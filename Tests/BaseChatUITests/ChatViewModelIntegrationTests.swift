@@ -3,7 +3,7 @@ import SwiftData
 @testable import BaseChatUI
 import BaseChatCore
 
-/// End-to-end tests for ChatViewModel with a real in-memory SwiftData store.
+/// Integration tests for ChatViewModel with a real in-memory SwiftData store and mock inference backend.
 ///
 /// These tests exercise the full pipeline: send message → stream tokens →
 /// persist to SwiftData → verify database state. Unlike the unit tests in
@@ -11,7 +11,7 @@ import BaseChatCore
 /// these wire up a real `ModelContainer` and verify that messages, sessions,
 /// and state survive the full round-trip.
 @MainActor
-final class ChatViewModelE2ETests: XCTestCase {
+final class ChatViewModelIntegrationTests: XCTestCase {
 
     private var container: ModelContainer!
     private var context: ModelContext!
