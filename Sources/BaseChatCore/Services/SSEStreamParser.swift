@@ -11,6 +11,24 @@ import Foundation
 ///
 /// Used by both OpenAI-compatible and Claude backends to stream tokens
 /// from cloud API responses.
+/// Interprets SSE JSON payloads for a specific API format.
+///
+/// Each cloud backend provides its own implementation to extract tokens,
+/// usage, stream-end signals, and errors from the provider's JSON format.
+public protocol SSEPayloadHandler: Sendable {
+    /// Extracts a text token from a JSON payload, or `nil` if not a token event.
+    func extractToken(from payload: String) -> String?
+
+    /// Extracts token usage from a JSON payload, or `nil` if not a usage event.
+    func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)?
+
+    /// Returns `true` if the payload signals end of stream.
+    func isStreamEnd(_ payload: String) -> Bool
+
+    /// Extracts an error from a JSON payload, or `nil` if not an error event.
+    func extractStreamError(from payload: String) -> Error?
+}
+
 public struct SSEStreamParser {
 
     /// Parses an `AsyncSequence` of bytes into an `AsyncThrowingStream` of SSE data lines.
@@ -68,6 +86,61 @@ public struct SSEStreamParser {
                 }
 
                 continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    /// Streams tokens from an HTTP response using an SSE payload handler.
+    ///
+    /// Combines `parse(bytes:)` with a payload handler to extract tokens,
+    /// track usage, detect stream end, and surface errors. This eliminates
+    /// the duplicated streaming loop in each cloud backend.
+    ///
+    /// - Parameters:
+    ///   - bytes: The raw byte stream from `URLSession.bytes(for:)`.
+    ///   - handler: A payload handler that interprets the provider's JSON format.
+    ///   - onUsage: Called when usage information is extracted from a payload.
+    /// - Returns: An `AsyncThrowingStream` of text tokens.
+    public static func streamTokens<S: AsyncSequence>(
+        from bytes: S,
+        using handler: some SSEPayloadHandler,
+        onUsage: (@Sendable (Int?, Int?) -> Void)? = nil
+    ) -> AsyncThrowingStream<String, Error> where S.Element == UInt8 {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let sseStream = parse(bytes: bytes)
+                    for try await payload in sseStream {
+                        if Task.isCancelled { break }
+
+                        if let token = handler.extractToken(from: payload) {
+                            continuation.yield(token)
+                        }
+
+                        if let usage = handler.extractUsage(from: payload) {
+                            onUsage?(usage.promptTokens, usage.completionTokens)
+                        }
+
+                        if handler.isStreamEnd(payload) {
+                            break
+                        }
+
+                        if let error = handler.extractStreamError(from: payload) {
+                            throw error
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    if !Task.isCancelled {
+                        continuation.finish(throwing: error)
+                    } else {
+                        continuation.finish()
+                    }
+                }
             }
 
             continuation.onTermination = { _ in

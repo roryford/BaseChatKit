@@ -21,7 +21,7 @@ public final class ChatViewModel {
 
     // MARK: - Persistence
 
-    private var modelContext: ModelContext?
+    var modelContext: ModelContext?
 
     // MARK: - Session
 
@@ -29,7 +29,7 @@ public final class ChatViewModel {
     public var activeSession: ChatSession?
 
     /// The session ID for the active session, or `nil` if no session is selected.
-    private var activeSessionID: UUID? { activeSession?.id }
+    var activeSessionID: UUID? { activeSession?.id }
 
     /// Called when a session might need its title auto-generated.
     /// Set by the view layer to connect to SessionManagerViewModel.
@@ -60,7 +60,7 @@ public final class ChatViewModel {
     public var selectedEndpoint: APIEndpoint?
 
     /// Ordered messages for the active session.
-    public private(set) var messages: [ChatMessage] = []
+    public internal(set) var messages: [ChatMessage] = []
 
     /// The user's current input text.
     public var inputText: String = ""
@@ -72,7 +72,7 @@ public final class ChatViewModel {
     public private(set) var isLoading: Bool = false
 
     /// Whether inference is currently streaming tokens.
-    public private(set) var isGenerating: Bool = false
+    public internal(set) var isGenerating: Bool = false
 
     /// A user-facing error message, shown as a banner. Cleared on next action.
     public var errorMessage: String?
@@ -92,10 +92,10 @@ public final class ChatViewModel {
     // MARK: - Context Tracking
 
     /// Estimated tokens used by current messages + system prompt.
-    public private(set) var contextUsedTokens: Int = 0
+    public internal(set) var contextUsedTokens: Int = 0
 
     /// Maximum tokens for the current model/session configuration.
-    public private(set) var contextMaxTokens: Int = 2048
+    public internal(set) var contextMaxTokens: Int = 2048
 
     /// Ratio of context used (0.0 to 1.0+).
     public var contextUsageRatio: Double {
@@ -138,7 +138,7 @@ public final class ChatViewModel {
     /// Set to `true` after the first Foundation-backed assistant response completes
     /// in a session, suggesting the user download a local model for longer context.
     /// Apps can override this behaviour by replacing `onUpgradeHintTriggered`.
-    public private(set) var showUpgradeHint: Bool = false
+    public internal(set) var showUpgradeHint: Bool = false
 
     /// Called when the upgrade hint is first shown. Override to customise behaviour.
     /// Default is `nil` (no-op — the hint banner is displayed by `ChatView`).
@@ -165,11 +165,11 @@ public final class ChatViewModel {
 
     // MARK: - Private State
 
-    private var generationTask: Task<Void, Never>?
+    var generationTask: Task<Void, Never>?
     private var lastPressureLevel: MemoryPressureLevel = .nominal
 
     /// Cached per-message token counts keyed by message ID, to avoid recalculating all messages.
-    private var tokenCountCache: [UUID: Int] = [:]
+    var tokenCountCache: [UUID: Int] = [:]
 
     // MARK: - Initialisation
 
@@ -493,170 +493,6 @@ public final class ChatViewModel {
             Log.persistence.info("State saved on background")
         } catch {
             Log.persistence.error("Failed to save state: \(error)")
-        }
-    }
-
-    // MARK: - Generation Core
-
-    private func generateIntoMessage(_ assistantMessage: ChatMessage) async {
-        isGenerating = true
-        defer {
-            isGenerating = false
-            inferenceService.generationDidFinish()
-        }
-
-        do {
-            // Trim messages to fit within the context window.
-            let allMessages = messages.filter { $0.id != assistantMessage.id }
-            let effectiveSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
-            let trimmedMessages = ContextWindowManager.trimMessages(
-                allMessages,
-                systemPrompt: effectiveSystemPrompt,
-                maxTokens: contextMaxTokens,
-                responseBuffer: 512
-            )
-            let history = trimmedMessages.map { (role: $0.role.rawValue, content: $0.content) }
-
-            let stream = try inferenceService.generate(
-                messages: history,
-                systemPrompt: effectiveSystemPrompt,
-                temperature: temperature,
-                topP: topP,
-                repeatPenalty: repeatPenalty
-            )
-
-            let task = Task {
-                do {
-                    for try await token in stream {
-                        if Task.isCancelled { break }
-                        assistantMessage.content += token
-                    }
-                } catch {
-                    if !Task.isCancelled {
-                        Log.inference.error("Generation stream error: \(error)")
-                        errorMessage = "Generation failed: \(error.localizedDescription)"
-                    }
-                }
-            }
-
-            generationTask = task
-            await task.value
-
-        } catch {
-            Log.inference.error("Generation start error: \(error)")
-            errorMessage = "Generation failed: \(error.localizedDescription)"
-        }
-
-        // Capture token usage from cloud backends.
-        if let usage = inferenceService.lastTokenUsage {
-            assistantMessage.promptTokens = usage.promptTokens
-            assistantMessage.completionTokens = usage.completionTokens
-        }
-
-        // Persist the completed assistant message.
-        if !assistantMessage.content.isEmpty {
-            saveMessage(assistantMessage)
-        } else {
-            // Empty response — remove the placeholder using ID-based lookup
-            // to avoid index invalidation from concurrent modifications.
-            messages.removeAll { $0.id == assistantMessage.id }
-        }
-
-        // After the first assistant response on Foundation, nudge the user to
-        // consider downloading a local model for longer context. Only show once
-        // per session and only when Foundation is the active backend.
-        if !showUpgradeHint,
-           !assistantMessage.content.isEmpty,
-           activeBackendName == "Apple",
-           messages.filter({ $0.role == .assistant }).count == 1 {
-            showUpgradeHint = true
-            onUpgradeHintTriggered?()
-        }
-
-        updateContextEstimate()
-    }
-
-    // MARK: - Context Estimation
-
-    /// Recalculates the context usage estimate based on current messages.
-    ///
-    /// Uses a per-message token count cache to avoid re-estimating unchanged messages.
-    private func updateContextEstimate() {
-        // Resolve max context: session override > model metadata > backend > default
-        contextMaxTokens = ContextWindowManager.resolveContextSize(
-            sessionOverride: activeSession?.contextSizeOverride,
-            modelContextLength: selectedModel?.detectedContextLength,
-            backendMaxTokens: backendCapabilities.map { Int($0.maxContextTokens) },
-            defaultSize: 2048
-        )
-
-        // Estimate tokens for all messages + system prompt, using cache for unchanged messages.
-        let systemTokens = ContextWindowManager.estimateTokenCount(systemPrompt)
-        var messageTokens = 0
-        var newCache: [UUID: Int] = [:]
-        for message in messages {
-            let count: Int
-            if let cached = tokenCountCache[message.id] {
-                count = cached
-            } else {
-                count = ContextWindowManager.estimateTokenCount(message.content)
-            }
-            newCache[message.id] = count
-            messageTokens += count
-        }
-        tokenCountCache = newCache
-        contextUsedTokens = systemTokens + messageTokens
-    }
-
-    // MARK: - Persistence
-
-    private func loadMessages() {
-        guard let modelContext else {
-            Log.persistence.warning("loadMessages called before modelContext was configured — messages will not load")
-            return
-        }
-        guard let sessionID = activeSessionID else {
-            messages = []
-            return
-        }
-
-        let descriptor = FetchDescriptor<ChatMessage>(
-            predicate: #Predicate { $0.sessionID == sessionID },
-            sortBy: [SortDescriptor(\.timestamp)]
-        )
-
-        do {
-            messages = try modelContext.fetch(descriptor)
-            Log.persistence.info("Loaded \(self.messages.count) messages")
-        } catch {
-            Log.persistence.error("Failed to load messages: \(error)")
-            messages = []
-        }
-    }
-
-    private func saveMessage(_ message: ChatMessage) {
-        guard let modelContext else {
-            Log.persistence.warning("saveMessage called before modelContext was configured — message will not be persisted")
-            return
-        }
-        modelContext.insert(message)
-        do {
-            try modelContext.save()
-        } catch {
-            Log.persistence.error("Failed to save message: \(error)")
-        }
-    }
-
-    private func deleteMessage(_ message: ChatMessage) {
-        guard let modelContext else {
-            Log.persistence.warning("deleteMessage called before modelContext was configured — message will not be deleted")
-            return
-        }
-        modelContext.delete(message)
-        do {
-            try modelContext.save()
-        } catch {
-            Log.persistence.error("Failed to delete message: \(error)")
         }
     }
 

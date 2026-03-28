@@ -35,7 +35,10 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
     // MARK: - Configuration
 
     private var baseURL: URL?
-    private var apiKey: String?
+    /// Keychain account identifier for just-in-time API key retrieval.
+    private var keychainAccount: String?
+    /// Fallback API key for tests or ephemeral use. Prefer `keychainAccount`.
+    private var ephemeralAPIKey: String?
     private var modelName: String = "gpt-4o-mini"
 
     // MARK: - State
@@ -66,10 +69,22 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
     private var currentTask: Task<Void, Never>?
     private let urlSession: URLSession
 
+    /// Shared session with certificate pinning delegate.
+    private static let pinnedSession: URLSession = {
+        let delegate = PinnedSessionDelegate()
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    }()
+
     // MARK: - Init
 
-    public init(urlSession: URLSession = .shared) {
-        self.urlSession = urlSession
+    /// Creates an OpenAI-compatible backend.
+    ///
+    /// - Parameter urlSession: Custom URLSession. Pass `nil` to use the default
+    ///   session with certificate pinning enabled.
+    public init(urlSession: URLSession? = nil) {
+        self.urlSession = urlSession ?? Self.pinnedSession
     }
 
     // MARK: - Configuration
@@ -79,13 +94,32 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
     /// - Parameters:
     ///   - baseURL: The base URL of the API server (e.g. `https://api.openai.com`).
     ///              The `/v1/chat/completions` path is appended automatically.
-    ///   - apiKey: The bearer token for authentication. Pass `nil` for local servers
+    ///   - apiKey: API key for ephemeral/test use. Pass `nil` for local servers
     ///             (Ollama, LM Studio) that don't require auth.
     ///   - modelName: The model identifier (e.g. `"gpt-4o-mini"`, `"llama3"`, `"local-model"`).
     public func configure(baseURL: URL, apiKey: String?, modelName: String) {
         self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.ephemeralAPIKey = apiKey
+        self.keychainAccount = nil
         self.modelName = modelName
+    }
+
+    /// Configures the backend with a Keychain-backed API key.
+    ///
+    /// The API key is read from the Keychain just-in-time for each request.
+    public func configure(baseURL: URL, keychainAccount: String, modelName: String) {
+        self.baseURL = baseURL
+        self.keychainAccount = keychainAccount
+        self.ephemeralAPIKey = nil
+        self.modelName = modelName
+    }
+
+    /// Retrieves the API key from Keychain or ephemeral storage.
+    private func resolveAPIKey() -> String? {
+        if let keychainAccount {
+            return KeychainService.retrieve(account: keychainAccount)
+        }
+        return ephemeralAPIKey
     }
 
     // MARK: - InferenceBackend
@@ -182,7 +216,8 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
     public func unloadModel() {
         stopGeneration()
         baseURL = nil
-        apiKey = nil
+        keychainAccount = nil
+        ephemeralAPIKey = nil
         isModelLoaded = false
         Self.inferenceLogger.info("OpenAI backend unloaded")
     }
@@ -223,7 +258,8 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
         request.timeoutInterval = 300
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        if let apiKey, !apiKey.isEmpty {
+        // Resolve API key just-in-time from Keychain or ephemeral storage.
+        if let apiKey = resolveAPIKey(), !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
 
@@ -262,6 +298,23 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
             let message = extractErrorMessage(from: errorBody) ?? "Unexpected server error (status \(statusCode))"
             throw CloudBackendError.serverError(statusCode: statusCode, message: message)
         }
+    }
+
+    // MARK: - SSE Payload Handler
+
+    /// OpenAI-specific SSE payload interpreter for use with `SSEStreamParser.streamTokens`.
+    static let payloadHandler = OpenAIPayloadHandler()
+
+    struct OpenAIPayloadHandler: SSEPayloadHandler {
+        func extractToken(from payload: String) -> String? {
+            OpenAIBackend.extractToken(from: payload)
+        }
+        func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? {
+            guard let usage = OpenAIBackend.extractUsage(from: payload) else { return nil }
+            return (promptTokens: usage.promptTokens, completionTokens: usage.completionTokens)
+        }
+        func isStreamEnd(_ payload: String) -> Bool { false }
+        func extractStreamError(from payload: String) -> Error? { nil }
     }
 
     // MARK: - JSON Parsing

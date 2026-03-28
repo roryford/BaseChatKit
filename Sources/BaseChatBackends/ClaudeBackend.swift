@@ -47,7 +47,11 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
     // MARK: - Configuration
 
     private var baseURL: URL?
-    private var apiKey: String?
+    /// Keychain account identifier for just-in-time API key retrieval.
+    /// The raw key is never held in memory as a stored property.
+    private var keychainAccount: String?
+    /// Fallback API key for tests or ephemeral use. Prefer `keychainAccount`.
+    private var ephemeralAPIKey: String?
     private var modelName: String = "claude-sonnet-4-20250514"
 
     /// Token usage from the most recent generation, if available.
@@ -58,10 +62,22 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
     private var currentTask: Task<Void, Never>?
     private let urlSession: URLSession
 
+    /// Shared session with certificate pinning delegate.
+    private static let pinnedSession: URLSession = {
+        let delegate = PinnedSessionDelegate()
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    }()
+
     // MARK: - Init
 
-    public init(urlSession: URLSession = .shared) {
-        self.urlSession = urlSession
+    /// Creates a Claude backend.
+    ///
+    /// - Parameter urlSession: Custom URLSession. Pass `nil` to use the default
+    ///   session with certificate pinning enabled.
+    public init(urlSession: URLSession? = nil) {
+        self.urlSession = urlSession ?? Self.pinnedSession
     }
 
     // MARK: - Configuration
@@ -71,12 +87,36 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
     /// Call this before `loadModel(from:contextSize:)`.
     /// - Parameters:
     ///   - baseURL: Anthropic API base URL (e.g. `https://api.anthropic.com`).
-    ///   - apiKey: Anthropic API key (`sk-ant-...`).
+    ///   - apiKey: API key for ephemeral/test use. Prefer `configure(baseURL:keychainAccount:modelName:)`.
     ///   - modelName: Model identifier (e.g. `claude-sonnet-4-20250514`).
     public func configure(baseURL: URL, apiKey: String?, modelName: String) {
         self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.ephemeralAPIKey = apiKey
+        self.keychainAccount = nil
         self.modelName = modelName
+    }
+
+    /// Configures the backend with a Keychain-backed API key.
+    ///
+    /// The API key is read from the Keychain just-in-time for each request,
+    /// avoiding holding secrets in memory between requests.
+    /// - Parameters:
+    ///   - baseURL: Anthropic API base URL (e.g. `https://api.anthropic.com`).
+    ///   - keychainAccount: The Keychain account identifier (from `APIEndpoint.keychainAccount`).
+    ///   - modelName: Model identifier (e.g. `claude-sonnet-4-20250514`).
+    public func configure(baseURL: URL, keychainAccount: String, modelName: String) {
+        self.baseURL = baseURL
+        self.keychainAccount = keychainAccount
+        self.ephemeralAPIKey = nil
+        self.modelName = modelName
+    }
+
+    /// Retrieves the API key from Keychain or ephemeral storage.
+    private func resolveAPIKey() -> String? {
+        if let keychainAccount {
+            return KeychainService.retrieve(account: keychainAccount)
+        }
+        return ephemeralAPIKey
     }
 
     // MARK: - Model Lifecycle
@@ -85,7 +125,7 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
         guard baseURL != nil else {
             throw CloudBackendError.invalidURL("No base URL configured")
         }
-        guard let apiKey, !apiKey.isEmpty else {
+        guard let key = resolveAPIKey(), !key.isEmpty else {
             throw CloudBackendError.missingAPIKey
         }
         isModelLoaded = true
@@ -95,7 +135,8 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
     public func unloadModel() {
         stopGeneration()
         baseURL = nil
-        apiKey = nil
+        keychainAccount = nil
+        ephemeralAPIKey = nil
         isModelLoaded = false
         Self.inferenceLogger.info("Claude backend unloaded")
     }
@@ -110,7 +151,8 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
         guard isModelLoaded, let baseURL else {
             throw CloudBackendError.invalidURL("Backend not configured")
         }
-        guard let apiKey, !apiKey.isEmpty else {
+        // Resolve the API key just-in-time from Keychain or ephemeral storage.
+        guard let apiKey = resolveAPIKey(), !apiKey.isEmpty else {
             throw CloudBackendError.missingAPIKey
         }
 
@@ -283,10 +325,30 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
         return body
     }
 
+    // MARK: - SSE Payload Handler
+
+    /// Claude-specific SSE payload interpreter for use with `SSEStreamParser.streamTokens`.
+    static let payloadHandler = ClaudePayloadHandler()
+
+    struct ClaudePayloadHandler: SSEPayloadHandler {
+        func extractToken(from payload: String) -> String? {
+            ClaudeBackend.extractToken(from: payload)
+        }
+        func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? {
+            ClaudeBackend.extractUsage(from: payload)
+        }
+        func isStreamEnd(_ payload: String) -> Bool {
+            ClaudeBackend.isStreamEnd(payload)
+        }
+        func extractStreamError(from payload: String) -> Error? {
+            ClaudeBackend.extractStreamError(from: payload)
+        }
+    }
+
     // MARK: - SSE Payload Parsing
 
     /// Extracts a text token from a `content_block_delta` event payload.
-    private static func extractToken(from json: String) -> String? {
+    static func extractToken(from json: String) -> String? {
         guard let data = json.data(using: .utf8),
               let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               parsed["type"] as? String == "content_block_delta",
