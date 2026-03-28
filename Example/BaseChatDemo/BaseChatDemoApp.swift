@@ -17,6 +17,9 @@ struct BaseChatDemoApp: App {
             bundleIdentifier: "com.basechatkit.demo"
         )
 
+        // Populate curated model recommendations
+        CuratedModel.all = Self.curatedModels
+
         let inferenceService = InferenceService()
         DefaultBackends.register(with: inferenceService)
 
@@ -36,6 +39,74 @@ struct BaseChatDemoApp: App {
             downloadManager: downloadManager
         ))
     }
+
+    // MARK: - Curated Models
+
+    private static let curatedModels: [CuratedModel] = [
+        // Small — runs on any Apple Silicon device (≤ 2.5 GB)
+        CuratedModel(
+            id: "smollm2-360m",
+            displayName: "SmolLM2 360M (Q8)",
+            fileName: "smollm2-360m-instruct-q8_0.gguf",
+            repoID: "HuggingFaceTB/SmolLM2-360M-Instruct-GGUF",
+            modelType: .gguf,
+            approximateSizeBytes: 386_000_000,
+            recommendedFor: [.small, .medium, .large, .xlarge],
+            contextSize: 2048,
+            promptTemplate: .chatML,
+            description: "Tiny but capable chat model, great for testing"
+        ),
+        CuratedModel(
+            id: "phi-4-mini-mlx",
+            displayName: "Phi-4 Mini (MLX, 4-bit)",
+            fileName: "mlx-community/Phi-4-mini-instruct-4bit",
+            repoID: "mlx-community/Phi-4-mini-instruct-4bit",
+            modelType: .mlx,
+            approximateSizeBytes: 2_400_000_000,
+            recommendedFor: [.small, .medium, .large, .xlarge],
+            contextSize: 4096,
+            promptTemplate: .phi,
+            description: "Microsoft's compact reasoning model, optimized for Apple Silicon"
+        ),
+        // Medium — 8 GB+ RAM devices (≤ 4.5 GB)
+        CuratedModel(
+            id: "mistral-7b-gguf",
+            displayName: "Mistral 7B Instruct v0.3 (Q4_K_M)",
+            fileName: "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+            repoID: "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
+            modelType: .gguf,
+            approximateSizeBytes: 4_370_000_000,
+            recommendedFor: [.medium, .large, .xlarge],
+            contextSize: 4096,
+            promptTemplate: .mistral,
+            description: "Excellent general-purpose chat model"
+        ),
+        CuratedModel(
+            id: "llama-3.2-3b-mlx",
+            displayName: "Llama 3.2 3B Instruct (MLX, 4-bit)",
+            fileName: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            repoID: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            modelType: .mlx,
+            approximateSizeBytes: 1_800_000_000,
+            recommendedFor: [.small, .medium, .large, .xlarge],
+            contextSize: 8192,
+            promptTemplate: .llama3,
+            description: "Meta's efficient 3B model with 8K context"
+        ),
+        // Large — 16 GB+ RAM devices (≤ 6 GB)
+        CuratedModel(
+            id: "qwen-2.5-7b-mlx",
+            displayName: "Qwen 2.5 7B Instruct (MLX, 4-bit)",
+            fileName: "mlx-community/Qwen2.5-7B-Instruct-4bit",
+            repoID: "mlx-community/Qwen2.5-7B-Instruct-4bit",
+            modelType: .mlx,
+            approximateSizeBytes: 4_500_000_000,
+            recommendedFor: [.large, .xlarge],
+            contextSize: 8192,
+            promptTemplate: .chatML,
+            description: "Strong multilingual model from Alibaba"
+        ),
+    ]
 
     var body: some Scene {
         WindowGroup {
