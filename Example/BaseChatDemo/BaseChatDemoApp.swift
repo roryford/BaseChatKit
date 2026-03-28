@@ -21,8 +21,11 @@ struct BaseChatDemoApp: App {
         DefaultBackends.register(with: inferenceService)
 
         let vm = ChatViewModel(inferenceService: inferenceService)
-        if #available(iOS 26, macOS 26, *) {
-            vm.foundationModelProvider = { FoundationBackend.isAvailable }
+        vm.foundationModelProvider = {
+            if #available(iOS 26, macOS 26, *) {
+                return FoundationBackend.isAvailable
+            }
+            return false
         }
         _chatViewModel = State(initialValue: vm)
 
