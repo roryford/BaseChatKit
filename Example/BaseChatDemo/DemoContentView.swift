@@ -1,0 +1,110 @@
+import SwiftUI
+import SwiftData
+import BaseChatCore
+import BaseChatUI
+
+struct DemoContentView: View {
+    @Environment(ChatViewModel.self) private var viewModel
+    @Environment(ModelManagementViewModel.self) private var managementViewModel
+    @Environment(SessionManagerViewModel.self) private var sessionManager
+    @Environment(\.modelContext) private var modelContext
+
+    @Query(filter: #Predicate<APIEndpoint> { $0.isEnabled }, sort: \APIEndpoint.createdAt)
+    private var cloudEndpoints: [APIEndpoint]
+
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var isModelManagementPresented = false
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+        } detail: {
+            ChatView(showModelManagement: $isModelManagementPresented)
+        }
+        .sheet(isPresented: $isModelManagementPresented) {
+            ModelManagementSheet()
+                .environment(viewModel)
+                .environment(managementViewModel)
+        }
+        .onAppear {
+            viewModel.configure(modelContext: modelContext)
+            sessionManager.configure(modelContext: modelContext)
+            viewModel.refreshModels()
+            viewModel.autoSelectFirstRunModel()
+            viewModel.startMemoryMonitoring()
+            sessionManager.loadSessions()
+
+            if sessionManager.sessions.isEmpty {
+                sessionManager.createSession()
+            }
+        }
+        .onChange(of: viewModel.selectedModel) {
+            if viewModel.selectedModel != nil {
+                viewModel.selectedEndpoint = nil
+            }
+            Task { await viewModel.loadSelectedModel() }
+        }
+        .onChange(of: viewModel.selectedEndpoint) {
+            if viewModel.selectedEndpoint != nil {
+                viewModel.selectedModel = nil
+            }
+            if let endpoint = viewModel.selectedEndpoint {
+                Task { await viewModel.loadCloudEndpoint(endpoint) }
+            }
+        }
+        .onChange(of: sessionManager.activeSession) { _, newSession in
+            if let session = newSession {
+                viewModel.switchToSession(session)
+            }
+        }
+        .onChange(of: managementViewModel.completedDownloadCount) { _, _ in
+            viewModel.refreshModels()
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            SessionListView()
+
+            Divider()
+
+            // Simple model section
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Model")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    isModelManagementPresented = true
+                } label: {
+                    HStack {
+                        Text(viewModel.selectedModel?.name ?? "No Model Selected")
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if viewModel.isModelLoaded {
+                    Label("Ready", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Chats")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    sessionManager.createSession()
+                } label: {
+                    Label("New Chat", systemImage: "plus")
+                }
+            }
+        }
+    }
+}
