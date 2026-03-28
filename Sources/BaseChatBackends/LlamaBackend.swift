@@ -95,7 +95,7 @@ public final class LlamaBackend: InferenceBackend {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> AsyncThrowingStream<String, Error> {
-        guard isModelLoaded, let context, let vocab, let model else {
+        guard isModelLoaded, let context, let vocab, model != nil else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
         guard !isGenerating else {
