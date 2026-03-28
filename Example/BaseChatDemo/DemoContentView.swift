@@ -31,6 +31,14 @@ struct DemoContentView: View {
             sessionManager.configure(modelContext: modelContext)
             viewModel.refreshModels()
             viewModel.autoSelectFirstRunModel()
+
+            // If no model was selected (e.g. first-run already fired before
+            // backends were configured), fall back to the Foundation model.
+            if viewModel.selectedModel == nil,
+               let foundation = viewModel.availableModels.first(where: { $0.modelType == .foundation }) {
+                viewModel.selectedModel = foundation
+            }
+
             viewModel.startMemoryMonitoring()
             sessionManager.loadSessions()
 
