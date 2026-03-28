@@ -111,4 +111,37 @@ final class OpenAIBackendTests: XCTestCase {
         let content = delta?["content"] as? String
         XCTAssertEqual(content, "token")
     }
+
+    // MARK: - Protocol Conformance
+
+    func test_conformsToConversationHistoryReceiver() {
+        let backend = OpenAIBackend()
+        XCTAssertTrue(backend is ConversationHistoryReceiver,
+                      "OpenAIBackend should conform to ConversationHistoryReceiver")
+    }
+
+    func test_conformsToTokenUsageProvider() {
+        let backend = OpenAIBackend()
+        XCTAssertTrue(backend is TokenUsageProvider,
+                      "OpenAIBackend should conform to TokenUsageProvider")
+    }
+
+    func test_setConversationHistory_storesMessages() {
+        let backend = OpenAIBackend()
+        let history: [(role: String, content: String)] = [
+            (role: "user", content: "Hello"),
+            (role: "assistant", content: "Hi!")
+        ]
+        backend.setConversationHistory(history)
+        XCTAssertEqual(backend.conversationHistory?.count, 2)
+        XCTAssertEqual(backend.conversationHistory?[0].content, "Hello")
+    }
+
+    func test_castAsProtocols_succeeds() {
+        let backend: any InferenceBackend = OpenAIBackend()
+        XCTAssertNotNil(backend as? ConversationHistoryReceiver,
+                        "Casting InferenceBackend to ConversationHistoryReceiver should succeed")
+        XCTAssertNotNil(backend as? TokenUsageProvider,
+                        "Casting InferenceBackend to TokenUsageProvider should succeed")
+    }
 }

@@ -12,7 +12,7 @@ import BaseChatCore
 ///
 /// Requires iOS 26+ / macOS 26+.
 @available(iOS 26, macOS 26, *)
-public final class FoundationBackend: InferenceBackend {
+public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Logging
 

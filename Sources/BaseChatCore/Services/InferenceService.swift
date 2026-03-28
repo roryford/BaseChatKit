@@ -20,6 +20,7 @@ public typealias CloudBackendFactory = (APIProvider) -> (any InferenceBackend)?
 /// direct dependency on MLX, llama.cpp, Foundation Models, or cloud SDKs —
 /// those are registered by the app or the BaseChatBackends target at startup.
 @Observable
+@MainActor
 public final class InferenceService {
 
     // MARK: - Published State
@@ -223,7 +224,7 @@ public final class InferenceService {
 
     // MARK: - Initializers
 
-    public init() {}
+    public nonisolated init() {}
 
     #if DEBUG
     /// Creates an InferenceService with a pre-loaded backend. For tests only.

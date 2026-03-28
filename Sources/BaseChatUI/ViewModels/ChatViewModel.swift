@@ -9,6 +9,7 @@ import BaseChatCore
 /// tracking, export, and SwiftData persistence. Views observe this via
 /// `@Environment` and never call services directly.
 @Observable
+@MainActor
 public final class ChatViewModel {
 
     // MARK: - Services
@@ -167,6 +168,9 @@ public final class ChatViewModel {
     private var generationTask: Task<Void, Never>?
     private var lastPressureLevel: MemoryPressureLevel = .nominal
 
+    /// Cached per-message token counts keyed by message ID, to avoid recalculating all messages.
+    private var tokenCountCache: [UUID: Int] = [:]
+
     // MARK: - Initialisation
 
     public init(
@@ -218,7 +222,7 @@ public final class ChatViewModel {
         showUpgradeHint = false
         loadMessages()
         updateContextEstimate()
-        Log.ui.info("Switched to session: \(session.title)")
+        Log.ui.info("Switched to session: \(session.title, privacy: .private)")
     }
 
     /// Saves the current generation settings back to the active session.
@@ -450,11 +454,17 @@ public final class ChatViewModel {
     }
 
     /// Clears all messages in the current session.
+    ///
+    /// Cancels any in-flight generation before clearing to avoid inconsistent UI state.
     public func clearChat() {
+        if isGenerating {
+            stopGeneration()
+        }
         for message in messages {
             deleteMessage(message)
         }
         messages.removeAll()
+        tokenCountCache.removeAll()
         updateContextEstimate()
         Log.ui.info("Chat cleared")
     }
@@ -474,8 +484,12 @@ public final class ChatViewModel {
 
     /// Saves all pending changes. Called on app background.
     public func saveState() {
+        guard let modelContext else {
+            Log.persistence.warning("saveState called before modelContext was configured — state will not be saved")
+            return
+        }
         do {
-            try modelContext?.save()
+            try modelContext.save()
             Log.persistence.info("State saved on background")
         } catch {
             Log.persistence.error("Failed to save state: \(error)")
@@ -543,10 +557,9 @@ public final class ChatViewModel {
         if !assistantMessage.content.isEmpty {
             saveMessage(assistantMessage)
         } else {
-            // Empty response — remove the placeholder.
-            if let index = messages.firstIndex(where: { $0.id == assistantMessage.id }) {
-                messages.remove(at: index)
-            }
+            // Empty response — remove the placeholder using ID-based lookup
+            // to avoid index invalidation from concurrent modifications.
+            messages.removeAll { $0.id == assistantMessage.id }
         }
 
         // After the first assistant response on Foundation, nudge the user to
@@ -566,6 +579,8 @@ public final class ChatViewModel {
     // MARK: - Context Estimation
 
     /// Recalculates the context usage estimate based on current messages.
+    ///
+    /// Uses a per-message token count cache to avoid re-estimating unchanged messages.
     private func updateContextEstimate() {
         // Resolve max context: session override > model metadata > backend > default
         contextMaxTokens = ContextWindowManager.resolveContextSize(
@@ -575,16 +590,31 @@ public final class ChatViewModel {
             defaultSize: 2048
         )
 
-        // Estimate tokens for all messages + system prompt
+        // Estimate tokens for all messages + system prompt, using cache for unchanged messages.
         let systemTokens = ContextWindowManager.estimateTokenCount(systemPrompt)
-        let messageTokens = messages.reduce(0) { $0 + ContextWindowManager.estimateTokenCount($1.content) }
+        var messageTokens = 0
+        var newCache: [UUID: Int] = [:]
+        for message in messages {
+            let count: Int
+            if let cached = tokenCountCache[message.id] {
+                count = cached
+            } else {
+                count = ContextWindowManager.estimateTokenCount(message.content)
+            }
+            newCache[message.id] = count
+            messageTokens += count
+        }
+        tokenCountCache = newCache
         contextUsedTokens = systemTokens + messageTokens
     }
 
     // MARK: - Persistence
 
     private func loadMessages() {
-        guard let modelContext else { return }
+        guard let modelContext else {
+            Log.persistence.warning("loadMessages called before modelContext was configured — messages will not load")
+            return
+        }
         guard let sessionID = activeSessionID else {
             messages = []
             return
@@ -605,7 +635,10 @@ public final class ChatViewModel {
     }
 
     private func saveMessage(_ message: ChatMessage) {
-        guard let modelContext else { return }
+        guard let modelContext else {
+            Log.persistence.warning("saveMessage called before modelContext was configured — message will not be persisted")
+            return
+        }
         modelContext.insert(message)
         do {
             try modelContext.save()
@@ -615,7 +648,10 @@ public final class ChatViewModel {
     }
 
     private func deleteMessage(_ message: ChatMessage) {
-        guard let modelContext else { return }
+        guard let modelContext else {
+            Log.persistence.warning("deleteMessage called before modelContext was configured — message will not be deleted")
+            return
+        }
         modelContext.delete(message)
         do {
             try modelContext.save()

@@ -8,7 +8,7 @@ import BaseChatCore
 /// Uses the llama.cpp C API via `mattt/llama.swift` (pre-built xcframework).
 /// Models are loaded from local `.gguf` files. Prompt formatting is handled
 /// externally by `InferenceService` using the detected `PromptTemplate`.
-public final class LlamaBackend: InferenceBackend {
+public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Logging
 

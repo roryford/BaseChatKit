@@ -6,6 +6,7 @@ import XCTest
 /// These tests verify service-level logic without loading real models.
 /// Concrete backend tests (LlamaBackend, MLXBackend, FoundationBackend) belong
 /// in BaseChatBackendsTests since those types live in BaseChatBackends.
+@MainActor
 final class InferenceServiceTests: XCTestCase {
 
     // MARK: - InferenceService

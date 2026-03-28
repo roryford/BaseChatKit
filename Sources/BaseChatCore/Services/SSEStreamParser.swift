@@ -22,17 +22,24 @@ public struct SSEStreamParser {
     ) -> AsyncThrowingStream<String, Error> where S.Element == UInt8 {
         AsyncThrowingStream { continuation in
             let task = Task {
-                var buffer = ""
+                var byteBuffer = Data()
                 var iterator = bytes.makeAsyncIterator()
 
                 do {
                     while let byte = try await iterator.next() {
                         if Task.isCancelled { break }
 
-                        let char = Character(UnicodeScalar(byte))
-                        if char == "\n" {
-                            let line = buffer.trimmingCharacters(in: .whitespaces)
-                            buffer = ""
+                        if byte == UInt8(ascii: "\n") {
+                            // Decode accumulated bytes as UTF-8.
+                            let line: String
+                            if let decoded = String(data: byteBuffer, encoding: .utf8) {
+                                line = decoded.trimmingCharacters(in: .whitespaces)
+                            } else {
+                                // Skip lines with invalid UTF-8 rather than crash.
+                                byteBuffer.removeAll(keepingCapacity: true)
+                                continue
+                            }
+                            byteBuffer.removeAll(keepingCapacity: true)
 
                             if line.isEmpty { continue }
 
@@ -50,7 +57,7 @@ public struct SSEStreamParser {
                             }
                             // Ignore event:, id:, retry:, and comment lines
                         } else {
-                            buffer.append(char)
+                            byteBuffer.append(byte)
                         }
                     }
                 } catch {

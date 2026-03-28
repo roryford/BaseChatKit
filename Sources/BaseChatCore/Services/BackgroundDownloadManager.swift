@@ -94,11 +94,11 @@ public final class BackgroundDownloadManager: NSObject {
     /// - Returns: The `DownloadState` that the UI should observe for progress.
     /// - Throws: `HuggingFaceError.insufficientDiskSpace` if there isn't enough room.
     @MainActor @discardableResult
-    public func startDownload(_ model: DownloadableModel, downloadURL: URL) throws -> DownloadState {
+    public func startDownload(_ model: DownloadableModel, downloadURL: URL) async throws -> DownloadState {
         Log.download.info("Starting download for \(model.displayName) from \(downloadURL)")
 
         // Check disk space.
-        try checkDiskSpace(requiredBytes: model.sizeBytes)
+        try await checkDiskSpace(requiredBytes: model.sizeBytes)
 
         // Ensure the models directory exists.
         try storageService.ensureModelsDirectory()
@@ -160,16 +160,21 @@ public final class BackgroundDownloadManager: NSObject {
     // MARK: - Disk Space
 
     /// Checks that there is enough free disk space for the download plus a safety buffer.
-    public func checkDiskSpace(requiredBytes: UInt64) throws {
-        let attrs = try FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory())
-        let freeSpace = attrs[.systemFreeSize] as? UInt64 ?? 0
+    ///
+    /// Performs the filesystem query on a background thread to avoid blocking the main thread.
+    public func checkDiskSpace(requiredBytes: UInt64) async throws {
+        let (freeSpace, needed) = try await Task.detached {
+            let attrs = try FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory())
+            let free = attrs[.systemFreeSize] as? UInt64 ?? 0
+            return (free, requiredBytes + Self.diskSpaceBuffer)
+        }.value
 
-        guard freeSpace > requiredBytes + Self.diskSpaceBuffer else {
+        guard freeSpace > needed else {
             Log.download.error(
-                "Insufficient disk space: need \(requiredBytes + Self.diskSpaceBuffer) bytes, have \(freeSpace)"
+                "Insufficient disk space: need \(needed) bytes, have \(freeSpace)"
             )
             throw HuggingFaceError.insufficientDiskSpace(
-                required: requiredBytes + Self.diskSpaceBuffer,
+                required: needed,
                 available: freeSpace
             )
         }

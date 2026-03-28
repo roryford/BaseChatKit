@@ -90,4 +90,43 @@ final class ClaudeBackendTests: XCTestCase {
             try backend.generate(prompt: "hello", systemPrompt: nil, config: GenerationConfig())
         )
     }
+
+    // MARK: - Protocol Conformance
+
+    func test_conformsToConversationHistoryReceiver() {
+        let backend = ClaudeBackend()
+        XCTAssertTrue(backend is ConversationHistoryReceiver,
+                      "ClaudeBackend should conform to ConversationHistoryReceiver")
+    }
+
+    func test_conformsToTokenUsageProvider() {
+        let backend = ClaudeBackend()
+        XCTAssertTrue(backend is TokenUsageProvider,
+                      "ClaudeBackend should conform to TokenUsageProvider")
+    }
+
+    func test_setConversationHistory_storesMessages() {
+        let backend = ClaudeBackend()
+        let history: [(role: String, content: String)] = [
+            (role: "user", content: "Hello"),
+            (role: "assistant", content: "Hi there!")
+        ]
+        backend.setConversationHistory(history)
+        XCTAssertEqual(backend.conversationHistory?.count, 2)
+        XCTAssertEqual(backend.conversationHistory?[0].role, "user")
+        XCTAssertEqual(backend.conversationHistory?[1].content, "Hi there!")
+    }
+
+    func test_lastUsage_nilByDefault() {
+        let backend = ClaudeBackend()
+        XCTAssertNil(backend.lastUsage, "lastUsage should be nil before any generation")
+    }
+
+    func test_castAsProtocols_succeeds() {
+        let backend: any InferenceBackend = ClaudeBackend()
+        XCTAssertNotNil(backend as? ConversationHistoryReceiver,
+                        "Casting InferenceBackend to ConversationHistoryReceiver should succeed")
+        XCTAssertNotNil(backend as? TokenUsageProvider,
+                        "Casting InferenceBackend to TokenUsageProvider should succeed")
+    }
 }

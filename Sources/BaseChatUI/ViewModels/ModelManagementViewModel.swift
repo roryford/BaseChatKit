@@ -38,6 +38,9 @@ public final class ModelManagementViewModel {
 
     private var searchTask: Task<Void, Never>?
 
+    /// Cached set of file names from `discoverModels()` to avoid N+1 filesystem scans.
+    private var discoveredModelFileNames: Set<String>?
+
     // MARK: - Initialisation
 
     public init(
@@ -145,7 +148,7 @@ public final class ModelManagementViewModel {
                 let results = try await service.searchModels(query: query)
                 guard !Task.isCancelled else { return }
                 searchResults = results
-                Log.network.info("Search returned \(results.count) results for '\(query)'")
+                Log.network.info("Search returned \(results.count) results for '\(query, privacy: .private)'")
             } catch {
                 guard !Task.isCancelled else { return }
                 searchError = "Search failed: \(error.localizedDescription)"
@@ -176,12 +179,14 @@ public final class ModelManagementViewModel {
 
         let url = service.downloadURL(for: model)
 
-        do {
-            let state = try manager.startDownload(model, downloadURL: url)
-            Log.download.info("Started download: \(model.displayName), id=\(state.id)")
-        } catch {
-            searchError = "Failed to start download: \(error.localizedDescription)"
-            Log.download.error("Download start error: \(error)")
+        Task {
+            do {
+                let state = try await manager.startDownload(model, downloadURL: url)
+                Log.download.info("Started download: \(model.displayName), id=\(state.id)")
+            } catch {
+                searchError = "Failed to start download: \(error.localizedDescription)"
+                Log.download.error("Download start error: \(error)")
+            }
         }
     }
 
@@ -207,9 +212,20 @@ public final class ModelManagementViewModel {
     }
 
     /// Whether a downloadable model's file already exists on disk.
+    ///
+    /// Uses a cached snapshot of discovered models to avoid repeated filesystem scans.
+    /// Call `invalidateModelCache()` after downloads complete or models are deleted.
     public func isModelDownloaded(_ model: DownloadableModel) -> Bool {
-        let onDisk = modelStorage.discoverModels()
-        return onDisk.contains { $0.fileName == model.fileName }
+        if discoveredModelFileNames == nil {
+            discoveredModelFileNames = Set(modelStorage.discoverModels().map(\.fileName))
+        }
+        return discoveredModelFileNames?.contains(model.fileName) ?? false
+    }
+
+    /// Invalidates the cached model discovery results, forcing a fresh filesystem scan
+    /// on the next `isModelDownloaded` call.
+    public func invalidateModelCache() {
+        discoveredModelFileNames = nil
     }
 
     /// Returns the active download state for a model, if any.

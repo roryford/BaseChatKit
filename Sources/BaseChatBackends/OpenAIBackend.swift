@@ -19,7 +19,7 @@ import BaseChatCore
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
 /// for try await token in stream { print(token, terminator: "") }
 /// ```
-public final class OpenAIBackend: InferenceBackend {
+public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver, TokenUsageProvider, @unchecked Sendable {
 
     // MARK: - Logging
 
@@ -46,6 +46,10 @@ public final class OpenAIBackend: InferenceBackend {
     /// Full conversation history for multi-turn support.
     /// Set by InferenceService before each generate call.
     public var conversationHistory: [(role: String, content: String)]?
+
+    public func setConversationHistory(_ messages: [(role: String, content: String)]) {
+        conversationHistory = messages
+    }
 
     public var capabilities: BackendCapabilities {
         BackendCapabilities(
@@ -155,7 +159,7 @@ public final class OpenAIBackend: InferenceBackend {
                     if Task.isCancelled {
                         continuation.finish()
                     } else {
-                        Self.networkLogger.error("OpenAI stream error: \(error.localizedDescription, privacy: .public)")
+                        Self.networkLogger.error("OpenAI stream error: \(error.localizedDescription, privacy: .private)")
                         continuation.finish(throwing: error)
                     }
                 }
@@ -215,6 +219,8 @@ public final class OpenAIBackend: InferenceBackend {
 
         var request = URLRequest(url: completionsURL)
         request.httpMethod = "POST"
+        // Generous timeout for streaming — covers inter-packet gaps during slow generation.
+        request.timeoutInterval = 300
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         if let apiKey, !apiKey.isEmpty {
@@ -253,7 +259,7 @@ public final class OpenAIBackend: InferenceBackend {
                 errorBody.append(Character(UnicodeScalar(byte)))
                 if errorBody.count > 2048 { break }
             }
-            let message = extractErrorMessage(from: errorBody) ?? errorBody.prefix(500).description
+            let message = extractErrorMessage(from: errorBody) ?? "Unexpected server error (status \(statusCode))"
             throw CloudBackendError.serverError(statusCode: statusCode, message: message)
         }
     }

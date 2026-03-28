@@ -29,19 +29,23 @@ final class DownloadManagerTests: XCTestCase {
 
     // MARK: - Disk Space
 
-    func test_diskSpaceCheck_sufficientSpace() {
+    func test_diskSpaceCheck_sufficientSpace() async {
         // A tiny model size should always pass the disk space check on a dev machine.
-        XCTAssertNoThrow(
-            try manager.checkDiskSpace(requiredBytes: 1024),
-            "1 KB model should pass disk space check on any reasonable system"
-        )
+        do {
+            try await manager.checkDiskSpace(requiredBytes: 1024)
+        } catch {
+            XCTFail("1 KB model should pass disk space check on any reasonable system, got: \(error)")
+        }
     }
 
-    func test_diskSpaceCheck_insufficientSpace() {
+    func test_diskSpaceCheck_insufficientSpace() async {
         // Request an absurdly large amount of space that no system has.
         let absurdSize: UInt64 = UInt64.max / 2
 
-        XCTAssertThrowsError(try manager.checkDiskSpace(requiredBytes: absurdSize)) { error in
+        do {
+            try await manager.checkDiskSpace(requiredBytes: absurdSize)
+            XCTFail("Expected insufficientDiskSpace error")
+        } catch {
             guard case HuggingFaceError.insufficientDiskSpace = error else {
                 XCTFail("Expected insufficientDiskSpace error, got: \(error)")
                 return
@@ -284,7 +288,7 @@ final class DownloadManagerTests: XCTestCase {
 
     // MARK: - Disk Space Edge Cases
 
-    func test_diskSpaceCheck_exactlyAtLimit() {
+    func test_diskSpaceCheck_exactlyAtLimit() async {
         // Get the actual free space on the system.
         let attrs = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory())
         guard let freeSpace = attrs?[.systemFreeSize] as? UInt64 else {
@@ -300,17 +304,19 @@ final class DownloadManagerTests: XCTestCase {
         }
         let requestSize = freeSpace - buffer - 1
 
-        XCTAssertNoThrow(
-            try manager.checkDiskSpace(requiredBytes: requestSize),
-            "Requesting just under free space minus buffer should pass"
-        )
+        do {
+            try await manager.checkDiskSpace(requiredBytes: requestSize)
+        } catch {
+            XCTFail("Requesting just under free space minus buffer should pass, got: \(error)")
+        }
     }
 
-    func test_diskSpaceCheck_zeroRequired_passes() {
-        XCTAssertNoThrow(
-            try manager.checkDiskSpace(requiredBytes: 0),
-            "Requesting 0 bytes should always pass the disk space check"
-        )
+    func test_diskSpaceCheck_zeroRequired_passes() async {
+        do {
+            try await manager.checkDiskSpace(requiredBytes: 0)
+        } catch {
+            XCTFail("Requesting 0 bytes should always pass the disk space check, got: \(error)")
+        }
     }
 
     // MARK: - MLX Directory Validation

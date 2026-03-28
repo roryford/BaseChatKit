@@ -5,6 +5,7 @@ import BaseChatCore
 /// Tests that DefaultBackends.register completes without error and
 /// that the resulting InferenceService can attempt model loads
 /// (which exercises the factory lookup path).
+@MainActor
 final class DefaultBackendsTests: XCTestCase {
 
     func test_register_doesNotCrash() {

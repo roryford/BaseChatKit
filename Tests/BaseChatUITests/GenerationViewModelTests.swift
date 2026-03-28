@@ -2,6 +2,7 @@ import XCTest
 @testable import BaseChatUI
 import BaseChatCore
 
+@MainActor
 final class ChatViewModelTests: XCTestCase {
 
     // MARK: - Helpers

@@ -15,7 +15,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.30.0"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", branch: "main"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", revision: "2a296f145c3129fea4290bb6e4a0a5fb458efa06"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
         .package(url: "https://github.com/mattt/llama.swift", from: "2.8563.0"),
     ],

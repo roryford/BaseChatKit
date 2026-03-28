@@ -8,6 +8,7 @@ import BaseChatCore
 /// DefaultBackends.register(with: service)
 /// ```
 public enum DefaultBackends {
+    @MainActor
     public static func register(with service: InferenceService) {
         service.registerBackendFactory { modelType in
             switch modelType {

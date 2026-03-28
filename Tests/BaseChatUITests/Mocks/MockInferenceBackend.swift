@@ -2,7 +2,7 @@ import Foundation
 @testable import BaseChatUI
 import BaseChatCore
 
-final class MockInferenceBackend: InferenceBackend {
+final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
     var isModelLoaded: Bool = false
     var isGenerating: Bool = false
     var capabilities: BackendCapabilities

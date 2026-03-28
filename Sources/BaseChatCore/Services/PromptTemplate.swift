@@ -15,6 +15,34 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
 
     public var id: String { rawValue }
 
+    /// Special tokens for each template format. User content containing these
+    /// tokens is sanitised before interpolation to prevent prompt injection.
+    private var specialTokens: [String] {
+        switch self {
+        case .chatML:
+            return ["<|im_start|>", "<|im_end|>"]
+        case .llama3:
+            return ["<|begin_of_text|>", "<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]
+        case .mistral:
+            return ["[INST]", "[/INST]", "</s>"]
+        case .alpaca:
+            return ["### Instruction:", "### Input:", "### Response:"]
+        case .gemma:
+            return ["<start_of_turn>", "<end_of_turn>"]
+        case .phi:
+            return ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>"]
+        }
+    }
+
+    /// Strips special tokens from user-controlled text to prevent prompt injection.
+    private func sanitize(_ text: String) -> String {
+        var result = text
+        for token in specialTokens {
+            result = result.replacingOccurrences(of: token, with: "")
+        }
+        return result
+    }
+
     /// Formats an array of messages into a single prompt string.
     ///
     /// - Parameters:
@@ -57,11 +85,11 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         var result = ""
 
         if let systemPrompt, !systemPrompt.isEmpty {
-            result += "<|im_start|>system\n\(systemPrompt)<|im_end|>\n"
+            result += "<|im_start|>system\n\(sanitize(systemPrompt))<|im_end|>\n"
         }
 
         for message in messages {
-            result += "<|im_start|>\(message.role)\n\(message.content)<|im_end|>\n"
+            result += "<|im_start|>\(message.role)\n\(sanitize(message.content))<|im_end|>\n"
         }
 
         result += "<|im_start|>assistant\n"
@@ -83,11 +111,11 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         var result = "<|begin_of_text|>"
 
         if let systemPrompt, !systemPrompt.isEmpty {
-            result += "<|start_header_id|>system<|end_header_id|>\n\n\(systemPrompt)<|eot_id|>"
+            result += "<|start_header_id|>system<|end_header_id|>\n\n\(sanitize(systemPrompt))<|eot_id|>"
         }
 
         for message in messages {
-            result += "<|start_header_id|>\(message.role)<|end_header_id|>\n\n\(message.content)<|eot_id|>"
+            result += "<|start_header_id|>\(message.role)<|end_header_id|>\n\n\(sanitize(message.content))<|eot_id|>"
         }
 
         result += "<|start_header_id|>assistant<|end_header_id|>\n\n"
@@ -111,18 +139,18 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         // Mistral v0.1/v0.2 style: system prompt is prepended to the first user message.
         var systemPrefix = ""
         if let systemPrompt, !systemPrompt.isEmpty {
-            systemPrefix = systemPrompt + "\n\n"
+            systemPrefix = sanitize(systemPrompt) + "\n\n"
         }
 
         var isFirstUser = true
         for message in messages {
             switch message.role {
             case "user":
-                let content = isFirstUser ? systemPrefix + message.content : message.content
+                let content = isFirstUser ? systemPrefix + sanitize(message.content) : sanitize(message.content)
                 result += "[INST] \(content) [/INST]"
                 isFirstUser = false
             case "assistant":
-                result += " \(message.content)</s>"
+                result += " \(sanitize(message.content))</s>"
             default:
                 break  // System messages handled via systemPrefix
             }
@@ -151,14 +179,14 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         var result = ""
 
         if let systemPrompt, !systemPrompt.isEmpty {
-            result += "### Instruction:\n\(systemPrompt)\n\n"
+            result += "### Instruction:\n\(sanitize(systemPrompt))\n\n"
         } else {
             result += "### Instruction:\nYou are a helpful assistant.\n\n"
         }
 
         // Alpaca is single-turn; use the last user message as input.
         if let lastUser = messages.last(where: { $0.role == "user" }) {
-            result += "### Input:\n\(lastUser.content)\n\n"
+            result += "### Input:\n\(sanitize(lastUser.content))\n\n"
         }
 
         result += "### Response:\n"
@@ -184,18 +212,18 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         // Gemma prepends system prompt to first user message.
         var systemPrefix = ""
         if let systemPrompt, !systemPrompt.isEmpty {
-            systemPrefix = systemPrompt + "\n\n"
+            systemPrefix = sanitize(systemPrompt) + "\n\n"
         }
 
         var isFirstUser = true
         for message in messages {
             switch message.role {
             case "user":
-                let content = isFirstUser ? systemPrefix + message.content : message.content
+                let content = isFirstUser ? systemPrefix + sanitize(message.content) : sanitize(message.content)
                 result += "<start_of_turn>user\n\(content)<end_of_turn>\n"
                 isFirstUser = false
             case "assistant":
-                result += "<start_of_turn>model\n\(message.content)<end_of_turn>\n"
+                result += "<start_of_turn>model\n\(sanitize(message.content))<end_of_turn>\n"
             default:
                 break
             }
@@ -222,17 +250,17 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         var result = ""
 
         if let systemPrompt, !systemPrompt.isEmpty {
-            result += "<|system|>\n\(systemPrompt)<|end|>\n"
+            result += "<|system|>\n\(sanitize(systemPrompt))<|end|>\n"
         }
 
         for message in messages {
             switch message.role {
             case "user":
-                result += "<|user|>\n\(message.content)<|end|>\n"
+                result += "<|user|>\n\(sanitize(message.content))<|end|>\n"
             case "assistant":
-                result += "<|assistant|>\n\(message.content)<|end|>\n"
+                result += "<|assistant|>\n\(sanitize(message.content))<|end|>\n"
             case "system":
-                result += "<|system|>\n\(message.content)<|end|>\n"
+                result += "<|system|>\n\(sanitize(message.content))<|end|>\n"
             default:
                 break
             }

@@ -12,7 +12,7 @@ import BaseChatCore
 /// or downloaded from HuggingFace by model ID.
 ///
 /// Requires real Apple Silicon hardware — does not work in iOS Simulator.
-public final class MLXBackend: InferenceBackend {
+public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Logging
 

@@ -39,7 +39,7 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
     // MARK: - Search
 
     public func searchModels(query: String) async throws -> [DownloadableModel] {
-        Log.network.info("Searching HuggingFace for: \(query)")
+        Log.network.info("Searching HuggingFace for: \(query, privacy: .private)")
 
         let response: PaginatedResponse<Model>
         do {

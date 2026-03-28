@@ -7,7 +7,7 @@ import BaseChatCore
 /// Streams completions from the Anthropic Messages API (`/v1/messages`).
 /// Handles Claude-specific SSE event types (`content_block_delta`, etc.)
 /// and authentication via `x-api-key` header.
-public final class ClaudeBackend: InferenceBackend {
+public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver, TokenUsageProvider, @unchecked Sendable {
 
     // MARK: - Logging
 
@@ -28,6 +28,10 @@ public final class ClaudeBackend: InferenceBackend {
     /// Full conversation history for multi-turn support.
     /// Set by InferenceService before each generate call.
     public var conversationHistory: [(role: String, content: String)]?
+
+    public func setConversationHistory(_ messages: [(role: String, content: String)]) {
+        conversationHistory = messages
+    }
 
     // MARK: - Capabilities
 
@@ -175,7 +179,7 @@ public final class ClaudeBackend: InferenceBackend {
 
                 } catch {
                     if !Task.isCancelled {
-                        Self.networkLogger.error("Claude stream error: \(error)")
+                        Self.networkLogger.error("Claude stream error: \(error, privacy: .private)")
                         continuation.finish(throwing: error)
                     } else {
                         continuation.finish()
@@ -229,6 +233,8 @@ public final class ClaudeBackend: InferenceBackend {
 
         var request = URLRequest(url: messagesURL)
         request.httpMethod = "POST"
+        // Generous timeout for streaming — covers inter-packet gaps during slow generation.
+        request.timeoutInterval = 300
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
