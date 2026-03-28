@@ -292,4 +292,4 @@ open BaseChatDemo.xcodeproj
 
 ## License
 
-[Add your license here]
+MIT License. See [LICENSE](LICENSE) for details.
