@@ -49,10 +49,11 @@ public struct PromptTemplateDetector {
     /// Maps known architecture identifiers to their canonical prompt formats.
     public static func detect(fromArchitecture arch: String) -> PromptTemplate {
         switch arch.lowercased() {
-        case "llama": return .llama3
         case "mistral": return .mistral
         case "gemma", "gemma2": return .gemma
         case "phi", "phi3": return .phi
+        // "llama" is too broad — many models (SmolLM2, TinyLlama, etc.) use the
+        // LLaMA architecture but train with ChatML. Fall through to chatML default.
         default: return .chatML
         }
     }

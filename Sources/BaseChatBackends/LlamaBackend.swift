@@ -135,7 +135,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 }
                 defer { llama_sampler_free(sampler) }
 
-                if config.repeatPenalty != 1.0 {
+                // Sampler chain order matters: penalties → top_k → top_p → temp → dist
+                if config.repeatPenalty > 1.0 {
                     llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
                         64,                    // last_n tokens to penalize
                         config.repeatPenalty,  // repeat penalty
@@ -143,9 +144,11 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                         0.0                    // presence penalty
                     ))
                 }
+                llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40))
                 if config.topP < 1.0 {
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_p(config.topP, 1))
                 }
+                llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
                 llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
                 llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 0...UInt32.max)))
 
