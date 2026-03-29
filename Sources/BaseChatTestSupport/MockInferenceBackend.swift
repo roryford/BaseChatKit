@@ -1,29 +1,31 @@
 import Foundation
-@testable import BaseChatUI
 import BaseChatCore
 
-final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
-    var isModelLoaded: Bool = false
-    var isGenerating: Bool = false
-    var capabilities: BackendCapabilities
+/// Configurable mock inference backend for testing.
+///
+/// Shared across all test targets via the `BaseChatTestSupport` module.
+public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
+    public var isModelLoaded: Bool = false
+    public var isGenerating: Bool = false
+    public var capabilities: BackendCapabilities
 
     // Configurable behavior
-    var tokensToYield: [String] = ["Hello", " world"]
-    var shouldThrowOnGenerate: Error? = nil
-    var shouldThrowOnLoad: Error? = nil
+    public var tokensToYield: [String] = ["Hello", " world"]
+    public var shouldThrowOnGenerate: Error? = nil
+    public var shouldThrowOnLoad: Error? = nil
 
     // Track calls
-    var loadModelCallCount = 0
-    var generateCallCount = 0
-    var stopCallCount = 0
-    var unloadCallCount = 0
+    public var loadModelCallCount = 0
+    public var generateCallCount = 0
+    public var stopCallCount = 0
+    public var unloadCallCount = 0
 
     // Capture last generate arguments
-    var lastPrompt: String?
-    var lastSystemPrompt: String?
-    var lastConfig: GenerationConfig?
+    public var lastPrompt: String?
+    public var lastSystemPrompt: String?
+    public var lastConfig: GenerationConfig?
 
-    init(capabilities: BackendCapabilities = BackendCapabilities(
+    public init(capabilities: BackendCapabilities = BackendCapabilities(
         supportedParameters: [.temperature, .topP, .repeatPenalty],
         maxContextTokens: 4096,
         requiresPromptTemplate: false,
@@ -32,13 +34,13 @@ final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
         self.capabilities = capabilities
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, contextSize: Int32) async throws {
         loadModelCallCount += 1
         if let error = shouldThrowOnLoad { throw error }
         isModelLoaded = true
     }
 
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
+    public func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
         generateCallCount += 1
         lastPrompt = prompt
         lastSystemPrompt = systemPrompt
@@ -61,12 +63,12 @@ final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
         }
     }
 
-    func stopGeneration() {
+    public func stopGeneration() {
         stopCallCount += 1
         isGenerating = false
     }
 
-    func unloadModel() {
+    public func unloadModel() {
         unloadCallCount += 1
         isModelLoaded = false
         isGenerating = false

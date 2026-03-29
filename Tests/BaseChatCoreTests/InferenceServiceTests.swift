@@ -1,5 +1,6 @@
 import XCTest
 @testable import BaseChatCore
+import BaseChatTestSupport
 
 /// Tests for the InferenceService orchestrator and backend behavior.
 ///

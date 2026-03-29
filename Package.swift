@@ -46,17 +46,23 @@ let package = Package(
             dependencies: ["BaseChatCore"],
             path: "Sources/BaseChatUI"
         ),
+        // Shared test mocks and utilities
+        .target(
+            name: "BaseChatTestSupport",
+            dependencies: ["BaseChatCore"],
+            path: "Sources/BaseChatTestSupport"
+        ),
         .testTarget(
             name: "BaseChatCoreTests",
-            dependencies: ["BaseChatCore"]
+            dependencies: ["BaseChatCore", "BaseChatTestSupport"]
         ),
         .testTarget(
             name: "BaseChatBackendsTests",
-            dependencies: ["BaseChatBackends", "BaseChatCore"]
+            dependencies: ["BaseChatBackends", "BaseChatCore", "BaseChatTestSupport"]
         ),
         .testTarget(
             name: "BaseChatUITests",
-            dependencies: ["BaseChatUI", "BaseChatCore"]
+            dependencies: ["BaseChatUI", "BaseChatCore", "BaseChatTestSupport"]
         ),
     ]
 )

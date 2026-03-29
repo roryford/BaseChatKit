@@ -1,5 +1,6 @@
 import XCTest
 @testable import BaseChatCore
+import BaseChatTestSupport
 
 final class BackendCapabilitiesTests: XCTestCase {
 

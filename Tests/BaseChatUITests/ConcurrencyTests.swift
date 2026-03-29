@@ -2,6 +2,7 @@ import XCTest
 import SwiftData
 @testable import BaseChatUI
 import BaseChatCore
+import BaseChatTestSupport
 
 // MARK: - Slow Mock Backend
 

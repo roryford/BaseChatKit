@@ -1,6 +1,7 @@
 import XCTest
 @testable import BaseChatUI
 import BaseChatCore
+import BaseChatTestSupport
 
 @MainActor
 final class ModelManagementViewModelTests: XCTestCase {
