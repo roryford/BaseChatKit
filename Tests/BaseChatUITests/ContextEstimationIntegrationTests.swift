@@ -241,6 +241,45 @@ final class ContextEstimationIntegrationTests: XCTestCase {
         )
     }
 
+    // MARK: - Backend Tokenizer Integration
+
+    func test_contextEstimation_usesBackendTokenizerWhenAvailable() async {
+        // Arrange: backend that returns a known fixed token count for every string.
+        let tokenizingMock = MockTokenizerVendorBackend()
+        tokenizingMock.stubbedTokenCount = 10  // every string → 10 tokens
+
+        let service = InferenceService(backend: tokenizingMock, name: "VendorMock")
+        let vendorVM = ChatViewModel(inferenceService: service)
+        vendorVM.configure(modelContext: context)
+        let session = ChatSession(title: "Vendor Test")
+        context.insert(session)
+        try? context.save()
+        vendorVM.switchToSession(session)
+
+        tokenizingMock.tokensToYield = ["Reply"]
+        vendorVM.inputText = "anything"
+        await vendorVM.sendMessage()
+
+        // With stubbed count of 10 per string:
+        // system prompt ("") → 10, user message → 10, assistant message → 10 = 30 total.
+        // This must NOT equal the heuristic value for "anything" (max(1,8/4)=2) + "Reply"(1) + sys(1)=4.
+        XCTAssertEqual(vendorVM.contextUsedTokens, 30,
+                       "Context estimation should use the backend tokenizer (10 per string) not the heuristic")
+    }
+
+    func test_contextEstimation_fallsBackToHeuristicWhenNoTokenizerVendor() async {
+        // Standard MockInferenceBackend does NOT conform to TokenizerVendor.
+        // Context estimation should use the heuristic.
+        createSession()
+        mock.tokensToYield = ["Hi"]
+        vm.inputText = "Hello world"
+        await vm.sendMessage()
+
+        // "Hello world"=11 chars → 2 tokens, "Hi"=2 chars → 1 token, sys ""→1 token = 4.
+        XCTAssertEqual(vm.contextUsedTokens, 4,
+                       "Should use heuristic (4-chars/token) when backend has no TokenizerVendor")
+    }
+
     // MARK: - HeuristicTokenizer Direct Tests
 
     func test_heuristicTokenizer_variousInputs() {

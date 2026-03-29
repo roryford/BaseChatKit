@@ -321,3 +321,22 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         return nil
     }
 }
+
+// MARK: - TokenizerVendor
+
+extension LlamaBackend: TokenizerVendor, TokenizerProvider {
+    /// Vends `self` as the synchronous tokenizer.
+    ///
+    /// `llama_tokenize` is a pure vocabulary lookup — safe to call from any thread
+    /// while the model is loaded. `LlamaBackend` is already `@unchecked Sendable`.
+    public var tokenizer: any TokenizerProvider { self }
+
+    /// Returns the number of tokens in `text` using the loaded llama.cpp vocabulary.
+    ///
+    /// Falls back to the 4-chars-per-token heuristic if no vocabulary is loaded.
+    /// Callers should prefer accessing this through `InferenceService.tokenizer`.
+    public func tokenCount(_ text: String) -> Int {
+        let tokens = tokenize(text, addBos: false)
+        return tokens.isEmpty ? max(1, text.count / 4) : tokens.count
+    }
+}

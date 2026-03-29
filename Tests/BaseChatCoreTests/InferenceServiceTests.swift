@@ -340,6 +340,43 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertEqual(service.activeBackendName, APIProvider.ollama.rawValue)
     }
 
+    // MARK: - TokenizerVendor
+
+    func test_tokenizer_nilWhenNoBackendLoaded() {
+        let service = InferenceService()
+        XCTAssertNil(service.tokenizer, "tokenizer should be nil when no backend is loaded")
+    }
+
+    func test_tokenizer_nilForNonVendorBackend() {
+        let mock = MockInferenceBackend()
+        let service = InferenceService(backend: mock, name: "Mock")
+        XCTAssertNil(service.tokenizer, "tokenizer should be nil for backends that don't conform to TokenizerVendor")
+    }
+
+    func test_tokenizer_returnedForVendorBackend() {
+        let mock = MockTokenizerVendorBackend()
+        let service = InferenceService(backend: mock, name: "VendorMock")
+        XCTAssertNotNil(service.tokenizer, "tokenizer should be non-nil for TokenizerVendor backends")
+    }
+
+    func test_tokenizer_delegatesToBackendTokenizerProvider() {
+        let mock = MockTokenizerVendorBackend()
+        mock.stubbedTokenCount = 42
+        let service = InferenceService(backend: mock, name: "VendorMock")
+
+        let count = service.tokenizer?.tokenCount("anything")
+        XCTAssertEqual(count, 42, "InferenceService should delegate tokenCount to the backend's tokenizer")
+    }
+
+    func test_tokenizer_nilAfterUnload() {
+        let mock = MockTokenizerVendorBackend()
+        let service = InferenceService(backend: mock, name: "VendorMock")
+        XCTAssertNotNil(service.tokenizer)
+
+        service.unloadModel()
+        XCTAssertNil(service.tokenizer, "tokenizer should be nil after backend is unloaded")
+    }
+
     func test_loadModel_replacesExistingBackend() async throws {
         // Load model A first using the #if DEBUG init.
         let firstMock = MockInferenceBackend()

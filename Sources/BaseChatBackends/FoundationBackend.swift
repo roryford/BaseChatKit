@@ -30,7 +30,10 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
     public let capabilities = BackendCapabilities(
         supportedParameters: [.temperature],
-        maxContextTokens: 4096,
+        // Declare 3500 rather than the true 4096 limit: the 4-char/token heuristic
+        // underestimates Apple's tokenizer, so we need ~15 % headroom to avoid
+        // FoundationModels.GenerationError.exceededContextWindowSize at runtime.
+        maxContextTokens: 3500,
         requiresPromptTemplate: false,
         supportsSystemPrompt: true
     )

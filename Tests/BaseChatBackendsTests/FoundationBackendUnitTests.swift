@@ -130,8 +130,8 @@ final class FoundationBackendUnitTests: XCTestCase {
         )
         XCTAssertEqual(
             caps.maxContextTokens,
-            4096,
-            "maxContextTokens must be 4096"
+            3500,
+            "maxContextTokens is 3500 (not 4096) to leave headroom for tokenizer underestimation"
         )
         XCTAssertTrue(
             caps.supportedParameters.contains(.temperature),

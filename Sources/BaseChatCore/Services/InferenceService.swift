@@ -242,9 +242,29 @@ public final class InferenceService {
         self.activeBackendName = name
     }
     #endif
+
+    // MARK: - Tokenizer
+
+    /// A real tokenizer from the currently loaded backend, or `nil` if the active
+    /// backend does not expose one (falls back to ``HeuristicTokenizer`` at call sites).
+    ///
+    /// Only backends that can tokenize synchronously vend a tokenizer here. Backends
+    /// that require async tokenization (e.g. MLX via `ModelContainer.perform`) and
+    /// backends with no tokenizer API (Foundation, cloud) return `nil`.
+    public var tokenizer: (any TokenizerProvider)? {
+        (backend as? TokenizerVendor)?.tokenizer
+    }
 }
 
-// MARK: - Supporting Protocols for Cloud Backend Interop
+// MARK: - Supporting Protocols for Backend Opt-In Capabilities
+
+/// Adopted by backends that can vend a synchronous ``TokenizerProvider``.
+///
+/// Use this when a backend has an efficient, thread-safe tokenizer available after
+/// model load. Backends whose tokenizer requires `async` access should not conform.
+public protocol TokenizerVendor: AnyObject {
+    var tokenizer: any TokenizerProvider { get }
+}
 
 /// Adopted by cloud backends to receive the full conversation history for multi-turn support.
 /// This avoids InferenceService having a hard dependency on specific backend types.

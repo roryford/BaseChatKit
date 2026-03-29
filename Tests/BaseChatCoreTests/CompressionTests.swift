@@ -358,7 +358,7 @@ final class CompressionOrchestratorTests: XCTestCase {
     func test_compress_withBalancedMode_routesToExtractiveWhenNoGenerateFn() async {
         let orchestrator = CompressionOrchestrator()
         orchestrator.mode = .balanced
-        // No generateFn on anchored → falls back to extractive inside AnchoredCompressor.
+        // .balanced routes directly to ExtractiveCompressor, not AnchoredCompressor.
 
         let messages = makeMessages(count: 10, contentLength: 100)
         let result = await orchestrator.compress(
@@ -368,9 +368,9 @@ final class CompressionOrchestratorTests: XCTestCase {
             tokenizer: tokenizer
         )
 
-        // Without a generateFn, AnchoredCompressor falls back → "anchored-fallback".
-        XCTAssertEqual(result.stats.strategy, "anchored-fallback",
-                       "Balanced mode without generateFn should produce 'anchored-fallback'")
+        // .balanced uses ExtractiveCompressor directly → strategy is always "extractive".
+        XCTAssertEqual(result.stats.strategy, "extractive",
+                       "Balanced mode routes to ExtractiveCompressor (strategy 'extractive'), not AnchoredCompressor")
     }
 
     func test_compress_withQualityMode_routesToAnchoredWhenGenerateFnSet() async {

@@ -18,7 +18,10 @@ extension ChatViewModel {
         )
 
         // Estimate tokens for all messages + system prompt, using cache for unchanged messages.
-        let systemTokens = ContextWindowManager.estimateTokenCount(systemPrompt)
+        // Use the real tokenizer from the loaded backend when available (GGUF/llama.cpp),
+        // falling back to the 4-chars/token heuristic for MLX, Foundation, and cloud.
+        let activeTokenizer = inferenceService.tokenizer
+        let systemTokens = ContextWindowManager.estimateTokenCount(systemPrompt, tokenizer: activeTokenizer)
         var messageTokens = 0
         var newCache: [UUID: Int] = [:]
         for message in messages {
@@ -26,7 +29,7 @@ extension ChatViewModel {
             if let cached = tokenCountCache[message.id] {
                 count = cached
             } else {
-                count = ContextWindowManager.estimateTokenCount(message.content)
+                count = ContextWindowManager.estimateTokenCount(message.content, tokenizer: activeTokenizer)
             }
             newCache[message.id] = count
             messageTokens += count

@@ -149,4 +149,38 @@ final class LlamaBackendTests: XCTestCase {
             backend.unloadModel()
         }
     }
+
+    // MARK: - TokenizerVendor
+
+    func test_tokenizerVendor_conformance_vendorReturnsSelf() {
+        let backend = LlamaBackend()
+        // tokenizer should be the backend itself (as TokenizerProvider)
+        let tokenizer = backend.tokenizer
+        // Verify it produces a result — exact value doesn't matter without a loaded vocab
+        let count = tokenizer.tokenCount("hello world")
+        XCTAssertGreaterThan(count, 0, "tokenCount should always return a positive value")
+    }
+
+    func test_tokenCount_withoutLoadedModel_fallsBackToHeuristic() {
+        // Without a loaded model, vocab is nil → tokenize() returns [] → heuristic kicks in.
+        // "hello world" = 11 chars → max(1, 11/4) = 2
+        let backend = LlamaBackend()
+        XCTAssertFalse(backend.isModelLoaded)
+        XCTAssertEqual(backend.tokenCount("hello world"), 2,
+                       "Should fall back to char-count heuristic when no model is loaded")
+    }
+
+    func test_tokenCount_emptyString_withoutModel_returnsOne() {
+        // HeuristicTokenizer floors at 1; LlamaBackend.tokenCount should match.
+        let backend = LlamaBackend()
+        XCTAssertEqual(backend.tokenCount(""), 1,
+                       "Empty string with no model should return heuristic floor of 1")
+    }
+
+    func test_tokenCount_longString_withoutModel_scalesWithLength() {
+        let backend = LlamaBackend()
+        let short = backend.tokenCount("Hi")          // max(1, 2/4) = 1
+        let long  = backend.tokenCount(String(repeating: "abcd", count: 100))  // 400/4 = 100
+        XCTAssertLessThan(short, long, "Longer text should produce a higher token count")
+    }
 }

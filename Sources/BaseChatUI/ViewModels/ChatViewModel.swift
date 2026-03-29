@@ -261,8 +261,11 @@ public final class ChatViewModel {
             selectedModel = model
         }
 
-        compressionMode = session.compressionMode
+        // pinnedMessageIDs must be set before compressionMode: the compressionMode
+        // didSet calls saveSettingsToSession(), which writes pinnedMessageIDs back to
+        // the session. Setting pins first ensures the correct value is persisted.
         pinnedMessageIDs = session.pinnedMessageIDs
+        compressionMode = session.compressionMode
 
         showUpgradeHint = false
         loadMessages()

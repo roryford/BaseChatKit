@@ -58,7 +58,7 @@ let package = Package(
         ),
         .testTarget(
             name: "BaseChatBackendsTests",
-            dependencies: ["BaseChatBackends", "BaseChatCore", "BaseChatTestSupport"]
+            dependencies: ["BaseChatBackends", "BaseChatUI", "BaseChatCore", "BaseChatTestSupport"]
         ),
         .testTarget(
             name: "BaseChatUITests",
