@@ -8,11 +8,62 @@ final class HuggingFaceServiceTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        CuratedModel.all = [
+            CuratedModel(
+                id: "test-phi",
+                displayName: "Phi-3.1 Mini Q4",
+                fileName: "phi-3.1-mini-q4.gguf",
+                repoID: "bartowski/Phi-3.1-mini-4k-instruct-GGUF",
+                modelType: .gguf,
+                approximateSizeBytes: 2_200_000_000,
+                recommendedFor: [.small, .medium, .large, .xlarge],
+                contextSize: 4096,
+                promptTemplate: .phi,
+                description: "Phi-3.1 Mini 4-bit quantized model"
+            ),
+            CuratedModel(
+                id: "test-mistral",
+                displayName: "Mistral 7B Q4_K_M",
+                fileName: "mistral-7b-instruct-v0.3-Q4_K_M.gguf",
+                repoID: "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
+                modelType: .gguf,
+                approximateSizeBytes: 4_100_000_000,
+                recommendedFor: [.medium, .large, .xlarge],
+                contextSize: 8192,
+                promptTemplate: .mistral,
+                description: "Mistral 7B Instruct v0.3 4-bit quantized"
+            ),
+            CuratedModel(
+                id: "test-qwen-mlx",
+                displayName: "Qwen3 4B 4-bit",
+                fileName: "Qwen3-4B-4bit",
+                repoID: "mlx-community/Qwen3-4B-4bit",
+                modelType: .mlx,
+                approximateSizeBytes: 5_000_000_000,
+                recommendedFor: [.large, .xlarge],
+                contextSize: 4096,
+                promptTemplate: .chatML,
+                description: "Qwen3 4B MLX 4-bit quantized model"
+            ),
+            CuratedModel(
+                id: "test-llama-large",
+                displayName: "Llama 3.1 70B Q4",
+                fileName: "llama-3.1-70b-q4.gguf",
+                repoID: "bartowski/Llama-3.1-70B-GGUF",
+                modelType: .gguf,
+                approximateSizeBytes: 40_000_000_000,
+                recommendedFor: [.xlarge],
+                contextSize: 8192,
+                promptTemplate: .llama3,
+                description: "Llama 3.1 70B 4-bit quantized model"
+            ),
+        ]
         service = HuggingFaceService()
     }
 
     override func tearDown() {
         service = nil
+        CuratedModel.all = []
         super.tearDown()
     }
 

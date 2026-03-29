@@ -3,18 +3,20 @@ import XCTest
 
 final class SettingsServiceTests: XCTestCase {
 
+    private var suiteName: String!
     private var testDefaults: UserDefaults!
     private var service: SettingsService!
 
     override func setUp() {
         super.setUp()
-        testDefaults = UserDefaults(suiteName: "SettingsServiceTests")!
-        testDefaults.removePersistentDomain(forName: "SettingsServiceTests")
+        suiteName = "SettingsServiceTests-\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: suiteName)!
         service = SettingsService(defaults: testDefaults)
     }
 
     override func tearDown() {
-        testDefaults.removePersistentDomain(forName: "SettingsServiceTests")
+        testDefaults.removePersistentDomain(forName: suiteName)
+        suiteName = nil
         super.tearDown()
     }
 

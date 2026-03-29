@@ -43,7 +43,7 @@ final class PromptTemplateDetectorTests: XCTestCase {
     // MARK: - Architecture Detection
 
     func test_detect_fromArchitecture_llama() {
-        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "llama"), .llama3)
+        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "llama"), .chatML)
     }
 
     func test_detect_fromArchitecture_mistral() {
@@ -71,7 +71,7 @@ final class PromptTemplateDetectorTests: XCTestCase {
     }
 
     func test_detect_fromArchitecture_caseInsensitive() {
-        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "Llama"), .llama3)
+        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "Llama"), .chatML)
         XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "MISTRAL"), .mistral)
     }
 

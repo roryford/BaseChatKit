@@ -3,6 +3,29 @@ import XCTest
 
 final class DownloadableModelTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        CuratedModel.all = [
+            CuratedModel(
+                id: "test-phi",
+                displayName: "Phi-3.1 Mini Q4",
+                fileName: "phi-3.1-mini-q4.gguf",
+                repoID: "bartowski/Phi-3.1-mini-4k-instruct-GGUF",
+                modelType: .gguf,
+                approximateSizeBytes: 2_200_000_000,
+                recommendedFor: [.small, .medium, .large, .xlarge],
+                contextSize: 4096,
+                promptTemplate: .phi,
+                description: "Phi-3.1 Mini 4-bit quantized model"
+            )
+        ]
+    }
+
+    override func tearDown() {
+        CuratedModel.all = []
+        super.tearDown()
+    }
+
     // MARK: - Init from CuratedModel
 
     func test_initFromCuratedModel_setsAllProperties() {
