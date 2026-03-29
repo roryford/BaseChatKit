@@ -44,6 +44,41 @@ final class CloudBackendErrorTests: XCTestCase {
                       "Should mention API key: \(description)")
     }
 
+    func test_invalidURL_descriptionContainsURL() {
+        let urlString = "https://bad url"
+        let error = CloudBackendError.invalidURL(urlString)
+        let description = error.errorDescription ?? ""
+        XCTAssertTrue(description.contains(urlString),
+                      "errorDescription should contain the URL string '\(urlString)': \(description)")
+    }
+
+    func test_invalidURL_localizedDescriptionIsNonEmpty() {
+        let error = CloudBackendError.invalidURL("https://bad url")
+        XCTAssertFalse(error.localizedDescription.isEmpty,
+                       "localizedDescription should be non-empty for invalidURL")
+    }
+
+    func test_allCases_haveNonEmptyLocalizedDescription() {
+        let errors: [CloudBackendError] = [
+            .invalidURL("https://bad url"),
+            .authenticationFailed(provider: "Test"),
+            .rateLimited(retryAfter: 10),
+            .rateLimited(retryAfter: nil),
+            .serverError(statusCode: 503, message: "Service unavailable"),
+            .networkError(underlying: URLError(.notConnectedToInternet)),
+            .parseError("unexpected token"),
+            .missingAPIKey,
+            .streamInterrupted,
+        ]
+
+        for error in errors {
+            XCTAssertNotNil(error.errorDescription,
+                            "\(error) errorDescription should be non-nil")
+            XCTAssertFalse(error.errorDescription?.isEmpty ?? true,
+                           "\(error) errorDescription should be non-empty")
+        }
+    }
+
     func test_allCases_haveNonNilDescription() {
         let errors: [CloudBackendError] = [
             .invalidURL("https://bad"),
