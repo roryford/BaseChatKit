@@ -56,9 +56,38 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
             throw HuggingFaceError.searchFailed(underlying: error)
         }
 
-        let models = response.items.flatMap { convertModelToDownloadables($0) }
-        Log.network.info("Search returned \(models.count) downloadable files from \(response.items.count) repos")
-        return models
+        // Filter to repos that contain GGUF files (single-file downloadable).
+        // MLX repos require snapshot downloads (multiple files) which is not yet supported.
+        let ggufRepos = response.items.filter { model in
+            guard let siblings = model.siblings else { return false }
+            return siblings.contains { $0.relativeFilename.lowercased().hasSuffix(".gguf") }
+        }
+
+        // Fetch each GGUF repo with filesMetadata to get actual file sizes.
+        var allModels: [DownloadableModel] = []
+        await withTaskGroup(of: [DownloadableModel].self) { group in
+            for model in ggufRepos {
+                group.addTask {
+                    do {
+                        let detailed = try await self.hubClient.getModel(
+                            model.id,
+                            full: true,
+                            filesMetadata: true
+                        )
+                        return self.convertModelToDownloadables(detailed)
+                    } catch {
+                        Log.network.warning("Failed to fetch details for \(model.id): \(error)")
+                        return self.convertModelToDownloadables(model)
+                    }
+                }
+            }
+            for await models in group {
+                allModels.append(contentsOf: models)
+            }
+        }
+
+        Log.network.info("Search returned \(allModels.count) downloadable files from \(ggufRepos.count) repos")
+        return allModels
     }
 
     // MARK: - Curated
@@ -82,7 +111,8 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
         do {
             model = try await hubClient.getModel(
                 repoIdentifier,
-                full: true
+                full: true,
+                filesMetadata: true
             )
         } catch {
             Log.network.error("Failed to fetch model \(repoID): \(error.localizedDescription)")
@@ -111,14 +141,12 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
 
     /// Converts a HuggingFace `Model` into zero or more `DownloadableModel` entries.
     ///
-    /// - GGUF repos: one entry per `.gguf` file (each quant variant).
-    /// - MLX repos: one entry if the repo contains `config.json` + `.safetensors` files.
-    /// - Repos with neither format are skipped entirely.
+    /// Currently only supports GGUF repos (one entry per `.gguf` file).
+    /// MLX repos require snapshot downloads (multiple files) which is not yet implemented.
     private func convertModelToDownloadables(_ model: Model) -> [DownloadableModel] {
         guard let siblings = model.siblings else { return [] }
 
         let repoID = model.id.rawValue
-        let displayNameBase = Self.cleanDisplayName(from: model.id.name)
         var results: [DownloadableModel] = []
 
         // Check for GGUF files.
@@ -143,26 +171,9 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
             ))
         }
 
-        // Check for MLX format (config.json + at least one .safetensors file).
-        let hasConfig = siblings.contains { $0.relativeFilename == "config.json" }
-        let hasSafetensors = siblings.contains {
-            $0.relativeFilename.lowercased().hasSuffix(".safetensors")
-        }
-        if hasConfig && hasSafetensors && ggufFiles.isEmpty {
-            // MLX repos are downloaded as a directory; use the repo name as the file name.
-            let totalSize = siblings.reduce(UInt64(0)) { $0 + UInt64($1.size ?? 0) }
-            results.append(DownloadableModel(
-                repoID: repoID,
-                fileName: model.id.name,
-                displayName: displayNameBase,
-                modelType: .mlx,
-                sizeBytes: totalSize,
-                downloads: model.downloads,
-                isCurated: false,
-                promptTemplate: nil,
-                description: nil
-            ))
-        }
+        // MLX repos (config.json + .safetensors) are not included in search results
+        // because they require snapshot downloads (multiple files), which is not yet
+        // supported. Users can manually import MLX models via drag-and-drop on macOS.
 
         return results
     }

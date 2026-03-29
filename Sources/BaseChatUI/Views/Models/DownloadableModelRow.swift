@@ -76,13 +76,21 @@ public struct DownloadableModelRow: View {
     /// Colored circle indicating whether this device can run the model.
     @ViewBuilder
     private var compatibilityBadge: some View {
-        let canRun = viewModel.canRunModel(sizeBytes: model.sizeBytes)
-        let isBorderline = !canRun && viewModel.canRunModel(sizeBytes: model.sizeBytes * 80 / 100)
+        // When size is unknown (0), show neutral gray instead of misleading green.
+        if model.sizeBytes == 0 {
+            Circle()
+                .fill(Color.secondary.opacity(0.4))
+                .frame(width: 10, height: 10)
+                .padding(.top, 6)
+        } else {
+            let canRun = viewModel.canRunModel(sizeBytes: model.sizeBytes)
+            let isBorderline = !canRun && viewModel.canRunModel(sizeBytes: model.sizeBytes * 80 / 100)
 
-        Circle()
-            .fill(badgeColor(canRun: canRun, isBorderline: isBorderline))
-            .frame(width: 10, height: 10)
-            .padding(.top, 6)
+            Circle()
+                .fill(badgeColor(canRun: canRun, isBorderline: isBorderline))
+                .frame(width: 10, height: 10)
+                .padding(.top, 6)
+        }
     }
 
     private func badgeColor(canRun: Bool, isBorderline: Bool) -> Color {

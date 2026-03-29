@@ -34,6 +34,17 @@ public final class ModelManagementViewModel {
     private let deviceCapability: DeviceCapabilityService
     private let modelStorage: ModelStorageService
 
+    // MARK: - Download Tracking
+
+    /// Mirrors `downloadManager.activeDownloads` as a stored property so that
+    /// SwiftUI observation tracking works correctly. Computed properties that
+    /// read from a nested `@Observable` object do not propagate change
+    /// notifications to views observing this view model.
+    public private(set) var trackedDownloads: [String: DownloadState] = [:]
+
+    /// Polling task that syncs download state from the manager to this view model.
+    private var downloadSyncTask: Task<Void, Never>?
+
     // MARK: - Private State
 
     private var searchTask: Task<Void, Never>?
@@ -69,12 +80,19 @@ public final class ModelManagementViewModel {
 
     /// All currently active downloads, keyed by model ID.
     public var activeDownloads: [String: DownloadState] {
-        downloadManager?.activeDownloads ?? [:]
+        trackedDownloads
     }
 
     /// Whether any downloads are in progress.
     public var hasActiveDownloads: Bool {
-        downloadManager?.hasActiveDownloads ?? false
+        trackedDownloads.values.contains { state in
+            switch state.status {
+            case .queued, .downloading:
+                return true
+            case .completed, .failed, .cancelled:
+                return false
+            }
+        }
     }
 
     /// Number of downloads that have reached the `.completed` state.
@@ -83,7 +101,7 @@ public final class ModelManagementViewModel {
     /// whenever a new download finishes, so the sidebar picker updates without
     /// requiring an app restart.
     public var completedDownloadCount: Int {
-        activeDownloads.values.filter {
+        trackedDownloads.values.filter {
             if case .completed = $0.status { return true }
             return false
         }.count
@@ -182,11 +200,50 @@ public final class ModelManagementViewModel {
         Task {
             do {
                 let state = try await manager.startDownload(model, downloadURL: url)
+                trackedDownloads[model.id] = state
                 Log.download.info("Started download: \(model.displayName), id=\(state.id)")
+                startDownloadSync()
             } catch {
                 searchError = "Failed to start download: \(error.localizedDescription)"
                 Log.download.error("Download start error: \(error)")
             }
+        }
+    }
+
+    /// Polls the download manager for state changes and syncs to `trackedDownloads`.
+    ///
+    /// This bridges the gap between the `BackgroundDownloadManager` (which updates
+    /// via URLSession delegate callbacks) and this view model's stored properties
+    /// (which SwiftUI observes for re-rendering).
+    private func startDownloadSync() {
+        guard downloadSyncTask == nil else { return }
+
+        downloadSyncTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, let manager = self.downloadManager else { break }
+
+                // Sync all state from the manager.
+                let managerDownloads = manager.activeDownloads
+                for (id, state) in managerDownloads {
+                    self.trackedDownloads[id] = state
+                }
+
+                // Stop polling if no active downloads remain.
+                let hasActive = managerDownloads.values.contains { state in
+                    switch state.status {
+                    case .queued, .downloading: return true
+                    default: return false
+                    }
+                }
+
+                if !hasActive && !managerDownloads.isEmpty {
+                    // Final sync then stop.
+                    break
+                }
+
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            self?.downloadSyncTask = nil
         }
     }
 

@@ -229,6 +229,7 @@ private struct ModelSelectRow: View {
 private struct ModelDownloadTab: View {
 
     @Environment(ModelManagementViewModel.self) private var viewModel
+    @Environment(ChatViewModel.self) private var chatViewModel
 
     var body: some View {
         @Bindable var viewModel = viewModel
@@ -248,9 +249,34 @@ private struct ModelDownloadTab: View {
             }
 
             if !viewModel.searchResults.isEmpty {
+                let groups = DownloadableModelGroup.group(viewModel.searchResults)
                 Section("Search Results") {
-                    ForEach(viewModel.searchResults) { model in
-                        DownloadableModelRow(model: model)
+                    ForEach(groups) { group in
+                        if group.variants.count == 1 {
+                            DownloadableModelRow(model: group.variants[0])
+                        } else {
+                            DisclosureGroup {
+                                ForEach(group.variants) { variant in
+                                    DownloadableModelRow(model: variant)
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(group.displayName)
+                                        .font(.headline)
+                                        .lineLimit(2)
+                                    HStack(spacing: 6) {
+                                        Text("\(group.variants.count) variants")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if let sizeRange = group.sizeRange {
+                                            Text(sizeRange)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -283,6 +309,10 @@ private struct ModelDownloadTab: View {
         .searchable(text: $viewModel.searchQuery, prompt: "Search HuggingFace models...")
         .onSubmit(of: .search) {
             Task { await viewModel.search() }
+        }
+        .onChange(of: viewModel.completedDownloadCount) {
+            viewModel.invalidateModelCache()
+            chatViewModel.refreshModels()
         }
         .onAppear {
             viewModel.loadRecommendations()

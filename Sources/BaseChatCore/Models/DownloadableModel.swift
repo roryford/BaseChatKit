@@ -83,3 +83,55 @@ public struct DownloadableModel: Identifiable, Sendable, Hashable {
         self.description = description
     }
 }
+
+// MARK: - Grouped Models
+
+/// Groups multiple downloadable variants (quant levels) under one repo.
+public struct DownloadableModelGroup: Identifiable {
+    public let id: String  // repoID
+    public let repoID: String
+    public let displayName: String
+    public let downloads: Int?
+    public let variants: [DownloadableModel]
+
+    /// Human-readable size range (e.g., "1.6 GB – 7.7 GB"), or nil if all sizes are zero.
+    public var sizeRange: String? {
+        let sizes = variants.map(\.sizeBytes).filter { $0 > 0 }
+        guard let minSize = sizes.min(), let maxSize = sizes.max() else { return nil }
+        let fmt = ByteCountFormatter()
+        fmt.countStyle = .file
+        if minSize == maxSize {
+            return fmt.string(fromByteCount: Int64(minSize))
+        }
+        return "\(fmt.string(fromByteCount: Int64(minSize))) – \(fmt.string(fromByteCount: Int64(maxSize)))"
+    }
+
+    /// Groups a flat list of downloadable models by their `repoID`.
+    public static func group(_ models: [DownloadableModel]) -> [DownloadableModelGroup] {
+        let grouped = Dictionary(grouping: models, by: \.repoID)
+        return grouped.map { repoID, variants in
+            // Use the shortest display name as the group name (avoids quant suffix).
+            let baseName = variants
+                .map(\.displayName)
+                .min(by: { $0.count < $1.count }) ?? repoID
+            // Clean up common suffixes from the group name.
+            let cleanName = Self.cleanGroupName(baseName)
+            return DownloadableModelGroup(
+                id: repoID,
+                repoID: repoID,
+                displayName: cleanName,
+                downloads: variants.first?.downloads,
+                variants: variants.sorted { $0.sizeBytes < $1.sizeBytes }
+            )
+        }
+        .sorted { ($0.downloads ?? 0) > ($1.downloads ?? 0) }
+    }
+
+    private static func cleanGroupName(_ name: String) -> String {
+        // Remove trailing quant identifiers like "Q4 K M", "IQ2 XS", etc.
+        let pattern = #"\s+(?:Q|IQ|F|BF)\d+.*$"#
+        guard let range = name.range(of: pattern, options: .regularExpression) else { return name }
+        let cleaned = String(name[..<range.lowerBound])
+        return cleaned.isEmpty ? name : cleaned
+    }
+}

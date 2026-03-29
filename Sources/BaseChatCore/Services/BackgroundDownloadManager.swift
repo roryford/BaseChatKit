@@ -206,21 +206,26 @@ public final class BackgroundDownloadManager: NSObject {
         case .gguf:
             try validateGGUFFile(at: fileURL)
         case .mlx:
-            // For individual MLX file downloads, check the file exists.
             guard FileManager.default.fileExists(atPath: fileURL.path) else {
                 throw HuggingFaceError.invalidDownloadedFile(reason: "Downloaded MLX file does not exist")
             }
-            // If this is a directory (assembled MLX repo), verify config.json and at least one .safetensors file.
+            // MLX models must be directories containing config.json + .safetensors files.
             var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory), isDirectory.boolValue {
-                let configPath = fileURL.appendingPathComponent("config.json").path
-                guard FileManager.default.fileExists(atPath: configPath) else {
-                    throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory is missing config.json")
-                }
-                let contents = try FileManager.default.contentsOfDirectory(atPath: fileURL.path)
-                guard contents.contains(where: { $0.hasSuffix(".safetensors") }) else {
-                    throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory contains no .safetensors files")
-                }
+            guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                // A single file is not a valid MLX model — likely an HTML error page
+                // from trying to download a directory URL.
+                throw HuggingFaceError.invalidDownloadedFile(
+                    reason: "MLX models require snapshot download (multiple files). Single-file download is not supported."
+                )
+            }
+            let configPath = fileURL.appendingPathComponent("config.json").path
+            guard FileManager.default.fileExists(atPath: configPath) else {
+                throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory is missing config.json")
+            }
+            let contents = try FileManager.default.contentsOfDirectory(atPath: fileURL.path)
+            guard contents.contains(where: { $0.hasSuffix(".safetensors") }) else {
+                throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory contains no .safetensors files")
             }
         case .foundation:
             throw HuggingFaceError.invalidDownloadedFile(reason: "Foundation models cannot be downloaded")
