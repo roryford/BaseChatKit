@@ -48,12 +48,8 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
                 sort: "downloads",
                 direction: .descending,
                 limit: 20,
-                pipelineTag: "text-generation",
-                expand: [
-                    .known(.siblings),
-                    .known(.downloads),
-                    .known(.tags)
-                ]
+                full: true,
+                pipelineTag: "text-generation"
             )
         } catch {
             Log.network.error("HuggingFace search failed: \(error.localizedDescription)")
@@ -86,7 +82,7 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
         do {
             model = try await hubClient.getModel(
                 repoIdentifier,
-                expand: [.known(.siblings)]
+                full: true
             )
         } catch {
             Log.network.error("Failed to fetch model \(repoID): \(error.localizedDescription)")
