@@ -30,10 +30,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
     public let capabilities = BackendCapabilities(
         supportedParameters: [.temperature],
-        // Declare 3500 rather than the true 4096 limit: the 4-char/token heuristic
-        // underestimates Apple's tokenizer, so we need ~15 % headroom to avoid
-        // FoundationModels.GenerationError.exceededContextWindowSize at runtime.
-        maxContextTokens: 3500,
+        maxContextTokens: 4096,
         requiresPromptTemplate: false,
         supportsSystemPrompt: true
     )
@@ -192,5 +189,29 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
     public func stopGeneration() {
         generationTask?.cancel()
         generationTask = nil
+    }
+
+}
+
+// MARK: - TokenizerVendor
+
+@available(iOS 26, macOS 26, *)
+extension FoundationBackend: TokenizerVendor {
+    /// Vends a synchronous tokenizer using a conservative 3-chars-per-token heuristic
+    /// calibrated for Apple's Foundation Model tokenizer (which produces more tokens
+    /// per character than the default 4-char heuristic).
+    public var tokenizer: any TokenizerProvider { FoundationTokenizer.shared }
+}
+
+/// Conservative synchronous tokenizer for Apple Foundation Models.
+///
+/// Apple's tokenizer produces roughly 1 token per 2.5-3 characters for English text.
+/// Using 3 chars/token is a safe estimate that slightly overestimates token usage,
+/// which is preferable to underestimating and hitting context overflow errors.
+@available(iOS 26, macOS 26, *)
+struct FoundationTokenizer: TokenizerProvider {
+    static let shared = FoundationTokenizer()
+    func tokenCount(_ text: String) -> Int {
+        max(1, text.count / 3)
     }
 }

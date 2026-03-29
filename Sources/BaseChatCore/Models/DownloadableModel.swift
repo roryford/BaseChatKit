@@ -33,6 +33,16 @@ public struct DownloadableModel: Identifiable, Sendable, Hashable {
         ByteCountFormatter.string(fromByteCount: Int64(sizeBytes), countStyle: .file)
     }
 
+    /// Quantization tag extracted from the filename (e.g., "Q4_K_M", "Q8_0"), or nil.
+    public var quantization: String? {
+        guard modelType == .gguf else { return nil }
+        // Match common GGUF quant patterns: Q4_K_M, Q8_0, IQ2_XS, F16, etc.
+        let pattern = #"[_\-\.]((?:Q|IQ|F|BF)\d+(?:_[A-Z0-9]+)*)\."#
+        guard let range = fileName.range(of: pattern, options: .regularExpression) else { return nil }
+        let match = fileName[range].dropFirst().dropLast() // strip leading separator and trailing dot
+        return String(match)
+    }
+
     // MARK: - Factory from CuratedModel
 
     public init(from curated: CuratedModel) {

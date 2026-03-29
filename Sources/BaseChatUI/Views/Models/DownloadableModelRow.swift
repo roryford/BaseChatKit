@@ -30,6 +30,16 @@ public struct DownloadableModelRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    if let quant = model.quantization {
+                        Text(quant)
+                            .font(.caption2)
+                            .fontDesign(.monospaced)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.fill.tertiary, in: Capsule())
+                            .foregroundStyle(.secondary)
+                    }
+
                     if model.isCurated {
                         Text("Curated")
                             .font(.caption2)
@@ -40,6 +50,11 @@ public struct DownloadableModelRow: View {
                             .accessibilityLabel("Curated model")
                     }
                 }
+
+                Text(model.fileName)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
 
                 if let description = model.description {
                     Text(description)
