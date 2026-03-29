@@ -65,22 +65,19 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
             )
         }
 
-        #if targetEnvironment(simulator)
-        // FoundationModels availability check may pass on simulator but the
-        // session cannot actually run inference. Verify with a probe request.
+        // Availability can report .available even when the session cannot
+        // actually run inference (e.g. simulator, or Apple Intelligence not
+        // fully set up). Probe with a minimal request to verify.
         let probeSession = LanguageModelSession()
         do {
             _ = try await probeSession.respond(to: "Hi")
         } catch {
-            Self.logger.warning("Foundation model not functional on simulator: \(error)")
+            Self.logger.warning("Foundation model probe failed: \(error)")
             throw InferenceError.inferenceFailure(
-                "Apple Intelligence is not available in the Simulator. Run on a device with Apple Intelligence enabled."
+                "Apple Intelligence model is not ready. Ensure Apple Intelligence is enabled in Settings > Apple Intelligence & Siri."
             )
         }
         session = probeSession
-        #else
-        session = LanguageModelSession()
-        #endif
 
         isModelLoaded = true
         Self.logger.info("Foundation backend loaded")
