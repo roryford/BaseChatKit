@@ -15,6 +15,10 @@ struct DemoContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var isModelManagementPresented = false
 
+    /// When `true`, the auto-model-load and related onAppear work is skipped
+    /// so that UI tests start from a deterministic empty state.
+    var skipAutoModelLoad: Bool = false
+
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
@@ -29,17 +33,21 @@ struct DemoContentView: View {
         .onAppear {
             viewModel.configure(modelContext: modelContext)
             sessionManager.configure(modelContext: modelContext)
-            viewModel.refreshModels()
-            viewModel.autoSelectFirstRunModel()
 
-            // If no model was selected (e.g. first-run already fired before
-            // backends were configured), fall back to the Foundation model.
-            if viewModel.selectedModel == nil,
-               let foundation = viewModel.availableModels.first(where: { $0.modelType == .foundation }) {
-                viewModel.selectedModel = foundation
+            if !skipAutoModelLoad {
+                viewModel.refreshModels()
+                viewModel.autoSelectFirstRunModel()
+
+                // If no model was selected (e.g. first-run already fired before
+                // backends were configured), fall back to the Foundation model.
+                if viewModel.selectedModel == nil,
+                   let foundation = viewModel.availableModels.first(where: { $0.modelType == .foundation }) {
+                    viewModel.selectedModel = foundation
+                }
+
+                viewModel.startMemoryMonitoring()
             }
 
-            viewModel.startMemoryMonitoring()
             sessionManager.loadSessions()
 
             if sessionManager.sessions.isEmpty {

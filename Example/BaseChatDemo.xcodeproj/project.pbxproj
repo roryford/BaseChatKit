@@ -13,6 +13,11 @@
 		BF0004000000000000000000 /* BaseChatUI in Frameworks */ = {isa = PBXBuildFile; productRef = F30002000000000000000000 /* BaseChatUI */; };
 		BF0005000000000000000000 /* BaseChatBackends in Frameworks */ = {isa = PBXBuildFile; productRef = F30003000000000000000000 /* BaseChatBackends */; };
 		BF1001000000000000000000 /* ModelManagementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11001000000000000000000 /* ModelManagementUITests.swift */; };
+		BF1002000000000000000000 /* UITestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11003000000000000000000 /* UITestHelpers.swift */; };
+		BF1003000000000000000000 /* ChatFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11004000000000000000000 /* ChatFlowUITests.swift */; };
+		BF1004000000000000000000 /* SessionManagementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11005000000000000000000 /* SessionManagementUITests.swift */; };
+		BF1005000000000000000000 /* SettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11006000000000000000000 /* SettingsUITests.swift */; };
+		BF1006000000000000000000 /* CloudAPIUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11007000000000000000000 /* CloudAPIUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -31,6 +36,11 @@
 		F10003000000000000000000 /* BaseChatDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BaseChatDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F11001000000000000000000 /* ModelManagementUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelManagementUITests.swift; sourceTree = "<group>"; };
 		F11002000000000000000000 /* BaseChatDemoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BaseChatDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F11003000000000000000000 /* UITestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestHelpers.swift; sourceTree = "<group>"; };
+		F11004000000000000000000 /* ChatFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatFlowUITests.swift; sourceTree = "<group>"; };
+		F11005000000000000000000 /* SessionManagementUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagementUITests.swift; sourceTree = "<group>"; };
+		F11006000000000000000000 /* SettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsUITests.swift; sourceTree = "<group>"; };
+		F11007000000000000000000 /* CloudAPIUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAPIUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,7 +102,12 @@
 		A01001000000000000000000 /* BaseChatDemoUITests */ = {
 			isa = PBXGroup;
 			children = (
+				F11003000000000000000000 /* UITestHelpers.swift */,
 				F11001000000000000000000 /* ModelManagementUITests.swift */,
+				F11004000000000000000000 /* ChatFlowUITests.swift */,
+				F11005000000000000000000 /* SessionManagementUITests.swift */,
+				F11006000000000000000000 /* SettingsUITests.swift */,
+				F11007000000000000000000 /* CloudAPIUITests.swift */,
 			);
 			path = BaseChatDemoUITests;
 			sourceTree = "<group>";
@@ -185,6 +200,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				BF1001000000000000000000 /* ModelManagementUITests.swift in Sources */,
+				BF1002000000000000000000 /* UITestHelpers.swift in Sources */,
+				BF1003000000000000000000 /* ChatFlowUITests.swift in Sources */,
+				BF1004000000000000000000 /* SessionManagementUITests.swift in Sources */,
+				BF1005000000000000000000 /* SettingsUITests.swift in Sources */,
+				BF1006000000000000000000 /* CloudAPIUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

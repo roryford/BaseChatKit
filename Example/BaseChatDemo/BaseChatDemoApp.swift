@@ -10,7 +10,20 @@ struct BaseChatDemoApp: App {
     @State private var modelManagementViewModel: ModelManagementViewModel
     @State private var sessionManager = SessionManagerViewModel()
 
+    /// When `true`, the app was launched with `--uitesting` and should use
+    /// an in-memory store, skip auto-model-load, and disable animations.
+    private let isUITesting: Bool
+    private let modelContainer: ModelContainer
+
     init() {
+        let testing = CommandLine.arguments.contains("--uitesting")
+        self.isUITesting = testing
+
+        if testing {
+            #if canImport(UIKit)
+            UIView.setAnimationsEnabled(false)
+            #endif
+        }
         // Configure BaseChatKit for this app
         BaseChatConfiguration.shared = BaseChatConfiguration(
             appName: "BaseChat Demo",
@@ -38,6 +51,10 @@ struct BaseChatDemoApp: App {
             huggingFaceService: hfService,
             downloadManager: downloadManager
         ))
+
+        let schema = Schema(BaseChatSchema.allModelTypes)
+        let config = ModelConfiguration(isStoredInMemoryOnly: testing)
+        self.modelContainer = try! ModelContainer(for: schema, configurations: [config])
     }
 
     // MARK: - Curated Models
@@ -110,11 +127,11 @@ struct BaseChatDemoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            DemoContentView()
+            DemoContentView(skipAutoModelLoad: isUITesting)
                 .environment(chatViewModel)
                 .environment(modelManagementViewModel)
                 .environment(sessionManager)
         }
-        .modelContainer(for: BaseChatSchema.allModelTypes)
+        .modelContainer(modelContainer)
     }
 }

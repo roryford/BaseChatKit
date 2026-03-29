@@ -64,5 +64,9 @@ let package = Package(
             name: "BaseChatUITests",
             dependencies: ["BaseChatUI", "BaseChatCore", "BaseChatTestSupport"]
         ),
+        .testTarget(
+            name: "BaseChatE2ETests",
+            dependencies: ["BaseChatBackends", "BaseChatCore", "BaseChatTestSupport"]
+        ),
     ]
 )
