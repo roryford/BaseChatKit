@@ -54,18 +54,31 @@ public final class BackgroundDownloadManager: NSObject {
     /// The storage service used to determine where to place completed files.
     private let storageService: ModelStorageService
 
+    /// Backing store for the lazily created background URL session.
+    ///
+    /// Kept as an optional so `deinit` can skip invalidation when the session
+    /// was never created (e.g. in unit tests that never start a download).
+    /// Accessing `backgroundSession` during `deinit` before the object has fully
+    /// initialised its memory is unsafe and causes a SIGSEGV.
+    @ObservationIgnored
+    private var _backgroundSession: URLSession?
+
     /// Lazily created background URL session.
     ///
-    /// Marked `@ObservationIgnored` because `@Observable` does not support `lazy var`.
+    /// Marked `@ObservationIgnored` because `@Observable` does not support stored
+    /// computed-like properties that hold references.
     @ObservationIgnored
-    private lazy var backgroundSession: URLSession = {
+    private var backgroundSession: URLSession {
+        if let existing = _backgroundSession { return existing }
         let config = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
         config.isDiscretionary = false
         config.sessionSendsLaunchEvents = true
         // Allow cellular for user-initiated downloads.
         config.allowsCellularAccess = true
-        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
-    }()
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        _backgroundSession = session
+        return session
+    }
 
     /// Persists download metadata so we can reconnect after app restart.
     private let defaults = UserDefaults.standard
@@ -81,7 +94,7 @@ public final class BackgroundDownloadManager: NSObject {
     }
 
     deinit {
-        backgroundSession.invalidateAndCancel()
+        _backgroundSession?.invalidateAndCancel()
     }
 
     // MARK: - Public API
