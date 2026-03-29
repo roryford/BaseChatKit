@@ -17,16 +17,46 @@ extension ChatViewModel {
         }
 
         do {
-            // Trim messages to fit within the context window.
+            // Build the message history, applying compression if the context is filling up.
             let allMessages = messages.filter { $0.id != assistantMessage.id }
             let effectiveSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
-            let trimmedMessages = ContextWindowManager.trimMessages(
-                allMessages,
+            let activeTokenizer = inferenceService.tokenizer
+
+            let compressible = allMessages.map {
+                CompressibleMessage(
+                    id: $0.id,
+                    role: $0.role.rawValue,
+                    content: $0.content,
+                    isPinned: pinnedMessageIDs.contains($0.id)
+                )
+            }
+
+            let history: [(role: String, content: String)]
+            if compressionOrchestrator.shouldCompress(
+                messages: compressible,
                 systemPrompt: effectiveSystemPrompt,
-                maxTokens: contextMaxTokens,
-                responseBuffer: 512
-            )
-            let history = trimmedMessages.map { (role: $0.role.rawValue, content: $0.content) }
+                contextSize: contextMaxTokens,
+                tokenizer: activeTokenizer
+            ) {
+                let result = await compressionOrchestrator.compress(
+                    messages: compressible,
+                    systemPrompt: effectiveSystemPrompt,
+                    contextSize: contextMaxTokens,
+                    tokenizer: activeTokenizer
+                )
+                lastCompressionStats = result.stats
+                history = result.messages
+            } else {
+                lastCompressionStats = nil
+                let trimmed = ContextWindowManager.trimMessages(
+                    allMessages,
+                    systemPrompt: effectiveSystemPrompt,
+                    maxTokens: contextMaxTokens,
+                    responseBuffer: 512,
+                    tokenizer: activeTokenizer
+                )
+                history = trimmed.map { (role: $0.role.rawValue, content: $0.content) }
+            }
 
             let stream = try inferenceService.generate(
                 messages: history,

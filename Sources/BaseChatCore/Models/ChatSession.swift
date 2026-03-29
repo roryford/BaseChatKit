@@ -59,6 +59,14 @@ public final class ChatSession {
         }
     }
 
+    /// The compression mode for this session.
+    ///
+    /// Defaults to `.automatic` when no value is stored.
+    public var compressionMode: CompressionMode {
+        get { compressionModeRaw.flatMap(CompressionMode.init(rawValue:)) ?? .automatic }
+        set { compressionModeRaw = newValue.rawValue }
+    }
+
     /// Convenience to get/set the prompt template as a `PromptTemplate` enum.
     public var promptTemplate: PromptTemplate? {
         get {

@@ -18,6 +18,7 @@ public final class ChatViewModel {
     private let deviceCapability: DeviceCapabilityService
     private let modelStorage: ModelStorageService
     private let memoryPressure: MemoryPressureHandler
+    public let compressionOrchestrator = CompressionOrchestrator()
 
     // MARK: - Persistence
 
@@ -89,6 +90,17 @@ public final class ChatViewModel {
     /// in the conversation history. Populated from ``ChatSession/pinnedMessageIDs``
     /// when switching sessions. Persisted back to the session on changes.
     public var pinnedMessageIDs: Set<UUID> = []
+
+    /// The active compression mode. Synced to the orchestrator and persisted to the session.
+    public var compressionMode: CompressionMode = .automatic {
+        didSet {
+            compressionOrchestrator.mode = compressionMode
+            saveSettingsToSession()
+        }
+    }
+
+    /// Statistics from the most recent compression pass, or `nil` if no compression occurred.
+    public internal(set) var lastCompressionStats: CompressionStats?
 
     // MARK: - Generation Settings
 
@@ -199,6 +211,22 @@ public final class ChatViewModel {
 
         let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
         self.isFirstRun = !UserDefaults.standard.bool(forKey: firstRunKey)
+
+        compressionOrchestrator.anchored.generateFn = { [weak self] prompt in
+            guard let self else { throw CancellationError() }
+            let stream = try await MainActor.run {
+                try self.inferenceService.generate(
+                    messages: [(role: "user", content: prompt)],
+                    systemPrompt: nil,
+                    temperature: 0.3,
+                    topP: 0.9,
+                    repeatPenalty: 1.0
+                )
+            }
+            var result = ""
+            for try await token in stream { result += token }
+            return result
+        }
     }
 
     /// Injects the SwiftData model context. Call once from the view layer
@@ -233,6 +261,9 @@ public final class ChatViewModel {
             selectedModel = model
         }
 
+        compressionMode = session.compressionMode
+        pinnedMessageIDs = session.pinnedMessageIDs
+
         showUpgradeHint = false
         loadMessages()
         updateContextEstimate()
@@ -247,6 +278,8 @@ public final class ChatViewModel {
         session.repeatPenalty = repeatPenalty
         session.systemPrompt = systemPrompt
         session.selectedModelID = selectedModel?.id
+        session.compressionMode = compressionMode
+        session.pinnedMessageIDs = pinnedMessageIDs
         session.updatedAt = Date()
 
         do {
