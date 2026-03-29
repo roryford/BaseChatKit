@@ -6,16 +6,20 @@ import BaseChatCore
 /// User messages are right-aligned with accent coloring, assistant messages
 /// are left-aligned with a secondary background, and system messages are
 /// centered and italic. Supports streaming state with a pulsing indicator.
+/// When `isPinned` is `true`, a small pin icon is shown in the top-trailing
+/// corner of the bubble to indicate the message is preserved from compression.
 public struct MessageBubbleView: View {
 
     public let message: ChatMessage
     public let isStreaming: Bool
+    public let isPinned: Bool
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    public init(message: ChatMessage, isStreaming: Bool) {
+    public init(message: ChatMessage, isStreaming: Bool, isPinned: Bool = false) {
         self.message = message
         self.isStreaming = isStreaming
+        self.isPinned = isPinned
     }
 
     // MARK: - Body
@@ -61,6 +65,9 @@ public struct MessageBubbleView: View {
         }
         .padding(12)
         .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(alignment: .topTrailing) {
+            pinIndicator
+        }
     }
 
     private var assistantBubble: some View {
@@ -92,6 +99,9 @@ public struct MessageBubbleView: View {
         }
         .padding(12)
         .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(alignment: .topTrailing) {
+            pinIndicator
+        }
     }
 
     private var systemBubble: some View {
@@ -107,6 +117,19 @@ public struct MessageBubbleView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Pin Indicator
+
+    @ViewBuilder
+    private var pinIndicator: some View {
+        if isPinned {
+            Image(systemName: "pin.fill")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(6)
+                .accessibilityLabel("Pinned message")
+        }
     }
 
     // MARK: - Streaming Indicator

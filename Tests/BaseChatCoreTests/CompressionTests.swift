@@ -451,6 +451,83 @@ final class CompressionOrchestratorTests: XCTestCase {
         XCTAssertTrue(whenAutomatic, "Should compress when mode is automatic and utilization is high")
         XCTAssertFalse(whenOff, "Should not compress after mode is changed to .off")
     }
+
+    func test_shouldCompress_returnsTrue_atLargeContextThreshold() {
+        let orchestrator = CompressionOrchestrator()
+        orchestrator.mode = .automatic
+
+        // contextSize = 20_000 > 16_000 → threshold is 0.85 (not 0.75).
+        // usableContext = 20_000 - 512 = 19_488.
+        // trigger at 19_488 * 0.85 = 16_564.8 → need tokens ≥ 16_565.
+        // 167 messages × 100 chars = 16_700 tokens → utilization = 16_700/19_488 ≈ 0.857 ≥ 0.85 → triggers.
+        let messages = makeMessages(count: 167, contentLength: 100)
+        let result = orchestrator.shouldCompress(
+            messages: messages,
+            systemPrompt: nil,
+            contextSize: 20_000,
+            tokenizer: tokenizer
+        )
+
+        XCTAssertTrue(result, "shouldCompress must be true when utilization meets the 0.85 large-context threshold")
+    }
+
+    func test_shouldCompress_returnsFalse_belowLargeContextThreshold() {
+        let orchestrator = CompressionOrchestrator()
+        orchestrator.mode = .automatic
+
+        // contextSize = 20_000 > 16_000 → threshold is 0.85.
+        // usableContext = 20_000 - 512 = 19_488.
+        // trigger at 16_565 tokens.
+        // 10 messages × 100 chars = 1_000 tokens → utilization = 1_000/19_488 ≈ 5% << 0.85 → does not trigger.
+        let messages = makeMessages(count: 10, contentLength: 100)
+        let result = orchestrator.shouldCompress(
+            messages: messages,
+            systemPrompt: nil,
+            contextSize: 20_000,
+            tokenizer: tokenizer
+        )
+
+        XCTAssertFalse(result, "shouldCompress must be false when utilization is well below the 0.85 large-context threshold")
+    }
+
+    func test_shouldCompress_systemPromptReducesAvailableBudget() {
+        // shouldCompress uses usableContext = contextSize - responseBuffer (512) for the gate.
+        // historyBudget (used during the actual compression pass) additionally subtracts system
+        // prompt tokens. Verify both sides of the boundary using historyBudget directly.
+        //
+        // contextSize = 1000, responseBuffer = 512.
+        // Without system prompt: budget = 1000 - 512 = 488.
+        // With system prompt of 200 chars (= 200 tokens via CharTokenizer): budget = 1000 - 200 - 512 = 288.
+        // Messages: 3 × 100 chars = 300 tokens.
+        //   300 ≤ 488 → fits without system prompt (would not need compression).
+        //   300 > 288 → does not fit with system prompt (would need compression).
+        let contextSize = 1000
+        let largeSystemPrompt = String(repeating: "s", count: 200)  // 200 tokens
+
+        let orchestrator = CompressionOrchestrator()
+
+        let budgetWithout = orchestrator.extractive.historyBudget(
+            contextSize: contextSize,
+            systemPrompt: nil,
+            tokenizer: tokenizer
+        )
+        let budgetWith = orchestrator.extractive.historyBudget(
+            contextSize: contextSize,
+            systemPrompt: largeSystemPrompt,
+            tokenizer: tokenizer
+        )
+
+        let messageTokens = 3 * 100  // 300 tokens
+
+        XCTAssertEqual(budgetWithout, 488,
+                       "Budget without system prompt should be contextSize - responseBuffer = 488")
+        XCTAssertEqual(budgetWith, 288,
+                       "Budget with 200-token system prompt should be 488 - 200 = 288")
+        XCTAssertLessThanOrEqual(messageTokens, budgetWithout,
+                                 "300-token history fits within 488-token budget (no system prompt)")
+        XCTAssertGreaterThan(messageTokens, budgetWith,
+                             "300-token history exceeds 288-token budget (large system prompt consumes the headroom)")
+    }
 }
 
 // MARK: - Test Data Helpers

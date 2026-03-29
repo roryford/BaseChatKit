@@ -229,7 +229,8 @@ public struct ChatView: View {
                     ForEach(viewModel.messages) { message in
                         MessageBubbleView(
                             message: message,
-                            isStreaming: isMessageStreaming(message)
+                            isStreaming: isMessageStreaming(message),
+                            isPinned: viewModel.isMessagePinned(message)
                         )
                         .messageActionMenu(message: message, viewModel: viewModel)
                         .id(message.id)

@@ -21,6 +21,12 @@ public struct MessageActionMenuModifier: ViewModifier {
     public func body(content: Content) -> some View {
         content
             .contextMenu {
+                if viewModel.isMessagePinned(message) {
+                    unpinButton
+                } else {
+                    pinButton
+                }
+
                 copyButton
 
                 if message.role == .user {
@@ -37,6 +43,22 @@ public struct MessageActionMenuModifier: ViewModifier {
     }
 
     // MARK: - Context Menu Items
+
+    private var pinButton: some View {
+        Button {
+            viewModel.pinMessage(message)
+        } label: {
+            Label("Pin", systemImage: "pin")
+        }
+    }
+
+    private var unpinButton: some View {
+        Button {
+            viewModel.unpinMessage(message)
+        } label: {
+            Label("Unpin", systemImage: "pin.slash")
+        }
+    }
 
     private var copyButton: some View {
         Button {

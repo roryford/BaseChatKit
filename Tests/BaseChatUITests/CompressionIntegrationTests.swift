@@ -332,4 +332,50 @@ final class CompressionIntegrationTests: XCTestCase {
         XCTAssertEqual(assistantMessages.last?.content, "AssistantReply",
                        "Assistant reply content should match the mock output")
     }
+
+    // MARK: - Pinned Message Survives Compression
+
+    /// Verifies that a pinned message is not evicted when compression fires.
+    ///
+    /// Setup mirrors test_compressionFiresAndProducesStats_whenContextIsFull exactly,
+    /// with an added pin on the oldest message (vm.messages[0]).
+    ///
+    /// contextMaxTokens = 600 → usableContext = 88 tokens
+    /// Threshold = 0.75 → trigger at ≥ 66 tokens.
+    /// 4 messages × 80 chars (heuristic: 20 tokens each) = 80 tokens > 66 → forces compression.
+    /// The pinned message at index 0 is the oldest and would be the first evicted without pinning.
+    func test_pinnedMessage_survivesCompression() async {
+        createSession()
+
+        vm.compressionMode = .automatic
+        vm.contextMaxTokens = 600
+
+        // Pre-load history that will exceed the compression threshold.
+        let longContent = String(repeating: "c", count: 80)
+        let sessionID = vm.activeSession!.id
+        for _ in 0..<4 {
+            let msg = ChatMessage(role: .user,
+                                  content: longContent,
+                                  sessionID: sessionID)
+            vm.messages.append(msg)
+        }
+
+        // Pin the oldest message — it would be evicted first without pinning support.
+        let pinnedMessage = vm.messages[0]
+        let pinnedContent = pinnedMessage.content
+        vm.pinMessage(pinnedMessage)
+
+        // Send one more message to trigger generateIntoMessage (runs the compression path).
+        mock.tokensToYield = ["AssistantReply"]
+        vm.inputText = "One more question"
+        await vm.sendMessage()
+
+        // Compression must have fired.
+        XCTAssertNotNil(vm.lastCompressionStats,
+                        "lastCompressionStats should be non-nil — compression must fire for the pin test to be meaningful")
+
+        // The pinned message's content must still be present after compression.
+        XCTAssertTrue(vm.messages.contains(where: { $0.content == pinnedContent }),
+                      "Pinned message content must survive compression and remain in vm.messages")
+    }
 }

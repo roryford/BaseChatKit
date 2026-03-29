@@ -1,0 +1,121 @@
+import XCTest
+import SwiftData
+@testable import BaseChatUI
+import BaseChatCore
+import BaseChatTestSupport
+
+/// ViewModel integration tests for the data that drives the pin indicator in MessageBubbleView.
+///
+/// Each test targets `isMessagePinned`, `pinMessage`, and `unpinMessage` to confirm that
+/// the Boolean value powering the visual indicator is correct across all relevant state
+/// transitions, and that pin state is persisted to the active ChatSession.
+@MainActor
+final class PinnedMessageIndicatorTests: XCTestCase {
+
+    private var container: ModelContainer!
+    private var context: ModelContext!
+    private var vm: ChatViewModel!
+    private var mock: MockInferenceBackend!
+
+    // MARK: - Setup / Teardown
+
+    override func setUp() {
+        super.setUp()
+
+        let schema = Schema(BaseChatSchema.allModelTypes)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        container = try! ModelContainer(for: schema, configurations: [config])
+        context = container.mainContext
+
+        mock = MockInferenceBackend()
+        mock.isModelLoaded = true
+        mock.tokensToYield = ["Reply"]
+
+        let service = InferenceService(backend: mock, name: "MockPin")
+        vm = ChatViewModel(inferenceService: service)
+        vm.configure(modelContext: context)
+    }
+
+    override func tearDown() {
+        vm = nil
+        mock = nil
+        context = nil
+        container = nil
+        super.tearDown()
+    }
+
+    // MARK: - Helpers
+
+    @discardableResult
+    private func createSession(title: String = "Pin Test") -> ChatSession {
+        let session = ChatSession(title: title)
+        context.insert(session)
+        try? context.save()
+        vm.switchToSession(session)
+        return session
+    }
+
+    private func makeMessage() -> ChatMessage {
+        let sessionID = vm.activeSession!.id
+        let message = ChatMessage(role: .user, content: "Test message", sessionID: sessionID)
+        vm.messages.append(message)
+        return message
+    }
+
+    // MARK: - Tests
+
+    func test_isMessagePinned_falseBeforePin() {
+        createSession()
+        let message = makeMessage()
+
+        XCTAssertFalse(vm.isMessagePinned(message),
+                       "A newly created message should not be pinned")
+    }
+
+    func test_isMessagePinned_trueAfterPin() {
+        createSession()
+        let message = makeMessage()
+
+        vm.pinMessage(message)
+
+        XCTAssertTrue(vm.isMessagePinned(message),
+                      "isMessagePinned should return true after pinMessage")
+    }
+
+    func test_isMessagePinned_falseAfterUnpin() {
+        createSession()
+        let message = makeMessage()
+
+        vm.pinMessage(message)
+        XCTAssertTrue(vm.isMessagePinned(message), "Precondition: message should be pinned")
+
+        vm.unpinMessage(message)
+
+        XCTAssertFalse(vm.isMessagePinned(message),
+                       "isMessagePinned should return false after unpinMessage")
+    }
+
+    func test_pinnedMessageIDs_persistedToSession() {
+        let session = createSession()
+        let message = makeMessage()
+
+        vm.pinMessage(message)
+
+        XCTAssertTrue(session.pinnedMessageIDs.contains(message.id),
+                      "After pinMessage, the session's pinnedMessageIDs should contain the message's id")
+    }
+
+    func test_unpinnedMessage_removedFromSession() {
+        let session = createSession()
+        let message = makeMessage()
+
+        vm.pinMessage(message)
+        XCTAssertTrue(session.pinnedMessageIDs.contains(message.id),
+                      "Precondition: session should contain the pinned id")
+
+        vm.unpinMessage(message)
+
+        XCTAssertFalse(session.pinnedMessageIDs.contains(message.id),
+                       "After unpinMessage, the session's pinnedMessageIDs should no longer contain the id")
+    }
+}
