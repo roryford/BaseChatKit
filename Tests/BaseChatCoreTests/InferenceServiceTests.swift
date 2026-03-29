@@ -119,4 +119,161 @@ final class InferenceServiceTests: XCTestCase {
         let service = InferenceService(backend: mock, name: "MockBackend")
         XCTAssertEqual(service.activeBackendName, "MockBackend")
     }
+
+    // MARK: - loadCloudBackend
+
+    func test_loadCloudBackend_invalidURL_throwsError() async {
+        let service = InferenceService()
+        // A null byte makes URL(string:) return nil on all Apple platforms.
+        let badURL = "http://foo\0bar"
+        let endpoint = APIEndpoint(name: "Bad", provider: .custom, baseURL: badURL)
+
+        do {
+            try await service.loadCloudBackend(from: endpoint)
+            XCTFail("Expected CloudBackendError.invalidURL to be thrown")
+        } catch CloudBackendError.invalidURL(let raw) {
+            XCTAssertEqual(raw, badURL)
+        } catch {
+            XCTFail("Expected CloudBackendError.invalidURL, got \(error)")
+        }
+    }
+
+    func test_loadCloudBackend_noFactoryRegistered_throwsError() async {
+        let service = InferenceService()
+        let endpoint = APIEndpoint(name: "Ollama", provider: .ollama)
+
+        do {
+            try await service.loadCloudBackend(from: endpoint)
+            XCTFail("Expected InferenceError.inferenceFailure to be thrown")
+        } catch InferenceError.inferenceFailure {
+            // expected
+        } catch {
+            XCTFail("Expected InferenceError.inferenceFailure, got \(error)")
+        }
+    }
+
+    func test_loadCloudBackend_setsIsModelLoaded() async throws {
+        let service = InferenceService()
+        let mock = MockInferenceBackend()
+
+        service.registerCloudBackendFactory { _ in mock }
+
+        let endpoint = APIEndpoint(name: "Ollama", provider: .ollama)
+        try await service.loadCloudBackend(from: endpoint)
+
+        XCTAssertTrue(service.isModelLoaded)
+        XCTAssertEqual(service.activeBackendName, APIProvider.ollama.rawValue)
+        XCTAssertEqual(mock.loadModelCallCount, 1)
+    }
+
+    func test_loadCloudBackend_unloadsExistingModel() async throws {
+        let firstMock = MockInferenceBackend()
+        let service = InferenceService(backend: firstMock, name: "First")
+
+        let cloudMock = MockInferenceBackend()
+        service.registerCloudBackendFactory { _ in cloudMock }
+
+        let endpoint = APIEndpoint(name: "Ollama", provider: .ollama)
+        try await service.loadCloudBackend(from: endpoint)
+
+        // The old backend should have been unloaded.
+        XCTAssertEqual(firstMock.unloadCallCount, 1, "Old backend should be unloaded")
+        // New backend is active.
+        XCTAssertTrue(service.isModelLoaded)
+        XCTAssertEqual(service.activeBackendName, APIProvider.ollama.rawValue)
+    }
+
+    // MARK: - Cloud backend interop
+
+    func test_generate_cloudBackend_passesConversationHistory() throws {
+        let mock = MockConversationHistoryBackend()
+        let service = InferenceService(backend: mock, name: "CloudMock")
+
+        let messages: [(role: String, content: String)] = [
+            ("user", "Hello"),
+            ("assistant", "Hi there"),
+            ("user", "How are you?")
+        ]
+
+        let _ = try service.generate(messages: messages)
+
+        XCTAssertNotNil(mock.receivedHistory, "setConversationHistory should have been called")
+        let received = mock.receivedHistory ?? []
+        XCTAssertEqual(received.count, 3)
+        XCTAssertEqual(received[0].role, "user")
+        XCTAssertEqual(received[0].content, "Hello")
+        XCTAssertEqual(received[2].content, "How are you?")
+    }
+
+    func test_generate_cloudBackend_capturesTokenUsage() async throws {
+        let mock = MockTokenUsageBackend()
+        mock.stubbedUsage = (promptTokens: 42, completionTokens: 17)
+        let service = InferenceService(backend: mock, name: "CloudMock")
+
+        let stream = try service.generate(messages: [("user", "ping")])
+        // Drain the stream so generation completes.
+        for try await _ in stream {}
+
+        let usage = service.lastTokenUsage
+        XCTAssertNotNil(usage, "lastTokenUsage should be populated after generation")
+        XCTAssertEqual(usage?.promptTokens, 42)
+        XCTAssertEqual(usage?.completionTokens, 17)
+    }
+}
+
+// MARK: - Local mock types for cloud interop tests
+
+/// A mock backend that also adopts ConversationHistoryReceiver.
+private final class MockConversationHistoryBackend: InferenceBackend,
+                                                    ConversationHistoryReceiver,
+                                                    @unchecked Sendable {
+    var isModelLoaded: Bool = true
+    var isGenerating: Bool = false
+    var capabilities: BackendCapabilities = BackendCapabilities(
+        supportedParameters: [.temperature],
+        maxContextTokens: 4096,
+        requiresPromptTemplate: false,
+        supportsSystemPrompt: true
+    )
+
+    var receivedHistory: [(role: String, content: String)]?
+
+    func setConversationHistory(_ messages: [(role: String, content: String)]) {
+        receivedHistory = messages
+    }
+
+    func loadModel(from url: URL, contextSize: Int32) async throws {}
+
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in continuation.finish() }
+    }
+
+    func stopGeneration() {}
+    func unloadModel() {}
+}
+
+/// A mock backend that also adopts TokenUsageProvider.
+private final class MockTokenUsageBackend: InferenceBackend,
+                                           TokenUsageProvider,
+                                           @unchecked Sendable {
+    var isModelLoaded: Bool = true
+    var isGenerating: Bool = false
+    var capabilities: BackendCapabilities = BackendCapabilities(
+        supportedParameters: [.temperature],
+        maxContextTokens: 4096,
+        requiresPromptTemplate: false,
+        supportsSystemPrompt: true
+    )
+
+    var stubbedUsage: (promptTokens: Int, completionTokens: Int)?
+    var lastUsage: (promptTokens: Int, completionTokens: Int)? { stubbedUsage }
+
+    func loadModel(from url: URL, contextSize: Int32) async throws {}
+
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in continuation.finish() }
+    }
+
+    func stopGeneration() {}
+    func unloadModel() {}
 }
