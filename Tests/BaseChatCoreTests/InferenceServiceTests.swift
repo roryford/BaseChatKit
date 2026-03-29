@@ -219,6 +219,150 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertEqual(usage?.promptTokens, 42)
         XCTAssertEqual(usage?.completionTokens, 17)
     }
+
+    // MARK: - Backend factory fallback chain
+
+    func test_createBackend_firstFactoryWins() async throws {
+        let service = InferenceService()
+
+        var firstCallCount = 0
+        var secondCallCount = 0
+
+        let firstMock = MockInferenceBackend()
+        service.registerBackendFactory { modelType in
+            guard modelType == .foundation else { return nil }
+            firstCallCount += 1
+            return firstMock
+        }
+
+        let secondMock = MockInferenceBackend()
+        service.registerBackendFactory { modelType in
+            guard modelType == .foundation else { return nil }
+            secondCallCount += 1
+            return secondMock
+        }
+
+        let modelInfo = ModelInfo(
+            name: "Foundation",
+            fileName: "Built-in",
+            url: URL(fileURLWithPath: "/"),
+            fileSize: 0,
+            modelType: .foundation
+        )
+        try await service.loadModel(from: modelInfo)
+
+        XCTAssertEqual(firstCallCount, 1, "First factory should be called once")
+        XCTAssertEqual(secondCallCount, 0, "Second factory should never be called when first wins")
+        XCTAssertEqual(firstMock.loadModelCallCount, 1, "First factory's backend should be loaded")
+        XCTAssertEqual(secondMock.loadModelCallCount, 0, "Second factory's backend should not be loaded")
+    }
+
+    func test_createBackend_firstFactoryRejectsSecondHandles() async throws {
+        let service = InferenceService()
+
+        var firstCallCount = 0
+        service.registerBackendFactory { modelType in
+            firstCallCount += 1
+            return nil  // always rejects
+        }
+
+        var secondCallCount = 0
+        let secondMock = MockInferenceBackend()
+        service.registerBackendFactory { modelType in
+            guard modelType == .gguf else { return nil }
+            secondCallCount += 1
+            return secondMock
+        }
+
+        let modelInfo = ModelInfo(
+            name: "Test GGUF",
+            fileName: "test.gguf",
+            url: URL(fileURLWithPath: "/tmp/test.gguf"),
+            fileSize: 0,
+            modelType: .gguf
+        )
+        try await service.loadModel(from: modelInfo)
+
+        XCTAssertEqual(firstCallCount, 1, "First factory should be called once")
+        XCTAssertEqual(secondCallCount, 1, "Second factory should be called after first rejects")
+        XCTAssertEqual(secondMock.loadModelCallCount, 1, "Second factory's backend should be loaded")
+        XCTAssertTrue(service.isModelLoaded)
+    }
+
+    func test_createBackend_allFactoriesReturnNil_throwsError() async {
+        let service = InferenceService()
+
+        service.registerBackendFactory { _ in nil }
+        service.registerBackendFactory { _ in nil }
+
+        let modelInfo = ModelInfo(
+            name: "Unknown",
+            fileName: "model.gguf",
+            url: URL(fileURLWithPath: "/tmp/model.gguf"),
+            fileSize: 0,
+            modelType: .gguf
+        )
+
+        do {
+            try await service.loadModel(from: modelInfo)
+            XCTFail("Expected InferenceError.inferenceFailure to be thrown")
+        } catch InferenceError.inferenceFailure {
+            // expected
+        } catch {
+            XCTFail("Expected InferenceError.inferenceFailure, got \(error)")
+        }
+    }
+
+    func test_registerCloudBackendFactory_fallsBackToSecond() async throws {
+        let service = InferenceService()
+
+        var firstCallCount = 0
+        service.registerCloudBackendFactory { provider in
+            firstCallCount += 1
+            return nil  // always rejects
+        }
+
+        var secondCallCount = 0
+        let secondMock = MockInferenceBackend()
+        service.registerCloudBackendFactory { provider in
+            guard provider == .ollama else { return nil }
+            secondCallCount += 1
+            return secondMock
+        }
+
+        let endpoint = APIEndpoint(name: "Ollama", provider: .ollama)
+        try await service.loadCloudBackend(from: endpoint)
+
+        XCTAssertEqual(firstCallCount, 1, "First cloud factory should be called once")
+        XCTAssertEqual(secondCallCount, 1, "Second cloud factory should be called after first rejects")
+        XCTAssertEqual(secondMock.loadModelCallCount, 1, "Second cloud factory's backend should be loaded")
+        XCTAssertTrue(service.isModelLoaded)
+        XCTAssertEqual(service.activeBackendName, APIProvider.ollama.rawValue)
+    }
+
+    func test_loadModel_replacesExistingBackend() async throws {
+        // Load model A first using the #if DEBUG init.
+        let firstMock = MockInferenceBackend()
+        let service = InferenceService(backend: firstMock, name: "ModelA")
+        XCTAssertTrue(service.isModelLoaded)
+
+        // Register a factory for the second model.
+        let secondMock = MockInferenceBackend()
+        service.registerBackendFactory { _ in secondMock }
+
+        let modelInfo = ModelInfo(
+            name: "ModelB",
+            fileName: "model-b.gguf",
+            url: URL(fileURLWithPath: "/tmp/model-b.gguf"),
+            fileSize: 0,
+            modelType: .gguf
+        )
+        try await service.loadModel(from: modelInfo)
+
+        XCTAssertEqual(firstMock.unloadCallCount, 1, "First backend's unloadModel() should be called exactly once")
+        XCTAssertEqual(secondMock.loadModelCallCount, 1, "Second backend should be loaded")
+        XCTAssertTrue(service.isModelLoaded)
+    }
 }
 
 // MARK: - Local mock types for cloud interop tests
