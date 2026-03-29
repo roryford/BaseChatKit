@@ -275,11 +275,20 @@ Templates auto-detect from GGUF metadata when available. User content is sanitis
 
 - API keys stored in Keychain with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
 - Keys read just-in-time from Keychain, never held as stored properties
-- Configurable certificate pinning via `PinnedSessionDelegate.pinnedHosts`
+- Certificate pinning support via `PinnedSessionDelegate` — disabled by default, opt-in by populating `pinnedHosts` with SPKI SHA-256 hashes for your endpoints
 - HTTPS enforced for non-localhost endpoints
 - User content sanitised in prompt templates to prevent injection
 - Sensitive data uses `privacy: .private` in os.Logger calls
 - Error response bodies filtered before logging
+
+## Binary Dependencies
+
+`BaseChatBackends` includes two pre-built binary xcframeworks:
+
+- **llama.swift** — wraps a pre-built llama.cpp xcframework. The binary is not compiled from source as part of your project. If you require a source-verified build, follow the [llama.swift build instructions](https://github.com/mattt/llama.swift) to compile your own xcframework.
+- **mlx-swift** — Apple's MLX framework ships as a pre-built xcframework from [ml-explore/mlx-swift](https://github.com/ml-explore/mlx-swift). Source builds are supported via that upstream repo.
+
+Both dependencies are pinned to specific tagged releases in `Package.swift`. Review `Package.resolved` to verify the exact versions in use.
 
 ## Example App
 

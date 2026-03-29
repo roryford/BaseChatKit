@@ -34,7 +34,7 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     public var defaultModelName: String {
         switch self {
         case .openAI: return "gpt-4o-mini"
-        case .claude: return "claude-sonnet-4-20250514"
+        case .claude: return "claude-sonnet-4-6"
         case .ollama: return "llama3.2"
         case .lmStudio: return "local-model"
         case .custom: return "model"

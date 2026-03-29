@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Run BaseChatCoreTests
+        run: swift test --filter BaseChatCoreTests
+
+      - name: Run BaseChatUITests
+        run: swift test --filter BaseChatUITests
+
+      # BaseChatBackendsTests and BaseChatE2ETests require physical hardware
+      # or specific OS versions (iOS 26 / macOS 26 for FoundationBackend).
+      # Run these locally before merging backend changes.

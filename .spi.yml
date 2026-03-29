@@ -1,0 +1,8 @@
+version: 1
+builder:
+  configs:
+    # BaseChatCore and BaseChatUI are documented on the macOS SPM builder.
+    # BaseChatBackends is excluded because it requires Apple Silicon
+    # xcframeworks (MLX, llama.cpp) that do not link on Intel CI runners.
+    - documentation_targets: [BaseChatCore, BaseChatUI]
+      platform: macosSpm

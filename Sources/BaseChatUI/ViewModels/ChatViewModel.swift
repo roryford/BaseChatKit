@@ -37,9 +37,13 @@ public final class ChatViewModel {
 
     // MARK: - First Run / Onboarding
 
-    /// Called on the first launch. Override to provide custom onboarding behaviour.
-    /// The default implementation auto-selects the Foundation model (if available)
-    /// and eagerly loads it.
+    /// Called on the first launch instead of the default first-run behaviour.
+    ///
+    /// When set, this closure is invoked by `autoSelectFirstRunModel()` and the default
+    /// Foundation model auto-selection is skipped entirely. If `nil`, the default
+    /// behaviour auto-selects the Foundation model (if available); the model load itself
+    /// is deferred to the view's `onChange(of: selectedModel)` handler to avoid a
+    /// double-load race condition.
     public var onFirstLaunch: (() -> Void)?
 
     /// Returns `true` if the Foundation model backend is available on this device.
@@ -245,7 +249,10 @@ public final class ChatViewModel {
 
     // MARK: - Model Discovery
 
-    /// Re-scans the models directory and updates the available models list.
+    /// Re-scans the models directory and rebuilds `availableModels`.
+    ///
+    /// Includes the built-in Foundation model when `foundationModelProvider` returns `true`.
+    /// Clears `selectedModel` if the previously selected model is no longer on disk.
     public func refreshModels() {
         do {
             try modelStorage.ensureModelsDirectory()
@@ -298,6 +305,11 @@ public final class ChatViewModel {
 
     // MARK: - Model Loading
 
+    /// Loads the currently selected local model into the inference backend.
+    ///
+    /// Does nothing if a load is already in progress. Sets `isLoading` for the duration
+    /// and writes to `errorMessage` on failure. Auto-detects the GGUF prompt template
+    /// from model metadata before loading.
     public func loadSelectedModel() async {
         guard !isLoading else { return }
 
