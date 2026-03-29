@@ -290,11 +290,10 @@ public final class ChatViewModel {
         }
 
         selectedModel = foundation
-        Log.ui.info("Auto-selected Foundation model for first launch — loading eagerly")
-
-        Task {
-            await loadSelectedModel()
-        }
+        Log.ui.info("Auto-selected Foundation model for first launch")
+        // Note: do NOT call loadSelectedModel() here — the onChange(of: selectedModel)
+        // handler in the view will trigger the load. Calling it here causes a double-load
+        // race where the second load unloads the first mid-flight.
     }
 
     // MARK: - Model Loading
