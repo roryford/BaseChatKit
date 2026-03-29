@@ -2,89 +2,7 @@ import XCTest
 import SwiftData
 @testable import BaseChatUI
 import BaseChatCore
-
-// MARK: - Enhanced Mock Backends
-
-/// A mock backend that yields some tokens then throws an error mid-stream.
-private final class MidStreamErrorBackend: InferenceBackend, @unchecked Sendable {
-    var isModelLoaded: Bool = true
-    var isGenerating: Bool = false
-    var capabilities = BackendCapabilities(
-        supportedParameters: [.temperature, .topP, .repeatPenalty],
-        maxContextTokens: 4096,
-        requiresPromptTemplate: false,
-        supportsSystemPrompt: true
-    )
-
-    var tokensBeforeError: [String]
-    var errorToThrow: Error
-
-    init(tokensBeforeError: [String], errorToThrow: Error) {
-        self.tokensBeforeError = tokensBeforeError
-        self.errorToThrow = errorToThrow
-    }
-
-    func loadModel(from url: URL, contextSize: Int32) async throws {
-        isModelLoaded = true
-    }
-
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
-        let tokens = tokensBeforeError
-        let error = errorToThrow
-        isGenerating = true
-        return AsyncThrowingStream { [weak self] continuation in
-            Task {
-                for token in tokens {
-                    continuation.yield(token)
-                }
-                self?.isGenerating = false
-                continuation.finish(throwing: error)
-            }
-        }
-    }
-
-    func stopGeneration() { isGenerating = false }
-    func unloadModel() { isModelLoaded = false; isGenerating = false }
-}
-
-/// A mock backend that yields a configurable list of tokens without errors.
-private final class ConfigurableTokenBackend: InferenceBackend, @unchecked Sendable {
-    var isModelLoaded: Bool = true
-    var isGenerating: Bool = false
-    var capabilities = BackendCapabilities(
-        supportedParameters: [.temperature, .topP, .repeatPenalty],
-        maxContextTokens: 4096,
-        requiresPromptTemplate: false,
-        supportsSystemPrompt: true
-    )
-
-    var tokensToYield: [String]
-
-    init(tokensToYield: [String]) {
-        self.tokensToYield = tokensToYield
-    }
-
-    func loadModel(from url: URL, contextSize: Int32) async throws {
-        isModelLoaded = true
-    }
-
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
-        let tokens = tokensToYield
-        isGenerating = true
-        return AsyncThrowingStream { [weak self] continuation in
-            Task {
-                for token in tokens {
-                    continuation.yield(token)
-                }
-                self?.isGenerating = false
-                continuation.finish()
-            }
-        }
-    }
-
-    func stopGeneration() { isGenerating = false }
-    func unloadModel() { isModelLoaded = false; isGenerating = false }
-}
+import BaseChatTestSupport
 
 // MARK: - Tests
 
@@ -188,7 +106,9 @@ final class StreamingFailureTests: XCTestCase {
     // MARK: - 3. Empty stream removes assistant placeholder
 
     func test_emptyStream_removesAssistantPlaceholder() async {
-        let backend = ConfigurableTokenBackend(tokensToYield: [])
+        let backend = MockInferenceBackend()
+        backend.isModelLoaded = true
+        backend.tokensToYield = []
         let vm = makeViewModel(backend: backend)
         createAndActivateSession(vm: vm)
 
@@ -203,7 +123,9 @@ final class StreamingFailureTests: XCTestCase {
     // MARK: - 4. Single token stream persists correctly
 
     func test_singleTokenStream_persistsCorrectly() async {
-        let backend = ConfigurableTokenBackend(tokensToYield: ["OK"])
+        let backend = MockInferenceBackend()
+        backend.isModelLoaded = true
+        backend.tokensToYield = ["OK"]
         let vm = makeViewModel(backend: backend)
         let session = createAndActivateSession(vm: vm)
 
@@ -226,7 +148,9 @@ final class StreamingFailureTests: XCTestCase {
 
     func test_largeTokenCount_completesSuccessfully() async {
         let tokens = Array(repeating: "t", count: 1000)
-        let backend = ConfigurableTokenBackend(tokensToYield: tokens)
+        let backend = MockInferenceBackend()
+        backend.isModelLoaded = true
+        backend.tokensToYield = tokens
         let vm = makeViewModel(backend: backend)
         createAndActivateSession(vm: vm)
 
@@ -242,7 +166,9 @@ final class StreamingFailureTests: XCTestCase {
     // MARK: - 6. Unicode tokens are preserved
 
     func test_streamWithUnicodeTokens_preservesContent() async {
-        let backend = ConfigurableTokenBackend(tokensToYield: ["Hello ", "\u{1F30D}", " caf\u{00E9}", " na\u{00EF}ve"])
+        let backend = MockInferenceBackend()
+        backend.isModelLoaded = true
+        backend.tokensToYield = ["Hello ", "\u{1F30D}", " caf\u{00E9}", " na\u{00EF}ve"]
         let vm = makeViewModel(backend: backend)
         createAndActivateSession(vm: vm)
 

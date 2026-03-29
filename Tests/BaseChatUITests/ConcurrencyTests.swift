@@ -4,74 +4,6 @@ import SwiftData
 import BaseChatCore
 import BaseChatTestSupport
 
-// MARK: - Slow Mock Backend
-
-/// A mock backend that yields tokens with a configurable delay, allowing
-/// concurrent operations to interleave during tests.
-private final class SlowMockInferenceBackend: InferenceBackend, @unchecked Sendable {
-    var isModelLoaded: Bool = true
-    var isGenerating: Bool = false
-    var capabilities: BackendCapabilities
-
-    var tokensToYield: [String] = ["Hello", " world"]
-    var delayPerToken: UInt64 = 50_000_000 // 50ms in nanoseconds
-    var shouldThrowOnGenerate: Error? = nil
-
-    init(
-        tokenCount: Int = 4,
-        delayMilliseconds: UInt64 = 50,
-        capabilities: BackendCapabilities = BackendCapabilities(
-            supportedParameters: [.temperature, .topP, .repeatPenalty],
-            maxContextTokens: 4096,
-            requiresPromptTemplate: false,
-            supportsSystemPrompt: true
-        )
-    ) {
-        self.capabilities = capabilities
-        self.delayPerToken = delayMilliseconds * 1_000_000
-        self.tokensToYield = (0..<tokenCount).map { "token\($0) " }
-    }
-
-    func loadModel(from url: URL, contextSize: Int32) async throws {
-        isModelLoaded = true
-    }
-
-    func generate(
-        prompt: String,
-        systemPrompt: String?,
-        config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
-        if let error = shouldThrowOnGenerate { throw error }
-        guard isModelLoaded else { throw InferenceError.inferenceFailure("No model loaded") }
-
-        isGenerating = true
-        let tokens = tokensToYield
-        let delay = delayPerToken
-
-        return AsyncThrowingStream { [weak self] continuation in
-            Task {
-                for token in tokens {
-                    if Task.isCancelled { break }
-                    try? await Task.sleep(nanoseconds: delay)
-                    if Task.isCancelled { break }
-                    continuation.yield(token)
-                }
-                self?.isGenerating = false
-                continuation.finish()
-            }
-        }
-    }
-
-    func stopGeneration() {
-        isGenerating = false
-    }
-
-    func unloadModel() {
-        isModelLoaded = false
-        isGenerating = false
-    }
-}
-
 // MARK: - Concurrency Tests
 
 /// Tests for concurrent access patterns in ChatViewModel and SessionManagerViewModel.
@@ -86,7 +18,7 @@ final class ConcurrencyTests: XCTestCase {
     private var context: ModelContext!
     private var vm: ChatViewModel!
     private var sessionManager: SessionManagerViewModel!
-    private var slowBackend: SlowMockInferenceBackend!
+    private var slowBackend: SlowMockBackend!
 
     // MARK: - Setup / Teardown
 
@@ -98,7 +30,7 @@ final class ConcurrencyTests: XCTestCase {
         container = try! ModelContainer(for: schema, configurations: [config])
         context = container.mainContext
 
-        slowBackend = SlowMockInferenceBackend(tokenCount: 4, delayMilliseconds: 50)
+        slowBackend = SlowMockBackend(tokenCount: 4, delayMilliseconds: 50)
 
         let service = InferenceService(backend: slowBackend, name: "SlowMock")
         vm = ChatViewModel(inferenceService: service)
@@ -191,7 +123,7 @@ final class ConcurrencyTests: XCTestCase {
 
         // Use a fast backend so message timestamps are as tight as possible.
         slowBackend.tokensToYield = ["reply"]
-        slowBackend.delayPerToken = 0
+        slowBackend.delayPerToken = .zero
 
         // Send first message and fully await it.
         vm.inputText = "First message"
@@ -232,7 +164,7 @@ final class ConcurrencyTests: XCTestCase {
 
         // Use a slow backend with many tokens so generation takes a while.
         slowBackend.tokensToYield = (0..<20).map { "tok\($0) " }
-        slowBackend.delayPerToken = 50_000_000 // 50ms per token = ~1s total
+        slowBackend.delayPerToken = .milliseconds(50)
 
         // Start first generation.
         vm.inputText = "First message"
@@ -274,7 +206,7 @@ final class ConcurrencyTests: XCTestCase {
         // Set up session A.
         let sessionA = createAndActivateSession(title: "Session A")
         slowBackend.tokensToYield = (0..<20).map { "alphaToken\($0) " }
-        slowBackend.delayPerToken = 50_000_000
+        slowBackend.delayPerToken = .milliseconds(50)
 
         // Pre-populate session B with a known message using a fast backend.
         let sessionB = sessionManager.createSession(title: "Session B")
@@ -355,7 +287,7 @@ final class ConcurrencyTests: XCTestCase {
         createAndActivateSession()
 
         slowBackend.tokensToYield = (0..<20).map { "tok\($0) " }
-        slowBackend.delayPerToken = 50_000_000
+        slowBackend.delayPerToken = .milliseconds(50)
 
         // Send initial message to start generation.
         vm.inputText = "Initial question"
@@ -387,7 +319,7 @@ final class ConcurrencyTests: XCTestCase {
 
         // Now regeneration should work.
         slowBackend.tokensToYield = ["regenerated"]
-        slowBackend.delayPerToken = 0
+        slowBackend.delayPerToken = .zero
         await vm.regenerateLastResponse()
 
         let lastAssistant = vm.messages.last { $0.role == .assistant }

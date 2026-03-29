@@ -20,6 +20,16 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
 
     public init() {}
 
+    /// Convenience initialiser that sets an initial token list and a millisecond delay.
+    ///
+    /// - Parameters:
+    ///   - tokenCount: Number of tokens to pre-populate (formatted as `"token0 "`, `"token1 "`, …).
+    ///   - delayMilliseconds: Per-token delay in milliseconds (default: 50).
+    public init(tokenCount: Int, delayMilliseconds: Int = 50) {
+        tokensToYield = (0..<tokenCount).map { "token\($0) " }
+        delayPerToken = .milliseconds(delayMilliseconds)
+    }
+
     public func loadModel(from url: URL, contextSize: Int32) async throws {
         isModelLoaded = true
     }

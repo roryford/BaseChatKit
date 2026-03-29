@@ -2,60 +2,7 @@ import XCTest
 import SwiftData
 @testable import BaseChatUI
 import BaseChatCore
-
-// MARK: - Slow Mock Backend
-
-/// A mock backend that yields tokens with configurable delays, enabling
-/// cancellation to be tested mid-stream.
-private final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
-    var isModelLoaded = true
-    var isGenerating = false
-    var capabilities = BackendCapabilities(
-        supportedParameters: [.temperature, .topP, .repeatPenalty],
-        maxContextTokens: 4096,
-        requiresPromptTemplate: false,
-        supportsSystemPrompt: true
-    )
-
-    var tokensToYield: [String] = []
-    var delayPerToken: Duration = .milliseconds(50)
-
-    func loadModel(from url: URL, contextSize: Int32) async throws {
-        isModelLoaded = true
-    }
-
-    func generate(
-        prompt: String,
-        systemPrompt: String?,
-        config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
-        isGenerating = true
-        let tokens = tokensToYield
-        let delay = delayPerToken
-
-        return AsyncThrowingStream { continuation in
-            Task { [weak self] in
-                for token in tokens {
-                    if Task.isCancelled { break }
-                    try? await Task.sleep(for: delay)
-                    if Task.isCancelled { break }
-                    continuation.yield(token)
-                }
-                self?.isGenerating = false
-                continuation.finish()
-            }
-        }
-    }
-
-    func stopGeneration() {
-        isGenerating = false
-    }
-
-    func unloadModel() {
-        isModelLoaded = false
-        isGenerating = false
-    }
-}
+import BaseChatTestSupport
 
 // MARK: - Cancellation Tests
 

@@ -3,107 +3,6 @@ import XCTest
 import BaseChatCore
 import BaseChatTestSupport
 
-// MARK: - Token Usage Mock
-
-/// A standalone mock backend that adopts TokenUsageProvider so that
-/// InferenceService.lastTokenUsage returns non-nil after generation.
-/// Cannot subclass MockInferenceBackend (it is final), so this duplicates
-/// the minimal behaviour needed for token-usage tests.
-private final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvider, @unchecked Sendable {
-    var isModelLoaded = true
-    var isGenerating = false
-    var capabilities = BackendCapabilities(
-        supportedParameters: [.temperature, .topP, .repeatPenalty],
-        maxContextTokens: 4096,
-        requiresPromptTemplate: false,
-        supportsSystemPrompt: true
-    )
-
-    var tokensToYield: [String] = []
-    var lastUsage: (promptTokens: Int, completionTokens: Int)?
-
-    /// Set this before generation; the usage is "recorded" after tokens finish.
-    var usageToReport: (promptTokens: Int, completionTokens: Int)?
-
-    /// When set, successive calls draw from this queue instead of `usageToReport`.
-    /// Each element is consumed in order; the last element is reused once exhausted.
-    var usageSequence: [(promptTokens: Int, completionTokens: Int)] = []
-    private var usageSequenceIndex = 0
-
-    func loadModel(from url: URL, contextSize: Int32) async throws {
-        isModelLoaded = true
-    }
-
-    func generate(
-        prompt: String,
-        systemPrompt: String?,
-        config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
-        isGenerating = true
-        let tokens = tokensToYield
-
-        // Draw from usageSequence if populated, otherwise fall back to usageToReport.
-        let usage: (promptTokens: Int, completionTokens: Int)?
-        if !usageSequence.isEmpty {
-            let idx = min(usageSequenceIndex, usageSequence.count - 1)
-            usage = usageSequence[idx]
-            usageSequenceIndex += 1
-        } else {
-            usage = usageToReport
-        }
-
-        return AsyncThrowingStream { [weak self] continuation in
-            Task {
-                for token in tokens {
-                    if Task.isCancelled { break }
-                    continuation.yield(token)
-                }
-                self?.lastUsage = usage
-                self?.isGenerating = false
-                continuation.finish()
-            }
-        }
-    }
-
-    func stopGeneration() { isGenerating = false }
-    func unloadModel() { isModelLoaded = false; isGenerating = false }
-}
-
-// MARK: - Error Mock
-
-/// A mock backend whose stream throws an error mid-generation.
-private final class StreamErrorMockBackend: InferenceBackend, @unchecked Sendable {
-    var isModelLoaded = true
-    var isGenerating = false
-    var capabilities = BackendCapabilities(
-        supportedParameters: [.temperature, .topP, .repeatPenalty],
-        maxContextTokens: 4096,
-        requiresPromptTemplate: false,
-        supportsSystemPrompt: true
-    )
-
-    var streamError: Error = NSError(domain: "test", code: 42, userInfo: [NSLocalizedDescriptionKey: "stream boom"])
-
-    func loadModel(from url: URL, contextSize: Int32) async throws {
-        isModelLoaded = true
-    }
-
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
-        isGenerating = true
-        let error = streamError
-        return AsyncThrowingStream { continuation in
-            Task { [weak self] in
-                continuation.yield("partial")
-                self?.isGenerating = false
-                continuation.finish(throwing: error)
-            }
-        }
-    }
-
-    func stopGeneration() { isGenerating = false }
-    func unloadModel() { isModelLoaded = false; isGenerating = false }
-}
-
 // MARK: - Tests
 
 @MainActor
@@ -412,7 +311,7 @@ final class GenerationExtensionTests: XCTestCase {
     }
 
     func test_isGenerating_falseAfterStreamError() async {
-        let errorBackend = StreamErrorMockBackend()
+        let errorBackend = MidStreamErrorBackend()
         let vm = makeVM(rawBackend: errorBackend)
 
         vm.inputText = "Go"
@@ -469,7 +368,7 @@ final class GenerationExtensionTests: XCTestCase {
     }
 
     func test_streamError_setsErrorMessage() async {
-        let errorBackend = StreamErrorMockBackend()
+        let errorBackend = MidStreamErrorBackend()
         let vm = makeVM(rawBackend: errorBackend)
 
         vm.inputText = "Hello"
