@@ -8,6 +8,55 @@ final class ModelManagementViewModelTests: XCTestCase {
 
     private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
 
+    override func setUp() {
+        super.setUp()
+        // Provide curated models for tests that depend on recommendations.
+        // In production, the app populates CuratedModel.all at startup.
+        CuratedModel.all = [
+            CuratedModel(
+                id: "small-model",
+                displayName: "Small Test Model",
+                fileName: "small-test.gguf",
+                repoID: "test/small",
+                modelType: .gguf,
+                approximateSizeBytes: 500_000_000,
+                recommendedFor: [.small, .medium, .large, .xlarge],
+                contextSize: 2048,
+                promptTemplate: .chatML,
+                description: "Tiny test model"
+            ),
+            CuratedModel(
+                id: "medium-model",
+                displayName: "Medium Test Model",
+                fileName: "medium-test.gguf",
+                repoID: "test/medium",
+                modelType: .gguf,
+                approximateSizeBytes: 4_000_000_000,
+                recommendedFor: [.medium, .large, .xlarge],
+                contextSize: 4096,
+                promptTemplate: .mistral,
+                description: "Medium test model"
+            ),
+            CuratedModel(
+                id: "large-model",
+                displayName: "Large Test Model",
+                fileName: "large-test.gguf",
+                repoID: "test/large",
+                modelType: .gguf,
+                approximateSizeBytes: 8_000_000_000,
+                recommendedFor: [.large, .xlarge],
+                contextSize: 8192,
+                promptTemplate: .llama3,
+                description: "Large test model"
+            ),
+        ]
+    }
+
+    override func tearDown() {
+        CuratedModel.all = []
+        super.tearDown()
+    }
+
     // MARK: - Default State
 
     func test_init_defaultState() {
