@@ -287,6 +287,38 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         XCTAssertEqual(vm.systemPrompt, "Be verbose.", "System prompt should restore from session B")
     }
 
+    // MARK: - Empty Response DB Verification
+
+    /// Verifies that when the backend yields no tokens, no blank assistant
+    /// `ChatMessage` record is ever written to the SwiftData store.
+    /// The check fetches ALL `ChatMessage` rows (not scoped by session) to
+    /// catch any phantom insert that might slip through.
+    func test_emptyResponse_neverPersistedToDatabase() async {
+        let session = createAndActivateSession()
+
+        mock.tokensToYield = []  // Empty stream — no tokens
+        vm.inputText = "Anything"
+        await vm.sendMessage()
+
+        // In-memory: only the user message should remain.
+        XCTAssertEqual(vm.messages.count, 1,
+            "Only the user message should remain in vm.messages after an empty response")
+        XCTAssertEqual(vm.messages[0].role, .user)
+
+        // Database: fetch ALL ChatMessage records (not scoped to session) to
+        // confirm no blank assistant row was ever inserted.
+        let allMessagesDescriptor = FetchDescriptor<ChatMessage>(
+            sortBy: [SortDescriptor(\.timestamp)]
+        )
+        let allDbMessages = (try? context.fetch(allMessagesDescriptor)) ?? []
+        XCTAssertEqual(allDbMessages.count, 1,
+            "Database should contain exactly 1 message (the user message); no blank assistant row should be persisted")
+        XCTAssertEqual(allDbMessages[0].role, .user,
+            "The sole persisted message must be the user message, not a blank assistant placeholder")
+        XCTAssertEqual(allDbMessages[0].sessionID, session.id,
+            "The persisted user message should belong to the active session")
+    }
+
     // MARK: - Empty Generation Removes Placeholder
 
     func test_emptyGeneration_doesNotPersistPlaceholder() async {
