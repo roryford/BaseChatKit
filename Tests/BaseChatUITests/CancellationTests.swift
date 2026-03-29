@@ -199,6 +199,43 @@ final class CancellationTests: XCTestCase {
         XCTAssertFalse(vm.isGenerating, "isGenerating should be false after clearChat")
     }
 
+    func test_unloadModel_duringGeneration_doesNotCrash() async throws {
+        createAndActivateSession()
+
+        slowBackend.tokensToYield = (0..<50).map { "t\($0) " }
+        slowBackend.delayPerToken = .milliseconds(30)
+
+        vm.inputText = "Hello"
+        let sendTask = Task { await vm.sendMessage() }
+        try await Task.sleep(for: .milliseconds(100))
+
+        // Simulate model switch: unload while generating
+        vm.inferenceService.unloadModel()
+
+        await sendTask.value
+
+        XCTAssertFalse(vm.isGenerating, "isGenerating should be false after unload")
+        XCTAssertFalse(vm.inferenceService.isModelLoaded, "Model should be unloaded")
+    }
+
+    func test_switchModel_duringGeneration_doesNotCrash() async throws {
+        createAndActivateSession()
+
+        slowBackend.tokensToYield = (0..<50).map { "t\($0) " }
+        slowBackend.delayPerToken = .milliseconds(30)
+
+        vm.inputText = "Hello"
+        let sendTask = Task { await vm.sendMessage() }
+        try await Task.sleep(for: .milliseconds(100))
+
+        // Unload the old model (simulates switching models)
+        vm.inferenceService.unloadModel()
+
+        await sendTask.value
+
+        XCTAssertFalse(vm.isGenerating, "isGenerating should be false after model switch")
+    }
+
     func test_isGenerating_falseAfterCompletion() async {
         createAndActivateSession()
 

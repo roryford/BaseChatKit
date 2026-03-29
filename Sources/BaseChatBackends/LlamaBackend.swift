@@ -39,15 +39,40 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     private var generationTask: Task<Void, Never>?
     private var cancelled = false
 
+    // MARK: - Global Backend Lifecycle
+
+    /// Guards `llama_backend_init/free` which are global and must only be
+    /// called once, not per-instance.
+    private static var backendRefCount = 0
+    private static let backendLock = NSLock()
+
+    private static func retainBackend() {
+        backendLock.lock()
+        defer { backendLock.unlock() }
+        if backendRefCount == 0 {
+            llama_backend_init()
+        }
+        backendRefCount += 1
+    }
+
+    private static func releaseBackend() {
+        backendLock.lock()
+        defer { backendLock.unlock() }
+        backendRefCount -= 1
+        if backendRefCount == 0 {
+            llama_backend_free()
+        }
+    }
+
     // MARK: - Init / Deinit
 
     public init() {
-        llama_backend_init()
+        Self.retainBackend()
     }
 
     deinit {
         unloadModel()
-        llama_backend_free()
+        Self.releaseBackend()
     }
 
     // MARK: - Model Lifecycle
@@ -56,7 +81,11 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         unloadModel()
 
         var modelParams = llama_model_default_params()
+        #if targetEnvironment(simulator)
+        modelParams.n_gpu_layers = 0   // Metal not reliable in simulator
+        #else
         modelParams.n_gpu_layers = 99  // Offload all layers to Metal
+        #endif
 
         guard let loadedModel = llama_model_load_from_file(url.path, modelParams) else {
             throw InferenceError.modelLoadFailed(underlying: NSError(
@@ -67,7 +96,9 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
 
         var ctxParams = llama_context_default_params()
-        ctxParams.n_ctx = UInt32(contextSize)
+        // Cap context size to prevent OOM from models reporting huge windows
+        let safeContextSize = min(contextSize, 8192)
+        ctxParams.n_ctx = UInt32(safeContextSize)
         ctxParams.n_threads = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
         ctxParams.n_threads_batch = ctxParams.n_threads
 
@@ -196,15 +227,18 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                     batch.n_tokens = 1
                     nCur += 1
 
+                    if Task.isCancelled || self.cancelled { break }
+
                     if llama_decode(context, batch) != 0 {
                         continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
                         return
                     }
                 }
 
-                // Clear KV cache for next generation
-                let memory = llama_get_memory(context)
-                llama_memory_clear(memory, false)
+                // Clear KV cache for next generation (skip if cancelled/unloaded)
+                if !self.cancelled, let memory = llama_get_memory(context) {
+                    llama_memory_clear(memory, false)
+                }
 
                 continuation.finish()
             }
@@ -226,7 +260,18 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     }
 
     public func unloadModel() {
-        stopGeneration()
+        cancelled = true
+        generationTask?.cancel()
+
+        // Spin briefly for the generation loop to observe cancellation and exit
+        // before freeing the llama context. Without this, the loop can access
+        // freed pointers and crash.
+        for _ in 0..<200 {
+            if !isGenerating { break }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        generationTask = nil
+
         if let context { llama_free(context) }
         if let model { llama_model_free(model) }
         context = nil
