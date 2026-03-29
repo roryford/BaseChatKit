@@ -300,6 +300,92 @@ final class MemoryAndConcurrencyTests: XCTestCase {
     }
 
     // MARK: - Test 8: stopGeneration Is Idempotent
+    // MARK: - Memory Pressure Transition Tests (named variants)
+
+    /// Critical pressure should unload the model; `inferenceService.isModelLoaded` becomes false.
+    func test_handleMemoryPressure_critical_unloadsModel() {
+        let handler = MemoryPressureHandler()
+        let (vm, mock, _) = makeViewModel(handler: handler)
+
+        // Precondition: model is loaded.
+        XCTAssertTrue(vm.inferenceService.isModelLoaded,
+            "Precondition: model should be loaded before critical pressure")
+
+        handler.pressureLevel = .critical
+        vm.handleMemoryPressure()
+
+        XCTAssertFalse(vm.inferenceService.isModelLoaded,
+            "Model should be unloaded after critical memory pressure")
+        XCTAssertEqual(mock.unloadCallCount, 1,
+            "unloadModel should be called once at critical level")
+        let error = vm.errorMessage ?? ""
+        XCTAssertTrue(
+            error.lowercased().contains("critical") || error.lowercased().contains("unload"),
+            "errorMessage should mention critical pressure or unloading, got: \(error)"
+        )
+    }
+
+    /// Warning pressure should set an error message but leave the model loaded.
+    func test_handleMemoryPressure_warning_setsErrorMessage() {
+        let handler = MemoryPressureHandler()
+        let (vm, mock, _) = makeViewModel(handler: handler)
+
+        handler.pressureLevel = .warning
+        vm.handleMemoryPressure()
+
+        XCTAssertNotNil(vm.errorMessage,
+            "errorMessage should be set at warning level")
+        XCTAssertTrue(vm.inferenceService.isModelLoaded,
+            "Model should NOT be unloaded at warning level")
+        XCTAssertEqual(mock.unloadCallCount, 0,
+            "unloadModel should not be called at warning level")
+    }
+
+    /// Calling `handleMemoryPressure()` twice with the same non-nominal level should
+    /// only produce side effects on the first call; the second call is a no-op.
+    func test_handleMemoryPressure_sameLevel_doesNothing() {
+        let handler = MemoryPressureHandler()
+        let (vm, _, _) = makeViewModel(handler: handler)
+
+        // Transition to warning — first call sets the error.
+        handler.pressureLevel = .warning
+        vm.handleMemoryPressure()
+        let errorAfterFirstCall = vm.errorMessage
+
+        XCTAssertNotNil(errorAfterFirstCall,
+            "Precondition: error should be set after first warning call")
+
+        // Second call with the same level — guarded by `lastPressureLevel`, should be a no-op.
+        vm.handleMemoryPressure()
+
+        XCTAssertEqual(vm.errorMessage, errorAfterFirstCall,
+            "errorMessage should not change on second call with same pressure level")
+    }
+
+    /// After warning sets an error, returning to nominal should clear the memory error.
+    func test_handleMemoryPressure_returnsToNominal_clearsMemoryError() {
+        let handler = MemoryPressureHandler()
+        let (vm, _, _) = makeViewModel(handler: handler)
+
+        // Step 1: transition to warning to set an error.
+        handler.pressureLevel = .warning
+        vm.handleMemoryPressure()
+        XCTAssertNotNil(vm.errorMessage,
+            "Precondition: error should be set after warning")
+        XCTAssertTrue(
+            vm.errorMessage?.contains("Memory pressure") == true,
+            "Precondition: error should mention Memory pressure"
+        )
+
+        // Step 2: return to nominal — the memory error should be cleared.
+        handler.pressureLevel = .nominal
+        vm.handleMemoryPressure()
+
+        XCTAssertNil(vm.errorMessage,
+            "Memory pressure error should be cleared when pressure returns to nominal")
+    }
+
+
 
     /// Calling stopGeneration() twice should not crash and isGenerating should be false.
     func test_stopGeneration_calledTwice_isIdempotent() {

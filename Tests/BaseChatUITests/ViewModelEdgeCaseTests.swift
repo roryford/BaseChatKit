@@ -154,6 +154,103 @@ final class ViewModelEdgeCaseTests: XCTestCase {
                       "Messages should be empty after switching to a session with no messages")
     }
 
+    // MARK: - switchToSession model-selection restoration
+
+    /// Creates a fake .gguf file in a temp directory for the duration of a test.
+    /// Returns the ModelInfo built from the file and the URL for cleanup.
+    private func makeTempGGUF(named fileName: String = "test-model-restore.gguf") throws -> (ModelInfo, URL) {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("BaseChatKitTests", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        let url = tmp.appendingPathComponent(fileName)
+        let data = Data(repeating: 0, count: 1024)
+        try data.write(to: url)
+        guard let model = ModelInfo(ggufURL: url) else {
+            throw XCTSkip("Could not create ModelInfo from temp GGUF — skipping")
+        }
+        return (model, url)
+    }
+
+    func test_switchToSession_restoresSelectedModel_whenModelInList() throws {
+        let (vm, _, container) = try makeViewModelWithPersistence()
+        let context = ModelContext(container)
+
+        // Use the built-in Foundation model as a known model that refreshModels() can surface.
+        // Inject it via foundationModelProvider so refreshModels() adds it to availableModels.
+        vm.foundationModelProvider = { true }
+        vm.refreshModels()
+        let foundationModel = ModelInfo.builtInFoundation
+
+        XCTAssertTrue(
+            vm.availableModels.contains(where: { $0.id == foundationModel.id }),
+            "Foundation model should be in availableModels after refreshModels()"
+        )
+
+        // Session whose selectedModelID matches the Foundation model.
+        let session = ChatSession(title: "Model Restore Session")
+        session.selectedModelID = foundationModel.id
+        context.insert(session)
+        try context.save()
+
+        vm.switchToSession(session)
+
+        XCTAssertEqual(vm.selectedModel?.id, foundationModel.id,
+            "selectedModel should be restored to the session's saved model when it exists in availableModels")
+        XCTAssertEqual(vm.selectedModel?.modelType, .foundation,
+            "Restored model should have the expected type")
+    }
+
+    func test_switchToSession_clearsSelectedModel_whenModelNotInList() throws {
+        let (vm, _, container) = try makeViewModelWithPersistence()
+        let context = ModelContext(container)
+
+        // availableModels is empty (no foundationModelProvider, no disk models).
+        // Pre-set a selectedModel to verify it is NOT changed when ID not found.
+        vm.foundationModelProvider = { true }
+        vm.refreshModels()
+        let foundationModel = ModelInfo.builtInFoundation
+        vm.selectedModel = foundationModel
+
+        // Session references an ID that does not exist in availableModels.
+        let missingModelID = UUID()
+        XCTAssertFalse(
+            vm.availableModels.contains(where: { $0.id == missingModelID }),
+            "Precondition: missingModelID must not be in availableModels"
+        )
+
+        let session = ChatSession(title: "Missing Model Session")
+        session.selectedModelID = missingModelID
+        context.insert(session)
+        try context.save()
+
+        vm.switchToSession(session)
+
+        // The code only sets selectedModel when the ID IS found; when not found,
+        // selectedModel is left unchanged (not cleared to nil).
+        XCTAssertEqual(vm.selectedModel?.id, foundationModel.id,
+            "selectedModel should be unchanged when session's model is not in availableModels")
+    }
+
+    func test_saveSettingsToSession_persistsSelectedModelID() throws {
+        let (vm, _, container) = try makeViewModelWithPersistence()
+        let context = ModelContext(container)
+
+        // Use the Foundation model as a readily available ModelInfo.
+        let model = ModelInfo.builtInFoundation
+        let expectedID = model.id
+
+        let session = ChatSession(title: "Persist Model Session")
+        context.insert(session)
+        try context.save()
+
+        vm.activeSession = session
+        vm.selectedModel = model
+
+        vm.saveSettingsToSession()
+
+        XCTAssertEqual(session.selectedModelID, expectedID,
+            "saveSettingsToSession should persist the selected model's UUID to the session")
+    }
+
     func test_switchToSession_usesDefaultsForNilSettings() throws {
         let (vm, _, container) = try makeViewModelWithPersistence()
         let context = ModelContext(container)
