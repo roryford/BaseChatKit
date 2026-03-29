@@ -53,6 +53,17 @@ struct DemoContentView: View {
             if sessionManager.sessions.isEmpty {
                 sessionManager.createSession()
             }
+
+            // Wire AI auto-rename: fires after the first user message in a session.
+            viewModel.onFirstMessage = { [inferenceService = viewModel.inferenceService] session, text in
+                Task {
+                    await sessionManager.autoRenameSession(
+                        session,
+                        firstMessage: text,
+                        inferenceService: inferenceService
+                    )
+                }
+            }
         }
         .onChange(of: viewModel.selectedModel) {
             if viewModel.selectedModel != nil {

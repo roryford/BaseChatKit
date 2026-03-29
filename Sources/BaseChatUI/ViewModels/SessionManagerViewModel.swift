@@ -69,6 +69,61 @@ public final class SessionManagerViewModel {
         loadSessions()
     }
 
+    // MARK: - AI Auto-Rename
+
+    /// Generates a concise session title by running a short inference request.
+    ///
+    /// Drains the token stream and returns the trimmed result, capped at 50
+    /// characters. Returns `nil` on any error so callers can silently fall back.
+    @MainActor
+    public func generateTitle(
+        from firstMessage: String,
+        using inferenceService: InferenceService
+    ) async -> String? {
+        let systemPrompt = "Generate a concise 3-5 word title for a conversation that starts with the following message. Reply with ONLY the title, no punctuation, no quotes."
+        let messages: [(role: String, content: String)] = [
+            (role: "user", content: firstMessage)
+        ]
+
+        do {
+            let stream = try inferenceService.generate(
+                messages: messages,
+                systemPrompt: systemPrompt,
+                temperature: 0.3,
+                topP: 0.9,
+                repeatPenalty: 1.0
+            )
+            var result = ""
+            for try await token in stream {
+                result += token
+            }
+            let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return trimmed.count > 50 ? String(trimmed.prefix(50)) : trimmed
+        } catch {
+            Log.ui.debug("Title generation failed (ignored): \(error)")
+            return nil
+        }
+    }
+
+    /// Generates an AI title for the session and saves it.
+    ///
+    /// Only renames sessions that are still named "New Chat". Failures are
+    /// silently ignored — the session keeps its existing title.
+    @MainActor
+    public func autoRenameSession(
+        _ session: ChatSession,
+        firstMessage: String,
+        inferenceService: InferenceService
+    ) async {
+        guard session.title == "New Chat" else { return }
+        guard let title = await generateTitle(from: firstMessage, using: inferenceService) else { return }
+        session.title = title
+        session.updatedAt = Date()
+        save()
+        loadSessions()
+    }
+
     /// Auto-generates a session title from the first user message.
     /// Only applies if the current title is "New Chat".
     public func autoGenerateTitle(for session: ChatSession, firstMessage: String) {
