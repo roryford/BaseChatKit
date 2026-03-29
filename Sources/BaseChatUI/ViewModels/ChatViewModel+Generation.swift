@@ -76,7 +76,8 @@ extension ChatViewModel {
         // After the first assistant response on Foundation, nudge the user to
         // consider downloading a local model for longer context. Only show once
         // per session and only when Foundation is the active backend.
-        if !showUpgradeHint,
+        if BaseChatConfiguration.shared.features.showUpgradeHint,
+           !showUpgradeHint,
            !assistantMessage.content.isEmpty,
            activeBackendName == "Apple",
            messages.filter({ $0.role == .assistant }).count == 1 {

@@ -12,6 +12,8 @@ public struct ModelManagementSheet: View {
     @Environment(ModelManagementViewModel.self) private var managementViewModel
     @Environment(\.dismiss) private var dismiss
 
+    private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
+
     public enum Tab: String, CaseIterable {
         case select = "Select"
         case download = "Download"
@@ -24,6 +26,14 @@ public struct ModelManagementSheet: View {
             case .storage: "externaldrive"
             }
         }
+    }
+
+    /// The tabs available based on feature flags.
+    private var availableTabs: [Tab] {
+        var tabs: [Tab] = [.select]
+        if features.showModelDownload { tabs.append(.download) }
+        if features.showStorageTab { tabs.append(.storage) }
+        return tabs
     }
 
     @State private var selectedTab: Tab = .select
@@ -64,15 +74,19 @@ public struct ModelManagementSheet: View {
 
     // MARK: - Tab Picker
 
+    @ViewBuilder
     private var tabPicker: some View {
-        Picker("Section", selection: $selectedTab) {
-            ForEach(Tab.allCases, id: \.self) { tab in
-                Label(tab.rawValue, systemImage: tab.systemImage)
-                    .tag(tab)
+        let tabs = availableTabs
+        if tabs.count > 1 {
+            Picker("Section", selection: $selectedTab) {
+                ForEach(tabs, id: \.self) { tab in
+                    Label(tab.rawValue, systemImage: tab.systemImage)
+                        .tag(tab)
+                }
             }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Model management section")
         }
-        .pickerStyle(.segmented)
-        .accessibilityLabel("Model management section")
     }
 
     // MARK: - Tab Content

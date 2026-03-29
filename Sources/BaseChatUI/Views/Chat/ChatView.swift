@@ -9,6 +9,8 @@ public struct ChatView: View {
 
     @Environment(ChatViewModel.self) private var viewModel
 
+    private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
+
     /// Controls the model management sheet. Passed in from the host app so that the
     /// "Browse Models" button in the empty state can open it directly.
     @Binding public var showModelManagement: Bool
@@ -36,7 +38,7 @@ public struct ChatView: View {
                 messageList
             }
 
-            if viewModel.showUpgradeHint {
+            if features.showUpgradeHint && viewModel.showUpgradeHint {
                 upgradeHintBanner
             }
 
@@ -58,18 +60,26 @@ public struct ChatView: View {
                         .foregroundStyle(.blue)
                         .accessibilityLabel("Using cloud backend: \(backend)")
                 }
-                ContextIndicatorView(
-                    usedTokens: viewModel.contextUsedTokens,
-                    maxTokens: viewModel.contextMaxTokens
-                )
-                MemoryIndicatorView(
-                    pressureLevel: viewModel.memoryPressureLevel,
-                    physicalMemoryBytes: viewModel.physicalMemoryBytes,
-                    appMemoryBytes: viewModel.appMemoryUsageBytes
-                )
-                exportButton
+                if features.showContextIndicator {
+                    ContextIndicatorView(
+                        usedTokens: viewModel.contextUsedTokens,
+                        maxTokens: viewModel.contextMaxTokens
+                    )
+                }
+                if features.showMemoryIndicator {
+                    MemoryIndicatorView(
+                        pressureLevel: viewModel.memoryPressureLevel,
+                        physicalMemoryBytes: viewModel.physicalMemoryBytes,
+                        appMemoryBytes: viewModel.appMemoryUsageBytes
+                    )
+                }
+                if features.showChatExport {
+                    exportButton
+                }
                 deviceInfoButton
-                settingsButton
+                if features.showGenerationSettings {
+                    settingsButton
+                }
                 clearChatButton
             }
         }

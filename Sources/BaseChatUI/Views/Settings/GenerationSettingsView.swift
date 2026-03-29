@@ -14,8 +14,11 @@ public struct GenerationSettingsView: View {
     @Environment(ChatViewModel.self) private var viewModel
     @Environment(\.dismiss) private var dismiss
 
+    private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
+
     @AppStorage("showAdvancedSettings") private var showAdvancedSettings = false
     @State private var isAPIConfigPresented = false
+    @State private var isPromptInspectorPresented = false
 
     public init() {}
 
@@ -84,6 +87,7 @@ public struct GenerationSettingsView: View {
                 }
 
                 // MARK: Advanced (collapsed by default)
+                if features.showAdvancedSettings {
                 Section {
                     DisclosureGroup(isExpanded: $showAdvancedSettings) {
                         // Top P
@@ -154,14 +158,26 @@ public struct GenerationSettingsView: View {
                         }
                     }
 
-                    Section("Cloud APIs") {
-                        Button {
-                            isAPIConfigPresented = true
-                        } label: {
-                            Label("Manage Cloud APIs", systemImage: "cloud")
+                    if features.showCloudAPIManagement {
+                        Section("Cloud APIs") {
+                            Button {
+                                isAPIConfigPresented = true
+                            } label: {
+                                Label("Manage Cloud APIs", systemImage: "cloud")
+                            }
                         }
                     }
+
+                    Section("Debug") {
+                        Button {
+                            isPromptInspectorPresented = true
+                        } label: {
+                            Label("Prompt Inspector", systemImage: "doc.text.magnifyingglass")
+                        }
+                        .accessibilityLabel("Open prompt inspector")
+                    }
                 }
+                } // end features.showAdvancedSettings
             }
             .navigationTitle("Generation Settings")
             #if os(iOS)
@@ -177,6 +193,12 @@ public struct GenerationSettingsView: View {
             }
             .sheet(isPresented: $isAPIConfigPresented) {
                 APIConfigurationView()
+            }
+            .sheet(isPresented: $isPromptInspectorPresented) {
+                PromptInspectorView(
+                    assembledPrompt: nil,
+                    contextSize: viewModel.contextMaxTokens
+                )
             }
         }
     }
