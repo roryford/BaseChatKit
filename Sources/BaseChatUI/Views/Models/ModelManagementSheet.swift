@@ -32,28 +32,34 @@ public struct ModelManagementSheet: View {
 
     public var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                tabPicker
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+            tabContent
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(spacing: 0) {
+                        tabPicker
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                            .padding(.bottom, 4)
 
-                Divider()
-                    .accessibilityHidden(true)
-
-                tabContent
-            }
-            .navigationTitle(selectedTab.rawValue)
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                        Divider()
+                            .accessibilityHidden(true)
+                    }
+                    .background(.bar)
                 }
-            }
+                .navigationTitle(selectedTab.rawValue)
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
         }
         .presentationDetents([.large])
+        .onAppear {
+            chatViewModel.refreshModels()
+            managementViewModel.invalidateModelCache()
+        }
     }
 
     // MARK: - Tab Picker
