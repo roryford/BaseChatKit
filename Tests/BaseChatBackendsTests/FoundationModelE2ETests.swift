@@ -136,6 +136,23 @@ final class FoundationModelE2ETests: XCTestCase {
         XCTAssertFalse(response.isEmpty, "Should generate a response with system prompt")
     }
 
+    func test_realInference_afterSessionSwitch_generatesSuccessfully() async throws {
+        // Simulate a session switch mid-session, which calls resetConversation()
+        // and clears FoundationBackend.session. generate() must still work.
+        let secondSession = ChatSession(title: "Second Session")
+        context.insert(secondSession)
+        try context.save()
+
+        vm.switchToSession(secondSession)  // → resetConversation() → session = nil
+
+        vm.inputText = "Reply with one word."
+        await vm.sendMessage()
+
+        XCTAssertNil(vm.errorMessage, "Should not error after session switch: \(vm.errorMessage ?? "")")
+        let response = vm.messages.last(where: { $0.role == .assistant })?.content ?? ""
+        XCTAssertFalse(response.isEmpty, "Should generate a response after session switch")
+    }
+
     func test_realInference_stopGeneration() async throws {
         // Use a prompt that should generate a long response
         vm.inputText = "Write a detailed essay about the history of computing."

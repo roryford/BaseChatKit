@@ -99,7 +99,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> AsyncThrowingStream<String, Error> {
-        guard isModelLoaded, session != nil else {
+        guard isModelLoaded else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
         guard !isGenerating else {
