@@ -170,6 +170,56 @@ final class ConcurrencyTests: XCTestCase {
         // Verify: no crash (we got here), messages are non-empty, generation finished.
         XCTAssertFalse(vm.messages.isEmpty, "Messages should be non-empty after rapid sends")
         XCTAssertFalse(vm.isGenerating, "isGenerating should be false after all tasks complete")
+
+        // Timestamp ordering: messages must be monotonically non-decreasing.
+        let timestamps = vm.messages.map(\.timestamp)
+        for i in 1..<timestamps.count {
+            XCTAssertLessThanOrEqual(
+                timestamps[i - 1], timestamps[i],
+                "messages[\(i - 1)].timestamp (\(timestamps[i - 1])) should be <= messages[\(i)].timestamp (\(timestamps[i])); vm.messages are out of chronological order"
+            )
+        }
+    }
+
+    // MARK: - Test 1b: Message Chronological Order
+
+    /// Sends two messages sequentially (each fully awaited before the next) and
+    /// verifies that the resulting four messages — user₁, assistant₁, user₂,
+    /// assistant₂ — have monotonically non-decreasing timestamps.
+    func test_messages_maintainChronologicalOrder() async {
+        createAndActivateSession()
+
+        // Use a fast backend so message timestamps are as tight as possible.
+        slowBackend.tokensToYield = ["reply"]
+        slowBackend.delayPerToken = 0
+
+        // Send first message and fully await it.
+        vm.inputText = "First message"
+        await vm.sendMessage()
+
+        // Send second message and fully await it.
+        slowBackend.tokensToYield = ["second reply"]
+        vm.inputText = "Second message"
+        await vm.sendMessage()
+
+        // Expect 4 messages: user₁, assistant₁, user₂, assistant₂.
+        XCTAssertEqual(vm.messages.count, 4,
+            "Expected 4 messages (2 user + 2 assistant); got \(vm.messages.count)")
+
+        let msgs = vm.messages
+        // Assert roles for clarity.
+        XCTAssertEqual(msgs[0].role, .user)
+        XCTAssertEqual(msgs[1].role, .assistant)
+        XCTAssertEqual(msgs[2].role, .user)
+        XCTAssertEqual(msgs[3].role, .assistant)
+
+        // Assert monotonically non-decreasing timestamps.
+        XCTAssertLessThanOrEqual(msgs[0].timestamp, msgs[1].timestamp,
+            "messages[0].timestamp should be <= messages[1].timestamp")
+        XCTAssertLessThanOrEqual(msgs[1].timestamp, msgs[2].timestamp,
+            "messages[1].timestamp should be <= messages[2].timestamp")
+        XCTAssertLessThanOrEqual(msgs[2].timestamp, msgs[3].timestamp,
+            "messages[2].timestamp should be <= messages[3].timestamp")
     }
 
     // MARK: - Test 2: Send While Generating
