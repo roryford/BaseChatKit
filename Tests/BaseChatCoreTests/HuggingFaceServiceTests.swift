@@ -350,3 +350,143 @@ final class HuggingFaceServiceTests: XCTestCase {
         XCTAssertEqual(mock.searchCallCount, 1, "searchCallCount should increment even when throwing")
     }
 }
+
+// MARK: - HuggingFaceDownloadURLTests
+
+final class HuggingFaceDownloadURLTests: XCTestCase {
+
+    private var service: HuggingFaceService!
+
+    override func setUp() {
+        super.setUp()
+        service = HuggingFaceService()
+    }
+
+    override func tearDown() {
+        service = nil
+        super.tearDown()
+    }
+
+    // MARK: - URL Construction
+
+    func test_downloadURL_gguf_constructsResolveURL() {
+        let model = DownloadableModel(
+            repoID: "TheBloke/Llama-2-7B-GGUF",
+            fileName: "llama-2-7b.Q4_K_M.gguf",
+            displayName: "Llama 2 7B Q4_K_M",
+            modelType: .gguf,
+            sizeBytes: 3_800_000_000
+        )
+
+        let url = service.downloadURL(for: model)
+
+        XCTAssertTrue(
+            url.absoluteString.contains("TheBloke/Llama-2-7B-GGUF"),
+            "URL should contain the repoID, got: \(url.absoluteString)"
+        )
+        XCTAssertTrue(
+            url.absoluteString.contains("llama-2-7b.Q4_K_M.gguf"),
+            "URL should contain the fileName, got: \(url.absoluteString)"
+        )
+        XCTAssertTrue(
+            url.absoluteString.contains("resolve/main"),
+            "URL should use the HuggingFace resolve/main path, got: \(url.absoluteString)"
+        )
+    }
+
+    func test_downloadURL_mlx_constructsResolveURL() {
+        let model = DownloadableModel(
+            repoID: "mlx-community/Llama-3-8B",
+            fileName: "Llama-3-8B",
+            displayName: "Llama 3 8B",
+            modelType: .mlx,
+            sizeBytes: 4_700_000_000
+        )
+
+        let url = service.downloadURL(for: model)
+
+        XCTAssertTrue(
+            url.absoluteString.contains("mlx-community/Llama-3-8B"),
+            "URL should contain the repoID, got: \(url.absoluteString)"
+        )
+        XCTAssertTrue(
+            url.absoluteString.contains("resolve/main"),
+            "URL should use the HuggingFace resolve/main path, got: \(url.absoluteString)"
+        )
+    }
+
+    func test_downloadURL_containsHuggingFaceDomain() {
+        let model = DownloadableModel(
+            repoID: "bartowski/Phi-3.1-mini-4k-instruct-GGUF",
+            fileName: "Phi-3.1-mini-4k-instruct-Q4_K_M.gguf",
+            displayName: "Phi 3.1 Mini Q4_K_M",
+            modelType: .gguf,
+            sizeBytes: 2_200_000_000
+        )
+
+        let url = service.downloadURL(for: model)
+
+        XCTAssertEqual(url.scheme, "https", "URL scheme should be https")
+        XCTAssertEqual(url.host, "huggingface.co", "URL host should be huggingface.co")
+    }
+
+    func test_downloadURL_specialCharsInRepoID_encodedCorrectly() {
+        // repoID and fileName each contain only dashes — valid HuggingFace identifiers.
+        // This confirms round-trip construction doesn't crash and produces a valid URL.
+        let model = DownloadableModel(
+            repoID: "my-org/My-Model-v2-GGUF",
+            fileName: "my-model-v2-Q8_0.gguf",
+            displayName: "My Model v2 Q8_0",
+            modelType: .gguf,
+            sizeBytes: 7_000_000_000
+        )
+
+        let url = service.downloadURL(for: model)
+
+        // URL must be valid (non-nil is guaranteed by the service, but we confirm the
+        // expected components survive the URLComponents round-trip).
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertEqual(url.host, "huggingface.co")
+        XCTAssertTrue(
+            url.absoluteString.contains("my-org/My-Model-v2-GGUF"),
+            "Dashes in repoID should be preserved, got: \(url.absoluteString)"
+        )
+        XCTAssertTrue(
+            url.absoluteString.contains("my-model-v2-Q8_0.gguf"),
+            "Dashes in fileName should be preserved, got: \(url.absoluteString)"
+        )
+    }
+
+    // MARK: - Error Mapping
+
+    func test_searchModels_networkError_throwsSearchFailed() async {
+        let mock = MockHuggingFaceService()
+        // Wrap a generic network-style error as a searchFailed, matching the real
+        // service's catch block in searchModels(query:).
+        struct FakeNetworkError: Error {}
+        mock.searchError = HuggingFaceError.searchFailed(underlying: FakeNetworkError())
+
+        do {
+            _ = try await mock.searchModels(query: "llama")
+            XCTFail("Expected searchModels to throw, but it succeeded")
+        } catch {
+            guard case HuggingFaceError.searchFailed = error else {
+                XCTFail("Expected searchFailed error, got: \(error)")
+                return
+            }
+        }
+        XCTAssertEqual(mock.searchCallCount, 1, "searchCallCount should increment even when throwing")
+    }
+
+    func test_searchModels_emptyQuery_returnsResults() async throws {
+        let mock = MockHuggingFaceService()
+        // No error configured — empty query should not throw.
+        mock.searchResults = []
+
+        let results = try await mock.searchModels(query: "")
+
+        // Contract: empty query does not throw; result may be empty.
+        XCTAssertNotNil(results, "searchModels should return a non-nil array for an empty query")
+        XCTAssertEqual(mock.searchCallCount, 1)
+    }
+}

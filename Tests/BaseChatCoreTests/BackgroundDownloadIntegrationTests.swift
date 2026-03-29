@@ -242,4 +242,216 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
 
         XCTAssertThrowsError(try manager.validateDownloadedFile(at: mlxDir, modelType: .mlx))
     }
+
+    // MARK: - startDownload State Management
+
+    func test_startDownload_addsToActiveDownloads() async throws {
+        let model = makeModel(
+            repoID: "test/start-download",
+            fileName: "start-download.gguf",
+            displayName: "Start Download Test"
+        )
+        let downloadURL = URL(string: "http://localhost/test.gguf")!
+
+        // The download will fail immediately (no server), but activeDownloads is
+        // populated synchronously before task.resume(), so it should be present.
+        _ = try await manager.startDownload(model, downloadURL: downloadURL)
+
+        XCTAssertNotNil(
+            manager.activeDownloads[model.id],
+            "startDownload should add the model to activeDownloads"
+        )
+
+        let state = manager.activeDownloads[model.id]
+        if let status = state?.status {
+            switch status {
+            case .queued, .downloading:
+                break  // Expected initial states.
+            case .completed, .failed, .cancelled:
+                // A fast failure is acceptable — the state was set and then transitioned.
+                break
+            }
+        } else {
+            XCTFail("activeDownloads[\(model.id)] should not be nil after startDownload")
+        }
+
+        // Clean up the pending downloads key written by startDownload.
+        UserDefaults.standard.removeObject(forKey: BaseChatConfiguration.shared.pendingDownloadsKey)
+    }
+
+    func test_startDownload_duplicateModel_doesNotAddTwice() async throws {
+        let model = makeModel(
+            repoID: "test/duplicate",
+            fileName: "duplicate.gguf",
+            displayName: "Duplicate Test"
+        )
+        let downloadURL = URL(string: "http://localhost/duplicate.gguf")!
+
+        _ = try await manager.startDownload(model, downloadURL: downloadURL)
+        let countAfterFirst = manager.activeDownloads.count
+
+        // Starting the same model a second time should not add a second entry.
+        // The manager overwrites the existing entry (same key), so count stays the same.
+        _ = try await manager.startDownload(model, downloadURL: downloadURL)
+
+        XCTAssertEqual(
+            manager.activeDownloads.count,
+            countAfterFirst,
+            "Starting the same model twice should not create duplicate activeDownloads entries"
+        )
+
+        // Clean up.
+        UserDefaults.standard.removeObject(forKey: BaseChatConfiguration.shared.pendingDownloadsKey)
+    }
+
+    func test_cancelDownload_removesFromActive() async throws {
+        let model = makeModel(
+            repoID: "test/cancel",
+            fileName: "cancel.gguf",
+            displayName: "Cancel Test"
+        )
+        let downloadURL = URL(string: "http://localhost/cancel.gguf")!
+
+        _ = try await manager.startDownload(model, downloadURL: downloadURL)
+
+        XCTAssertNotNil(
+            manager.activeDownloads[model.id],
+            "Model should be in activeDownloads after startDownload"
+        )
+
+        manager.cancelDownload(id: model.id)
+
+        // cancelDownload goes through getAllTasks (async callback) then Task { @MainActor in },
+        // so poll until the pending entry is removed, with a 2-second timeout.
+        let key = BaseChatConfiguration.shared.pendingDownloadsKey
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline {
+            let pending = UserDefaults.standard.dictionary(forKey: key) as? [String: [String: String]]
+            if pending?[model.id] == nil { break }
+            await Task.yield()
+        }
+
+        let pending = UserDefaults.standard.dictionary(forKey: key) as? [String: [String: String]]
+        XCTAssertNil(
+            pending?[model.id],
+            "cancelDownload should remove the entry from the pending downloads UserDefaults key"
+        )
+
+        // Clean up any remaining key.
+        UserDefaults.standard.removeObject(forKey: BaseChatConfiguration.shared.pendingDownloadsKey)
+    }
+
+    // MARK: - Session Reconnection / Pending Download Persistence
+
+    func test_reconnectBackgroundSession_restoresPendingDownloads() {
+        let realKey = BaseChatConfiguration.shared.pendingDownloadsKey
+        let previousValue = UserDefaults.standard.dictionary(forKey: realKey)
+        defer {
+            // Restore whatever was in the key before the test.
+            if let previousValue {
+                UserDefaults.standard.set(previousValue, forKey: realKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: realKey)
+            }
+        }
+
+        let model = makeModel(
+            repoID: "test/reconnect",
+            fileName: "reconnect.gguf",
+            displayName: "Reconnect Test"
+        )
+
+        // Write pending download data using the same format as the real code.
+        let pending: [String: [String: String]] = [
+            model.id: [
+                "repoID": model.repoID,
+                "fileName": model.fileName,
+                "displayName": model.displayName,
+                "modelType": "gguf",
+            ]
+        ]
+        UserDefaults.standard.set(pending, forKey: realKey)
+        UserDefaults.standard.synchronize()
+
+        // A fresh manager starts with no active downloads.
+        let freshManager = BackgroundDownloadManager()
+        XCTAssertNil(freshManager.activeDownloads[model.id], "No active downloads before reconnect")
+
+        // reconnectBackgroundSession calls restorePendingDownloads internally.
+        freshManager.reconnectBackgroundSession()
+
+        XCTAssertNotNil(
+            freshManager.activeDownloads[model.id],
+            "reconnectBackgroundSession should restore pending downloads into activeDownloads"
+        )
+    }
+
+    func test_pendingDownload_removedOnCancellation() async throws {
+        let realKey = BaseChatConfiguration.shared.pendingDownloadsKey
+        defer {
+            UserDefaults.standard.removeObject(forKey: realKey)
+        }
+
+        let model = makeModel(
+            repoID: "test/pending-removal",
+            fileName: "pending-removal.gguf",
+            displayName: "Pending Removal Test"
+        )
+        let downloadURL = URL(string: "http://localhost/pending-removal.gguf")!
+
+        // Start a download — this writes to pendingDownloadsKey.
+        _ = try await manager.startDownload(model, downloadURL: downloadURL)
+
+        let pendingAfterStart = UserDefaults.standard.dictionary(forKey: realKey) as? [String: [String: String]]
+        XCTAssertNotNil(
+            pendingAfterStart?[model.id],
+            "startDownload should write the model to the pending downloads key"
+        )
+
+        // Cancel it — this should remove from pendingDownloadsKey.
+        manager.cancelDownload(id: model.id)
+
+        // cancelDownload routes through getAllTasks (async callback) then a Task { @MainActor in },
+        // so two yields are not enough. Poll until the entry disappears, with a timeout.
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline {
+            let pending = UserDefaults.standard.dictionary(forKey: realKey) as? [String: [String: String]]
+            if pending?[model.id] == nil { break }
+            await Task.yield()
+        }
+
+        let pendingAfterCancel = UserDefaults.standard.dictionary(forKey: realKey) as? [String: [String: String]]
+        XCTAssertNil(
+            pendingAfterCancel?[model.id],
+            "cancelDownload should remove the model from the pending downloads UserDefaults key"
+        )
+    }
+
+    // MARK: - Validation (named variants)
+
+    func test_validateDownloadedFile_gguf_validFile_passes() throws {
+        // Write a temp file with valid GGUF magic bytes and realistic size (>1 MB).
+        let fileURL = tempDirectory.appendingPathComponent("named-valid.gguf")
+        var data = Data([0x47, 0x47, 0x55, 0x46])  // "GGUF" magic
+        data.append(Data(repeating: 0xBB, count: 1_100_000))
+        try data.write(to: fileURL)
+
+        XCTAssertNoThrow(
+            try manager.validateDownloadedFile(at: fileURL, modelType: .gguf),
+            "A file with valid GGUF magic bytes and size >1 MB should pass validation"
+        )
+    }
+
+    func test_validateDownloadedFile_mlx_validDirectory_passes() throws {
+        // Create a temp directory with the required MLX structure.
+        let mlxDir = tempDirectory.appendingPathComponent("named-valid-mlx")
+        try FileManager.default.createDirectory(at: mlxDir, withIntermediateDirectories: true)
+        try Data("{\"model_type\": \"llama\"}".utf8).write(to: mlxDir.appendingPathComponent("config.json"))
+        try Data(repeating: 0x00, count: 1024).write(to: mlxDir.appendingPathComponent("weights.safetensors"))
+
+        XCTAssertNoThrow(
+            try manager.validateDownloadedFile(at: mlxDir, modelType: .mlx),
+            "A directory with config.json and a .safetensors file should pass MLX validation"
+        )
+    }
 }

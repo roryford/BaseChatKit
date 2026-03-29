@@ -98,4 +98,114 @@ final class DownloadableModelTests: XCTestCase {
         XCTAssertNil(model.promptTemplate, "Memberwise init should default promptTemplate to nil")
         XCTAssertNil(model.description, "Memberwise init should default description to nil")
     }
+
+    // MARK: - Quantization
+
+    func test_quantization_Q4KM_extractedCorrectly() {
+        let model = DownloadableModel(
+            repoID: "bartowski/Llama-3-8B-GGUF",
+            fileName: "Llama-3-8B-Q4_K_M.gguf",
+            displayName: "Llama 3 8B Q4_K_M",
+            modelType: .gguf,
+            sizeBytes: 4_661_000_000
+        )
+
+        XCTAssertEqual(model.quantization, "Q4_K_M")
+    }
+
+    func test_quantization_Q8_0_extractedCorrectly() {
+        let model = DownloadableModel(
+            repoID: "bartowski/Mistral-7B-GGUF",
+            fileName: "Mistral-7B-Q8_0.gguf",
+            displayName: "Mistral 7B Q8_0",
+            modelType: .gguf,
+            sizeBytes: 7_700_000_000
+        )
+
+        XCTAssertEqual(model.quantization, "Q8_0")
+    }
+
+    func test_quantization_IQ2XS_extractedCorrectly() {
+        let model = DownloadableModel(
+            repoID: "bartowski/some-model-GGUF",
+            fileName: "model-IQ2_XS.gguf",
+            displayName: "Some Model IQ2_XS",
+            modelType: .gguf,
+            sizeBytes: 1_600_000_000
+        )
+
+        XCTAssertEqual(model.quantization, "IQ2_XS")
+    }
+
+    func test_quantization_F16_extractedCorrectly() {
+        let model = DownloadableModel(
+            repoID: "bartowski/some-model-GGUF",
+            fileName: "model-F16.gguf",
+            displayName: "Some Model F16",
+            modelType: .gguf,
+            sizeBytes: 14_000_000_000
+        )
+
+        XCTAssertEqual(model.quantization, "F16")
+    }
+
+    func test_quantization_BF16_extractedCorrectly() {
+        let model = DownloadableModel(
+            repoID: "bartowski/some-model-GGUF",
+            fileName: "model-BF16.gguf",
+            displayName: "Some Model BF16",
+            modelType: .gguf,
+            sizeBytes: 14_000_000_000
+        )
+
+        XCTAssertEqual(model.quantization, "BF16")
+    }
+
+    func test_quantization_nilForMLXModel() {
+        let model = DownloadableModel(
+            repoID: "mlx-community/Llama-3-8B-mlx",
+            fileName: "Llama-3-8B-Q4_K_M",
+            displayName: "Llama 3 8B MLX",
+            modelType: .mlx,
+            sizeBytes: 4_661_000_000
+        )
+
+        XCTAssertNil(model.quantization, "MLX models should always return nil for quantization")
+    }
+
+    func test_quantization_nilWhenNoQuantInFilename() {
+        let model = DownloadableModel(
+            repoID: "bartowski/some-model-GGUF",
+            fileName: "model.gguf",
+            displayName: "Some Model",
+            modelType: .gguf,
+            sizeBytes: 1_000_000_000
+        )
+
+        XCTAssertNil(model.quantization, "Filename with no quant tag should return nil")
+    }
+
+    func test_quantization_dotSeparated_extractedCorrectly() {
+        let model = DownloadableModel(
+            repoID: "bartowski/some-model-GGUF",
+            fileName: "model.Q4_K_M.gguf",
+            displayName: "Some Model Q4_K_M",
+            modelType: .gguf,
+            sizeBytes: 4_661_000_000
+        )
+
+        XCTAssertEqual(model.quantization, "Q4_K_M")
+    }
+
+    func test_quantization_dashSeparated_extractedCorrectly() {
+        let model = DownloadableModel(
+            repoID: "bartowski/some-model-GGUF",
+            fileName: "model-Q4_K_M.gguf",
+            displayName: "Some Model Q4_K_M",
+            modelType: .gguf,
+            sizeBytes: 4_661_000_000
+        )
+
+        XCTAssertEqual(model.quantization, "Q4_K_M")
+    }
 }
