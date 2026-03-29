@@ -25,6 +25,11 @@ private final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvid
     /// Set this before generation; the usage is "recorded" after tokens finish.
     var usageToReport: (promptTokens: Int, completionTokens: Int)?
 
+    /// When set, successive calls draw from this queue instead of `usageToReport`.
+    /// Each element is consumed in order; the last element is reused once exhausted.
+    var usageSequence: [(promptTokens: Int, completionTokens: Int)] = []
+    private var usageSequenceIndex = 0
+
     func loadModel(from url: URL, contextSize: Int32) async throws {
         isModelLoaded = true
     }
@@ -36,7 +41,16 @@ private final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvid
     ) throws -> AsyncThrowingStream<String, Error> {
         isGenerating = true
         let tokens = tokensToYield
-        let usage = usageToReport
+
+        // Draw from usageSequence if populated, otherwise fall back to usageToReport.
+        let usage: (promptTokens: Int, completionTokens: Int)?
+        if !usageSequence.isEmpty {
+            let idx = min(usageSequenceIndex, usageSequence.count - 1)
+            usage = usageSequence[idx]
+            usageSequenceIndex += 1
+        } else {
+            usage = usageToReport
+        }
 
         return AsyncThrowingStream { [weak self] continuation in
             Task {
@@ -147,6 +161,43 @@ final class GenerationExtensionTests: XCTestCase {
         XCTAssertNotNil(assistant, "Should have an assistant message")
         XCTAssertEqual(assistant?.promptTokens, 10, "promptTokens should be captured from backend usage")
         XCTAssertEqual(assistant?.completionTokens, 5, "completionTokens should be captured from backend usage")
+    }
+
+    func test_tokenUsage_capturedPerGeneration_notCrossContaminated() async {
+        // The risk: if the backend overwrites `lastUsage` before the first message
+        // captures it, the wrong token counts get attached to a ChatMessage.
+        // This test sends two sequential messages and asserts that each assistant
+        // message receives the token counts from *its own* generation, not the other.
+        let mock = TokenTrackingMockBackend()
+        mock.tokensToYield = ["reply"]
+        mock.usageSequence = [
+            (promptTokens: 10, completionTokens: 5),   // first generation
+            (promptTokens: 20, completionTokens: 8),   // second generation
+        ]
+        let vm = makeVM(rawBackend: mock)
+
+        // First generation
+        vm.inputText = "First question"
+        await vm.sendMessage()
+
+        // Second generation
+        vm.inputText = "Second question"
+        await vm.sendMessage()
+
+        let assistants = vm.messages.filter { $0.role == .assistant }
+        XCTAssertEqual(assistants.count, 2, "Should have two assistant messages")
+
+        let first = assistants[0]
+        XCTAssertEqual(first.promptTokens, 10,
+            "First message should have promptTokens=10, got \(String(describing: first.promptTokens))")
+        XCTAssertEqual(first.completionTokens, 5,
+            "First message should have completionTokens=5, got \(String(describing: first.completionTokens))")
+
+        let second = assistants[1]
+        XCTAssertEqual(second.promptTokens, 20,
+            "Second message should have promptTokens=20, got \(String(describing: second.promptTokens))")
+        XCTAssertEqual(second.completionTokens, 8,
+            "Second message should have completionTokens=8, got \(String(describing: second.completionTokens))")
     }
 
     func test_tokenUsage_nilWhenBackendDoesNotProvide() async {
