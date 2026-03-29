@@ -81,6 +81,15 @@ public final class ChatViewModel {
     /// A user-facing error message, shown as a banner. Cleared on next action.
     public var errorMessage: String?
 
+    // MARK: - Compression
+
+    /// IDs of messages that are pinned in the current session.
+    ///
+    /// Pinned messages are excluded from context compression and always preserved
+    /// in the conversation history. Populated from ``ChatSession/pinnedMessageIDs``
+    /// when switching sessions. Persisted back to the session on changes.
+    public var pinnedMessageIDs: Set<UUID> = []
+
     // MARK: - Generation Settings
 
     public var temperature: Float = 0.7
@@ -535,5 +544,24 @@ public final class ChatViewModel {
                 errorMessage = nil
             }
         }
+    }
+
+    // MARK: - Message Pinning
+
+    /// Marks a message as pinned, preserving it from context compression.
+    public func pinMessage(_ message: ChatMessage) {
+        pinnedMessageIDs.insert(message.id)
+        saveSettingsToSession()
+    }
+
+    /// Removes the pin from a message.
+    public func unpinMessage(_ message: ChatMessage) {
+        pinnedMessageIDs.remove(message.id)
+        saveSettingsToSession()
+    }
+
+    /// Returns whether the given message is currently pinned.
+    public func isMessagePinned(_ message: ChatMessage) -> Bool {
+        pinnedMessageIDs.contains(message.id)
     }
 }
