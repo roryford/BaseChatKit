@@ -29,12 +29,34 @@ public final class ChatSession {
     /// User override for context window size; nil uses model default.
     public var contextSizeOverride: Int?
 
+    /// Raw storage for CompressionMode. nil means .automatic.
+    /// SwiftData lightweight migration handles this new optional column automatically.
+    public var compressionModeRaw: String?
+
+    /// Comma-separated UUID strings of pinned messages in this session.
+    /// nil means no messages are pinned.
+    public var pinnedMessageIDsRaw: String?
+
     public init(title: String = "New Chat") {
         self.id = UUID()
         self.title = title
         self.createdAt = Date()
         self.updatedAt = Date()
         self.systemPrompt = ""
+    }
+
+    /// The set of pinned message IDs for this session.
+    ///
+    /// Pinned messages are preserved during context compression regardless of age.
+    /// Serialized as comma-separated UUID strings in ``pinnedMessageIDsRaw``.
+    public var pinnedMessageIDs: Set<UUID> {
+        get {
+            guard let raw = pinnedMessageIDsRaw else { return [] }
+            return Set(raw.split(separator: ",").compactMap { UUID(uuidString: String($0)) })
+        }
+        set {
+            pinnedMessageIDsRaw = newValue.isEmpty ? nil : newValue.map(\.uuidString).joined(separator: ",")
+        }
     }
 
     /// Convenience to get/set the prompt template as a `PromptTemplate` enum.
