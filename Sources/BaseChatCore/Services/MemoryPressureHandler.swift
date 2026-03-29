@@ -24,7 +24,7 @@ public final class MemoryPressureHandler {
     // MARK: - Published State
 
     /// The current memory pressure level reported by the OS.
-    public private(set) var pressureLevel: MemoryPressureLevel = .nominal
+    public internal(set) var pressureLevel: MemoryPressureLevel = .nominal
 
     // MARK: - Private State
 
