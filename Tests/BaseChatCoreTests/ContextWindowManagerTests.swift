@@ -179,6 +179,102 @@ final class ContextWindowManagerTests: XCTestCase {
                       "System prompt should reduce available space for messages")
     }
 
+    // MARK: - Boundary Conditions
+
+    func test_trimMessages_responseBufferExceedsMaxTokens_stillKeepsLastMessage() {
+        // available = 100 - estimateTokenCount("") - 150
+        // estimateTokenCount("") = max(1, 0/4) = 1
+        // available = 100 - 1 - 150 = -51  →  ≤ 0 branch
+        // Fallback: return the last user message
+        let messages = [
+            makeMessage(role: .assistant, content: "Earlier reply"),
+            makeMessage(role: .user, content: "Final question"),
+        ]
+
+        let result = ContextWindowManager.trimMessages(
+            messages,
+            systemPrompt: nil,
+            maxTokens: 100,
+            responseBuffer: 150
+        )
+
+        XCTAssertEqual(result.count, 1, "Should return exactly one message from the fallback path")
+        XCTAssertEqual(result.first?.content, "Final question",
+                       "The last user message must survive when responseBuffer exceeds maxTokens")
+    }
+
+    func test_trimMessages_systemPromptAloneExceedsBudget_keepsLastMessage() {
+        // System prompt: 400 chars → estimateTokenCount = 400/4 = 100 tokens
+        // maxTokens = 50, responseBuffer = 512 (default)
+        // available = 50 - 100 - 512 = -562  →  ≤ 0 branch
+        // Fallback: return the last user message
+        let bigSystemPrompt = String(repeating: "s", count: 400)   // 100 tokens
+        let messages = [
+            makeMessage(role: .user, content: "First question"),
+            makeMessage(role: .assistant, content: "Some answer"),
+            makeMessage(role: .user, content: "Last question"),
+        ]
+
+        let result = ContextWindowManager.trimMessages(
+            messages,
+            systemPrompt: bigSystemPrompt,
+            maxTokens: 50
+        )
+
+        XCTAssertEqual(result.count, 1,
+                       "Should return exactly one message when system prompt alone exceeds the budget")
+        XCTAssertEqual(result.first?.content, "Last question",
+                       "The last user message must be kept when system prompt consumes the entire budget")
+    }
+
+    func test_trimMessages_zeroMaxTokens_keepsLastMessage() {
+        // available = 0 - 1 - 512 = -513  →  ≤ 0 branch
+        // Fallback: return the last user message
+        let messages = [
+            makeMessage(role: .assistant, content: "Hello"),
+            makeMessage(role: .user, content: "World"),
+        ]
+
+        let result = ContextWindowManager.trimMessages(
+            messages,
+            systemPrompt: nil,
+            maxTokens: 0
+        )
+
+        XCTAssertEqual(result.count, 1, "Should return exactly one message even with maxTokens of 0")
+        XCTAssertEqual(result.first?.content, "World",
+                       "The last user message must survive when maxTokens is 0")
+    }
+
+    func test_trimMessages_emptyHistory_returnsEmpty() {
+        // guard !messages.isEmpty else { return [] }  — must not crash
+        let result = ContextWindowManager.trimMessages(
+            [],
+            systemPrompt: "You are helpful.",
+            maxTokens: 4096
+        )
+
+        XCTAssertTrue(result.isEmpty, "Empty input should return an empty array without crashing")
+    }
+
+    func test_trimMessages_singleMessage_alwaysKept() {
+        // Loop condition: usedTokens + messageTokens > available && !kept.isEmpty
+        // On the first (only) iteration kept.isEmpty == true, so the condition short-circuits
+        // and the message is always appended regardless of size.
+        let bigMessage = makeMessage(role: .user, content: String(repeating: "z", count: 8000))  // 2000 tokens
+
+        let result = ContextWindowManager.trimMessages(
+            [bigMessage],
+            systemPrompt: nil,
+            maxTokens: 200,
+            responseBuffer: 50
+        )
+
+        XCTAssertEqual(result.count, 1, "A single message must never be trimmed regardless of its size")
+        XCTAssertEqual(result.first?.content, bigMessage.content,
+                       "The sole message must be returned intact")
+    }
+
     // MARK: - Context Budget
 
     func test_contextBudget_reservesResponseBuffer() {
