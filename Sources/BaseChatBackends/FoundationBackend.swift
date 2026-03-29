@@ -39,6 +39,9 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
     private var session: LanguageModelSession?
     private var generationTask: Task<Void, Never>?
+    /// Tracks the system prompt used to create the current session, so we only
+    /// recreate when the prompt actually changes.
+    private var currentSystemPrompt: String?
 
     // MARK: - Init
 
@@ -70,6 +73,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
     public func unloadModel() {
         stopGeneration()
         session = nil
+        currentSystemPrompt = nil
         isModelLoaded = false
         isGenerating = false
         Self.logger.info("Foundation backend unloaded")
@@ -92,16 +96,21 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         isGenerating = true
         Self.logger.debug("Foundation generate started")
 
-        // Create a fresh session with instructions for each generation.
-        // LanguageModelSession accumulates conversation history, so a new
-        // session ensures a clean context each time.
+        // Reuse the existing session to preserve conversation history.
+        // Only recreate if the system prompt changed or no session exists.
+        let needsNewSession = session == nil || systemPrompt != currentSystemPrompt
         let activeSession: LanguageModelSession
-        if let systemPrompt, !systemPrompt.isEmpty {
-            activeSession = LanguageModelSession(instructions: systemPrompt)
+        if needsNewSession {
+            if let systemPrompt, !systemPrompt.isEmpty {
+                activeSession = LanguageModelSession(instructions: systemPrompt)
+            } else {
+                activeSession = LanguageModelSession()
+            }
+            session = activeSession
+            currentSystemPrompt = systemPrompt
         } else {
-            activeSession = LanguageModelSession()
+            activeSession = session!
         }
-        session = activeSession
 
         return AsyncThrowingStream { [weak self] continuation in
             let task = Task {
@@ -152,6 +161,14 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                 task.cancel()
             }
         }
+    }
+
+    // MARK: - Conversation Reset
+
+    public func resetConversation() {
+        session = nil
+        currentSystemPrompt = nil
+        Self.logger.info("Foundation conversation reset")
     }
 
     // MARK: - Control

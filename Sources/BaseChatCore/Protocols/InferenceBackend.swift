@@ -52,4 +52,14 @@ public protocol InferenceBackend: AnyObject, Sendable {
 
     /// Unloads the model and frees all associated memory.
     func unloadModel()
+
+    /// Resets any accumulated conversation state without unloading the model.
+    ///
+    /// Backends that maintain multi-turn conversation history (e.g. Foundation)
+    /// should clear it here. The default implementation is a no-op.
+    func resetConversation()
+}
+
+extension InferenceBackend {
+    public func resetConversation() {}
 }

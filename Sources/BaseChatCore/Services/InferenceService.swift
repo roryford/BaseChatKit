@@ -194,6 +194,14 @@ public final class InferenceService {
         isGenerating = false
     }
 
+    /// Resets conversation state in the active backend without unloading the model.
+    ///
+    /// Call when switching between sessions or stories so backends that track
+    /// multi-turn history (e.g. Foundation) start fresh.
+    public func resetConversation() {
+        backend?.resetConversation()
+    }
+
     // MARK: - Backend Selection
 
     private func createBackend(for modelType: ModelType) -> (any InferenceBackend)? {

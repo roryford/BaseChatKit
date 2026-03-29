@@ -6,9 +6,15 @@ import Foundation
 /// A real tokenizer can replace this in a future cycle.
 public enum ContextWindowManager {
 
-    /// Estimates the token count of a string using ~4 chars per token.
-    public static func estimateTokenCount(_ text: String) -> Int {
-        max(1, text.count / 4)
+    /// Estimates the token count of a string.
+    ///
+    /// When a ``TokenizerProvider`` is supplied, it is used for an accurate count.
+    /// Otherwise falls back to the ~4 chars-per-token heuristic.
+    public static func estimateTokenCount(_ text: String, tokenizer: TokenizerProvider? = nil) -> Int {
+        if let tokenizer {
+            return tokenizer.tokenCount(text)
+        }
+        return max(1, text.count / 4)
     }
 
     /// Resolves the effective context size from available sources.
@@ -33,16 +39,18 @@ public enum ContextWindowManager {
     ///   - systemPrompt: Optional system prompt that consumes part of the budget.
     ///   - maxTokens: Total context window size in tokens.
     ///   - responseBuffer: Tokens reserved for the model's response.
+    ///   - tokenizer: Optional tokenizer for accurate counts. Falls back to heuristic.
     /// - Returns: The subset of messages that fit within the budget.
     public static func trimMessages(
         _ messages: [ChatMessage],
         systemPrompt: String?,
         maxTokens: Int,
-        responseBuffer: Int = 512
+        responseBuffer: Int = 512,
+        tokenizer: TokenizerProvider? = nil
     ) -> [ChatMessage] {
         guard !messages.isEmpty else { return [] }
 
-        let systemTokens = estimateTokenCount(systemPrompt ?? "")
+        let systemTokens = estimateTokenCount(systemPrompt ?? "", tokenizer: tokenizer)
         let available = maxTokens - systemTokens - responseBuffer
 
         guard available > 0 else {
@@ -58,7 +66,7 @@ public enum ContextWindowManager {
         var usedTokens = 0
 
         for message in messages.reversed() {
-            let messageTokens = estimateTokenCount(message.content)
+            let messageTokens = estimateTokenCount(message.content, tokenizer: tokenizer)
             if usedTokens + messageTokens > available && !kept.isEmpty {
                 break
             }
@@ -75,10 +83,11 @@ public enum ContextWindowManager {
         systemPrompt: String?,
         messages: [ChatMessage],
         maxTokens: Int,
-        responseBuffer: Int = 512
+        responseBuffer: Int = 512,
+        tokenizer: TokenizerProvider? = nil
     ) -> ContextBudget {
-        let systemTokens = estimateTokenCount(systemPrompt ?? "")
-        let messageTokens = messages.reduce(0) { $0 + estimateTokenCount($1.content) }
+        let systemTokens = estimateTokenCount(systemPrompt ?? "", tokenizer: tokenizer)
+        let messageTokens = messages.reduce(0) { $0 + estimateTokenCount($1.content, tokenizer: tokenizer) }
         let availableForHistory = maxTokens - systemTokens - responseBuffer
 
         return ContextBudget(

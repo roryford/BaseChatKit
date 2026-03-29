@@ -4,10 +4,13 @@ import BaseChatCore
 /// Shows context window usage as a compact gauge in the chat toolbar.
 ///
 /// Changes color based on usage: green (< 80%), yellow (80-95%), red (> 95%).
+/// Tapping the indicator shows a popover with additional context details.
 public struct ContextIndicatorView: View {
 
     public let usedTokens: Int
     public let maxTokens: Int
+
+    @State private var isPopoverPresented = false
 
     public init(usedTokens: Int, maxTokens: Int) {
         self.usedTokens = usedTokens
@@ -52,6 +55,46 @@ public struct ContextIndicatorView: View {
         .accessibilityElement(children: .ignore)
         .help("Context: \(usedTokens) / \(maxTokens) tokens (\(percentage)%)")
         .accessibilityLabel("Context usage \(percentage) percent, \(usedTokens) of \(maxTokens) tokens")
+        .accessibilityHint("Tap for context details")
+        .onTapGesture {
+            isPopoverPresented = true
+        }
+        .popover(isPresented: $isPopoverPresented) {
+            contextPopover
+        }
+    }
+
+    // MARK: - Context Popover
+
+    private var contextPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Context Window")
+                .font(.headline)
+
+            LabeledContent("Used") {
+                Text("\(usedTokens) tokens")
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Available") {
+                Text("\(maxTokens) tokens")
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Usage") {
+                Text("\(percentage)%")
+                    .monospacedDigit()
+                    .foregroundStyle(color)
+            }
+
+            Divider()
+
+            Label("Open Prompt Inspector in Generation Settings for per-slot breakdown.", systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(minWidth: 240)
     }
 }
 

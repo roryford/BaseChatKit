@@ -201,6 +201,7 @@ public final class ChatViewModel {
     /// Switches to a different chat session, loading its messages and settings.
     public func switchToSession(_ session: ChatSession) {
         activeSession = session
+        inferenceService.resetConversation()
 
         // Load session's generation settings (fall back to defaults)
         systemPrompt = session.systemPrompt
