@@ -5,18 +5,6 @@ import BaseChatCore
 @MainActor
 final class AssistantMarkdownRenderingTests: XCTestCase {
 
-    func test_renderingMode_assistantUsesMarkdown() {
-        XCTAssertEqual(MessageRenderingModeResolver.mode(for: .assistant), .markdown)
-    }
-
-    func test_renderingMode_userUsesPlainText() {
-        XCTAssertEqual(MessageRenderingModeResolver.mode(for: .user), .plainText)
-    }
-
-    func test_renderingMode_systemUsesPlainText() {
-        XCTAssertEqual(MessageRenderingModeResolver.mode(for: .system), .plainText)
-    }
-
     func test_parseBlocks_mixedMarkdownAndFencedCode_splitsIntoOrderedBlocks() {
         let input = """
         Intro **bold**

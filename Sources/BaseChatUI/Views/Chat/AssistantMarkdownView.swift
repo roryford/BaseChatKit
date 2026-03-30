@@ -1,17 +1,6 @@
 import SwiftUI
 import BaseChatCore
 
-enum MessageRenderingMode: Equatable {
-    case plainText
-    case markdown
-}
-
-enum MessageRenderingModeResolver {
-    static func mode(for role: MessageRole) -> MessageRenderingMode {
-        role == .assistant ? .markdown : .plainText
-    }
-}
-
 struct AssistantMarkdownBlock: Identifiable, Equatable {
     enum Kind: Equatable {
         case markdown
@@ -33,6 +22,7 @@ enum AssistantMarkdownParser {
         var isInCodeBlock = false
         var codeLanguage: String?
         var openingFenceLength = 0
+        // Intentionally support markdown-in-markdown examples from LLM output.
         var nestedFenceDepth = 0
 
         let lines = source.components(separatedBy: "\n")
@@ -90,6 +80,7 @@ enum AssistantMarkdownParser {
     }
 
     private static func parseFenceLine(_ line: String) -> (ticks: Int, rest: String)? {
+        // Accept arbitrary indentation to be lenient with streamed/model-formatted fences.
         let trimmedLeading = line.trimmingCharacters(in: .whitespaces)
         guard trimmedLeading.first == "`" else { return nil }
 
