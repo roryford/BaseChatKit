@@ -1,12 +1,22 @@
+#if Llama
 import XCTest
 import BaseChatCore
+import BaseChatTestSupport
 @testable import BaseChatBackends
 
 /// Tests for LlamaBackend state, capabilities, and error handling.
 ///
 /// These tests exercise everything that does not require a real GGUF model file:
 /// init state, capabilities, error paths, lifecycle transitions, and stop/unload.
+///
+/// All tests require Apple Silicon (llama_backend_init uses Metal).
 final class LlamaBackendTests: XCTestCase {
+
+    override func setUp() async throws {
+        try await super.setUp()
+        try XCTSkipUnless(HardwareRequirements.isPhysicalDevice, "LlamaBackend requires Metal (unavailable in simulator)")
+        try XCTSkipUnless(HardwareRequirements.isAppleSilicon, "LlamaBackend requires Apple Silicon")
+    }
 
     // MARK: - Init & State
 
@@ -184,3 +194,4 @@ final class LlamaBackendTests: XCTestCase {
         XCTAssertLessThan(short, long, "Longer text should produce a higher token count")
     }
 }
+#endif

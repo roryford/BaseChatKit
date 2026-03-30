@@ -1,3 +1,4 @@
+#if Llama
 import Foundation
 import LlamaSwift
 import os
@@ -43,6 +44,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     /// Guards `llama_backend_init/free` which are global and must only be
     /// called once, not per-instance.
+    /// NSLock is intentional here: init/deinit are synchronous, so actor
+    /// isolation would require fire-and-forget Tasks with no ordering guarantee.
     private static var backendRefCount = 0
     private static let backendLock = NSLock()
 
@@ -340,3 +343,4 @@ extension LlamaBackend: TokenizerVendor, TokenizerProvider {
         return tokens.isEmpty ? max(1, text.count / 4) : tokens.count
     }
 }
+#endif
