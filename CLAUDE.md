@@ -75,8 +75,10 @@ All changes go through PRs — direct pushes to `main` are blocked for everyone.
 
 1. Branch off `main`
 2. Write code, commit with conventional commits
-3. Open a PR with a conventional title
-4. CI must pass (`BaseChatCoreTests` + `BaseChatUITests`)
-5. Merge
+3. Open a PR: `gh pr create --title "feat: ..." --body "..."`
+4. Report the PR URL — the maintainer reviews and merges manually
+5. Do NOT pass `--auto` or `--merge` — merges require human approval
+
+CI must pass (`BaseChatCoreTests` + `BaseChatUITests`) before merge is allowed.
 
 Hardware-gated tests (`BaseChatBackendsTests`, `BaseChatE2ETests`) do not run in CI. Run them locally on Apple Silicon before merging backend changes.
