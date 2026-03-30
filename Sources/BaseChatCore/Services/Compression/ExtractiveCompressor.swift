@@ -81,8 +81,9 @@ public final class ExtractiveCompressor: ContextCompressor {
             )
         }
 
-        // Pre-compute per-message token counts (indexed same as messages array).
+        // Pre-compute per-message token counts and keyword densities (indexed same as messages array).
         let messageTokens = messages.map { ContextWindowManager.estimateTokenCount($0.content, tokenizer: tokenizer) }
+        let messageKeywordDensities = messages.map { keywordDensity(of: $0.content) }
 
         let tailBudget = Int(Double(budget) * tailBudgetFraction)
         let candidateBudget = budget - tailBudget
@@ -131,7 +132,7 @@ public final class ExtractiveCompressor: ContextCompressor {
 
             let recencyScore = Double(i) / Double(messageCount - 1)
             let lengthScore = min(1.0, Double(messageTokens[i]) / 200.0)
-            let density = keywordDensity(of: messages[i].content)
+            let density = messageKeywordDensities[i]
 
             let total = recencyScore * recencyWeight
                       + lengthScore * lengthWeight
