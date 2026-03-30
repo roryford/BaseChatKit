@@ -56,7 +56,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
     /// Creates a session, activates it, and returns it.
     @discardableResult
     private func createAndActivateSession(title: String = "Test Chat") -> ChatSessionRecord {
-        let session = sessionManager.createSession(title: title)
+        let session = try! sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)
         return session
@@ -249,7 +249,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         vm.topP = 0.8
         vm.repeatPenalty = 1.3
         vm.systemPrompt = "You are a pirate."
-        vm.saveSettingsToSession()
+        try! vm.saveSettingsToSession()
 
         // Fetch session from database and verify
         let dbSessions = fetchSessions()
@@ -268,14 +268,14 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         createAndActivateSession(title: "Session A")
         vm.temperature = 0.3
         vm.systemPrompt = "Be concise."
-        vm.saveSettingsToSession()
+        try! vm.saveSettingsToSession()
         let sessionA = vm.activeSession!
 
         // Session B with different settings
         createAndActivateSession(title: "Session B")
         vm.temperature = 1.8
         vm.systemPrompt = "Be verbose."
-        vm.saveSettingsToSession()
+        try! vm.saveSettingsToSession()
         let sessionB = vm.activeSession!
 
         // Switch to A — settings should restore
@@ -380,7 +380,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
     func test_sessionManager_createAndDelete_persistsCorrectly() {
         XCTAssertTrue(fetchSessions().isEmpty, "Should start with no sessions")
 
-        let session = sessionManager.createSession(title: "My Chat")
+        let session = try! sessionManager.createSession(title: "My Chat")
         XCTAssertEqual(fetchSessions().count, 1)
         XCTAssertEqual(fetchSessions().first?.title, "My Chat")
 
@@ -421,7 +421,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
 
         // The session title is "Test Chat", not "New Chat", so autoGenerateTitle won't fire.
         // Create a fresh session with default title to test auto-title.
-        let newSession = sessionManager.createSession()  // Default title: "New Chat"
+        let newSession = try! sessionManager.createSession()  // Default title: "New Chat"
         sessionManager.activeSession = newSession
         vm.switchToSession(newSession)
 
@@ -462,7 +462,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
 
         // Modify session settings and save
         vm.temperature = 0.1
-        vm.saveSettingsToSession()
+        try! vm.saveSettingsToSession()
 
         vm.saveState()
 

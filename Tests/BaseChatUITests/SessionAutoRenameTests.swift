@@ -47,7 +47,7 @@ final class SessionAutoRenameTests: XCTestCase {
     // MARK: - Tests
 
     func test_autoRename_updatesSessionTitle() async {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         XCTAssertEqual(session.title, "New Chat")
 
         let service = makeInferenceService(tokens: ["Travel", " Planning", " Tips"])
@@ -59,7 +59,7 @@ final class SessionAutoRenameTests: XCTestCase {
     }
 
     func test_autoRename_onError_keepsExistingTitle() async {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         XCTAssertEqual(session.title, "New Chat")
 
         let service = makeThrowingInferenceService()
@@ -71,7 +71,7 @@ final class SessionAutoRenameTests: XCTestCase {
     }
 
     func test_autoRename_truncatesLongTitle() async {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
 
         // 60-character title returned by the mock
         let longTitle = "This Is A Very Long Title That Definitely Exceeds Fifty Char"
@@ -87,7 +87,7 @@ final class SessionAutoRenameTests: XCTestCase {
     }
 
     func test_autoRename_trimsWhitespace() async {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
 
         let service = makeInferenceService(tokens: ["  My Title  \n"])
 

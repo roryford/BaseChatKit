@@ -100,10 +100,15 @@ extension ChatViewModel {
 
         // Persist the completed assistant message.
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            if !messages[idx].content.isEmpty {
-                saveMessage(messages[idx])
-            } else {
-                messages.remove(at: idx)
+            do {
+                if messages[idx].content.isEmpty {
+                    messages.remove(at: idx)
+                } else {
+                    try saveMessage(messages[idx])
+                }
+            } catch {
+                Log.persistence.error("Failed to persist assistant message: \(error)")
+                errorMessage = "Failed to save assistant response: \(error.localizedDescription)"
             }
         }
 

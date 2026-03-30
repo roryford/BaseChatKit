@@ -51,7 +51,11 @@ struct DemoContentView: View {
             sessionManager.loadSessions()
 
             if sessionManager.sessions.isEmpty {
-                sessionManager.createSession()
+                do {
+                    try sessionManager.createSession()
+                } catch {
+                    viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
+                }
             }
 
             // Wire AI auto-rename: fires after the first user message in a session.
@@ -127,7 +131,11 @@ struct DemoContentView: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button {
-                    sessionManager.createSession()
+                    do {
+                        try sessionManager.createSession()
+                    } catch {
+                        viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
+                    }
                 } label: {
                     Label("New Chat", systemImage: "plus")
                 }

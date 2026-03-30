@@ -36,7 +36,9 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
     }
 
     public func updateSession(_ record: ChatSessionRecord) throws {
-        guard let session = try fetchSwiftDataSession(id: record.id) else { return }
+        guard let session = try fetchSwiftDataSession(id: record.id) else {
+            throw ChatPersistenceError.sessionNotFound(record.id)
+        }
         session.title = record.title
         session.updatedAt = record.updatedAt
         session.systemPrompt = record.systemPrompt
@@ -52,8 +54,10 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
     }
 
     public func deleteSession(_ sessionID: UUID) throws {
+        guard let session = try fetchSwiftDataSession(id: sessionID) else {
+            throw ChatPersistenceError.sessionNotFound(sessionID)
+        }
         try deleteMessages(for: sessionID)
-        guard let session = try fetchSwiftDataSession(id: sessionID) else { return }
         modelContext.delete(session)
         try modelContext.save()
     }
@@ -78,7 +82,9 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
     }
 
     public func updateMessage(_ record: ChatMessageRecord) throws {
-        guard let message = try fetchSwiftDataMessage(id: record.id) else { return }
+        guard let message = try fetchSwiftDataMessage(id: record.id) else {
+            throw ChatPersistenceError.messageNotFound(record.id)
+        }
         message.content = record.content
         message.promptTokens = record.promptTokens
         message.completionTokens = record.completionTokens
@@ -86,7 +92,9 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
     }
 
     public func deleteMessage(_ messageID: UUID) throws {
-        guard let message = try fetchSwiftDataMessage(id: messageID) else { return }
+        guard let message = try fetchSwiftDataMessage(id: messageID) else {
+            throw ChatPersistenceError.messageNotFound(messageID)
+        }
         modelContext.delete(message)
         try modelContext.save()
     }

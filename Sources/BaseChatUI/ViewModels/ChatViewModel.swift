@@ -95,7 +95,12 @@ public final class ChatViewModel {
     public var compressionMode: CompressionMode = .automatic {
         didSet {
             compressionOrchestrator.mode = compressionMode
-            saveSettingsToSession()
+            do {
+                try saveSettingsToSession()
+            } catch {
+                Log.persistence.error("Failed to persist compression mode: \(error)")
+                errorMessage = "Failed to save settings: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -280,8 +285,12 @@ public final class ChatViewModel {
     }
 
     /// Saves the current generation settings back to the active session.
-    public func saveSettingsToSession() {
+    public func saveSettingsToSession() throws {
         guard var session = activeSession else { return }
+        guard let persistence else {
+            Log.persistence.warning("saveSettingsToSession called before persistence was configured")
+            throw ChatPersistenceError.providerNotConfigured
+        }
         session.temperature = temperature
         session.topP = topP
         session.repeatPenalty = repeatPenalty
@@ -290,13 +299,8 @@ public final class ChatViewModel {
         session.compressionMode = compressionMode
         session.pinnedMessageIDs = pinnedMessageIDs
         session.updatedAt = Date()
+        try persistence.updateSession(session)
         activeSession = session
-
-        do {
-            try persistence?.updateSession(session)
-        } catch {
-            Log.persistence.error("Failed to save session settings: \(error)")
-        }
     }
 
     // MARK: - Model Discovery
@@ -435,7 +439,14 @@ public final class ChatViewModel {
         // Create and persist the user message.
         let userMessage = ChatMessageRecord(role: .user, content: text, sessionID: activeSessionID)
         messages.append(userMessage)
-        saveMessage(userMessage)
+        do {
+            try saveMessage(userMessage)
+        } catch {
+            Log.persistence.error("Failed to save user message: \(error)")
+            errorMessage = "Failed to save message: \(error.localizedDescription)"
+            messages.removeAll(where: { $0.id == userMessage.id })
+            return
+        }
 
         // Update session timestamp.
         activeSession?.updatedAt = Date()
@@ -465,7 +476,14 @@ public final class ChatViewModel {
         }
 
         let removed = messages.remove(at: lastAssistantIndex)
-        deleteMessage(removed)
+        do {
+            try deleteMessage(removed)
+        } catch {
+            Log.persistence.error("Failed to delete prior assistant message: \(error)")
+            errorMessage = "Failed to regenerate response: \(error.localizedDescription)"
+            messages.insert(removed, at: lastAssistantIndex)
+            return
+        }
 
         // Create a fresh assistant message.
         let assistantMessage = ChatMessageRecord(role: .assistant, content: "", sessionID: activeSessionID)
@@ -483,14 +501,29 @@ public final class ChatViewModel {
         guard let activeSessionID else { return }
 
         // Update the edited message.
+        let originalMessage = messages[index]
         messages[index].content = newContent
-        updateMessage(messages[index])
+        do {
+            try updateMessage(messages[index])
+        } catch {
+            messages[index] = originalMessage
+            Log.persistence.error("Failed to update edited message: \(error)")
+            errorMessage = "Failed to edit message: \(error.localizedDescription)"
+            return
+        }
 
         // Remove all messages after the edited one.
         let toRemove = Array(messages[(index + 1)...])
         messages.removeSubrange((index + 1)...)
         for msg in toRemove {
-            deleteMessage(msg)
+            do {
+                try deleteMessage(msg)
+            } catch {
+                Log.persistence.error("Failed to delete message during edit regeneration: \(error)")
+                errorMessage = "Failed to regenerate conversation: \(error.localizedDescription)"
+                messages = Array(messages.prefix(index + 1)) + toRemove
+                return
+            }
         }
 
         // If the edited message was from the user, regenerate the assistant response.
@@ -512,7 +545,12 @@ public final class ChatViewModel {
         // Persist whatever has been generated so far.
         if let lastAssistant = messages.last(where: { $0.role == .assistant }),
            !lastAssistant.content.isEmpty {
-            saveMessage(lastAssistant)
+            do {
+                try saveMessage(lastAssistant)
+            } catch {
+                Log.persistence.error("Failed to persist partial assistant message: \(error)")
+                errorMessage = "Failed to save partial response: \(error.localizedDescription)"
+            }
         }
         Log.ui.debug("Generation stopped by user")
     }
@@ -525,7 +563,13 @@ public final class ChatViewModel {
             stopGeneration()
         }
         for message in messages {
-            deleteMessage(message)
+            do {
+                try deleteMessage(message)
+            } catch {
+                Log.persistence.error("Failed to delete message while clearing chat: \(error)")
+                errorMessage = "Failed to clear chat: \(error.localizedDescription)"
+                return
+            }
         }
         messages.removeAll()
         tokenCountCache.removeAll()
@@ -548,8 +592,13 @@ public final class ChatViewModel {
 
     /// Saves all pending changes. Called on app background.
     public func saveState() {
-        saveSettingsToSession()
-        Log.persistence.info("State saved on background")
+        do {
+            try saveSettingsToSession()
+            Log.persistence.info("State saved on background")
+        } catch {
+            Log.persistence.error("Failed to save state on background: \(error)")
+            errorMessage = "Failed to save state: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Memory Pressure Monitoring
@@ -586,13 +635,23 @@ public final class ChatViewModel {
     /// Marks a message as pinned, preserving it from context compression.
     public func pinMessage(id messageID: UUID) {
         pinnedMessageIDs.insert(messageID)
-        saveSettingsToSession()
+        do {
+            try saveSettingsToSession()
+        } catch {
+            Log.persistence.error("Failed to save pinned message settings: \(error)")
+            errorMessage = "Failed to pin message: \(error.localizedDescription)"
+        }
     }
 
     /// Removes the pin from a message.
     public func unpinMessage(id messageID: UUID) {
         pinnedMessageIDs.remove(messageID)
-        saveSettingsToSession()
+        do {
+            try saveSettingsToSession()
+        } catch {
+            Log.persistence.error("Failed to save unpinned message settings: \(error)")
+            errorMessage = "Failed to unpin message: \(error.localizedDescription)"
+        }
     }
 
     /// Returns whether the given message is currently pinned.

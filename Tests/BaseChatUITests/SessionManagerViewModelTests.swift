@@ -31,7 +31,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_createSession_insertsIntoContext() {
-        let session = vm.createSession(title: "Test Session")
+        let session = try! vm.createSession(title: "Test Session")
 
         XCTAssertEqual(session.title, "Test Session")
         XCTAssertEqual(vm.sessions.count, 1)
@@ -40,7 +40,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_createSession_defaultTitle() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         XCTAssertEqual(session.title, "New Chat")
     }
 
@@ -48,7 +48,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_deleteSession_removesSession() {
-        let session = vm.createSession(title: "To Delete")
+        let session = try! vm.createSession(title: "To Delete")
         XCTAssertEqual(vm.sessions.count, 1)
 
         vm.deleteSession(session)
@@ -58,7 +58,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_deleteSession_removesAssociatedMessages() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
 
         // Insert messages for this session
         let msg1 = ChatMessage(role: .user, content: "Hello", sessionID: session.id)
@@ -80,7 +80,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_deleteSession_clearsActiveIfDeleted() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         vm.activeSession = session
 
         vm.deleteSession(session)
@@ -92,7 +92,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_renameSession_updatesTitle() {
-        let session = vm.createSession(title: "Original")
+        let session = try! vm.createSession(title: "Original")
 
         vm.renameSession(session, title: "Renamed")
 
@@ -104,7 +104,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_autoGenerateTitle_setsFromFirstMessage() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         XCTAssertEqual(session.title, "New Chat")
 
         vm.autoGenerateTitle(for: session, firstMessage: "Tell me about dragons")
@@ -115,7 +115,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_autoGenerateTitle_truncatesAtWordBoundary() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         let longMessage = "This is a really long message that should be truncated at a word boundary because it exceeds fifty characters"
 
         vm.autoGenerateTitle(for: session, firstMessage: longMessage)
@@ -128,7 +128,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_autoGenerateTitle_skipsIfAlreadyNamed() {
-        let session = vm.createSession(title: "Custom Title")
+        let session = try! vm.createSession(title: "Custom Title")
 
         vm.autoGenerateTitle(for: session, firstMessage: "This should be ignored")
 
@@ -139,7 +139,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_autoGenerateTitle_handlesEmptyMessage() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
 
         vm.autoGenerateTitle(for: session, firstMessage: "   ")
 
@@ -152,9 +152,9 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_sessions_sortedByUpdatedAtDescending() {
-        vm.createSession(title: "Oldest")
-        vm.createSession(title: "Middle")
-        vm.createSession(title: "Newest")
+        _ = try! vm.createSession(title: "Oldest")
+        _ = try! vm.createSession(title: "Middle")
+        _ = try! vm.createSession(title: "Newest")
 
         vm.loadSessions()
 

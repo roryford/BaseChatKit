@@ -66,7 +66,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         vm.repeatPenalty = 1.5
         vm.systemPrompt = "Be concise."
 
-        vm.saveSettingsToSession()
+        try vm.saveSettingsToSession()
 
         let updated = vm.activeSession!
         XCTAssertEqual(updated.temperature!, 0.3, accuracy: 0.001,
@@ -84,7 +84,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
         // No active session — should not crash.
         vm.temperature = 0.5
-        vm.saveSettingsToSession()
+        try vm.saveSettingsToSession()
 
         XCTAssertNil(vm.activeSession, "activeSession should remain nil")
     }
@@ -206,17 +206,18 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     }
 
     func test_saveSettingsToSession_persistsSelectedModelID() throws {
-        let (vm, _, _) = try makeViewModelWithPersistence()
+        let (vm, _, persistence) = try makeViewModelWithPersistence()
 
         let model = ModelInfo.builtInFoundation
         let expectedID = model.id
 
         let session = ChatSessionRecord(title: "Persist Model Session")
+        try persistence.insertSession(session)
 
         vm.activeSession = session
         vm.selectedModel = model
 
-        vm.saveSettingsToSession()
+        try vm.saveSettingsToSession()
 
         XCTAssertEqual(vm.activeSession?.selectedModelID, expectedID,
             "saveSettingsToSession should persist the selected model's UUID to the session")

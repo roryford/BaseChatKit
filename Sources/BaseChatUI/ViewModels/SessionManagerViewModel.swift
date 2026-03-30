@@ -5,6 +5,7 @@ import BaseChatCore
 
 /// Manages chat session CRUD operations and the session list.
 @Observable
+@MainActor
 public final class SessionManagerViewModel {
 
     /// All sessions, sorted by most recently updated.
@@ -34,13 +35,13 @@ public final class SessionManagerViewModel {
 
     /// Creates a new session, inserts it, and returns it.
     @discardableResult
-    public func createSession(title: String = "New Chat") -> ChatSessionRecord {
-        var record = ChatSessionRecord(title: title)
-        do {
-            try persistence?.insertSession(record)
-        } catch {
-            Log.persistence.error("Failed to insert session: \(error)")
+    public func createSession(title: String = "New Chat") throws -> ChatSessionRecord {
+        guard let persistence else {
+            Log.persistence.warning("createSession called before persistence was configured")
+            throw ChatPersistenceError.providerNotConfigured
         }
+        let record = ChatSessionRecord(title: title)
+        try persistence.insertSession(record)
         loadSessions()
         return record
     }

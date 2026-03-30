@@ -147,7 +147,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         let session = createSession()
 
         let message = ChatMessage(role: .user, content: "Persisted message", sessionID: session.id)
-        vm.saveMessage(message.toRecord())
+        try! vm.saveMessage(message.toRecord())
 
         let fetched = fetchMessages(for: session.id)
         XCTAssertEqual(fetched.count, 1)
@@ -161,8 +161,8 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         let msg1 = ChatMessage(role: .user, content: "User msg", sessionID: session.id)
         let msg2 = ChatMessage(role: .assistant, content: "Assistant msg", sessionID: session.id)
-        vm.saveMessage(msg1.toRecord())
-        vm.saveMessage(msg2.toRecord())
+        try! vm.saveMessage(msg1.toRecord())
+        try! vm.saveMessage(msg2.toRecord())
 
         let fetched = fetchMessages(for: session.id)
         XCTAssertEqual(fetched.count, 2)
@@ -174,10 +174,10 @@ final class PersistenceIntegrationTests: XCTestCase {
         let session = createSession()
 
         let message = ChatMessage(role: .user, content: "To be deleted", sessionID: session.id)
-        vm.saveMessage(message.toRecord())
+        try! vm.saveMessage(message.toRecord())
         XCTAssertEqual(fetchMessages(for: session.id).count, 1)
 
-        vm.deleteMessage(message.toRecord())
+        try! vm.deleteMessage(message.toRecord())
         XCTAssertEqual(
             fetchMessages(for: session.id).count, 0,
             "Message should be removed from the database after deletion"
@@ -189,11 +189,11 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         let msg1 = ChatMessage(role: .user, content: "Keep this", sessionID: session.id)
         let msg2 = ChatMessage(role: .assistant, content: "Delete this", sessionID: session.id)
-        vm.saveMessage(msg1.toRecord())
-        vm.saveMessage(msg2.toRecord())
+        try! vm.saveMessage(msg1.toRecord())
+        try! vm.saveMessage(msg2.toRecord())
         XCTAssertEqual(fetchMessages(for: session.id).count, 2)
 
-        vm.deleteMessage(msg2.toRecord())
+        try! vm.deleteMessage(msg2.toRecord())
 
         let remaining = fetchMessages(for: session.id)
         XCTAssertEqual(remaining.count, 1)

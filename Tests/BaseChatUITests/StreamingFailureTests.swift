@@ -41,7 +41,7 @@ final class StreamingFailureTests: XCTestCase {
 
     @discardableResult
     private func createAndActivateSession(vm: ChatViewModel, title: String = "Test Chat") -> ChatSessionRecord {
-        let session = sessionManager.createSession(title: title)
+        let session = try! sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)
         return session

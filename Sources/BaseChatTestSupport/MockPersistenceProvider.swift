@@ -37,13 +37,17 @@ public final class MockPersistenceProvider: ChatPersistenceProvider, @unchecked 
 
     public func updateSession(_ session: ChatSessionRecord) throws {
         updateSessionCallCount += 1
-        if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
-            sessions[idx] = session
+        guard let idx = sessions.firstIndex(where: { $0.id == session.id }) else {
+            throw ChatPersistenceError.sessionNotFound(session.id)
         }
+        sessions[idx] = session
     }
 
     public func deleteSession(_ sessionID: UUID) throws {
         deleteSessionCallCount += 1
+        guard sessions.contains(where: { $0.id == sessionID }) else {
+            throw ChatPersistenceError.sessionNotFound(sessionID)
+        }
         try deleteMessages(for: sessionID)
         sessions.removeAll { $0.id == sessionID }
     }
@@ -64,13 +68,17 @@ public final class MockPersistenceProvider: ChatPersistenceProvider, @unchecked 
 
     public func updateMessage(_ message: ChatMessageRecord) throws {
         updateMessageCallCount += 1
-        if let idx = messages.firstIndex(where: { $0.id == message.id }) {
-            messages[idx] = message
+        guard let idx = messages.firstIndex(where: { $0.id == message.id }) else {
+            throw ChatPersistenceError.messageNotFound(message.id)
         }
+        messages[idx] = message
     }
 
     public func deleteMessage(_ messageID: UUID) throws {
         deleteMessageCallCount += 1
+        guard messages.contains(where: { $0.id == messageID }) else {
+            throw ChatPersistenceError.messageNotFound(messageID)
+        }
         messages.removeAll { $0.id == messageID }
     }
 

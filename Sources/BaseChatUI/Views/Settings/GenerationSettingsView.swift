@@ -199,7 +199,12 @@ public struct GenerationSettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        viewModel.saveSettingsToSession()
+                        do {
+                            try viewModel.saveSettingsToSession()
+                        } catch {
+                            Log.persistence.error("Failed to save settings from sheet: \(error)")
+                            viewModel.errorMessage = "Failed to save settings: \(error.localizedDescription)"
+                        }
                         dismiss()
                     }
                 }
