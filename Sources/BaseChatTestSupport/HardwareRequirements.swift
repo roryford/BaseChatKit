@@ -27,8 +27,9 @@ public enum HardwareRequirements {
         #endif
     }
 
-    /// `true` when the Foundation Models framework is available at runtime.
-    /// Requires macOS 26+ / iOS 26+ with Apple Intelligence enabled.
+    /// `true` when the OS version supports Foundation Models (macOS 26+ / iOS 26+).
+    /// This does NOT check whether Apple Intelligence is enabled — use
+    /// `FoundationBackend.isAvailable` for that.
     public static var hasFoundationModels: Bool {
         if #available(macOS 26, iOS 26, *) {
             return true

@@ -63,7 +63,7 @@ Tests that need specific hardware use `XCTSkipUnless` with flags from `HardwareR
 |------|-------------|
 | `HardwareRequirements.isAppleSilicon` | Running on arm64 (Apple Silicon) |
 | `HardwareRequirements.isPhysicalDevice` | Running on a real device, not the iOS Simulator |
-| `HardwareRequirements.hasFoundationModels` | macOS 26+ / iOS 26+ SDK is available at runtime |
+| `HardwareRequirements.hasFoundationModels` | Running on macOS 26+ / iOS 26+ (does not check Apple Intelligence) |
 
 Tests also check `FoundationBackend.isAvailable` for Apple Intelligence availability, which is distinct from the OS version check (the user may not have Apple Intelligence enabled).
 
