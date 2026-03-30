@@ -48,7 +48,7 @@ final class ContextEstimationIntegrationTests: XCTestCase {
         let session = ChatSession(title: title)
         context.insert(session)
         try? context.save()
-        vm.switchToSession(session)
+        vm.switchToSession(session.toRecord())
         return session
     }
 
@@ -116,7 +116,7 @@ final class ContextEstimationIntegrationTests: XCTestCase {
         let session = createSession()
         session.systemPrompt = "You are a helpful assistant that provides concise answers."
 
-        vm.switchToSession(session)
+        vm.switchToSession(session.toRecord())
         let tokensWithSystemPrompt = vm.contextUsedTokens
 
         // The system prompt has ~56 characters → max(1, 56/4) = 14 tokens.
@@ -254,7 +254,7 @@ final class ContextEstimationIntegrationTests: XCTestCase {
         let session = ChatSession(title: "Vendor Test")
         context.insert(session)
         try? context.save()
-        vendorVM.switchToSession(session)
+        vendorVM.switchToSession(session.toRecord())
 
         tokenizingMock.tokensToYield = ["Reply"]
         vendorVM.inputText = "anything"

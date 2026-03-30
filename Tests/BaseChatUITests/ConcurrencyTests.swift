@@ -52,8 +52,8 @@ final class ConcurrencyTests: XCTestCase {
     // MARK: - Helpers
 
     @discardableResult
-    private func createAndActivateSession(title: String = "Test Chat") -> ChatSession {
-        let session = sessionManager.createSession(title: title)
+    private func createAndActivateSession(title: String = "Test Chat") -> ChatSessionRecord {
+        let session = try! sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)
         return session
@@ -209,7 +209,7 @@ final class ConcurrencyTests: XCTestCase {
         slowBackend.delayPerToken = .milliseconds(50)
 
         // Pre-populate session B with a known message using a fast backend.
-        let sessionB = sessionManager.createSession(title: "Session B")
+        let sessionB = try! sessionManager.createSession(title: "Session B")
 
         // Start generation on session A.
         vm.inputText = "Alpha question"
@@ -259,7 +259,7 @@ final class ConcurrencyTests: XCTestCase {
 
         for i in 0..<10 {
             let task = Task { @MainActor in
-                _ = self.sessionManager.createSession(title: "Concurrent Session \(i)")
+                _ = try! self.sessionManager.createSession(title: "Concurrent Session \(i)")
             }
             tasks.append(task)
         }

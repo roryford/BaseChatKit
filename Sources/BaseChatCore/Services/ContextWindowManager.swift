@@ -42,12 +42,12 @@ public enum ContextWindowManager {
     ///   - tokenizer: Optional tokenizer for accurate counts. Falls back to heuristic.
     /// - Returns: The subset of messages that fit within the budget.
     public static func trimMessages(
-        _ messages: [ChatMessage],
+        _ messages: [ChatMessageRecord],
         systemPrompt: String?,
         maxTokens: Int,
         responseBuffer: Int = 512,
         tokenizer: TokenizerProvider? = nil
-    ) -> [ChatMessage] {
+    ) -> [ChatMessageRecord] {
         guard !messages.isEmpty else { return [] }
 
         let systemTokens = estimateTokenCount(systemPrompt ?? "", tokenizer: tokenizer)
@@ -81,7 +81,7 @@ public enum ContextWindowManager {
     /// Calculates a context budget breakdown.
     public static func calculateBudget(
         systemPrompt: String?,
-        messages: [ChatMessage],
+        messages: [ChatMessageRecord],
         maxTokens: Int,
         responseBuffer: Int = 512,
         tokenizer: TokenizerProvider? = nil

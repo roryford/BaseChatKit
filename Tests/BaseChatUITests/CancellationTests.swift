@@ -49,8 +49,8 @@ final class CancellationTests: XCTestCase {
     // MARK: - Helpers
 
     @discardableResult
-    private func createAndActivateSession(title: String = "Test Chat") -> ChatSession {
-        let session = sessionManager.createSession(title: title)
+    private func createAndActivateSession(title: String = "Test Chat") -> ChatSessionRecord {
+        let session = try! sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)
         return session

@@ -10,13 +10,13 @@ import BaseChatCore
 /// corner of the bubble to indicate the message is preserved from compression.
 public struct MessageBubbleView: View {
 
-    public let message: ChatMessage
+    public let message: ChatMessageRecord
     public let isStreaming: Bool
     public let isPinned: Bool
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    public init(message: ChatMessage, isStreaming: Bool, isPinned: Bool = false) {
+    public init(message: ChatMessageRecord, isStreaming: Bool, isPinned: Bool = false) {
         self.message = message
         self.isStreaming = isStreaming
         self.isPinned = isPinned
@@ -181,28 +181,28 @@ public struct MessageBubbleView: View {
 
 #Preview("User Message") {
     MessageBubbleView(
-        message: ChatMessage(role: .user, content: "Hello, tell me a story about a dragon.", sessionID: UUID()),
+        message: ChatMessageRecord(role: .user, content: "Hello, tell me a story about a dragon.", sessionID: UUID()),
         isStreaming: false
     )
 }
 
 #Preview("Assistant Message") {
     MessageBubbleView(
-        message: ChatMessage(role: .assistant, content: "Once upon a time, in a land far away, there lived a magnificent dragon named Ember.", sessionID: UUID()),
+        message: ChatMessageRecord(role: .assistant, content: "Once upon a time, in a land far away, there lived a magnificent dragon named Ember.", sessionID: UUID()),
         isStreaming: false
     )
 }
 
 #Preview("Assistant Streaming") {
     MessageBubbleView(
-        message: ChatMessage(role: .assistant, content: "Once upon a time...", sessionID: UUID()),
+        message: ChatMessageRecord(role: .assistant, content: "Once upon a time...", sessionID: UUID()),
         isStreaming: true
     )
 }
 
 #Preview("System Message") {
     MessageBubbleView(
-        message: ChatMessage(role: .system, content: "You are a creative storytelling assistant.", sessionID: UUID()),
+        message: ChatMessageRecord(role: .system, content: "You are a creative storytelling assistant.", sessionID: UUID()),
         isStreaming: false
     )
 }

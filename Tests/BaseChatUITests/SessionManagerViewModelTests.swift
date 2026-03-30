@@ -31,7 +31,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_createSession_insertsIntoContext() {
-        let session = vm.createSession(title: "Test Session")
+        let session = try! vm.createSession(title: "Test Session")
 
         XCTAssertEqual(session.title, "Test Session")
         XCTAssertEqual(vm.sessions.count, 1)
@@ -40,7 +40,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_createSession_defaultTitle() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         XCTAssertEqual(session.title, "New Chat")
     }
 
@@ -48,7 +48,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_deleteSession_removesSession() {
-        let session = vm.createSession(title: "To Delete")
+        let session = try! vm.createSession(title: "To Delete")
         XCTAssertEqual(vm.sessions.count, 1)
 
         vm.deleteSession(session)
@@ -58,7 +58,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_deleteSession_removesAssociatedMessages() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
 
         // Insert messages for this session
         let msg1 = ChatMessage(role: .user, content: "Hello", sessionID: session.id)
@@ -80,7 +80,7 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_deleteSession_clearsActiveIfDeleted() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         vm.activeSession = session
 
         vm.deleteSession(session)
@@ -92,54 +92,59 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_renameSession_updatesTitle() {
-        let session = vm.createSession(title: "Original")
+        let session = try! vm.createSession(title: "Original")
 
         vm.renameSession(session, title: "Renamed")
 
-        XCTAssertEqual(session.title, "Renamed")
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "Renamed")
     }
 
     // MARK: - Auto-Generate Title
 
     @MainActor
     func test_autoGenerateTitle_setsFromFirstMessage() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         XCTAssertEqual(session.title, "New Chat")
 
         vm.autoGenerateTitle(for: session, firstMessage: "Tell me about dragons")
 
-        XCTAssertEqual(session.title, "Tell me about dragons")
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "Tell me about dragons")
     }
 
     @MainActor
     func test_autoGenerateTitle_truncatesAtWordBoundary() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         let longMessage = "This is a really long message that should be truncated at a word boundary because it exceeds fifty characters"
 
         vm.autoGenerateTitle(for: session, firstMessage: longMessage)
 
-        XCTAssertTrue(session.title.count <= 53, "Title should be truncated (50 chars + '...')")
-        XCTAssertTrue(session.title.hasSuffix("..."), "Truncated title should end with ...")
-        XCTAssertFalse(session.title.contains("characters"), "Should truncate before 'characters'")
+        let updated = vm.sessions.first { $0.id == session.id }!
+        XCTAssertTrue(updated.title.count <= 53, "Title should be truncated (50 chars + '...')")
+        XCTAssertTrue(updated.title.hasSuffix("..."), "Truncated title should end with ...")
+        XCTAssertFalse(updated.title.contains("characters"), "Should truncate before 'characters'")
     }
 
     @MainActor
     func test_autoGenerateTitle_skipsIfAlreadyNamed() {
-        let session = vm.createSession(title: "Custom Title")
+        let session = try! vm.createSession(title: "Custom Title")
 
         vm.autoGenerateTitle(for: session, firstMessage: "This should be ignored")
 
-        XCTAssertEqual(session.title, "Custom Title",
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "Custom Title",
                        "Should not overwrite a user-set title")
     }
 
     @MainActor
     func test_autoGenerateTitle_handlesEmptyMessage() {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
 
         vm.autoGenerateTitle(for: session, firstMessage: "   ")
 
-        XCTAssertEqual(session.title, "New Chat",
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "New Chat",
                        "Should not set empty title")
     }
 
@@ -147,15 +152,9 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     @MainActor
     func test_sessions_sortedByUpdatedAtDescending() {
-        let session1 = vm.createSession(title: "Oldest")
-        let session2 = vm.createSession(title: "Middle")
-        let session3 = vm.createSession(title: "Newest")
-
-        // Force different updatedAt times
-        session1.updatedAt = Date(timeIntervalSinceNow: -300)
-        session2.updatedAt = Date(timeIntervalSinceNow: -100)
-        session3.updatedAt = Date()
-        try? context.save()
+        _ = try! vm.createSession(title: "Oldest")
+        _ = try! vm.createSession(title: "Middle")
+        _ = try! vm.createSession(title: "Newest")
 
         vm.loadSessions()
 

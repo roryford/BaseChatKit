@@ -9,8 +9,9 @@ extension ChatViewModel {
     ///
     /// Handles context trimming, token usage capture, empty response cleanup,
     /// and the Foundation model upgrade hint.
-    func generateIntoMessage(_ assistantMessage: ChatMessage) async {
+    func generateIntoMessage(_ assistantMessage: ChatMessageRecord) async {
         isGenerating = true
+        let messageID = assistantMessage.id
         defer {
             isGenerating = false
             inferenceService.generationDidFinish()
@@ -18,7 +19,7 @@ extension ChatViewModel {
 
         do {
             // Build the message history, applying compression if the context is filling up.
-            let allMessages = messages.filter { $0.id != assistantMessage.id }
+            let allMessages = messages.filter { $0.id != messageID }
             let effectiveSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
             let activeTokenizer = inferenceService.tokenizer
 
@@ -70,7 +71,9 @@ extension ChatViewModel {
                 do {
                     for try await token in stream {
                         if Task.isCancelled { break }
-                        assistantMessage.content += token
+                        if let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
+                            self.messages[idx].content += token
+                        }
                     }
                 } catch {
                     if !Task.isCancelled {
@@ -89,26 +92,33 @@ extension ChatViewModel {
         }
 
         // Capture token usage from cloud backends.
-        if let usage = inferenceService.lastTokenUsage {
-            assistantMessage.promptTokens = usage.promptTokens
-            assistantMessage.completionTokens = usage.completionTokens
+        if let usage = inferenceService.lastTokenUsage,
+           let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[idx].promptTokens = usage.promptTokens
+            messages[idx].completionTokens = usage.completionTokens
         }
 
         // Persist the completed assistant message.
-        if !assistantMessage.content.isEmpty {
-            saveMessage(assistantMessage)
-        } else {
-            // Empty response — remove the placeholder using ID-based lookup
-            // to avoid index invalidation from concurrent modifications.
-            messages.removeAll { $0.id == assistantMessage.id }
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            do {
+                if messages[idx].content.isEmpty {
+                    messages.remove(at: idx)
+                } else {
+                    try saveMessage(messages[idx])
+                }
+            } catch {
+                Log.persistence.error("Failed to persist assistant message: \(error)")
+                errorMessage = "Failed to save assistant response: \(error.localizedDescription)"
+            }
         }
 
         // After the first assistant response on Foundation, nudge the user to
         // consider downloading a local model for longer context. Only show once
         // per session and only when Foundation is the active backend.
+        let assistantContent = messages.first(where: { $0.id == messageID })?.content ?? ""
         if BaseChatConfiguration.shared.features.showUpgradeHint,
            !showUpgradeHint,
-           !assistantMessage.content.isEmpty,
+           !assistantContent.isEmpty,
            activeBackendName == "Apple",
            messages.filter({ $0.role == .assistant }).count == 1 {
             showUpgradeHint = true

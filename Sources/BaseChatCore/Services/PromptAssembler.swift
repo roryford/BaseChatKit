@@ -25,7 +25,7 @@ public enum PromptAssembler {
     /// - Returns: An ``AssembledPrompt`` containing resolved slots, trimmed messages, and budget info.
     public static func assemble(
         slots: [PromptSlot],
-        messages: [ChatMessage],
+        messages: [ChatMessageRecord],
         systemPrompt: String?,
         contextSize: Int,
         responseBuffer: Int = 512,
@@ -109,10 +109,10 @@ public enum PromptAssembler {
     /// Trims messages to fit within the given token budget.
     /// Walks backward from the newest message, always keeping at least the last message.
     private static func trimMessagesToFit(
-        _ messages: [ChatMessage],
+        _ messages: [ChatMessageRecord],
         budget: Int,
         tokenizer: TokenizerProvider
-    ) -> [ChatMessage] {
+    ) -> [ChatMessageRecord] {
         guard !messages.isEmpty else { return [] }
 
         if budget <= 0 {
@@ -123,7 +123,7 @@ public enum PromptAssembler {
             return Array(messages.suffix(1))
         }
 
-        var kept: [ChatMessage] = []
+        var kept: [ChatMessageRecord] = []
         var usedTokens = 0
 
         for message in messages.reversed() {
@@ -145,7 +145,7 @@ public enum PromptAssembler {
     /// Slots that share a depth are kept in their sorted order.
     private static func insertSlotsIntoHistory(
         slots: [ResolvedSlot],
-        messages: [ChatMessage]
+        messages: [ChatMessageRecord]
     ) -> [(role: String, content: String)] {
         // Separate slots into "top" (depth 0) and "depth-inserted"
         let topSlots = slots.filter { $0.depth == 0 }
@@ -159,7 +159,7 @@ public enum PromptAssembler {
             result.append((role: "system", content: slot.content))
         }
 
-        // Convert ChatMessages
+        // Convert ChatMessageRecords
         var messageTuples = messages.map { (role: $0.role.rawValue, content: $0.content) }
 
         // Insert depth-positioned slots into the message list.

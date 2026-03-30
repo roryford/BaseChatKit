@@ -48,7 +48,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         let session = ChatSession(title: title)
         context.insert(session)
         try? context.save()
-        vm.switchToSession(session)
+        vm.switchToSession(session.toRecord())
         return session
     }
 
@@ -82,7 +82,7 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         // Create a session and set it directly so loadMessages has a sessionID.
         let session = ChatSession(title: "Test")
-        unconfiguredVM.activeSession = session
+        unconfiguredVM.activeSession = session.toRecord()
 
         unconfiguredVM.loadMessages()
 
@@ -99,7 +99,7 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         // Manually add a message to the in-memory messages array.
         let dummyMessage = ChatMessage(role: .user, content: "stale", sessionID: UUID())
-        vm.messages = [dummyMessage]
+        vm.messages = [dummyMessage.toRecord()]
         XCTAssertEqual(vm.messages.count, 1)
 
         // Ensure no active session.
@@ -147,7 +147,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         let session = createSession()
 
         let message = ChatMessage(role: .user, content: "Persisted message", sessionID: session.id)
-        vm.saveMessage(message)
+        try! vm.saveMessage(message.toRecord())
 
         let fetched = fetchMessages(for: session.id)
         XCTAssertEqual(fetched.count, 1)
@@ -161,8 +161,8 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         let msg1 = ChatMessage(role: .user, content: "User msg", sessionID: session.id)
         let msg2 = ChatMessage(role: .assistant, content: "Assistant msg", sessionID: session.id)
-        vm.saveMessage(msg1)
-        vm.saveMessage(msg2)
+        try! vm.saveMessage(msg1.toRecord())
+        try! vm.saveMessage(msg2.toRecord())
 
         let fetched = fetchMessages(for: session.id)
         XCTAssertEqual(fetched.count, 2)
@@ -174,10 +174,10 @@ final class PersistenceIntegrationTests: XCTestCase {
         let session = createSession()
 
         let message = ChatMessage(role: .user, content: "To be deleted", sessionID: session.id)
-        vm.saveMessage(message)
+        try! vm.saveMessage(message.toRecord())
         XCTAssertEqual(fetchMessages(for: session.id).count, 1)
 
-        vm.deleteMessage(message)
+        try! vm.deleteMessage(message.toRecord())
         XCTAssertEqual(
             fetchMessages(for: session.id).count, 0,
             "Message should be removed from the database after deletion"
@@ -189,11 +189,11 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         let msg1 = ChatMessage(role: .user, content: "Keep this", sessionID: session.id)
         let msg2 = ChatMessage(role: .assistant, content: "Delete this", sessionID: session.id)
-        vm.saveMessage(msg1)
-        vm.saveMessage(msg2)
+        try! vm.saveMessage(msg1.toRecord())
+        try! vm.saveMessage(msg2.toRecord())
         XCTAssertEqual(fetchMessages(for: session.id).count, 2)
 
-        vm.deleteMessage(msg2)
+        try! vm.deleteMessage(msg2.toRecord())
 
         let remaining = fetchMessages(for: session.id)
         XCTAssertEqual(remaining.count, 1)
@@ -246,12 +246,12 @@ final class PersistenceIntegrationTests: XCTestCase {
         XCTAssertEqual(vm.messages[0].content, "Question for B")
 
         // Switch back to A.
-        vm.switchToSession(sessionA)
+        vm.switchToSession(sessionA.toRecord())
         XCTAssertEqual(vm.messages.count, 2)
         XCTAssertEqual(vm.messages[0].content, "Question for A", "Switching should reload session A messages")
 
         // Switch to B.
-        vm.switchToSession(sessionB)
+        vm.switchToSession(sessionB.toRecord())
         XCTAssertEqual(vm.messages.count, 2)
         XCTAssertEqual(vm.messages[0].content, "Question for B", "Switching should reload session B messages")
     }
@@ -272,7 +272,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         // Use SessionManagerViewModel to delete the session (it handles cascade).
         let sessionManager = SessionManagerViewModel()
         sessionManager.configure(modelContext: context)
-        sessionManager.deleteSession(session)
+        sessionManager.deleteSession(session.toRecord())
 
         XCTAssertEqual(
             fetchMessages(for: sessionID).count, 0,
@@ -303,7 +303,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         // Delete session B.
         let sessionManager = SessionManagerViewModel()
         sessionManager.configure(modelContext: context)
-        sessionManager.deleteSession(sessionB)
+        sessionManager.deleteSession(sessionB.toRecord())
 
         // Session A should be unaffected.
         XCTAssertEqual(

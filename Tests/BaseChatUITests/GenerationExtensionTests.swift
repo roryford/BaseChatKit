@@ -25,7 +25,7 @@ final class GenerationExtensionTests: XCTestCase {
             modelStorage: ModelStorageService(),
             memoryPressure: MemoryPressureHandler()
         )
-        vm.activeSession = ChatSession(title: "Test")
+        vm.activeSession = ChatSessionRecord(title: "Test")
         return vm
     }
 
@@ -41,7 +41,7 @@ final class GenerationExtensionTests: XCTestCase {
             modelStorage: ModelStorageService(),
             memoryPressure: MemoryPressureHandler()
         )
-        vm.activeSession = ChatSession(title: "Test")
+        vm.activeSession = ChatSessionRecord(title: "Test")
         return vm
     }
 
@@ -236,7 +236,7 @@ final class GenerationExtensionTests: XCTestCase {
         let longContent = String(repeating: "word ", count: 200) // ~1000 chars = ~250 tokens
         for i in 0..<10 {
             let role: MessageRole = i.isMultiple(of: 2) ? .user : .assistant
-            let msg = ChatMessage(role: role, content: longContent, sessionID: sessionID)
+            let msg = ChatMessageRecord(role: role, content: longContent, sessionID: sessionID)
             vm.messages.append(msg)
         }
 

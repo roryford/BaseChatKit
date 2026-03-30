@@ -7,13 +7,13 @@ import BaseChatCore
 /// only) actions. Uses platform-appropriate clipboard APIs.
 public struct MessageActionMenuModifier: ViewModifier {
 
-    public let message: ChatMessage
+    public let message: ChatMessageRecord
     public let viewModel: ChatViewModel
 
     @State private var isEditing: Bool = false
     @State private var editText: String = ""
 
-    public init(message: ChatMessage, viewModel: ChatViewModel) {
+    public init(message: ChatMessageRecord, viewModel: ChatViewModel) {
         self.message = message
         self.viewModel = viewModel
     }
@@ -21,7 +21,7 @@ public struct MessageActionMenuModifier: ViewModifier {
     public func body(content: Content) -> some View {
         content
             .contextMenu {
-                if viewModel.isMessagePinned(message) {
+                if viewModel.isMessagePinned(id: message.id) {
                     unpinButton
                 } else {
                     pinButton
@@ -46,7 +46,7 @@ public struct MessageActionMenuModifier: ViewModifier {
 
     private var pinButton: some View {
         Button {
-            viewModel.pinMessage(message)
+            viewModel.pinMessage(id: message.id)
         } label: {
             Label("Pin", systemImage: "pin")
         }
@@ -54,7 +54,7 @@ public struct MessageActionMenuModifier: ViewModifier {
 
     private var unpinButton: some View {
         Button {
-            viewModel.unpinMessage(message)
+            viewModel.unpinMessage(id: message.id)
         } label: {
             Label("Unpin", systemImage: "pin.slash")
         }
@@ -109,7 +109,7 @@ public struct MessageActionMenuModifier: ViewModifier {
                             let newContent = editText
                             isEditing = false
                             Task {
-                                await viewModel.editMessage(message, newContent: newContent)
+                                await viewModel.editMessage(message.id, newContent: newContent)
                             }
                         }
                         .disabled(editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -135,7 +135,7 @@ public struct MessageActionMenuModifier: ViewModifier {
 
 extension View {
     /// Attaches a context menu with message actions (copy, edit, regenerate).
-    public func messageActionMenu(message: ChatMessage, viewModel: ChatViewModel) -> some View {
+    public func messageActionMenu(message: ChatMessageRecord, viewModel: ChatViewModel) -> some View {
         modifier(MessageActionMenuModifier(message: message, viewModel: viewModel))
     }
 }

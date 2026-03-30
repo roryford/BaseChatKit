@@ -47,29 +47,31 @@ final class SessionAutoRenameTests: XCTestCase {
     // MARK: - Tests
 
     func test_autoRename_updatesSessionTitle() async {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         XCTAssertEqual(session.title, "New Chat")
 
         let service = makeInferenceService(tokens: ["Travel", " Planning", " Tips"])
 
         await vm.autoRenameSession(session, firstMessage: "How do I plan a trip?", inferenceService: service)
 
-        XCTAssertEqual(session.title, "Travel Planning Tips")
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "Travel Planning Tips")
     }
 
     func test_autoRename_onError_keepsExistingTitle() async {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
         XCTAssertEqual(session.title, "New Chat")
 
         let service = makeThrowingInferenceService()
 
         await vm.autoRenameSession(session, firstMessage: "Tell me about dogs", inferenceService: service)
 
-        XCTAssertEqual(session.title, "New Chat")
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "New Chat")
     }
 
     func test_autoRename_truncatesLongTitle() async {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
 
         // 60-character title returned by the mock
         let longTitle = "This Is A Very Long Title That Definitely Exceeds Fifty Char"
@@ -79,17 +81,19 @@ final class SessionAutoRenameTests: XCTestCase {
 
         await vm.autoRenameSession(session, firstMessage: "Some question", inferenceService: service)
 
-        XCTAssertEqual(session.title.count, 50)
-        XCTAssertEqual(session.title, String(longTitle.prefix(50)))
+        let updated = vm.sessions.first { $0.id == session.id }!
+        XCTAssertEqual(updated.title.count, 50)
+        XCTAssertEqual(updated.title, String(longTitle.prefix(50)))
     }
 
     func test_autoRename_trimsWhitespace() async {
-        let session = vm.createSession()
+        let session = try! vm.createSession()
 
         let service = makeInferenceService(tokens: ["  My Title  \n"])
 
         await vm.autoRenameSession(session, firstMessage: "What is cooking?", inferenceService: service)
 
-        XCTAssertEqual(session.title, "My Title")
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "My Title")
     }
 }

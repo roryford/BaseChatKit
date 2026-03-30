@@ -4,9 +4,9 @@ import BaseChatCore
 /// A single row in the session list showing the chat title and relative timestamp.
 public struct SessionRowView: View {
 
-    public let session: ChatSession
+    public let session: ChatSessionRecord
 
-    public init(session: ChatSession) {
+    public init(session: ChatSessionRecord) {
         self.session = session
     }
 
