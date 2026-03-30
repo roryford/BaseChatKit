@@ -1,3 +1,4 @@
+#if canImport(FoundationModels)
 import XCTest
 import BaseChatCore
 @testable import BaseChatBackends
@@ -186,3 +187,4 @@ final class FoundationBackendUnitTests: XCTestCase {
         XCTAssertFalse(backend.isGenerating)
     }
 }
+#endif

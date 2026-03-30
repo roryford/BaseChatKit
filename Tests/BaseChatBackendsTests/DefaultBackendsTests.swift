@@ -21,6 +21,7 @@ final class DefaultBackendsTests: XCTestCase {
         // Should not crash or corrupt state
     }
 
+    #if Llama
     func test_loadModel_gguf_invalidPath_throwsModelLoadFailed() async {
         let service = InferenceService()
         DefaultBackends.register(with: service)
@@ -41,6 +42,7 @@ final class DefaultBackendsTests: XCTestCase {
             XCTAssertFalse(service.isModelLoaded)
         }
     }
+    #endif
 
     // Note: MLX backend tests require Xcode's Metal toolchain and cannot
     // run under `swift test`. Test MLX through the Xcode scheme instead.
