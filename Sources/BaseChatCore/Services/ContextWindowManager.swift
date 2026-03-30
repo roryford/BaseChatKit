@@ -61,21 +61,21 @@ public enum ContextWindowManager {
             return Array(messages.suffix(1))
         }
 
-        // Walk backwards from newest, accumulating tokens
-        var kept: [ChatMessage] = []
+        // Walk backwards from newest, tracking the earliest index to keep.
+        // Avoids building a reversed array and re-reversing it.
+        var firstKeptIndex = messages.endIndex
         var usedTokens = 0
 
-        for message in messages.reversed() {
-            let messageTokens = estimateTokenCount(message.content, tokenizer: tokenizer)
-            if usedTokens + messageTokens > available && !kept.isEmpty {
+        for i in stride(from: messages.count - 1, through: 0, by: -1) {
+            let messageTokens = estimateTokenCount(messages[i].content, tokenizer: tokenizer)
+            if usedTokens + messageTokens > available && firstKeptIndex < messages.endIndex {
                 break
             }
-            kept.append(message)
+            firstKeptIndex = i
             usedTokens += messageTokens
         }
 
-        // Restore chronological order
-        return kept.reversed()
+        return Array(messages[firstKeptIndex...])
     }
 
     /// Calculates a context budget breakdown.

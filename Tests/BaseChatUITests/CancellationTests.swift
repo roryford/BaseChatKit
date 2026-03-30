@@ -69,16 +69,29 @@ final class CancellationTests: XCTestCase {
         (0..<20).map { "t\($0) " }.joined()
     }
 
+    // MARK: - Helpers
+
+    /// Waits until at least one token has been written into the assistant message,
+    /// then stops generation. Guards against the empty-message cleanup path in
+    /// generateIntoMessage, which removes the placeholder if content is still empty.
+    private func sendAndStopMidStream(input: String = "Hello") async throws {
+        vm.inputText = input
+        let sendTask = Task { await vm.sendMessage() }
+        for _ in 0..<100 {
+            if vm.messages.count >= 2, !(vm.messages.last?.content ?? "").isEmpty { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        vm.stopGeneration()
+        await sendTask.value
+    }
+
     // MARK: - Tests
 
     func test_stopGeneration_midStream_stopsTokenFlow() async throws {
         createAndActivateSession()
 
-        vm.inputText = "Hello"
-        let sendTask = Task { await vm.sendMessage() }
-        try await Task.sleep(for: .milliseconds(150))
-        vm.stopGeneration()
-        await sendTask.value
+        try await sendAndStopMidStream()
+
 
         XCTAssertFalse(vm.isGenerating, "isGenerating should be false after stopping")
 
@@ -92,11 +105,7 @@ final class CancellationTests: XCTestCase {
     func test_stopGeneration_preservesPartialContent() async throws {
         createAndActivateSession()
 
-        vm.inputText = "Hello"
-        let sendTask = Task { await vm.sendMessage() }
-        try await Task.sleep(for: .milliseconds(150))
-        vm.stopGeneration()
-        await sendTask.value
+        try await sendAndStopMidStream()
 
         XCTAssertEqual(vm.messages.count, 2)
 
@@ -110,11 +119,7 @@ final class CancellationTests: XCTestCase {
         createAndActivateSession()
 
         // First message: stop mid-generation
-        vm.inputText = "First message"
-        let sendTask1 = Task { await vm.sendMessage() }
-        try await Task.sleep(for: .milliseconds(150))
-        vm.stopGeneration()
-        await sendTask1.value
+        try await sendAndStopMidStream(input: "First message")
 
         XCTAssertEqual(vm.messages.count, 2, "Should have user1 + partial assistant1")
         XCTAssertFalse(vm.isGenerating)

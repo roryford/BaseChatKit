@@ -74,20 +74,34 @@ See existing backends in `Sources/BaseChatBackends` for reference implementation
 
 ## Commit Style
 
-Use a short imperative subject line (50 characters or fewer):
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). Release Please reads these to determine version bumps and generate the changelog automatically.
 
 ```
-Fix FoundationBackend generate() failing after session switch
+feat: add streaming cancellation to FoundationBackend
+fix: prevent context overflow when system prompt exceeds budget
+perf: precompute keyword densities in ExtractiveCompressor
+test: add XCTMeasure baselines for trimMessages hot path
+chore: update mlx-swift-lm to 2.31.0
+docs: clarify TokenizerProvider fallback behaviour
 ```
 
-Add a body when the *why* needs explanation — omit it when the subject line is self-sufficient. Do not describe what the diff already shows.
+| Type | Version bump |
+|------|-------------|
+| `feat` | MINOR (`0.x.0`) |
+| `fix` | PATCH (`0.0.x`) |
+| `BREAKING CHANGE:` in footer | MAJOR (`x.0.0`) |
+| everything else | no release |
+
+PR titles must follow the same format — CI enforces this.
+
+Add a body when the *why* needs explanation. Do not describe what the diff already shows.
 
 ```
-Fix FoundationBackend generate() failing after session switch
+fix: prevent context overflow when system prompt exceeds budget
 
-The backend held a stale session reference after switchToSession() was
-called. Invalidate the cached session on unload so the next generate()
-call forces a fresh probe.
+The trimMessages fallback path returned an empty array when the system
+prompt alone exceeded maxTokens. Always return at least the last user
+message so generation has something to work with.
 ```
 
 ## Pull Request Process
