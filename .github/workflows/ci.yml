@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: macos-15
+    runs-on: macos-15-xlarge  # Apple Silicon (arm64) — ~2x faster than Intel
 
     steps:
       - name: Checkout
@@ -23,18 +23,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-spm-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-${{ runner.arch }}-spm-
 
-      - name: Build
-        run: swift build -c release
-
-      - name: Run BaseChatCoreTests
-        run: swift test --filter BaseChatCoreTests
-
-      - name: Run BaseChatUITests
-        run: swift test --filter BaseChatUITests
+      - name: Run tests
+        run: swift test --filter "BaseChatCoreTests|BaseChatUITests"
 
       # BaseChatBackendsTests and BaseChatE2ETests require physical hardware
       # or specific OS versions (iOS 26 / macOS 26 for FoundationBackend).
