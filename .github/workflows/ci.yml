@@ -19,13 +19,14 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Cache SPM dependencies
+      - name: Cache build artifacts
         uses: actions/cache@v4
         with:
           path: .build
-          key: ${{ runner.os }}-${{ runner.arch }}-spm-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-build-${{ hashFiles('Package.resolved', '**/*.swift') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-spm-
+            ${{ runner.os }}-${{ runner.arch }}-build-${{ hashFiles('Package.resolved') }}-
+            ${{ runner.os }}-${{ runner.arch }}-build-
 
       - name: Run tests
         run: swift test --filter "BaseChatCoreTests|BaseChatUITests"
