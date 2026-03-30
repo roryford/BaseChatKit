@@ -1,3 +1,4 @@
+#if MLX
 import Foundation
 import MLX
 import MLXLLM
@@ -156,3 +157,4 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         Self.logger.info("MLX backend unloaded")
     }
 }
+#endif

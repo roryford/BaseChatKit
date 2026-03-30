@@ -12,14 +12,21 @@ public enum DefaultBackends {
     public static func register(with service: InferenceService) {
         service.registerBackendFactory { modelType in
             switch modelType {
+            #if MLX
             case .mlx: return MLXBackend()
+            #endif
+            #if canImport(FoundationModels)
             case .foundation:
                 if #available(iOS 26, macOS 26, *) {
                     return FoundationBackend()
                 } else {
                     return nil
                 }
+            #endif
+            #if Llama
             case .gguf: return LlamaBackend()
+            #endif
+            default: return nil
             }
         }
         service.registerCloudBackendFactory { provider in
