@@ -30,7 +30,7 @@ When writing hardware-gated tests, add `XCTSkipIf` guards at the top of the test
 - Use `XCTestCase` for new tests (existing Swift Testing suites use `@Suite`/`@Test` — match the file you're editing).
 - Tests must honestly reflect their classification: a test that hits SwiftData is an integration test, not a unit test. Name and place it accordingly.
 - Do not mock the persistence layer to make tests faster. Use in-memory SwiftData stores.
-- Async tests: use real `async/await`, not `XCTestExpectation` wrappers unless testing callback-based code. Avoid artificial `sleep` or fixed timeouts — use `withTimeout` or `XCTestExpectation` with tight deadlines.
+- Async tests: use real `async/await`, not `XCTestExpectation` wrappers unless testing callback-based code. Avoid artificial `sleep` or fixed timeouts — instead use `XCTestExpectation` / `XCTWaiter` with tight deadlines for callback-based code.
 - After asserting an expected outcome, add a sabotage check: temporarily break the code path being tested and confirm the test fails. Remove the sabotage before committing.
 - Performance tests use `measure { }` (XCTMeasure). Build all fixtures before the measure block.
 
