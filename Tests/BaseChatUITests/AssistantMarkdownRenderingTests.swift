@@ -66,6 +66,30 @@ final class AssistantMarkdownRenderingTests: XCTestCase {
         XCTAssertEqual(blocks[0].text, #"print("hi")"#)
     }
 
+    func test_parseBlocks_nestedFenceInsideCodeBlock_keepsSingleOuterBlock() {
+        let input = """
+        Here's how:
+        ```markdown
+        Use fenced blocks:
+        ```swift
+        print("hi")
+        ```
+        Done
+        ```
+        End.
+        """
+
+        let blocks = AssistantMarkdownParser.parseBlocks(from: input)
+        XCTAssertEqual(blocks.count, 3)
+        XCTAssertEqual(blocks[0].kind, .markdown)
+        XCTAssertEqual(blocks[1].kind, .code(language: "markdown"))
+        XCTAssertEqual(blocks[2].kind, .markdown)
+
+        XCTAssertTrue(blocks[1].text.contains("```swift"))
+        XCTAssertTrue(blocks[1].text.contains(#"print("hi")"#))
+        XCTAssertTrue(blocks[1].text.contains("Done"))
+    }
+
     func test_attributedString_inlineFormattingIncludesIntents() {
         let rendered = AssistantMarkdownParser.attributedString(from: "**bold** *italic* `code`")
         let rawValues = rendered.runs.compactMap(\.inlinePresentationIntent?.rawValue)

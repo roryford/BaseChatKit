@@ -26,54 +26,90 @@ struct AssistantMarkdownBlock: Identifiable, Equatable {
 enum AssistantMarkdownParser {
     static func parseBlocks(from source: String) -> [AssistantMarkdownBlock] {
         guard !source.isEmpty else { return [] }
-
-        let pattern = #"```([^\n`]*)\n([\s\S]*?)```"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return [AssistantMarkdownBlock(id: 0, kind: .markdown, text: source)]
-        }
-
-        let fullRange = NSRange(source.startIndex..<source.endIndex, in: source)
-        let matches = regex.matches(in: source, options: [], range: fullRange)
-        guard !matches.isEmpty else {
-            return [AssistantMarkdownBlock(id: 0, kind: .markdown, text: source)]
-        }
-
         var blocks: [AssistantMarkdownBlock] = []
         var nextID = 0
-        var cursor = source.startIndex
+        var markdownBuffer = ""
+        var codeBuffer = ""
+        var isInCodeBlock = false
+        var codeLanguage: String?
+        var openingFenceLength = 0
+        var nestedFenceDepth = 0
 
-        for match in matches {
-            guard
-                let matchRange = Range(match.range, in: source),
-                let languageRange = Range(match.range(at: 1), in: source),
-                let codeRange = Range(match.range(at: 2), in: source)
-            else { continue }
+        let lines = source.components(separatedBy: "\n")
+        for (lineIndex, line) in lines.enumerated() {
+            let hadTrailingNewline = lineIndex < lines.count - 1
 
-            if cursor < matchRange.lowerBound {
-                let markdownText = String(source[cursor..<matchRange.lowerBound])
-                if !markdownText.isEmpty {
-                    blocks.append(.init(id: nextID, kind: .markdown, text: markdownText))
-                    nextID += 1
+            if !isInCodeBlock {
+                if let fence = parseFenceLine(line) {
+                    if !markdownBuffer.isEmpty {
+                        blocks.append(.init(id: nextID, kind: .markdown, text: markdownBuffer))
+                        nextID += 1
+                        markdownBuffer = ""
+                    }
+                    isInCodeBlock = true
+                    openingFenceLength = fence.ticks
+                    codeLanguage = fence.rest.isEmpty ? nil : fence.rest
+                    nestedFenceDepth = 0
+                } else {
+                    append(line: line, hadTrailingNewline: hadTrailingNewline, to: &markdownBuffer)
+                }
+                continue
+            }
+
+            if let fence = parseFenceLine(line), fence.ticks >= openingFenceLength {
+                if fence.rest.isEmpty {
+                    if nestedFenceDepth == 0 {
+                        let code = codeBuffer.trimmingCharacters(in: .newlines)
+                        blocks.append(.init(id: nextID, kind: .code(language: codeLanguage), text: code))
+                        nextID += 1
+                        codeBuffer = ""
+                        isInCodeBlock = false
+                        openingFenceLength = 0
+                        codeLanguage = nil
+                        continue
+                    }
+                    nestedFenceDepth -= 1
+                } else {
+                    nestedFenceDepth += 1
                 }
             }
 
-            let rawLanguage = source[languageRange].trimmingCharacters(in: .whitespacesAndNewlines)
-            let normalizedLanguage = rawLanguage.isEmpty ? nil : rawLanguage
-            let code = String(source[codeRange]).trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
-            blocks.append(.init(id: nextID, kind: .code(language: normalizedLanguage), text: code))
-            nextID += 1
-
-            cursor = matchRange.upperBound
+            append(line: line, hadTrailingNewline: hadTrailingNewline, to: &codeBuffer)
         }
 
-        if cursor < source.endIndex {
-            let trailingText = String(source[cursor..<source.endIndex])
-            if !trailingText.isEmpty {
-                blocks.append(.init(id: nextID, kind: .markdown, text: trailingText))
-            }
+        // Streaming can end mid-fence; keep partially parsed content as plain markdown.
+        if isInCodeBlock {
+            return [AssistantMarkdownBlock(id: 0, kind: .markdown, text: source)]
+        }
+
+        if !markdownBuffer.isEmpty {
+            blocks.append(.init(id: nextID, kind: .markdown, text: markdownBuffer))
         }
 
         return blocks.isEmpty ? [AssistantMarkdownBlock(id: 0, kind: .markdown, text: source)] : blocks
+    }
+
+    private static func parseFenceLine(_ line: String) -> (ticks: Int, rest: String)? {
+        let trimmedLeading = line.trimmingCharacters(in: .whitespaces)
+        guard trimmedLeading.first == "`" else { return nil }
+
+        var tickCount = 0
+        var index = trimmedLeading.startIndex
+        while index < trimmedLeading.endIndex, trimmedLeading[index] == "`" {
+            tickCount += 1
+            index = trimmedLeading.index(after: index)
+        }
+        guard tickCount >= 3 else { return nil }
+
+        let rest = String(trimmedLeading[index...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (ticks: tickCount, rest: rest)
+    }
+
+    private static func append(line: String, hadTrailingNewline: Bool, to target: inout String) {
+        target += line
+        if hadTrailingNewline {
+            target += "\n"
+        }
     }
 
     static func attributedString(from markdown: String) -> AttributedString {
