@@ -41,38 +41,39 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Global Backend Lifecycle
 
-    /// Guards `llama_backend_init/free` which are global and must only be
-    /// called once, not per-instance.
-    private static var backendRefCount = 0
-    private static let backendLock = NSLock()
+    /// Serializes `llama_backend_init/free` which are global and must only be
+    /// called once, not per-instance. Actor isolation replaces the old NSLock.
+    private actor BackendLifecycle {
+        private var refCount = 0
 
-    private static func retainBackend() {
-        backendLock.lock()
-        defer { backendLock.unlock() }
-        if backendRefCount == 0 {
-            llama_backend_init()
+        func retain() {
+            if refCount == 0 {
+                llama_backend_init()
+            }
+            refCount += 1
         }
-        backendRefCount += 1
-    }
 
-    private static func releaseBackend() {
-        backendLock.lock()
-        defer { backendLock.unlock() }
-        backendRefCount -= 1
-        if backendRefCount == 0 {
-            llama_backend_free()
+        func release() {
+            refCount -= 1
+            if refCount == 0 {
+                llama_backend_free()
+            }
         }
     }
+
+    private static let lifecycle = BackendLifecycle()
 
     // MARK: - Init / Deinit
 
     public init() {
-        Self.retainBackend()
+        // Actor-isolated retain runs asynchronously but completes before any
+        // real work because loadModel (async) is always called first.
+        Task { await Self.lifecycle.retain() }
     }
 
     deinit {
         unloadModel()
-        Self.releaseBackend()
+        Task { await Self.lifecycle.release() }
     }
 
     // MARK: - Model Lifecycle
