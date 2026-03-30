@@ -75,9 +75,7 @@ public struct MessageBubbleView: View {
             if message.content.isEmpty && isStreaming {
                 streamingPlaceholder
             } else {
-                Text(message.content)
-                    .font(.body)
-                    .textSelection(.enabled)
+                AssistantMarkdownView(content: message.content)
             }
 
             if isStreaming && !message.content.isEmpty {
