@@ -1,3 +1,4 @@
+#if canImport(FoundationModels)
 import Foundation
 import FoundationModels
 import os
@@ -215,3 +216,4 @@ struct FoundationTokenizer: TokenizerProvider {
         max(1, text.count / 3)
     }
 }
+#endif

@@ -74,14 +74,14 @@ public final class MemoryPressureHandler {
             }
 
             // Update on main actor so SwiftUI observation triggers correctly.
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self.pressureLevel = level
             }
         }
 
         newSource.setCancelHandler { [weak self] in
             // Ensure we nil out the source on cancellation to allow re-start.
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self?.source = nil
             }
         }
