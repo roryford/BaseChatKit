@@ -1,4 +1,3 @@
-#if Llama
 import XCTest
 import BaseChatCore
 import BaseChatTestSupport
@@ -194,4 +193,3 @@ final class LlamaBackendTests: XCTestCase {
         XCTAssertLessThan(short, long, "Longer text should produce a higher token count")
     }
 }
-#endif

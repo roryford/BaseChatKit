@@ -1,4 +1,3 @@
-#if Llama
 import Foundation
 import LlamaSwift
 import os
@@ -343,4 +342,3 @@ extension LlamaBackend: TokenizerVendor, TokenizerProvider {
         return tokens.isEmpty ? max(1, text.count / 4) : tokens.count
     }
 }
-#endif
