@@ -1,12 +1,21 @@
 import XCTest
 import BaseChatCore
+import BaseChatTestSupport
 @testable import BaseChatBackends
 
 /// Tests that DefaultBackends.register completes without error and
 /// that the resulting InferenceService can attempt model loads
 /// (which exercises the factory lookup path).
+///
+/// Registration creates LlamaBackend instances, which require Apple Silicon.
 @MainActor
 final class DefaultBackendsTests: XCTestCase {
+
+    override func setUp() async throws {
+        try await super.setUp()
+        try XCTSkipUnless(HardwareRequirements.isPhysicalDevice, "DefaultBackends registers LlamaBackend which requires Metal")
+        try XCTSkipUnless(HardwareRequirements.isAppleSilicon, "DefaultBackends registers LlamaBackend which requires Apple Silicon")
+    }
 
     func test_register_doesNotCrash() {
         let service = InferenceService()
