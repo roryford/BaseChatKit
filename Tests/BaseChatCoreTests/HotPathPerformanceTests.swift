@@ -61,7 +61,7 @@ final class HotPathPerformanceTests: XCTestCase {
                 }
                 expectation.fulfill()
             }
-            self.wait(for: [expectation], timeout: 10)
+            self.wait(for: [expectation], timeout: 5)
         }
     }
 
