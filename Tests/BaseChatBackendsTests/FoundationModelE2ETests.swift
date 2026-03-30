@@ -1,3 +1,4 @@
+#if canImport(FoundationModels)
 import XCTest
 import SwiftData
 import BaseChatCore
@@ -169,3 +170,4 @@ final class FoundationModelE2ETests: XCTestCase {
         XCTAssertGreaterThanOrEqual(vm.messages.count, 1)
     }
 }
+#endif
