@@ -55,6 +55,28 @@ To run everything at once on a capable machine:
 swift test
 ```
 
+### Hardware gate helpers
+
+Tests that need specific hardware use `XCTSkipUnless` with flags from `HardwareRequirements` (in `BaseChatTestSupport`):
+
+| Flag | When `true` |
+|------|-------------|
+| `HardwareRequirements.isAppleSilicon` | Running on arm64 (Apple Silicon) |
+| `HardwareRequirements.isPhysicalDevice` | Running on a real device, not the iOS Simulator |
+| `HardwareRequirements.hasFoundationModels` | macOS 26+ / iOS 26+ SDK is available at runtime |
+
+Tests also check `FoundationBackend.isAvailable` for Apple Intelligence availability, which is distinct from the OS version check (the user may not have Apple Intelligence enabled).
+
+Use these at the top of `setUp()` or individual test methods:
+
+```swift
+override func setUp() async throws {
+    try await super.setUp()
+    try XCTSkipUnless(HardwareRequirements.isAppleSilicon, "Requires Apple Silicon")
+    try XCTSkipUnless(HardwareRequirements.isPhysicalDevice, "Metal unavailable in simulator")
+}
+```
+
 ## Adding a New Backend
 
 1. Implement the `InferenceBackend` protocol (defined in `Sources/BaseChatCore`).

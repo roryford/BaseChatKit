@@ -1,9 +1,9 @@
 import XCTest
 import SwiftData
 import BaseChatCore
+import BaseChatTestSupport
 @testable import BaseChatBackends
 @testable import BaseChatUI
-import BaseChatTestSupport
 
 /// True end-to-end tests using Apple's Foundation Models backend.
 ///
@@ -26,9 +26,8 @@ final class FoundationModelE2ETests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
 
-        guard FoundationBackend.isAvailable else {
-            throw XCTSkip("Foundation Models not available on this device")
-        }
+        try XCTSkipUnless(HardwareRequirements.hasFoundationModels, "Requires macOS 26+ / iOS 26+")
+        try XCTSkipUnless(FoundationBackend.isAvailable, "Apple Intelligence not available on this device")
 
         let schema = Schema(BaseChatSchema.allModelTypes)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)

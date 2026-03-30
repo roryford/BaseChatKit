@@ -1,5 +1,6 @@
 import XCTest
 import BaseChatCore
+import BaseChatTestSupport
 @testable import BaseChatBackends
 
 /// Isolated unit tests for `FoundationBackend` state management and guard paths.
@@ -8,8 +9,8 @@ import BaseChatCore
 /// They run everywhere that iOS 26 / macOS 26 SDK symbols are available (which is
 /// satisfied at compile time even on the simulator / CI machines with Xcode 26 SDKs).
 ///
-/// Tests that would require live model inference are marked with `XCTSkip` when
-/// `FoundationBackend.isAvailable` returns `false`.
+/// Tests that would require live model inference are gated with
+/// `XCTSkipUnless(HardwareRequirements.hasFoundationModels)`.
 @available(iOS 26, macOS 26, *)
 final class FoundationBackendUnitTests: XCTestCase {
 
@@ -89,9 +90,7 @@ final class FoundationBackendUnitTests: XCTestCase {
     /// On a real device with Apple Intelligence, verify the full round-trip:
     /// loadModel() → isModelLoaded==true, resetConversation() → still true.
     func test_resetConversation_preservesIsModelLoaded_afterLoad() async throws {
-        guard FoundationBackend.isAvailable else {
-            throw XCTSkip("Apple Intelligence not available on this device")
-        }
+        try XCTSkipUnless(FoundationBackend.isAvailable, "Apple Intelligence not available on this device")
 
         let url = URL(fileURLWithPath: "/dev/null") // ignored by FoundationBackend
         try await backend.loadModel(from: url, contextSize: 4096)
@@ -148,9 +147,7 @@ final class FoundationBackendUnitTests: XCTestCase {
         // is not loaded. To reach the alreadyGenerating path we need isModelLoaded
         // to be true. Since we cannot call loadModel() without Apple Intelligence,
         // skip this sub-test when unavailable.
-        guard FoundationBackend.isAvailable else {
-            throw XCTSkip("Apple Intelligence not available — cannot reach isGenerating guard without a loaded model")
-        }
+        try XCTSkipUnless(FoundationBackend.isAvailable, "Apple Intelligence not available — cannot reach isGenerating guard without a loaded model")
 
         // If we get here we could load the model and start a long generation,
         // but that would be an E2E test. Instead, we verify the guard order
@@ -169,9 +166,7 @@ final class FoundationBackendUnitTests: XCTestCase {
     /// State-only version (no real inference): checks that isModelLoaded is
     /// still true after reset, meaning the generate() guard would pass.
     func test_generate_afterResetConversation_isModelLoadedRemainsTrue() async throws {
-        guard FoundationBackend.isAvailable else {
-            throw XCTSkip("Apple Intelligence not available on this device")
-        }
+        try XCTSkipUnless(FoundationBackend.isAvailable, "Apple Intelligence not available on this device")
 
         let url = URL(fileURLWithPath: "/dev/null")
         try await backend.loadModel(from: url, contextSize: 4096)
