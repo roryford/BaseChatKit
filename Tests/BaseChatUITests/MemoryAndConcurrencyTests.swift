@@ -25,7 +25,7 @@ final class MemoryAndConcurrencyTests: XCTestCase {
             modelStorage: ModelStorageService(),
             memoryPressure: handler
         )
-        vm.activeSession = ChatSession(title: "Test Session")
+        vm.activeSession = ChatSessionRecord(title: "Test Session")
         return (vm, mock, handler)
     }
 
@@ -45,7 +45,7 @@ final class MemoryAndConcurrencyTests: XCTestCase {
             modelStorage: ModelStorageService(),
             memoryPressure: MemoryPressureHandler()
         )
-        vm.activeSession = ChatSession(title: "Slow Test Session")
+        vm.activeSession = ChatSessionRecord(title: "Slow Test Session")
         return (vm, slow)
     }
 
@@ -174,7 +174,7 @@ final class MemoryAndConcurrencyTests: XCTestCase {
             modelStorage: ModelStorageService(),
             memoryPressure: MemoryPressureHandler()
         )
-        vm.activeSession = ChatSession(title: "Rapid Test")
+        vm.activeSession = ChatSessionRecord(title: "Rapid Test")
 
         // Fire 3 sends in rapid succession as separate tasks.
         var tasks: [Task<Void, Never>] = []
@@ -238,11 +238,11 @@ final class MemoryAndConcurrencyTests: XCTestCase {
 
         // Attempt to edit the first user message while generating -- should be guarded.
         let messageCountBefore = vm.messages.count
-        await vm.editMessage(originalUserMessage, newContent: "Edited question")
+        await vm.editMessage(originalUserMessage.id, newContent: "Edited question")
 
         XCTAssertEqual(vm.messages.count, messageCountBefore,
             "editMessage should be a no-op while isGenerating is true")
-        XCTAssertEqual(originalUserMessage.content, "Original question",
+        XCTAssertEqual(vm.messages[0].content, "Original question",
             "Original message content should be unchanged during generation")
 
         // Stop generation and wait for task to finish.
@@ -254,9 +254,9 @@ final class MemoryAndConcurrencyTests: XCTestCase {
         // Now edit should work. Set up fast tokens for the regeneration.
         slow.tokensToYield = ["edited", " reply"]
         slow.delayPerToken = .milliseconds(0)
-        await vm.editMessage(originalUserMessage, newContent: "Edited question")
+        await vm.editMessage(originalUserMessage.id, newContent: "Edited question")
 
-        XCTAssertEqual(originalUserMessage.content, "Edited question",
+        XCTAssertEqual(vm.messages[0].content, "Edited question",
             "User message should be updated after edit")
 
         // The edit removes everything after the edited message and regenerates.

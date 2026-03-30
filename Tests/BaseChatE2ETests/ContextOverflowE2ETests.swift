@@ -12,8 +12,8 @@ struct ContextOverflowE2ETests {
 
     private let heuristicTok = HeuristicTokenizer()
 
-    private func makeMessage(role: MessageRole, content: String) -> ChatMessage {
-        ChatMessage(role: role, content: content, sessionID: UUID())
+    private func makeMessage(role: MessageRole, content: String) -> ChatMessageRecord {
+        ChatMessageRecord(role: role, content: content, sessionID: UUID())
     }
 
     // MARK: - PromptAssembler: Progressive Overflow

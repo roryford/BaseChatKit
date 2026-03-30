@@ -22,19 +22,19 @@ public final class ChatViewModel {
 
     // MARK: - Persistence
 
-    var modelContext: ModelContext?
+    var persistence: ChatPersistenceProvider?
 
     // MARK: - Session
 
     /// The currently active chat session. Set via `switchToSession(_:)`.
-    public var activeSession: ChatSession?
+    public var activeSession: ChatSessionRecord?
 
     /// The session ID for the active session, or `nil` if no session is selected.
     var activeSessionID: UUID? { activeSession?.id }
 
     /// Called when a session might need its title auto-generated.
     /// Set by the view layer to connect to SessionManagerViewModel.
-    public var onFirstMessage: ((ChatSession, String) -> Void)?
+    public var onFirstMessage: ((ChatSessionRecord, String) -> Void)?
 
     // MARK: - First Run / Onboarding
 
@@ -65,7 +65,7 @@ public final class ChatViewModel {
     public var selectedEndpoint: APIEndpoint?
 
     /// Ordered messages for the active session.
-    public internal(set) var messages: [ChatMessage] = []
+    public internal(set) var messages: [ChatMessageRecord] = []
 
     /// The user's current input text.
     public var inputText: String = ""
@@ -87,7 +87,7 @@ public final class ChatViewModel {
     /// IDs of messages that are pinned in the current session.
     ///
     /// Pinned messages are excluded from context compression and always preserved
-    /// in the conversation history. Populated from ``ChatSession/pinnedMessageIDs``
+    /// in the conversation history. Populated from ``ChatSessionRecord/pinnedMessageIDs``
     /// when switching sessions. Persisted back to the session on changes.
     public var pinnedMessageIDs: Set<UUID> = []
 
@@ -229,18 +229,24 @@ public final class ChatViewModel {
         }
     }
 
-    /// Injects the SwiftData model context. Call once from the view layer
-    /// after the model container is available.
+    /// Injects the persistence provider. Call once from the view layer
+    /// after the storage backend is available.
+    public func configure(persistence: ChatPersistenceProvider) {
+        guard self.persistence == nil else { return }
+        self.persistence = persistence
+        Log.persistence.info("ChatViewModel configured with persistence provider")
+    }
+
+    /// Convenience: wraps a SwiftData `ModelContext` in a ``SwiftDataPersistenceProvider``.
+    @available(*, deprecated, message: "Use configure(persistence:) with an explicit provider")
     public func configure(modelContext: ModelContext) {
-        guard self.modelContext == nil else { return }
-        self.modelContext = modelContext
-        Log.persistence.info("ChatViewModel configured with ModelContext")
+        configure(persistence: SwiftDataPersistenceProvider(modelContext: modelContext))
     }
 
     // MARK: - Session Management
 
     /// Switches to a different chat session, loading its messages and settings.
-    public func switchToSession(_ session: ChatSession) {
+    public func switchToSession(_ session: ChatSessionRecord) {
         activeSession = session
         inferenceService.resetConversation()
 
@@ -275,7 +281,7 @@ public final class ChatViewModel {
 
     /// Saves the current generation settings back to the active session.
     public func saveSettingsToSession() {
-        guard let session = activeSession else { return }
+        guard var session = activeSession else { return }
         session.temperature = temperature
         session.topP = topP
         session.repeatPenalty = repeatPenalty
@@ -284,9 +290,10 @@ public final class ChatViewModel {
         session.compressionMode = compressionMode
         session.pinnedMessageIDs = pinnedMessageIDs
         session.updatedAt = Date()
+        activeSession = session
 
         do {
-            try modelContext?.save()
+            try persistence?.updateSession(session)
         } catch {
             Log.persistence.error("Failed to save session settings: \(error)")
         }
@@ -426,7 +433,7 @@ public final class ChatViewModel {
         Log.ui.debug("User sent message")
 
         // Create and persist the user message.
-        let userMessage = ChatMessage(role: .user, content: text, sessionID: activeSessionID)
+        let userMessage = ChatMessageRecord(role: .user, content: text, sessionID: activeSessionID)
         messages.append(userMessage)
         saveMessage(userMessage)
 
@@ -439,7 +446,7 @@ public final class ChatViewModel {
         }
 
         // Create an empty assistant message that will be streamed into.
-        let assistantMessage = ChatMessage(role: .assistant, content: "", sessionID: activeSessionID)
+        let assistantMessage = ChatMessageRecord(role: .assistant, content: "", sessionID: activeSessionID)
         messages.append(assistantMessage)
 
         await generateIntoMessage(assistantMessage)
@@ -461,7 +468,7 @@ public final class ChatViewModel {
         deleteMessage(removed)
 
         // Create a fresh assistant message.
-        let assistantMessage = ChatMessage(role: .assistant, content: "", sessionID: activeSessionID)
+        let assistantMessage = ChatMessageRecord(role: .assistant, content: "", sessionID: activeSessionID)
         messages.append(assistantMessage)
 
         Log.ui.debug("Regenerating last response")
@@ -469,15 +476,15 @@ public final class ChatViewModel {
     }
 
     /// Edits a message and regenerates everything after it.
-    public func editMessage(_ message: ChatMessage, newContent: String) async {
-        guard let index = messages.firstIndex(where: { $0.id == message.id }) else { return }
+    public func editMessage(_ messageID: UUID, newContent: String) async {
+        guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
         guard !isGenerating else { return }
 
         guard let activeSessionID else { return }
 
         // Update the edited message.
-        message.content = newContent
-        saveMessage(message)
+        messages[index].content = newContent
+        saveMessage(messages[index])
 
         // Remove all messages after the edited one.
         let toRemove = Array(messages[(index + 1)...])
@@ -487,8 +494,8 @@ public final class ChatViewModel {
         }
 
         // If the edited message was from the user, regenerate the assistant response.
-        if message.role == .user {
-            let assistantMessage = ChatMessage(role: .assistant, content: "", sessionID: activeSessionID)
+        if messages[index].role == .user {
+            let assistantMessage = ChatMessageRecord(role: .assistant, content: "", sessionID: activeSessionID)
             messages.append(assistantMessage)
             Log.ui.debug("Edited user message, regenerating")
             await generateIntoMessage(assistantMessage)
@@ -541,16 +548,8 @@ public final class ChatViewModel {
 
     /// Saves all pending changes. Called on app background.
     public func saveState() {
-        guard let modelContext else {
-            Log.persistence.warning("saveState called before modelContext was configured — state will not be saved")
-            return
-        }
-        do {
-            try modelContext.save()
-            Log.persistence.info("State saved on background")
-        } catch {
-            Log.persistence.error("Failed to save state: \(error)")
-        }
+        saveSettingsToSession()
+        Log.persistence.info("State saved on background")
     }
 
     // MARK: - Memory Pressure Monitoring
@@ -585,19 +584,19 @@ public final class ChatViewModel {
     // MARK: - Message Pinning
 
     /// Marks a message as pinned, preserving it from context compression.
-    public func pinMessage(_ message: ChatMessage) {
-        pinnedMessageIDs.insert(message.id)
+    public func pinMessage(id messageID: UUID) {
+        pinnedMessageIDs.insert(messageID)
         saveSettingsToSession()
     }
 
     /// Removes the pin from a message.
-    public func unpinMessage(_ message: ChatMessage) {
-        pinnedMessageIDs.remove(message.id)
+    public func unpinMessage(id messageID: UUID) {
+        pinnedMessageIDs.remove(messageID)
         saveSettingsToSession()
     }
 
     /// Returns whether the given message is currently pinned.
-    public func isMessagePinned(_ message: ChatMessage) -> Bool {
-        pinnedMessageIDs.contains(message.id)
+    public func isMessagePinned(id messageID: UUID) -> Bool {
+        pinnedMessageIDs.contains(messageID)
     }
 }

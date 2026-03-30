@@ -49,7 +49,7 @@ final class CompressionStatsDisplayTests: XCTestCase {
         let session = ChatSession(title: title)
         context.insert(session)
         try? context.save()
-        vm.switchToSession(session)
+        vm.switchToSession(session.toRecord())
         return session
     }
 
@@ -63,7 +63,7 @@ final class CompressionStatsDisplayTests: XCTestCase {
         let longContent = String(repeating: "b", count: charCount)
         let sessionID = vm.activeSession!.id
         for _ in 0..<messageCount {
-            let msg = ChatMessage(role: .user,
+            let msg = ChatMessageRecord(role: .user,
                                   content: longContent,
                                   sessionID: sessionID)
             vm.messages.append(msg)

@@ -52,7 +52,7 @@ final class ConcurrencyTests: XCTestCase {
     // MARK: - Helpers
 
     @discardableResult
-    private func createAndActivateSession(title: String = "Test Chat") -> ChatSession {
+    private func createAndActivateSession(title: String = "Test Chat") -> ChatSessionRecord {
         let session = sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)

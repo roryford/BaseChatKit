@@ -35,10 +35,10 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         return (vm, mock)
     }
 
-    /// Creates a view model with an in-memory SwiftData container configured.
+    /// Creates a view model with an in-memory mock persistence provider.
     private func makeViewModelWithPersistence(
         mock: MockInferenceBackend = MockInferenceBackend()
-    ) throws -> (ChatViewModel, MockInferenceBackend, ModelContainer) {
+    ) throws -> (ChatViewModel, MockInferenceBackend, MockPersistenceProvider) {
         mock.isModelLoaded = true
         let service = InferenceService(backend: mock, name: "Mock")
         let vm = ChatViewModel(
@@ -47,21 +47,18 @@ final class ViewModelEdgeCaseTests: XCTestCase {
             modelStorage: ModelStorageService(),
             memoryPressure: MemoryPressureHandler()
         )
-        let container = try makeInMemoryContainer()
-        let context = ModelContext(container)
-        vm.configure(modelContext: context)
-        return (vm, mock, container)
+        let persistence = MockPersistenceProvider()
+        vm.configure(persistence: persistence)
+        return (vm, mock, persistence)
     }
 
     // MARK: - saveSettingsToSession
 
     func test_saveSettingsToSession_updatesSessionProperties() throws {
-        let (vm, _, container) = try makeViewModelWithPersistence()
-        let context = ModelContext(container)
+        let (vm, _, persistence) = try makeViewModelWithPersistence()
 
-        let session = ChatSession(title: "Settings Test")
-        context.insert(session)
-        try context.save()
+        var session = ChatSessionRecord(title: "Settings Test")
+        try persistence.insertSession(session)
 
         vm.activeSession = session
         vm.temperature = 0.3
@@ -71,13 +68,14 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
         vm.saveSettingsToSession()
 
-        XCTAssertEqual(session.temperature!, 0.3, accuracy: 0.001,
+        let updated = vm.activeSession!
+        XCTAssertEqual(updated.temperature!, 0.3, accuracy: 0.001,
                        "Session temperature should match view model value")
-        XCTAssertEqual(session.topP!, 0.8, accuracy: 0.001,
+        XCTAssertEqual(updated.topP!, 0.8, accuracy: 0.001,
                        "Session topP should match view model value")
-        XCTAssertEqual(session.repeatPenalty!, 1.5, accuracy: 0.001,
+        XCTAssertEqual(updated.repeatPenalty!, 1.5, accuracy: 0.001,
                        "Session repeatPenalty should match view model value")
-        XCTAssertEqual(session.systemPrompt, "Be concise.",
+        XCTAssertEqual(updated.systemPrompt, "Be concise.",
                        "Session systemPrompt should match view model value")
     }
 
@@ -94,23 +92,19 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     // MARK: - switchToSession
 
     func test_switchToSession_loadsSessionSettings() throws {
-        let (vm, _, container) = try makeViewModelWithPersistence()
-        let context = ModelContext(container)
+        let (vm, _, _) = try makeViewModelWithPersistence()
 
-        let sessionA = ChatSession(title: "Session A")
+        var sessionA = ChatSessionRecord(title: "Session A")
         sessionA.temperature = 0.2
         sessionA.topP = 0.5
         sessionA.repeatPenalty = 1.0
         sessionA.systemPrompt = "Prompt A"
-        context.insert(sessionA)
 
-        let sessionB = ChatSession(title: "Session B")
+        var sessionB = ChatSessionRecord(title: "Session B")
         sessionB.temperature = 0.9
         sessionB.topP = 0.95
         sessionB.repeatPenalty = 1.3
         sessionB.systemPrompt = "Prompt B"
-        context.insert(sessionB)
-        try context.save()
 
         vm.switchToSession(sessionA)
         XCTAssertEqual(vm.temperature, 0.2, accuracy: 0.001)
@@ -128,12 +122,9 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     }
 
     func test_switchToSession_clearsMessages() async throws {
-        let (vm, mock, container) = try makeViewModelWithPersistence(mock: MockInferenceBackend())
-        let context = ModelContext(container)
+        let (vm, mock, _) = try makeViewModelWithPersistence(mock: MockInferenceBackend())
 
-        let sessionA = ChatSession(title: "Session A")
-        context.insert(sessionA)
-        try context.save()
+        let sessionA = ChatSessionRecord(title: "Session A")
 
         vm.activeSession = sessionA
         vm.inputText = "Hello"
@@ -143,9 +134,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         XCTAssertGreaterThan(countBeforeSwitch, 0,
                              "Should have messages before switching")
 
-        let sessionB = ChatSession(title: "Session B")
-        context.insert(sessionB)
-        try context.save()
+        let sessionB = ChatSessionRecord(title: "Session B")
 
         vm.switchToSession(sessionB)
 
@@ -171,11 +160,8 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     }
 
     func test_switchToSession_restoresSelectedModel_whenModelInList() throws {
-        let (vm, _, container) = try makeViewModelWithPersistence()
-        let context = ModelContext(container)
+        let (vm, _, _) = try makeViewModelWithPersistence()
 
-        // Use the built-in Foundation model as a known model that refreshModels() can surface.
-        // Inject it via foundationModelProvider so refreshModels() adds it to availableModels.
         vm.foundationModelProvider = { true }
         vm.refreshModels()
         let foundationModel = ModelInfo.builtInFoundation
@@ -185,11 +171,8 @@ final class ViewModelEdgeCaseTests: XCTestCase {
             "Foundation model should be in availableModels after refreshModels()"
         )
 
-        // Session whose selectedModelID matches the Foundation model.
-        let session = ChatSession(title: "Model Restore Session")
+        var session = ChatSessionRecord(title: "Model Restore Session")
         session.selectedModelID = foundationModel.id
-        context.insert(session)
-        try context.save()
 
         vm.switchToSession(session)
 
@@ -200,67 +183,50 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     }
 
     func test_switchToSession_clearsSelectedModel_whenModelNotInList() throws {
-        let (vm, _, container) = try makeViewModelWithPersistence()
-        let context = ModelContext(container)
+        let (vm, _, _) = try makeViewModelWithPersistence()
 
-        // availableModels is empty (no foundationModelProvider, no disk models).
-        // Pre-set a selectedModel to verify it is NOT changed when ID not found.
         vm.foundationModelProvider = { true }
         vm.refreshModels()
         let foundationModel = ModelInfo.builtInFoundation
         vm.selectedModel = foundationModel
 
-        // Session references an ID that does not exist in availableModels.
         let missingModelID = UUID()
         XCTAssertFalse(
             vm.availableModels.contains(where: { $0.id == missingModelID }),
             "Precondition: missingModelID must not be in availableModels"
         )
 
-        let session = ChatSession(title: "Missing Model Session")
+        var session = ChatSessionRecord(title: "Missing Model Session")
         session.selectedModelID = missingModelID
-        context.insert(session)
-        try context.save()
 
         vm.switchToSession(session)
 
-        // The code only sets selectedModel when the ID IS found; when not found,
-        // selectedModel is left unchanged (not cleared to nil).
         XCTAssertEqual(vm.selectedModel?.id, foundationModel.id,
             "selectedModel should be unchanged when session's model is not in availableModels")
     }
 
     func test_saveSettingsToSession_persistsSelectedModelID() throws {
-        let (vm, _, container) = try makeViewModelWithPersistence()
-        let context = ModelContext(container)
+        let (vm, _, _) = try makeViewModelWithPersistence()
 
-        // Use the Foundation model as a readily available ModelInfo.
         let model = ModelInfo.builtInFoundation
         let expectedID = model.id
 
-        let session = ChatSession(title: "Persist Model Session")
-        context.insert(session)
-        try context.save()
+        let session = ChatSessionRecord(title: "Persist Model Session")
 
         vm.activeSession = session
         vm.selectedModel = model
 
         vm.saveSettingsToSession()
 
-        XCTAssertEqual(session.selectedModelID, expectedID,
+        XCTAssertEqual(vm.activeSession?.selectedModelID, expectedID,
             "saveSettingsToSession should persist the selected model's UUID to the session")
     }
 
     func test_switchToSession_usesDefaultsForNilSettings() throws {
-        let (vm, _, container) = try makeViewModelWithPersistence()
-        let context = ModelContext(container)
+        let (vm, _, _) = try makeViewModelWithPersistence()
 
-        let session = ChatSession(title: "Defaults Session")
-        // Leave temperature, topP, repeatPenalty as nil (defaults)
-        context.insert(session)
-        try context.save()
+        let session = ChatSessionRecord(title: "Defaults Session")
 
-        // Set non-default values on VM first
         vm.temperature = 0.1
         vm.topP = 0.1
         vm.repeatPenalty = 2.0
@@ -281,7 +247,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         let mock = MockInferenceBackend()
         mock.tokensToYield = ["Original", " reply"]
         let (vm, _) = makeViewModelWithMock(mock: mock)
-        vm.activeSession = ChatSession(title: "Test")
+        vm.activeSession = ChatSessionRecord(title: "Test")
         vm.inputText = "Question"
 
         await vm.sendMessage()
@@ -292,7 +258,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
         let generateCountBefore = mock.generateCallCount
 
-        await vm.editMessage(assistantMessage, newContent: "Edited assistant text")
+        await vm.editMessage(assistantMessage.id, newContent: "Edited assistant text")
 
         // Editing an assistant message should update its content...
         XCTAssertEqual(assistantMessage.content, "Edited assistant text",
@@ -311,7 +277,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         let mock = MockInferenceBackend()
         mock.tokensToYield = ["Reply"]
         let (vm, _) = makeViewModelWithMock(mock: mock)
-        vm.activeSession = ChatSession(title: "Test")
+        vm.activeSession = ChatSessionRecord(title: "Test")
         vm.inputText = "Hello"
 
         await vm.sendMessage()
@@ -321,7 +287,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
         // Edit with empty content — the method does not guard against this.
         mock.tokensToYield = ["New", " reply"]
-        await vm.editMessage(userMessage, newContent: "")
+        await vm.editMessage(userMessage.id, newContent: "")
 
         XCTAssertEqual(userMessage.content, "",
                        "User message content should be set to empty string")
@@ -334,7 +300,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
     func test_sendMessage_whitespaceOnlyInput_isNoop() async {
         let (vm, mock) = makeViewModelWithMock()
-        vm.activeSession = ChatSession(title: "Test")
+        vm.activeSession = ChatSessionRecord(title: "Test")
         vm.inputText = "   \n  "
 
         await vm.sendMessage()
@@ -347,7 +313,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
     func test_sendMessage_tabAndNewlineInput_isNoop() async {
         let (vm, mock) = makeViewModelWithMock()
-        vm.activeSession = ChatSession(title: "Test")
+        vm.activeSession = ChatSessionRecord(title: "Test")
         vm.inputText = "\t\n\r\n  \t"
 
         await vm.sendMessage()
@@ -364,7 +330,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         let mock = MockInferenceBackend()
         mock.tokensToYield = ["OK"]
         let (vm, _) = makeViewModelWithMock(mock: mock)
-        vm.activeSession = ChatSession(title: "Test")
+        vm.activeSession = ChatSessionRecord(title: "Test")
 
         vm.errorMessage = "Previous error that should be cleared"
         vm.inputText = "Hello"
@@ -392,13 +358,13 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
     func test_exportChat_markdownFormat_returnsNonEmptyOutput() {
         let (vm, _) = makeViewModelWithMock()
-        vm.activeSession = ChatSession(title: "Export Test")
+        vm.activeSession = ChatSessionRecord(title: "Export Test")
 
         // Manually add messages to test export without triggering generation.
         let sessionID = vm.activeSession!.id
         vm.messages = [
-            ChatMessage(role: .user, content: "What is 2+2?", sessionID: sessionID),
-            ChatMessage(role: .assistant, content: "4", sessionID: sessionID)
+            ChatMessageRecord(role: .user, content: "What is 2+2?", sessionID: sessionID),
+            ChatMessageRecord(role: .assistant, content: "4", sessionID: sessionID)
         ]
 
         let markdown = vm.exportChat(format: .markdown)
@@ -418,12 +384,12 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
     func test_exportChat_plainTextFormat_returnsNonEmptyOutput() {
         let (vm, _) = makeViewModelWithMock()
-        vm.activeSession = ChatSession(title: "Plain Export")
+        vm.activeSession = ChatSessionRecord(title: "Plain Export")
 
         let sessionID = vm.activeSession!.id
         vm.messages = [
-            ChatMessage(role: .user, content: "Hello", sessionID: sessionID),
-            ChatMessage(role: .assistant, content: "Hi there", sessionID: sessionID)
+            ChatMessageRecord(role: .user, content: "Hello", sessionID: sessionID),
+            ChatMessageRecord(role: .assistant, content: "Hi there", sessionID: sessionID)
         ]
 
         let plainText = vm.exportChat(format: .plainText)
@@ -439,7 +405,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
     func test_exportChat_emptyMessages_returnsHeaderOnly() {
         let (vm, _) = makeViewModelWithMock()
-        vm.activeSession = ChatSession(title: "Empty Chat")
+        vm.activeSession = ChatSessionRecord(title: "Empty Chat")
         vm.messages = []
 
         let markdown = vm.exportChat(format: .markdown)

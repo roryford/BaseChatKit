@@ -35,7 +35,7 @@ final class ChatViewModelTests: XCTestCase {
             memoryPressure: MemoryPressureHandler()
         )
         // Set an active session so sendMessage/regenerate/edit don't bail out.
-        vm.activeSession = ChatSession(title: "Test Session")
+        vm.activeSession = ChatSessionRecord(title: "Test Session")
         return (vm, mock)
     }
 
@@ -176,7 +176,7 @@ final class ChatViewModelTests: XCTestCase {
 
     func test_sendMessage_noModelLoaded_setsError() async {
         let vm = makeViewModel()
-        vm.activeSession = ChatSession(title: "Test")
+        vm.activeSession = ChatSessionRecord(title: "Test")
         vm.inputText = "Tell me a story"
 
         await vm.sendMessage()
@@ -446,7 +446,7 @@ final class ChatViewModelTests: XCTestCase {
         mock.tokensToYield = ["New", " reply"]
         let userMessage = vm.messages[0]
 
-        await vm.editMessage(userMessage, newContent: "Edited question")
+        await vm.editMessage(userMessage.id, newContent: "Edited question")
 
         XCTAssertEqual(vm.messages[0].content, "Edited question", "User message should be updated")
         XCTAssertEqual(vm.messages.count, 2, "Should still have 2 messages after edit + regenerate")
@@ -463,9 +463,9 @@ final class ChatViewModelTests: XCTestCase {
         await vm.sendMessage()
 
         let originalCount = vm.messages.count
-        let fakeMessage = ChatMessage(role: .user, content: "Fake", sessionID: UUID())
+        let fakeMessage = ChatMessageRecord(role: .user, content: "Fake", sessionID: UUID())
 
-        await vm.editMessage(fakeMessage, newContent: "Edited")
+        await vm.editMessage(fakeMessage.id, newContent: "Edited")
 
         XCTAssertEqual(vm.messages.count, originalCount, "Messages should not change when editing a non-existent message")
     }

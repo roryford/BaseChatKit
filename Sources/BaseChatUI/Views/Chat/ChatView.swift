@@ -230,7 +230,7 @@ public struct ChatView: View {
                         MessageBubbleView(
                             message: message,
                             isStreaming: isMessageStreaming(message),
-                            isPinned: viewModel.isMessagePinned(message)
+                            isPinned: viewModel.isMessagePinned(id: message.id)
                         )
                         .messageActionMenu(message: message, viewModel: viewModel)
                         .id(message.id)
@@ -336,7 +336,7 @@ public struct ChatView: View {
 
     // MARK: - Helpers
 
-    private func isMessageStreaming(_ message: ChatMessage) -> Bool {
+    private func isMessageStreaming(_ message: ChatMessageRecord) -> Bool {
         viewModel.isGenerating
         && message.role == .assistant
         && message.id == viewModel.messages.last?.id

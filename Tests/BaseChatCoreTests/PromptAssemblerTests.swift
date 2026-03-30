@@ -15,8 +15,8 @@ struct PromptAssemblerTests {
 
     private let tok = CharTokenizer()
 
-    private func makeMessage(role: MessageRole, content: String) -> ChatMessage {
-        ChatMessage(role: role, content: content, sessionID: UUID())
+    private func makeMessage(role: MessageRole, content: String) -> ChatMessageRecord {
+        ChatMessageRecord(role: role, content: content, sessionID: UUID())
     }
 
     // MARK: - Basic

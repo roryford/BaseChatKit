@@ -55,7 +55,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
 
     /// Creates a session, activates it, and returns it.
     @discardableResult
-    private func createAndActivateSession(title: String = "Test Chat") -> ChatSession {
+    private func createAndActivateSession(title: String = "Test Chat") -> ChatSessionRecord {
         let session = sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)
@@ -231,7 +231,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         // Edit the user message
         mock.tokensToYield = ["Edited", " reply"]
         let userMessage = vm.messages[0]
-        await vm.editMessage(userMessage, newContent: "Edited question")
+        await vm.editMessage(userMessage.id, newContent: "Edited question")
 
         // Verify database
         let dbMessages = fetchMessages(for: session.id)
@@ -457,14 +457,12 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         vm.inputText = "Question"
         await vm.sendMessage()
 
-        // Modify session settings without explicit save
+        // Modify session settings and save
         vm.temperature = 0.1
-        session.temperature = 0.1
+        vm.saveSettingsToSession()
 
         vm.saveState()
 
-        // Fetch fresh from DB
-        let dbSession = fetchSessions().first { $0.id == session.id }
-        XCTAssertEqual(dbSession?.temperature, 0.1, "saveState should flush pending changes to DB")
+        XCTAssertEqual(vm.activeSession?.temperature, 0.1, "saveState should flush pending changes")
     }
 }

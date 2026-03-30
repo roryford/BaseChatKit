@@ -9,8 +9,8 @@ public struct SessionListView: View {
 
     @Environment(SessionManagerViewModel.self) private var sessionManager
 
-    @State private var sessionToDelete: ChatSession?
-    @State private var sessionToRename: ChatSession?
+    @State private var sessionToDelete: ChatSessionRecord?
+    @State private var sessionToRename: ChatSessionRecord?
     @State private var renameText: String = ""
 
     public init() {}

@@ -54,7 +54,7 @@ final class CompressionIntegrationTests: XCTestCase {
         let session = ChatSession(title: title)
         context.insert(session)
         try? context.save()
-        vm.switchToSession(session)
+        vm.switchToSession(session.toRecord())
         return session
     }
 
@@ -73,9 +73,9 @@ final class CompressionIntegrationTests: XCTestCase {
         // Mutate via the VM — didSet calls saveSettingsToSession()
         vm.compressionMode = .balanced
 
-        XCTAssertEqual(session.compressionMode, .balanced,
+        XCTAssertEqual(session.toRecord().compressionMode, .balanced,
                        "Session should have .balanced after setting compressionMode")
-        XCTAssertEqual(session.compressionModeRaw, "Balanced",
+        XCTAssertEqual(session.toRecord().compressionModeRaw, "Balanced",
                        "Raw storage should be 'Balanced'")
     }
 
@@ -88,9 +88,9 @@ final class CompressionIntegrationTests: XCTestCase {
         let otherSession = ChatSession(title: "Other")
         context.insert(otherSession)
         try? context.save()
-        vm.switchToSession(otherSession)
+        vm.switchToSession(otherSession.toRecord())
 
-        vm.switchToSession(session)
+        vm.switchToSession(session.toRecord())
 
         XCTAssertEqual(vm.compressionMode, .balanced,
                        "switchToSession should restore .balanced from compressionModeRaw")
@@ -104,9 +104,9 @@ final class CompressionIntegrationTests: XCTestCase {
         let otherSession = ChatSession(title: "Other")
         context.insert(otherSession)
         try? context.save()
-        vm.switchToSession(otherSession)
+        vm.switchToSession(otherSession.toRecord())
 
-        vm.switchToSession(session)
+        vm.switchToSession(session.toRecord())
 
         XCTAssertEqual(vm.compressionMode, .automatic,
                        "nil compressionModeRaw should default to .automatic on switchToSession")
@@ -121,11 +121,11 @@ final class CompressionIntegrationTests: XCTestCase {
         await vm.sendMessage()
 
         let message = vm.messages[0]  // user message
-        vm.pinMessage(message)
+        vm.pinMessage(id: message.id)
 
         XCTAssertTrue(vm.pinnedMessageIDs.contains(message.id),
                       "pinnedMessageIDs should contain the pinned message's ID")
-        XCTAssertTrue(session.pinnedMessageIDs.contains(message.id),
+        XCTAssertTrue(session.toRecord().pinnedMessageIDs.contains(message.id),
                       "Session pinnedMessageIDs should contain the ID after pinMessage")
     }
 
@@ -136,14 +136,14 @@ final class CompressionIntegrationTests: XCTestCase {
         await vm.sendMessage()
 
         let message = vm.messages[0]
-        vm.pinMessage(message)
-        XCTAssertTrue(vm.isMessagePinned(message))
+        vm.pinMessage(id: message.id)
+        XCTAssertTrue(vm.isMessagePinned(id: message.id))
 
-        vm.unpinMessage(message)
+        vm.unpinMessage(id: message.id)
 
         XCTAssertFalse(vm.pinnedMessageIDs.contains(message.id),
                        "pinnedMessageIDs should NOT contain the ID after unpinMessage")
-        XCTAssertFalse(session.pinnedMessageIDs.contains(message.id),
+        XCTAssertFalse(session.toRecord().pinnedMessageIDs.contains(message.id),
                        "Session pinnedMessageIDs should NOT contain the ID after unpinMessage")
     }
 
@@ -155,13 +155,13 @@ final class CompressionIntegrationTests: XCTestCase {
 
         let message = vm.messages[0]
 
-        XCTAssertFalse(vm.isMessagePinned(message), "Message should not be pinned initially")
+        XCTAssertFalse(vm.isMessagePinned(id: message.id), "Message should not be pinned initially")
 
-        vm.pinMessage(message)
-        XCTAssertTrue(vm.isMessagePinned(message), "Message should be pinned after pinMessage")
+        vm.pinMessage(id: message.id)
+        XCTAssertTrue(vm.isMessagePinned(id: message.id), "Message should be pinned after pinMessage")
 
-        vm.unpinMessage(message)
-        XCTAssertFalse(vm.isMessagePinned(message), "Message should not be pinned after unpinMessage")
+        vm.unpinMessage(id: message.id)
+        XCTAssertFalse(vm.isMessagePinned(id: message.id), "Message should not be pinned after unpinMessage")
     }
 
     func test_pinnedMessageIDs_restoredOnSessionSwitch() async {
@@ -171,7 +171,7 @@ final class CompressionIntegrationTests: XCTestCase {
         await vm.sendMessage()
 
         let message = vm.messages[0]
-        vm.pinMessage(message)
+        vm.pinMessage(id: message.id)
         let pinnedID = message.id
         XCTAssertTrue(vm.pinnedMessageIDs.contains(pinnedID))
 
@@ -179,12 +179,12 @@ final class CompressionIntegrationTests: XCTestCase {
         let sessionB = ChatSession(title: "Session B")
         context.insert(sessionB)
         try? context.save()
-        vm.switchToSession(sessionB)
+        vm.switchToSession(sessionB.toRecord())
         XCTAssertFalse(vm.pinnedMessageIDs.contains(pinnedID),
                        "Switching sessions should clear pinnedMessageIDs from previous session")
 
         // Switch back — IDs should be restored from session A
-        vm.switchToSession(sessionA)
+        vm.switchToSession(sessionA.toRecord())
         XCTAssertTrue(vm.pinnedMessageIDs.contains(pinnedID),
                       "Switching back to session A should restore its pinnedMessageIDs")
     }
@@ -209,7 +209,7 @@ final class CompressionIntegrationTests: XCTestCase {
         let longContent = String(repeating: "a", count: 80)
         let sessionID = vm.activeSession!.id
         for _ in 0..<5 {
-            let msg = ChatMessage(role: .user,
+            let msg = ChatMessageRecord(role: .user,
                                   content: longContent,
                                   sessionID: sessionID)
             vm.messages.append(msg)
@@ -310,7 +310,7 @@ final class CompressionIntegrationTests: XCTestCase {
         let longContent = String(repeating: "b", count: 80)
         let sessionID = vm.activeSession!.id
         for _ in 0..<5 {
-            let msg = ChatMessage(role: .user,
+            let msg = ChatMessageRecord(role: .user,
                                   content: longContent,
                                   sessionID: sessionID)
             vm.messages.append(msg)
@@ -354,7 +354,7 @@ final class CompressionIntegrationTests: XCTestCase {
         let longContent = String(repeating: "c", count: 80)
         let sessionID = vm.activeSession!.id
         for _ in 0..<4 {
-            let msg = ChatMessage(role: .user,
+            let msg = ChatMessageRecord(role: .user,
                                   content: longContent,
                                   sessionID: sessionID)
             vm.messages.append(msg)
@@ -363,7 +363,7 @@ final class CompressionIntegrationTests: XCTestCase {
         // Pin the oldest message — it would be evicted first without pinning support.
         let pinnedMessage = vm.messages[0]
         let pinnedContent = pinnedMessage.content
-        vm.pinMessage(pinnedMessage)
+        vm.pinMessage(id: pinnedMessage.id)
 
         // Send one more message to trigger generateIntoMessage (runs the compression path).
         mock.tokensToYield = ["AssistantReply"]

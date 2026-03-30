@@ -51,14 +51,14 @@ final class PinnedMessageIndicatorTests: XCTestCase {
         let session = ChatSession(title: title)
         context.insert(session)
         try? context.save()
-        vm.switchToSession(session)
+        vm.switchToSession(session.toRecord())
         return session
     }
 
     private func makeMessage() -> ChatMessage {
         let sessionID = vm.activeSession!.id
         let message = ChatMessage(role: .user, content: "Test message", sessionID: sessionID)
-        vm.messages.append(message)
+        vm.messages.append(message.toRecord())
         return message
     }
 
@@ -68,7 +68,7 @@ final class PinnedMessageIndicatorTests: XCTestCase {
         createSession()
         let message = makeMessage()
 
-        XCTAssertFalse(vm.isMessagePinned(message),
+        XCTAssertFalse(vm.isMessagePinned(id: message.id),
                        "A newly created message should not be pinned")
     }
 
@@ -76,9 +76,9 @@ final class PinnedMessageIndicatorTests: XCTestCase {
         createSession()
         let message = makeMessage()
 
-        vm.pinMessage(message)
+        vm.pinMessage(id: message.id)
 
-        XCTAssertTrue(vm.isMessagePinned(message),
+        XCTAssertTrue(vm.isMessagePinned(id: message.id),
                       "isMessagePinned should return true after pinMessage")
     }
 
@@ -86,12 +86,12 @@ final class PinnedMessageIndicatorTests: XCTestCase {
         createSession()
         let message = makeMessage()
 
-        vm.pinMessage(message)
-        XCTAssertTrue(vm.isMessagePinned(message), "Precondition: message should be pinned")
+        vm.pinMessage(id: message.id)
+        XCTAssertTrue(vm.isMessagePinned(id: message.id), "Precondition: message should be pinned")
 
-        vm.unpinMessage(message)
+        vm.unpinMessage(id: message.id)
 
-        XCTAssertFalse(vm.isMessagePinned(message),
+        XCTAssertFalse(vm.isMessagePinned(id: message.id),
                        "isMessagePinned should return false after unpinMessage")
     }
 
@@ -99,9 +99,9 @@ final class PinnedMessageIndicatorTests: XCTestCase {
         let session = createSession()
         let message = makeMessage()
 
-        vm.pinMessage(message)
+        vm.pinMessage(id: message.id)
 
-        XCTAssertTrue(session.pinnedMessageIDs.contains(message.id),
+        XCTAssertTrue(session.toRecord().pinnedMessageIDs.contains(message.id),
                       "After pinMessage, the session's pinnedMessageIDs should contain the message's id")
     }
 
@@ -109,13 +109,13 @@ final class PinnedMessageIndicatorTests: XCTestCase {
         let session = createSession()
         let message = makeMessage()
 
-        vm.pinMessage(message)
-        XCTAssertTrue(session.pinnedMessageIDs.contains(message.id),
+        vm.pinMessage(id: message.id)
+        XCTAssertTrue(session.toRecord().pinnedMessageIDs.contains(message.id),
                       "Precondition: session should contain the pinned id")
 
-        vm.unpinMessage(message)
+        vm.unpinMessage(id: message.id)
 
-        XCTAssertFalse(session.pinnedMessageIDs.contains(message.id),
+        XCTAssertFalse(session.toRecord().pinnedMessageIDs.contains(message.id),
                        "After unpinMessage, the session's pinnedMessageIDs should no longer contain the id")
     }
 }

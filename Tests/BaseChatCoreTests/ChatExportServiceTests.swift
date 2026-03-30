@@ -5,8 +5,8 @@ final class ChatExportServiceTests: XCTestCase {
 
     private let sessionID = UUID()
 
-    private func makeMessage(role: MessageRole, content: String) -> ChatMessage {
-        ChatMessage(role: role, content: content, sessionID: sessionID)
+    private func makeMessage(role: MessageRole, content: String) -> ChatMessageRecord {
+        ChatMessageRecord(role: role, content: content, sessionID: sessionID)
     }
 
     // MARK: - Plain Text

@@ -1,15 +1,14 @@
 import Foundation
-import SwiftData
 import BaseChatCore
 
 // MARK: - ChatViewModel + Persistence
 
 extension ChatViewModel {
 
-    /// Loads messages for the active session from SwiftData.
+    /// Loads messages for the active session from the persistence provider.
     func loadMessages() {
-        guard let modelContext else {
-            Log.persistence.warning("loadMessages called before modelContext was configured — messages will not load")
+        guard let persistence else {
+            Log.persistence.warning("loadMessages called before persistence was configured — messages will not load")
             return
         }
         guard let sessionID = activeSessionID else {
@@ -17,13 +16,8 @@ extension ChatViewModel {
             return
         }
 
-        let descriptor = FetchDescriptor<ChatMessage>(
-            predicate: #Predicate { $0.sessionID == sessionID },
-            sortBy: [SortDescriptor(\.timestamp)]
-        )
-
         do {
-            messages = try modelContext.fetch(descriptor)
+            messages = try persistence.fetchMessages(for: sessionID)
             Log.persistence.info("Loaded \(self.messages.count) messages")
         } catch {
             Log.persistence.error("Failed to load messages: \(error)")
@@ -31,29 +25,27 @@ extension ChatViewModel {
         }
     }
 
-    /// Persists a message to SwiftData.
-    func saveMessage(_ message: ChatMessage) {
-        guard let modelContext else {
-            Log.persistence.warning("saveMessage called before modelContext was configured — message will not be persisted")
+    /// Persists a message via the persistence provider.
+    func saveMessage(_ message: ChatMessageRecord) {
+        guard let persistence else {
+            Log.persistence.warning("saveMessage called before persistence was configured — message will not be persisted")
             return
         }
-        modelContext.insert(message)
         do {
-            try modelContext.save()
+            try persistence.insertMessage(message)
         } catch {
             Log.persistence.error("Failed to save message: \(error)")
         }
     }
 
-    /// Deletes a message from SwiftData.
-    func deleteMessage(_ message: ChatMessage) {
-        guard let modelContext else {
-            Log.persistence.warning("deleteMessage called before modelContext was configured — message will not be deleted")
+    /// Deletes a message via the persistence provider.
+    func deleteMessage(_ message: ChatMessageRecord) {
+        guard let persistence else {
+            Log.persistence.warning("deleteMessage called before persistence was configured — message will not be deleted")
             return
         }
-        modelContext.delete(message)
         do {
-            try modelContext.save()
+            try persistence.deleteMessage(message.id)
         } catch {
             Log.persistence.error("Failed to delete message: \(error)")
         }

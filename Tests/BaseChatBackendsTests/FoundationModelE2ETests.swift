@@ -44,13 +44,13 @@ final class FoundationModelE2ETests: XCTestCase {
         }
 
         vm = ChatViewModel(inferenceService: inferenceService)
-        vm.configure(modelContext: context)
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        vm.configure(persistence: persistence)
 
         // Create and activate a session
-        let session = ChatSession(title: "E2E Test")
-        context.insert(session)
-        try context.save()
-        vm.switchToSession(session)
+        let record = ChatSessionRecord(title: "E2E Test")
+        try persistence.insertSession(record)
+        vm.switchToSession(record)
 
         // Load the Foundation model
         let foundationModel = ModelInfo.builtInFoundation
@@ -67,12 +67,12 @@ final class FoundationModelE2ETests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func fetchMessages(for sessionID: UUID) -> [ChatMessage] {
+    private func fetchMessages(for sessionID: UUID) -> [ChatMessageRecord] {
         let descriptor = FetchDescriptor<ChatMessage>(
             predicate: #Predicate { $0.sessionID == sessionID },
             sortBy: [SortDescriptor(\.timestamp)]
         )
-        return (try? context.fetch(descriptor)) ?? []
+        return ((try? context.fetch(descriptor)) ?? []).map { $0.toRecord() }
     }
 
     // MARK: - Real Inference Tests
@@ -139,9 +139,8 @@ final class FoundationModelE2ETests: XCTestCase {
     func test_realInference_afterSessionSwitch_generatesSuccessfully() async throws {
         // Simulate a session switch mid-session, which calls resetConversation()
         // and clears FoundationBackend.session. generate() must still work.
-        let secondSession = ChatSession(title: "Second Session")
-        context.insert(secondSession)
-        try context.save()
+        let secondSession = ChatSessionRecord(title: "Second Session")
+        try SwiftDataPersistenceProvider(modelContext: context).insertSession(secondSession)
 
         vm.switchToSession(secondSession)  // → resetConversation() → session = nil
 
