@@ -38,6 +38,19 @@ extension ChatViewModel {
         }
     }
 
+    /// Updates an existing message via the persistence provider.
+    func updateMessage(_ message: ChatMessageRecord) {
+        guard let persistence else {
+            Log.persistence.warning("updateMessage called before persistence was configured — message will not be updated")
+            return
+        }
+        do {
+            try persistence.updateMessage(message)
+        } catch {
+            Log.persistence.error("Failed to update message: \(error)")
+        }
+    }
+
     /// Deletes a message via the persistence provider.
     func deleteMessage(_ message: ChatMessageRecord) {
         guard let persistence else {

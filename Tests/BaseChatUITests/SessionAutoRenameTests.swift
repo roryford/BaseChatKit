@@ -54,7 +54,8 @@ final class SessionAutoRenameTests: XCTestCase {
 
         await vm.autoRenameSession(session, firstMessage: "How do I plan a trip?", inferenceService: service)
 
-        XCTAssertEqual(session.title, "Travel Planning Tips")
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "Travel Planning Tips")
     }
 
     func test_autoRename_onError_keepsExistingTitle() async {
@@ -65,7 +66,8 @@ final class SessionAutoRenameTests: XCTestCase {
 
         await vm.autoRenameSession(session, firstMessage: "Tell me about dogs", inferenceService: service)
 
-        XCTAssertEqual(session.title, "New Chat")
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "New Chat")
     }
 
     func test_autoRename_truncatesLongTitle() async {
@@ -79,8 +81,9 @@ final class SessionAutoRenameTests: XCTestCase {
 
         await vm.autoRenameSession(session, firstMessage: "Some question", inferenceService: service)
 
-        XCTAssertEqual(session.title.count, 50)
-        XCTAssertEqual(session.title, String(longTitle.prefix(50)))
+        let updated = vm.sessions.first { $0.id == session.id }!
+        XCTAssertEqual(updated.title.count, 50)
+        XCTAssertEqual(updated.title, String(longTitle.prefix(50)))
     }
 
     func test_autoRename_trimsWhitespace() async {
@@ -90,6 +93,7 @@ final class SessionAutoRenameTests: XCTestCase {
 
         await vm.autoRenameSession(session, firstMessage: "What is cooking?", inferenceService: service)
 
-        XCTAssertEqual(session.title, "My Title")
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "My Title")
     }
 }

@@ -57,7 +57,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     func test_saveSettingsToSession_updatesSessionProperties() throws {
         let (vm, _, persistence) = try makeViewModelWithPersistence()
 
-        var session = ChatSessionRecord(title: "Settings Test")
+        let session = ChatSessionRecord(title: "Settings Test")
         try persistence.insertSession(session)
 
         vm.activeSession = session
@@ -122,7 +122,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     }
 
     func test_switchToSession_clearsMessages() async throws {
-        let (vm, mock, _) = try makeViewModelWithPersistence(mock: MockInferenceBackend())
+        let (vm, _, _) = try makeViewModelWithPersistence(mock: MockInferenceBackend())
 
         let sessionA = ChatSessionRecord(title: "Session A")
 
@@ -261,7 +261,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         await vm.editMessage(assistantMessage.id, newContent: "Edited assistant text")
 
         // Editing an assistant message should update its content...
-        XCTAssertEqual(assistantMessage.content, "Edited assistant text",
+        XCTAssertEqual(vm.messages[1].content, "Edited assistant text",
                        "Assistant message content should be updated")
         // ...but should NOT trigger regeneration (only user edits do that).
         XCTAssertEqual(mock.generateCallCount, generateCountBefore,
@@ -289,7 +289,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         mock.tokensToYield = ["New", " reply"]
         await vm.editMessage(userMessage.id, newContent: "")
 
-        XCTAssertEqual(userMessage.content, "",
+        XCTAssertEqual(vm.messages[0].content, "",
                        "User message content should be set to empty string")
         // Since it was a user message edit, regeneration should still occur.
         XCTAssertEqual(vm.messages.count, 2,

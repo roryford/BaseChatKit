@@ -265,16 +265,18 @@ final class ChatViewModelIntegrationTests: XCTestCase {
 
     func test_switchSession_restoresGenerationSettings() async {
         // Session A with custom settings
-        let sessionA = createAndActivateSession(title: "Session A")
+        createAndActivateSession(title: "Session A")
         vm.temperature = 0.3
         vm.systemPrompt = "Be concise."
         vm.saveSettingsToSession()
+        let sessionA = vm.activeSession!
 
         // Session B with different settings
-        let sessionB = createAndActivateSession(title: "Session B")
+        createAndActivateSession(title: "Session B")
         vm.temperature = 1.8
         vm.systemPrompt = "Be verbose."
         vm.saveSettingsToSession()
+        let sessionB = vm.activeSession!
 
         // Switch to A — settings should restore
         vm.switchToSession(sessionA)
@@ -427,10 +429,11 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         vm.inputText = "What is the meaning of life?"
         await vm.sendMessage()
 
-        // Verify the session title was auto-generated
-        XCTAssertNotEqual(newSession.title, "New Chat", "Title should be auto-generated")
-        XCTAssertTrue(newSession.title.contains("What is the meaning of life"),
-                      "Title should be derived from first message, got: \(newSession.title)")
+        // Re-fetch from the session manager since ChatSessionRecord is a value type
+        let updatedSession = sessionManager.sessions.first { $0.id == newSession.id }
+        XCTAssertNotEqual(updatedSession?.title, "New Chat", "Title should be auto-generated")
+        XCTAssertTrue(updatedSession?.title.contains("What is the meaning of life") == true,
+                      "Title should be derived from first message, got: \(updatedSession?.title ?? "nil")")
     }
 
     // MARK: - Export After Persistence
@@ -451,7 +454,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
     // MARK: - Save State Persists Pending Changes
 
     func test_saveState_flushesPendingChanges() async {
-        let session = createAndActivateSession()
+        createAndActivateSession()
 
         mock.tokensToYield = ["Reply"]
         vm.inputText = "Question"

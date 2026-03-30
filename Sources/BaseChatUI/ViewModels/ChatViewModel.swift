@@ -484,7 +484,7 @@ public final class ChatViewModel {
 
         // Update the edited message.
         messages[index].content = newContent
-        saveMessage(messages[index])
+        updateMessage(messages[index])
 
         // Remove all messages after the edited one.
         let toRemove = Array(messages[(index + 1)...])
