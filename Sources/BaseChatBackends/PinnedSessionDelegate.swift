@@ -77,12 +77,12 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
         // If no pins are configured for this host, fall back to default trust.
         // Log a warning in debug builds so developers know pinning is inactive —
         // silently falling back would make it easy to deploy without real pins.
-        if Self.pinnedHosts[host] == nil || Self.pinnedHosts[host]!.isEmpty {
+        let pins = Self.pinnedHosts[host]
+        guard let expectedPins = pins, !expectedPins.isEmpty else {
             Log.network.warning("PinnedSessionDelegate: no pins configured for \(host, privacy: .public). Falling back to default trust evaluation.")
             completionHandler(.performDefaultHandling, nil)
             return
         }
-        let expectedPins = Self.pinnedHosts[host]!
 
         // Evaluate the trust chain first.
         var error: CFError?

@@ -10,7 +10,11 @@ import BaseChatTestSupport
 final class DefaultBackendsRoutingTests: XCTestCase {
 
     func test_routing_gguf_mapsToLlamaBackend() {
+        #if Llama
         XCTAssertEqual(DefaultBackends.backendTypeName(for: .gguf), "LlamaBackend")
+        #else
+        XCTAssertNil(DefaultBackends.backendTypeName(for: .gguf))
+        #endif
     }
 
     func test_routing_mlx_mapsToMLXBackend() {
