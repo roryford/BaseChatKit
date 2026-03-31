@@ -104,6 +104,31 @@ final class PinnedSessionDelegateTests: XCTestCase {
         XCTAssertEqual(receivedDisposition, .performDefaultHandling)
     }
 
+    // MARK: - Concurrent Access
+
+    func test_concurrentPinnedHostsAccess_doesNotCrash() {
+        // Verify that concurrent reads and writes through the NSLock-guarded
+        // accessor don't produce data races or crashes.
+        let queue = DispatchQueue(label: "test.concurrent", attributes: .concurrent)
+        let group = DispatchGroup()
+
+        for i in 0..<100 {
+            group.enter()
+            queue.async {
+                if i.isMultiple(of: 2) {
+                    PinnedSessionDelegate.pinnedHosts["api.example.com"] = ["hash\(i)"]
+                } else {
+                    _ = PinnedSessionDelegate.pinnedHosts
+                }
+                group.leave()
+            }
+        }
+
+        group.wait()
+        // Reaching here without a crash is sufficient.
+        PinnedSessionDelegate.pinnedHosts = [:]
+    }
+
     // MARK: - Helpers
 
     private func verifyBypassHost(_ host: String) async {

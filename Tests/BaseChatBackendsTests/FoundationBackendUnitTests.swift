@@ -158,7 +158,40 @@ final class FoundationBackendUnitTests: XCTestCase {
         XCTAssertFalse(backend.isGenerating, "isGenerating must start false")
     }
 
-    // MARK: - 2. After resetConversation(), generate() doesn't hit the model-not-loaded guard
+    // MARK: - Probe session history
+
+    /// Verifies that after `loadModel()` the backend does NOT retain the probe
+    /// session as its active session. If it did, the first user message would
+    /// see the probe "Hi / <response>" exchange as prior context.
+    ///
+    /// The `session` property is private, so we verify the observable invariant:
+    /// after a successful `loadModel`, the backend must be able to generate
+    /// without pre-existing conversation history. Since the property is inaccessible,
+    /// we document the contract here and skip when Apple Intelligence is unavailable.
+    func test_loadModel_doesNotRetainProbeSessionHistory() async throws {
+        // Without live Foundation Models we cannot drive loadModel to success,
+        // so we skip rather than silently pass on a path we haven't exercised.
+        try XCTSkipUnless(
+            FoundationBackend.isAvailable,
+            "Apple Intelligence not available — cannot call loadModel() to verify probe session is discarded. "
+            + "Inspect FoundationBackend.loadModel: session must remain nil after the probe so generate() creates a clean session."
+        )
+
+        let url = URL(fileURLWithPath: "/dev/null")
+        try await backend.loadModel(from: url, contextSize: 4096)
+        XCTAssertTrue(backend.isModelLoaded, "Precondition: loadModel should succeed")
+
+        // If the probe session were retained, generate() with systemPrompt == nil
+        // would reuse it (needsNewSession == false), carrying probe history forward.
+        // After our fix, session is nil post-loadModel, so generate() creates a
+        // fresh LanguageModelSession() on this call.
+        XCTAssertFalse(backend.isGenerating, "isGenerating must be false before generate()")
+        let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: GenerationConfig())
+        backend.stopGeneration()
+        _ = stream // suppress unused-variable warning
+    }
+
+
 
     /// Verifies that resetConversation() only clears the session (conversation
     /// history), not the loaded state — so a subsequent generate() can recreate

@@ -27,7 +27,23 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
     /// These pins are intentionally left empty and must be populated with actual
     /// SPKI hashes before enabling pinning in production. The delegate falls back
     /// to default trust evaluation when no pins are configured for a host.
-    static var pinnedHosts: [String: Set<String>] = [:]
+    // NSLock guards concurrent reads/writes from multiple URLSession delegate
+    // callback threads, which can arrive on arbitrary background threads.
+    private static let _pinnedHostsLock = NSLock()
+    private static var _pinnedHosts: [String: Set<String>] = [:]
+
+    public static var pinnedHosts: [String: Set<String>] {
+        get {
+            _pinnedHostsLock.lock()
+            defer { _pinnedHostsLock.unlock() }
+            return _pinnedHosts
+        }
+        set {
+            _pinnedHostsLock.lock()
+            defer { _pinnedHostsLock.unlock() }
+            _pinnedHosts = newValue
+        }
+    }
     // Populate with actual SPKI SHA-256 base64 hashes before enabling:
     // pinnedHosts["api.anthropic.com"] = Set(["hash1...", "hash2-backup..."])
     // pinnedHosts["api.openai.com"] = Set(["hash1...", "hash2-backup..."])
@@ -58,11 +74,15 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
             return
         }
 
-        // If no pins are configured for this host, use default trust.
-        guard let expectedPins = Self.pinnedHosts[host], !expectedPins.isEmpty else {
+        // If no pins are configured for this host, fall back to default trust.
+        // Log a warning in debug builds so developers know pinning is inactive —
+        // silently falling back would make it easy to deploy without real pins.
+        if Self.pinnedHosts[host] == nil || Self.pinnedHosts[host]!.isEmpty {
+            Log.network.warning("PinnedSessionDelegate: no pins configured for \(host, privacy: .public). Falling back to default trust evaluation.")
             completionHandler(.performDefaultHandling, nil)
             return
         }
+        let expectedPins = Self.pinnedHosts[host]!
 
         // Evaluate the trust chain first.
         var error: CFError?

@@ -3,6 +3,56 @@ import BaseChatCore
 import BaseChatTestSupport
 @testable import BaseChatBackends
 
+// MARK: - Pure Routing Tests (no hardware required)
+
+/// Tests the pure routing functions in DefaultBackends.
+/// These run in CI — no hardware, no backend instantiation.
+final class DefaultBackendsRoutingTests: XCTestCase {
+
+    func test_routing_gguf_mapsToLlamaBackend() {
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .gguf), "LlamaBackend")
+    }
+
+    func test_routing_mlx_mapsToMLXBackend() {
+        #if MLX
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .mlx), "MLXBackend")
+        #else
+        // MLX trait not enabled in this build — routing returns nil, which is correct.
+        XCTAssertNil(DefaultBackends.backendTypeName(for: .mlx))
+        #endif
+    }
+
+    func test_routing_foundation_mapsToFoundationBackend() {
+        #if canImport(FoundationModels)
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .foundation), "FoundationBackend")
+        #else
+        XCTAssertNil(DefaultBackends.backendTypeName(for: .foundation))
+        #endif
+    }
+
+    func test_routing_openAI_mapsToOpenAIBackend() {
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .openAI), "OpenAIBackend")
+    }
+
+    func test_routing_claude_mapsToClaudeBackend() {
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .claude), "ClaudeBackend")
+    }
+
+    func test_routing_ollama_mapsToOpenAIBackend() {
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .ollama), "OpenAIBackend")
+    }
+
+    func test_routing_lmStudio_mapsToOpenAIBackend() {
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .lmStudio), "OpenAIBackend")
+    }
+
+    func test_routing_custom_mapsToOpenAIBackend() {
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .custom), "OpenAIBackend")
+    }
+}
+
+// MARK: - Integration Tests (require hardware)
+
 /// Tests that DefaultBackends.register completes without error and
 /// that the resulting InferenceService can attempt model loads
 /// (which exercises the factory lookup path).
