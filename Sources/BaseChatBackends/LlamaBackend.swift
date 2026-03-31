@@ -117,7 +117,9 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         // Respect the model's actual training context length — hard-capping at 8192
         // prevents long-context models (32K–128K) from using their full window.
         let trainedContextLength = Int32(llama_model_n_ctx_train(loadedModel))
-        // Device-safe cap: roughly 1 token ≈ 2 KB of KV cache; cap at availableRAM / 4
+        // Device-safe cap: 1 token ≈ 8 KB of KV cache (2 KB per layer element × 4 bytes);
+        // physicalMemory / 8 192 gives the token count that would exhaust all RAM,
+        // clamped to 128 000 as an absolute ceiling.
         let availableRAM = Int64(ProcessInfo.processInfo.physicalMemory)
         let ramSafeCap = Int32(min(Int64(128_000), availableRAM / (2 * 1024 * 4)))
         let effectiveContextSize = min(contextSize, trainedContextLength, ramSafeCap)
