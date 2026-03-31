@@ -69,6 +69,13 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         // Availability can report .available even when the session cannot
         // actually run inference (e.g. simulator, or Apple Intelligence not
         // fully set up). Probe with a minimal request to verify.
+        //
+        // Probe session history: `LanguageModelSession.respond(to:)` accumulates
+        // conversation turns inside the session object. We must NOT store the probe
+        // session as the backend's active session — if we did, the first real user
+        // message would see the "Hi / <probe response>" exchange as prior context.
+        // Instead we discard the probe session after the availability check; `generate()`
+        // will create a fresh session on its first call (session == nil triggers that path).
         let probeSession = LanguageModelSession()
         do {
             _ = try await probeSession.respond(to: "Hi")
@@ -78,7 +85,8 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                 "Apple Intelligence model is not ready. Ensure Apple Intelligence is enabled in Settings > Apple Intelligence & Siri."
             )
         }
-        session = probeSession
+        // Intentionally NOT assigning probeSession to self.session — see comment above.
+        // session remains nil; generate() will create a clean session on first use.
 
         isModelLoaded = true
         Self.logger.info("Foundation backend loaded")
