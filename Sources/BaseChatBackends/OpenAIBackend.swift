@@ -73,7 +73,9 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
     private static let pinnedSession: URLSession = {
         let delegate = PinnedSessionDelegate()
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
+        // 300s covers inter-packet gaps during slow LLM generation; 600s caps total resource time.
+        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForResource = 600
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }()
 
@@ -165,26 +167,28 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
                 defer { self?.isGenerating = false }
 
                 do {
-                    let (bytes, response) = try await session.bytes(for: request)
+                    try await withExponentialBackoff {
+                        let (bytes, response) = try await session.bytes(for: request)
 
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        throw CloudBackendError.networkError(
-                            underlying: URLError(.badServerResponse)
-                        )
-                    }
-
-                    try await Self.checkStatusCode(httpResponse, bytes: bytes)
-
-                    let tokenStream = SSEStreamParser.parse(bytes: bytes)
-                    for try await payload in tokenStream {
-                        if Task.isCancelled { break }
-
-                        if let token = Self.extractToken(from: payload) {
-                            continuation.yield(token)
+                        guard let httpResponse = response as? HTTPURLResponse else {
+                            throw CloudBackendError.networkError(
+                                underlying: URLError(.badServerResponse)
+                            )
                         }
 
-                        if let usage = Self.extractUsage(from: payload) {
-                            self?.lastUsage = usage
+                        try await Self.checkStatusCode(httpResponse, bytes: bytes)
+
+                        let tokenStream = SSEStreamParser.parse(bytes: bytes)
+                        for try await payload in tokenStream {
+                            if Task.isCancelled { break }
+
+                            if let token = Self.extractToken(from: payload) {
+                                continuation.yield(token)
+                            }
+
+                            if let usage = Self.extractUsage(from: payload) {
+                                self?.lastUsage = usage
+                            }
                         }
                     }
 
@@ -254,8 +258,6 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
 
         var request = URLRequest(url: completionsURL)
         request.httpMethod = "POST"
-        // Generous timeout for streaming — covers inter-packet gaps during slow generation.
-        request.timeoutInterval = 300
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         // Resolve API key just-in-time from Keychain or ephemeral storage.

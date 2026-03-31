@@ -29,8 +29,8 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-build-
 
       - name: Run tests
-        run: swift test --filter "BaseChatCoreTests|BaseChatUITests"
+        run: swift test --filter "BaseChatCoreTests|BaseChatUITests|BaseChatBackendsTests"
 
-      # BaseChatBackendsTests and BaseChatE2ETests require physical hardware
-      # or specific OS versions (iOS 26 / macOS 26 for FoundationBackend).
+      # BaseChatE2ETests requires physical hardware or specific OS versions
+      # (iOS 26 / macOS 26 for FoundationBackend).
       # Run these locally before merging backend changes.

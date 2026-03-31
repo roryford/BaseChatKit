@@ -182,38 +182,45 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
                 }
 
                 do {
-                    let (bytes, response) = try await session.bytes(for: request)
+                    try await withExponentialBackoff {
+                        let (bytes, response) = try await session.bytes(for: request)
 
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        throw CloudBackendError.networkError(
-                            underlying: URLError(.badServerResponse)
-                        )
-                    }
-
-                    try await Self.validateStatusCode(httpResponse, bytes: bytes)
-
-                    let sseStream = SSEStreamParser.parse(bytes: bytes)
-
-                    for try await payload in sseStream {
-                        if Task.isCancelled { break }
-
-                        if let token = Self.extractToken(from: payload) {
-                            continuation.yield(token)
-                        }
-
-                        if let usage = Self.extractUsage(from: payload) {
-                            self?.lastUsage = (
-                                promptTokens: usage.promptTokens ?? self?.lastUsage?.promptTokens ?? 0,
-                                completionTokens: usage.completionTokens ?? self?.lastUsage?.completionTokens ?? 0
+                        guard let httpResponse = response as? HTTPURLResponse else {
+                            throw CloudBackendError.networkError(
+                                underlying: URLError(.badServerResponse)
                             )
                         }
 
-                        if Self.isStreamEnd(payload) {
-                            break
-                        }
+                        try await Self.validateStatusCode(httpResponse, bytes: bytes)
 
-                        if let error = Self.extractStreamError(from: payload) {
-                            throw error
+                        let sseStream = SSEStreamParser.parse(bytes: bytes)
+
+                        for try await payload in sseStream {
+                            if Task.isCancelled { break }
+
+                            if let token = Self.extractToken(from: payload) {
+                                continuation.yield(token)
+                            }
+
+                            if let usage = Self.extractUsage(from: payload) {
+                                if let promptTokens = usage.promptTokens {
+                                    // message_start: capture prompt count; completionTokens fills in later.
+                                    self?.lastUsage = (promptTokens: promptTokens, completionTokens: 0)
+                                } else if let completionTokens = usage.completionTokens {
+                                    // message_delta: merge with already-stored prompt count so a mid-stream
+                                    // drop still preserves whatever partial counts we have.
+                                    let existing = self?.lastUsage?.promptTokens ?? 0
+                                    self?.lastUsage = (promptTokens: existing, completionTokens: completionTokens)
+                                }
+                            }
+
+                            if Self.isStreamEnd(payload) {
+                                break
+                            }
+
+                            if let error = Self.extractStreamError(from: payload) {
+                                throw error
+                            }
                         }
                     }
 
