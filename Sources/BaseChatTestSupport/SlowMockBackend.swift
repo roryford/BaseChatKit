@@ -6,19 +6,48 @@ import BaseChatCore
 ///
 /// Shared across test targets via BaseChatTestSupport.
 public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
-    public var isModelLoaded = true
-    public var isGenerating = false
-    public var capabilities = BackendCapabilities(
+    private let stateLock = NSLock()
+    private var _isModelLoaded = true
+    private var _isGenerating = false
+    private var _tokensToYield: [String] = []
+    private var _delayPerToken: Duration = .milliseconds(50)
+
+    public var isModelLoaded: Bool {
+        get { withStateLock { _isModelLoaded } }
+        set { withStateLock { _isModelLoaded = newValue } }
+    }
+
+    public var isGenerating: Bool {
+        get { withStateLock { _isGenerating } }
+        set { withStateLock { _isGenerating = newValue } }
+    }
+
+    public let capabilities = BackendCapabilities(
         supportedParameters: [.temperature, .topP, .repeatPenalty],
         maxContextTokens: 4096,
         requiresPromptTemplate: false,
         supportsSystemPrompt: true
     )
 
-    public var tokensToYield: [String] = []
-    public var delayPerToken: Duration = .milliseconds(50)
+    public var tokensToYield: [String] {
+        get { withStateLock { _tokensToYield } }
+        set { withStateLock { _tokensToYield = newValue } }
+    }
+
+    public var delayPerToken: Duration {
+        get { withStateLock { _delayPerToken } }
+        set { withStateLock { _delayPerToken = newValue } }
+    }
+
+    // Retained so stopGeneration() / unloadModel() can cancel the in-flight task,
+    // preventing the continuation from firing into a deallocated consumer.
+    private var generationTask: Task<Void, Never>?
 
     public init() {}
+
+    deinit {
+        cancelGeneration(markModelUnloaded: false)
+    }
 
     /// Convenience initialiser that sets an initial token list and a millisecond delay.
     ///
@@ -31,7 +60,7 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
     }
 
     public func loadModel(from url: URL, contextSize: Int32) async throws {
-        isModelLoaded = true
+        withStateLock { _isModelLoaded = true }
     }
 
     public func generate(
@@ -39,30 +68,69 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> AsyncThrowingStream<String, Error> {
-        isGenerating = true
-        let tokens = tokensToYield
-        let delay = delayPerToken
+        let (tokens, delay) = withStateLock {
+            _isGenerating = true
+            return (_tokensToYield, _delayPerToken)
+        }
 
-        return AsyncThrowingStream { continuation in
-            Task { [weak self] in
+        return AsyncThrowingStream { [weak self] continuation in
+            let task = Task { [weak self] in
+                defer {
+                    self?.finishGeneration()
+                    continuation.finish()
+                }
+
                 for token in tokens {
                     if Task.isCancelled { break }
                     try? await Task.sleep(for: delay)
                     if Task.isCancelled { break }
                     continuation.yield(token)
                 }
-                self?.isGenerating = false
-                continuation.finish()
             }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+            self?.setGenerationTask(task)
         }
     }
 
     public func stopGeneration() {
-        isGenerating = false
+        cancelGeneration(markModelUnloaded: false)
     }
 
     public func unloadModel() {
-        isModelLoaded = false
-        isGenerating = false
+        cancelGeneration(markModelUnloaded: true)
+    }
+
+    private func withStateLock<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
+    }
+
+    private func setGenerationTask(_ task: Task<Void, Never>) {
+        withStateLock {
+            generationTask = task
+        }
+    }
+
+    private func finishGeneration() {
+        withStateLock {
+            _isGenerating = false
+            generationTask = nil
+        }
+    }
+
+    private func cancelGeneration(markModelUnloaded: Bool) {
+        let task = withStateLock {
+            if markModelUnloaded {
+                _isModelLoaded = false
+            }
+            _isGenerating = false
+            let task = generationTask
+            generationTask = nil
+            return task
+        }
+        task?.cancel()
     }
 }

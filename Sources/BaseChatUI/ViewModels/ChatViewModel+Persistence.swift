@@ -51,4 +51,13 @@ extension ChatViewModel {
         }
         try persistence.deleteMessage(message.id)
     }
+
+    /// Deletes all messages for a session via the persistence provider.
+    func deleteMessages(for sessionID: UUID) throws {
+        guard let persistence else {
+            Log.persistence.warning("deleteMessages called before persistence was configured — messages will not be deleted")
+            return
+        }
+        try persistence.deleteMessages(for: sessionID)
+    }
 }

@@ -18,12 +18,14 @@ public final class MockPersistenceProvider: ChatPersistenceProvider, @unchecked 
     public var insertMessageCallCount = 0
     public var updateMessageCallCount = 0
     public var deleteMessageCallCount = 0
+    public var deleteMessagesCallCount = 0
     public var fetchMessagesCallCount = 0
 
     public var shouldThrowOnInsertSession: Error?
     public var shouldThrowOnFetchSessions: Error?
     public var shouldThrowOnInsertMessage: Error?
     public var shouldThrowOnFetchMessages: Error?
+    public var shouldThrowOnDeleteMessages: Error?
 
     public init() {}
 
@@ -91,6 +93,8 @@ public final class MockPersistenceProvider: ChatPersistenceProvider, @unchecked 
     }
 
     public func deleteMessages(for sessionID: UUID) throws {
+        deleteMessagesCallCount += 1
+        if let error = shouldThrowOnDeleteMessages { throw error }
         messages.removeAll { $0.sessionID == sessionID }
     }
 }
