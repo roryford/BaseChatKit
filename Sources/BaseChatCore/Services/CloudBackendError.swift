@@ -34,4 +34,15 @@ public enum CloudBackendError: LocalizedError {
             return "Response stream was interrupted."
         }
     }
+
+    public var isRetryable: Bool {
+        switch self {
+        case .rateLimited, .networkError, .streamInterrupted:
+            return true
+        case .serverError(let statusCode, _):
+            return statusCode >= 500
+        case .invalidURL, .authenticationFailed, .parseError, .missingAPIKey:
+            return false
+        }
+    }
 }

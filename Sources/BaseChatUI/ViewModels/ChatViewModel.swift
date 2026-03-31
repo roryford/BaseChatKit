@@ -562,18 +562,21 @@ public final class ChatViewModel {
         if isGenerating {
             stopGeneration()
         }
+        var firstDeleteError: Error?
         for message in messages {
             do {
                 try deleteMessage(message)
             } catch {
                 Log.persistence.error("Failed to delete message while clearing chat: \(error)")
-                errorMessage = "Failed to clear chat: \(error.localizedDescription)"
-                return
+                if firstDeleteError == nil { firstDeleteError = error }
             }
         }
         messages.removeAll()
         tokenCountCache.removeAll()
         updateContextEstimate()
+        if let error = firstDeleteError {
+            errorMessage = "Failed to clear chat: \(error.localizedDescription)"
+        }
         Log.ui.info("Chat cleared")
     }
 
