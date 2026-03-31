@@ -86,6 +86,10 @@ public final class MockURLProtocol: URLProtocol {
         return nil
     }
 
+    // MARK: - Instance State
+
+    private var asyncDeliveryItem: DispatchWorkItem?
+
     // MARK: - URLProtocol Overrides
 
     public override class func canInit(with request: URLRequest) -> Bool {
@@ -127,7 +131,8 @@ public final class MockURLProtocol: URLProtocol {
     }
 
     public override func stopLoading() {
-        // Nothing to clean up for synchronous stubs.
+        asyncDeliveryItem?.cancel()
+        asyncDeliveryItem = nil
     }
 
     // MARK: - Response Delivery
@@ -171,12 +176,19 @@ public final class MockURLProtocol: URLProtocol {
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
 
         let client = self.client
-        DispatchQueue.global(qos: .default).async {
+        var workItem: DispatchWorkItem!
+        workItem = DispatchWorkItem {
             for chunk in chunks {
+                if workItem.isCancelled { break }
                 Thread.sleep(forTimeInterval: chunkDelay)
+                if workItem.isCancelled { break }
                 client?.urlProtocol(self, didLoad: chunk)
             }
-            client?.urlProtocolDidFinishLoading(self)
+            if !workItem.isCancelled {
+                client?.urlProtocolDidFinishLoading(self)
+            }
         }
+        asyncDeliveryItem = workItem
+        DispatchQueue.global(qos: .default).async(execute: workItem)
     }
 }

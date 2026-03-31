@@ -262,9 +262,11 @@ extension OpenAIBackendTests {
     }
 }
 
-// MARK: - BackendContractSuite
+// MARK: - Backend Contract
 
-extension OpenAIBackendTests: BackendContractSuite {
-    func makeBackend() -> OpenAIBackend { OpenAIBackend() }
+extension OpenAIBackendTests {
+    func test_contract_allInvariants() {
+        BackendContractChecks.assertAllInvariants { OpenAIBackend() }
+    }
 }
 

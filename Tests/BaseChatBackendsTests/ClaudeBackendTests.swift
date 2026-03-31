@@ -250,9 +250,11 @@ extension ClaudeBackendTests {
     }
 }
 
-// MARK: - BackendContractSuite
+// MARK: - Backend Contract
 
-extension ClaudeBackendTests: BackendContractSuite {
-    func makeBackend() -> ClaudeBackend { ClaudeBackend() }
+extension ClaudeBackendTests {
+    func test_contract_allInvariants() {
+        BackendContractChecks.assertAllInvariants { ClaudeBackend() }
+    }
 }
 
