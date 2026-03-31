@@ -43,7 +43,7 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
     public init() {}
 
     deinit {
-        generationTask?.cancel()
+        cancelGeneration(markModelUnloaded: false)
     }
 
     /// Convenience initialiser that sets an initial token list and a millisecond delay.
