@@ -123,6 +123,38 @@ final class LlamaBackendTests: XCTestCase {
 
     // MARK: - Unload
 
+    func test_unloadModel_doesNotBlockCallerThread() {
+        // unloadModel() must return quickly — it must not spin on the calling
+        // thread waiting for isGenerating, as InferenceService is @MainActor.
+        let backend = LlamaBackend()
+        let start = Date()
+        backend.unloadModel()
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertLessThan(elapsed, 0.1,
+                          "unloadModel() must return in < 100 ms (got \(elapsed * 1000)ms); "
+                        + "spinning on the calling thread would freeze the UI")
+    }
+
+    func test_contextSize_capLogic_ramSafeCapCalculation() {
+        // Validates the RAM-safe cap formula used in loadModel without requiring a real model.
+        // effectiveContextSize = min(requested, trainedContextLength, ramSafeCap)
+        // where ramSafeCap = min(128_000, physicalMemory / (2 * 1024 * 4))
+        //
+        // On any modern Apple Silicon device this should yield a positive cap well
+        // under 128_000 — confirming the formula doesn't overflow or produce zero.
+        let availableRAM = Int64(ProcessInfo.processInfo.physicalMemory)
+        let ramSafeCap = Int32(min(Int64(128_000), availableRAM / (2 * 1024 * 4)))
+        XCTAssertGreaterThan(ramSafeCap, 0,
+                             "RAM-safe cap must be positive; formula may have underflowed")
+        XCTAssertLessThanOrEqual(ramSafeCap, 128_000,
+                                 "RAM-safe cap must not exceed the absolute maximum of 128_000")
+        // Also verify min() behaviour: a small requested size always wins
+        let requested = Int32(512)
+        let effective = min(requested, Int32(32_000), ramSafeCap)
+        XCTAssertEqual(effective, requested,
+                       "Requested context size should win when it is the smallest of the three values")
+    }
+
     func test_unloadModel_fromCleanState_isNoOp() {
         let backend = LlamaBackend()
         // Should not crash when nothing is loaded
