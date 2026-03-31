@@ -2,45 +2,50 @@ import XCTest
 import BaseChatCore
 @testable import BaseChatBackends
 
-/// Shared contract assertions that every InferenceBackend implementation must satisfy.
-/// Called from a single `test_contract_allInvariants()` method declared directly on
-/// each adopting XCTestCase subclass — protocol extension methods are invisible to
-/// XCTest's ObjC runtime and would never run.
-enum BackendContractChecks {
+/// A protocol that backend test classes adopt to inherit a standard set of
+/// contract tests every InferenceBackend implementation must satisfy.
+///
+/// Adopting types must implement `makeBackend()` returning a freshly
+/// initialised, unconfigured backend instance.
+protocol BackendContractSuite: XCTestCase {
+    associatedtype Backend: InferenceBackend
+    func makeBackend() -> Backend
+}
 
-    static func assertAllInvariants<B: InferenceBackend>(
-        makingBackend makeBackend: () -> B,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        // 1. Not loaded on init
+extension BackendContractSuite {
+    func test_contract_isNotLoadedOnInit() {
         XCTAssertFalse(makeBackend().isModelLoaded,
-            "Backend must report isModelLoaded == false before loadModel is called",
-            file: file, line: line)
+                       "Backend must report isModelLoaded == false before loadModel is called")
+    }
 
-        // 2. Not generating on init
+    func test_contract_isNotGeneratingOnInit() {
         XCTAssertFalse(makeBackend().isGenerating,
-            "Backend must report isGenerating == false before any generation",
-            file: file, line: line)
+                       "Backend must report isGenerating == false before any generation")
+    }
 
-        // 3. generate() before load must throw
+    func test_contract_generateBeforeLoad_throws() {
+        let backend = makeBackend()
         XCTAssertThrowsError(
-            try makeBackend().generate(prompt: "hello", systemPrompt: nil, config: GenerationConfig()),
-            "generate() must throw when called before loadModel()",
-            file: file, line: line
+            try backend.generate(prompt: "hello", systemPrompt: nil, config: GenerationConfig()),
+            "generate() must throw when called before loadModel()"
         )
+    }
 
-        // 4. Capabilities must advertise at least one parameter
+    func test_contract_capabilities_parametersNotEmpty() {
         XCTAssertFalse(makeBackend().capabilities.supportedParameters.isEmpty,
-            "Backend must advertise at least one supported generation parameter",
-            file: file, line: line)
+                       "Backend must advertise at least one supported generation parameter")
+    }
 
-        // 5. unloadModel() is idempotent
-        let b1 = makeBackend()
-        b1.unloadModel()
-        b1.unloadModel()  // second call must not crash
+    func test_contract_unloadModel_isIdempotent() {
+        let backend = makeBackend()
+        // Should not crash when called on an already-unloaded backend
+        backend.unloadModel()
+        backend.unloadModel()
+    }
 
-        // 6. stopGeneration() before load must not crash
-        makeBackend().stopGeneration()
+    func test_contract_stopGeneration_beforeLoad_doesNotCrash() {
+        let backend = makeBackend()
+        // Should be safe to call even without an active generation
+        backend.stopGeneration()
     }
 }
