@@ -11,6 +11,7 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
     private var _isGenerating = false
     private var _tokensToYield: [String] = []
     private var _delayPerToken: Duration = .milliseconds(50)
+    private var generationTask: Task<Void, Never>?
 
     public var isModelLoaded: Bool {
         get { withStateLock { _isModelLoaded } }
@@ -39,14 +40,10 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
         set { withStateLock { _delayPerToken = newValue } }
     }
 
-    // Retained so stopGeneration() / unloadModel() can cancel the in-flight task,
-    // preventing the continuation from firing into a deallocated consumer.
-    private var generationTask: Task<Void, Never>?
-
     public init() {}
 
     deinit {
-        cancelGeneration(markModelUnloaded: false)
+        generationTask?.cancel()
     }
 
     /// Convenience initialiser that sets an initial token list and a millisecond delay.
