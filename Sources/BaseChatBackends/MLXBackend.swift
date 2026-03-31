@@ -71,6 +71,14 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Generation
 
+    /// Generates a token stream from the loaded MLX model.
+    ///
+    /// - Important: Generation is dispatched to `@MainActor` because `ModelContainer.generate()`
+    ///   in `mlx-swift-lm` must be called on the main thread (the MLX GPU scheduler is not
+    ///   thread-safe). This means long responses will occupy the main event loop. The effect
+    ///   is mitigated by the relatively short context windows used for on-device inference.
+    ///   If a future version of `mlx-swift-lm` supports a background-thread generate API,
+    ///   remove the `@MainActor` annotation from the inner `Task`.
     public func generate(
         prompt: String,
         systemPrompt: String?,
