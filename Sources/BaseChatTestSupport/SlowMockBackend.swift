@@ -18,6 +18,10 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
     public var tokensToYield: [String] = []
     public var delayPerToken: Duration = .milliseconds(50)
 
+    // Retained so stopGeneration() / unloadModel() can cancel the in-flight task,
+    // preventing the continuation from firing into a deallocated consumer.
+    private var generationTask: Task<Void, Never>?
+
     public init() {}
 
     /// Convenience initialiser that sets an initial token list and a millisecond delay.
@@ -43,8 +47,8 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
         let tokens = tokensToYield
         let delay = delayPerToken
 
-        return AsyncThrowingStream { continuation in
-            Task { [weak self] in
+        return AsyncThrowingStream { [weak self] continuation in
+            let task = Task { [weak self] in
                 for token in tokens {
                     if Task.isCancelled { break }
                     try? await Task.sleep(for: delay)
@@ -54,15 +58,20 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
                 self?.isGenerating = false
                 continuation.finish()
             }
+            self?.generationTask = task
         }
     }
 
     public func stopGeneration() {
         isGenerating = false
+        generationTask?.cancel()
+        generationTask = nil
     }
 
     public func unloadModel() {
         isModelLoaded = false
         isGenerating = false
+        generationTask?.cancel()
+        generationTask = nil
     }
 }
