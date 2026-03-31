@@ -30,6 +30,9 @@ public final class MockURLProtocol: URLProtocol {
         case immediate(data: Data, statusCode: Int)
         /// Return data in chunks (simulating SSE), with a brief delay between each.
         case sse(chunks: [Data], statusCode: Int)
+        /// Return data in chunks asynchronously — each chunk is delivered on a background
+        /// thread with a small delay, allowing consumers to cancel between chunks.
+        case asyncSSE(chunks: [Data], chunkDelay: TimeInterval = 0.005, statusCode: Int)
         /// Return a URL error (e.g. connection lost).
         case error(Error)
     }
@@ -38,6 +41,9 @@ public final class MockURLProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var stubs: [String: StubbedResponse] = [:]
 
+    /// All requests intercepted since the last `reset()` call, in order.
+    public private(set) static var capturedRequests: [URLRequest] = []
+
     /// Registers a canned response for a URL.
     public static func stub(url: URL, response: StubbedResponse) {
         lock.lock()
@@ -45,11 +51,12 @@ public final class MockURLProtocol: URLProtocol {
         stubs[url.absoluteString] = response
     }
 
-    /// Removes all registered stubs.
+    /// Removes all registered stubs and captured requests.
     public static func reset() {
         lock.lock()
         defer { lock.unlock() }
         stubs.removeAll()
+        capturedRequests.removeAll()
     }
 
     /// Finds a stub matching the URL — tries exact match first, then path-contains match.
@@ -79,6 +86,10 @@ public final class MockURLProtocol: URLProtocol {
         return nil
     }
 
+    // MARK: - Instance State
+
+    private var asyncDeliveryItem: DispatchWorkItem?
+
     // MARK: - URLProtocol Overrides
 
     public override class func canInit(with request: URLRequest) -> Bool {
@@ -93,6 +104,11 @@ public final class MockURLProtocol: URLProtocol {
     }
 
     public override func startLoading() {
+        // Capture every intercepted request for later inspection.
+        Self.lock.lock()
+        Self.capturedRequests.append(request)
+        Self.lock.unlock()
+
         guard let url = request.url,
               let stub = Self.findStub(for: url) else {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
@@ -106,13 +122,17 @@ public final class MockURLProtocol: URLProtocol {
         case .sse(let chunks, let statusCode):
             deliverSSEResponse(statusCode: statusCode, chunks: chunks)
 
+        case .asyncSSE(let chunks, let chunkDelay, let statusCode):
+            deliverAsyncSSEResponse(statusCode: statusCode, chunks: chunks, chunkDelay: chunkDelay)
+
         case .error(let error):
             client?.urlProtocol(self, didFailWithError: error)
         }
     }
 
     public override func stopLoading() {
-        // Nothing to clean up for synchronous stubs.
+        asyncDeliveryItem?.cancel()
+        asyncDeliveryItem = nil
     }
 
     // MARK: - Response Delivery
@@ -142,5 +162,33 @@ public final class MockURLProtocol: URLProtocol {
             client?.urlProtocol(self, didLoad: chunk)
         }
         client?.urlProtocolDidFinishLoading(self)
+    }
+
+    /// Delivers chunks on a background thread with a small delay between each,
+    /// so that async consumers have a real opportunity to cancel mid-stream.
+    private func deliverAsyncSSEResponse(statusCode: Int, chunks: [Data], chunkDelay: TimeInterval) {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: statusCode,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/event-stream"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+
+        let client = self.client
+        var workItem: DispatchWorkItem!
+        workItem = DispatchWorkItem {
+            for chunk in chunks {
+                if workItem.isCancelled { break }
+                Thread.sleep(forTimeInterval: chunkDelay)
+                if workItem.isCancelled { break }
+                client?.urlProtocol(self, didLoad: chunk)
+            }
+            if !workItem.isCancelled {
+                client?.urlProtocolDidFinishLoading(self)
+            }
+        }
+        asyncDeliveryItem = workItem
+        DispatchQueue.global(qos: .default).async(execute: workItem)
     }
 }
