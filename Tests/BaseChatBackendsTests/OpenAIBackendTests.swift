@@ -144,4 +144,10 @@ final class OpenAIBackendTests: XCTestCase {
         XCTAssertNotNil(backend as? TokenUsageProvider,
                         "Casting InferenceBackend to TokenUsageProvider should succeed")
     }
+
+    // MARK: - Backend Contract
+
+    func test_contract_allInvariants() {
+        BackendContractChecks.assertAllInvariants { OpenAIBackend() }
+    }
 }
