@@ -23,7 +23,9 @@ public enum DefaultBackends {
                     return nil
                 }
             #endif
+            #if Llama
             case .gguf: return LlamaBackend()
+            #endif
             default: return nil
             }
         }

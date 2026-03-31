@@ -15,6 +15,7 @@ let package = Package(
     ],
     traits: [
         .trait(name: "MLX", description: "Enable the MLX inference backend (requires Apple Silicon)"),
+        .trait(name: "Llama", description: "Enable the llama.cpp (GGUF) inference backend"),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.30.0"),
@@ -39,7 +40,7 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift", condition: .when(traits: ["MLX"])),
                 .product(name: "MLXLLM", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
-                .product(name: "LlamaSwift", package: "llama.swift"),
+                .product(name: "LlamaSwift", package: "llama.swift", condition: .when(traits: ["Llama"])),
             ],
             path: "Sources/BaseChatBackends"
         ),

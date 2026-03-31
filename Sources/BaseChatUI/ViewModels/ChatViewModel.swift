@@ -395,15 +395,6 @@ public final class ChatViewModel {
         do {
             let contextSize: Int32 = Int32(model.detectedContextLength ?? 2048)
             try await inferenceService.loadModel(from: model, contextSize: contextSize)
-        } catch let inferenceError as InferenceError {
-            switch inferenceError {
-            case .inferenceFailure(let message)
-                where model.modelType == .gguf && message.contains("No registered backend can handle model type"):
-                errorMessage =
-                    "GGUF backend is unavailable in this build. Re-enable the BaseChatKit Llama trait for the app target, then rebuild."
-            default:
-                errorMessage = "Failed to load model: \(inferenceError.localizedDescription)"
-            }
         } catch {
             errorMessage = "Failed to load model: \(error.localizedDescription)"
         }
@@ -571,18 +562,21 @@ public final class ChatViewModel {
         if isGenerating {
             stopGeneration()
         }
+        var firstDeleteError: Error?
         for message in messages {
             do {
                 try deleteMessage(message)
             } catch {
                 Log.persistence.error("Failed to delete message while clearing chat: \(error)")
-                errorMessage = "Failed to clear chat: \(error.localizedDescription)"
-                return
+                if firstDeleteError == nil { firstDeleteError = error }
             }
         }
         messages.removeAll()
         tokenCountCache.removeAll()
         updateContextEstimate()
+        if let error = firstDeleteError {
+            errorMessage = "Failed to clear chat: \(error.localizedDescription)"
+        }
         Log.ui.info("Chat cleared")
     }
 
