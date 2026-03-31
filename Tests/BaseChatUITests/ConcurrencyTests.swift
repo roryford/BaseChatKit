@@ -41,6 +41,8 @@ final class ConcurrencyTests: XCTestCase {
     }
 
     override func tearDown() {
+        vm?.stopGeneration()
+        vm?.inferenceService.unloadModel()
         vm = nil
         sessionManager = nil
         slowBackend = nil

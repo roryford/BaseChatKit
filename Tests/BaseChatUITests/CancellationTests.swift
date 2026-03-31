@@ -38,6 +38,8 @@ final class CancellationTests: XCTestCase {
     }
 
     override func tearDown() {
+        vm?.stopGeneration()
+        vm?.inferenceService.unloadModel()
         vm = nil
         sessionManager = nil
         slowBackend = nil
