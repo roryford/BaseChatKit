@@ -49,27 +49,19 @@ public struct ModelManagementSheet: View {
                 tabPickerBar
                 tabContent
             }
-            .navigationTitle(selectedTab.rawValue)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
             #else
             // On iOS/iPadOS, safeAreaInset is required so the List is a direct
             // child of NavigationStack — a VStack wrapper breaks hit testing on iPad.
             tabContent
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    tabPickerBar
-                }
-                .navigationTitle(selectedTab.rawValue)
+                .safeAreaInset(edge: .top, spacing: 0) { tabPickerBar }
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { dismiss() }
-                    }
-                }
             #endif
+        }
+        .navigationTitle(selectedTab.rawValue)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done") { dismiss() }
+            }
         }
         .presentationDetents([.large])
         .onAppear {
@@ -258,6 +250,7 @@ private struct ModelDownloadTab: View {
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     TextField("Search HuggingFace models...", text: $viewModel.searchQuery)
                         .textFieldStyle(.plain)
                         .autocorrectionDisabled()
@@ -268,6 +261,7 @@ private struct ModelDownloadTab: View {
                         .onSubmit {
                             Task { await viewModel.search() }
                         }
+                        .accessibilityLabel("Search HuggingFace models")
                     if !viewModel.searchQuery.isEmpty {
                         Button {
                             viewModel.searchQuery = ""
