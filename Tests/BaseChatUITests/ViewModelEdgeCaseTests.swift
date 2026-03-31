@@ -143,6 +143,33 @@ final class ViewModelEdgeCaseTests: XCTestCase {
                       "Messages should be empty after switching to a session with no messages")
     }
 
+    func test_clearChat_whenPersistenceDeleteFails_reloadsPersistedMessages() async throws {
+        let (vm, _, persistence) = try makeViewModelWithPersistence()
+        let session = ChatSessionRecord(title: "Clear Chat Failure")
+        vm.activeSession = session
+
+        vm.inputText = "Hello"
+        await vm.sendMessage()
+
+        let expectedMessages = persistence.messages
+        XCTAssertEqual(expectedMessages.count, 2, "Precondition: the chat should have persisted user and assistant messages")
+
+        let deleteError = NSError(
+            domain: "ViewModelEdgeCaseTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "simulated delete failure"]
+        )
+        persistence.shouldThrowOnDeleteMessages = deleteError
+
+        vm.clearChat()
+
+        XCTAssertEqual(vm.messages.map(\.id), expectedMessages.map(\.id),
+                       "clearChat should reload persisted messages when deletion fails")
+        XCTAssertEqual(persistence.messages.map(\.id), expectedMessages.map(\.id),
+                       "Persistence should still contain the original messages after a failed clear")
+        XCTAssertEqual(vm.errorMessage, "Failed to clear chat: simulated delete failure")
+    }
+
     // MARK: - switchToSession model-selection restoration
 
     /// Creates a fake .gguf file in a temp directory for the duration of a test.
