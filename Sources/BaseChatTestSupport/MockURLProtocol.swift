@@ -26,8 +26,8 @@ public final class MockURLProtocol: URLProtocol {
 
     /// Describes how a stubbed URL should respond.
     public enum StubbedResponse: @unchecked Sendable {
-        /// Return data immediately with the given HTTP status code.
-        case immediate(data: Data, statusCode: Int)
+        /// Return data immediately with the given HTTP status code and optional extra headers.
+        case immediate(data: Data, statusCode: Int, headers: [String: String] = [:])
         /// Return data in chunks (simulating SSE), with a brief delay between each.
         case sse(chunks: [Data], statusCode: Int)
         /// Return data in chunks asynchronously — each chunk is delivered on a background
@@ -116,8 +116,8 @@ public final class MockURLProtocol: URLProtocol {
         }
 
         switch stub {
-        case .immediate(let data, let statusCode):
-            deliverResponse(statusCode: statusCode, data: data)
+        case .immediate(let data, let statusCode, let extraHeaders):
+            deliverResponse(statusCode: statusCode, data: data, extraHeaders: extraHeaders)
 
         case .sse(let chunks, let statusCode):
             deliverSSEResponse(statusCode: statusCode, chunks: chunks)
@@ -137,12 +137,16 @@ public final class MockURLProtocol: URLProtocol {
 
     // MARK: - Response Delivery
 
-    private func deliverResponse(statusCode: Int, data: Data) {
+    private func deliverResponse(statusCode: Int, data: Data, extraHeaders: [String: String] = [:]) {
+        var headers = ["Content-Type": "text/event-stream"]
+        for (key, value) in extraHeaders {
+            headers[key] = value
+        }
         let response = HTTPURLResponse(
             url: request.url!,
             statusCode: statusCode,
             httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": "text/event-stream"]
+            headerFields: headers
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
