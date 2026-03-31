@@ -121,7 +121,8 @@ struct ClaudeBackendSSETests {
         {"error":{"type":"rate_limit_error","message":"Rate limited"}}
         """.utf8)
 
-        MockURLProtocol.stub(url: url, response: .immediate(data: body, statusCode: 429))
+        // Retry-After: 0 keeps retries instant so the test finishes quickly.
+        MockURLProtocol.stub(url: url, response: .immediate(data: body, statusCode: 429, headers: ["Retry-After": "0"]))
 
         try await loadBackend(backend)
 
@@ -376,7 +377,8 @@ struct OpenAIBackendSSETests {
         {"error":{"message":"Rate limit exceeded"}}
         """.utf8)
 
-        MockURLProtocol.stub(url: url, response: .immediate(data: body, statusCode: 429))
+        // Retry-After: 0 keeps retries instant so the test finishes quickly.
+        MockURLProtocol.stub(url: url, response: .immediate(data: body, statusCode: 429, headers: ["Retry-After": "0"]))
 
         try await loadBackend(backend)
 
