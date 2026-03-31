@@ -25,8 +25,9 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Locking
 
-    /// Guards `isGenerating` and `cancelled` which are read from @MainActor
-    /// callers and written from the background generation Task.
+    /// Guards `isGenerating`, `cancelled`, and any pending async cleanup task.
+    /// These values are read from @MainActor callers and written from detached
+    /// tasks that may outlive the initiating method call.
     private let stateLock = NSLock()
 
     private func withStateLock<T>(_ body: () -> T) -> T {
@@ -51,6 +52,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     private var vocab: OpaquePointer?
     private var generationTask: Task<Void, Never>?
     private var cancelled = false
+    private var cleanupTask: Task<Void, Never>?
 
     // MARK: - Global Backend Lifecycle
 
@@ -94,6 +96,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     public func loadModel(from url: URL, contextSize: Int32) async throws {
         unloadModel()
+        await waitForPendingCleanup()
 
         var modelParams = llama_model_default_params()
         #if targetEnvironment(simulator)
@@ -282,7 +285,12 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     }
 
     public func unloadModel() {
-        withStateLock { cancelled = true }
+        let previousCleanup = withStateLock {
+            cancelled = true
+            let task = cleanupTask
+            cleanupTask = nil
+            return task
+        }
         generationTask?.cancel()
 
         // Capture the in-flight generation task and C pointers before clearing
@@ -303,18 +311,41 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
         Self.logger.info("Llama backend unloaded")
 
+        guard capturedTask != nil || capturedContext != nil || capturedModel != nil else {
+            withStateLock {
+                cleanupTask = previousCleanup
+            }
+            return
+        }
+
+        Self.retainBackend()
+
         // Defer llama_free off the calling thread — InferenceService is @MainActor,
         // so blocking here would freeze the UI for the duration of the spin-wait.
         // We await the generation task to ensure the C loop has stopped before
         // touching the pointers, preventing a use-after-free crash.
-        Task.detached(priority: .utility) {
+        let cleanupTask = Task.detached(priority: .utility) {
+            await previousCleanup?.value
             await capturedTask?.value
             if let ctx = capturedContext { llama_free(ctx) }
             if let mdl = capturedModel { llama_model_free(mdl) }
+            Self.releaseBackend()
+        }
+        withStateLock {
+            self.cleanupTask = cleanupTask
         }
     }
 
     // MARK: - Tokenization Helpers
+
+    private func waitForPendingCleanup() async {
+        let task = withStateLock {
+            let task = cleanupTask
+            cleanupTask = nil
+            return task
+        }
+        await task?.value
+    }
 
     private func tokenize(_ text: String, addBos: Bool) -> [llama_token] {
         guard let vocab else { return [] }
