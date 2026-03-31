@@ -18,6 +18,10 @@ public struct ModelBrowserView: View {
 
         NavigationStack {
             List {
+                Section {
+                    ModelBrowserSearchField(text: $viewModel.searchQuery)
+                }
+
                 WhyDownloadView()
 
                 Section("Recommended for Your Device") {
@@ -64,8 +68,10 @@ public struct ModelBrowserView: View {
                     }
                 }
             }
-            .searchable(text: $viewModel.searchQuery, prompt: "Search HuggingFace models...")
             .onSubmit(of: .search) {
+                Task { await viewModel.search() }
+            }
+            .onChange(of: viewModel.searchQuery) { _, _ in
                 Task { await viewModel.search() }
             }
             .navigationTitle("Browse Models")
@@ -78,6 +84,44 @@ public struct ModelBrowserView: View {
                 viewModel.loadRecommendations()
             }
         }
+    }
+}
+
+private struct ModelBrowserSearchField: View {
+
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            searchTextField
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var searchTextField: some View {
+        #if os(iOS)
+        TextField("Search HuggingFace models...", text: $text)
+            .textInputAutocapitalization(.never)
+            .disableAutocorrection(true)
+            .submitLabel(.search)
+        #else
+        TextField("Search HuggingFace models...", text: $text)
+        #endif
     }
 }
 

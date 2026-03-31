@@ -66,6 +66,22 @@ public final class ModelManagementViewModel {
         self.modelStorage = modelStorage
     }
 
+    /// Creates a production-ready model manager with search and downloads enabled.
+    public static func live(
+        huggingFaceService: any HuggingFaceServiceProtocol = HuggingFaceService(),
+        downloadManager: BackgroundDownloadManager = BackgroundDownloadManager(),
+        deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
+        modelStorage: ModelStorageService = ModelStorageService()
+    ) -> ModelManagementViewModel {
+        downloadManager.reconnectBackgroundSession()
+        return ModelManagementViewModel(
+            huggingFaceService: huggingFaceService,
+            downloadManager: downloadManager,
+            deviceCapability: deviceCapability,
+            modelStorage: modelStorage
+        )
+    }
+
     // MARK: - Computed Properties
 
     /// The recommended model size tier for this device.
