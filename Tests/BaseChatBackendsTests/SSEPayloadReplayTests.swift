@@ -11,7 +11,7 @@ struct ByteSequence: AsyncSequence {
     struct AsyncIterator: AsyncIteratorProtocol {
         var index: Data.Index
         let data: Data
-        mutating func next() -> UInt8? {
+        mutating func next() async -> UInt8? {
             guard index < data.endIndex else { return nil }
             defer { index = data.index(after: index) }
             return data[index]
