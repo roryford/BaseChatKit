@@ -144,16 +144,17 @@ struct DownloadValidationE2ETests {
         try manager.validateDownloadedFile(at: mlxDir, modelType: .mlx)
     }
 
-    @Test func mlx_singleFile_exists_isAccepted() throws {
+    @Test func mlx_singleFile_isRejected() throws {
         let dir = try makeTempDir()
         defer { cleanup(dir) }
 
-        // For individual MLX file downloads (not a directory).
+        // A single file is not a valid MLX snapshot.
         let fileURL = dir.appendingPathComponent("tokenizer.json")
         try Data("{}".utf8).write(to: fileURL)
 
-        // Single file that exists should pass.
-        try manager.validateDownloadedFile(at: fileURL, modelType: .mlx)
+        #expect(throws: HuggingFaceError.self) {
+            try manager.validateDownloadedFile(at: fileURL, modelType: .mlx)
+        }
     }
 
     @Test func mlx_nonExistentFile_isRejected() throws {
