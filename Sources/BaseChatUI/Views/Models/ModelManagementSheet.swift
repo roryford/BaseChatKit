@@ -42,34 +42,45 @@ public struct ModelManagementSheet: View {
 
     public var body: some View {
         NavigationStack {
+            #if os(macOS)
+            // On macOS, VStack works correctly and avoids the safeAreaInset
+            // state propagation bug where tab content doesn't update on selection.
+            VStack(spacing: 0) {
+                tabPickerBar
+                tabContent
+            }
+            #else
+            // On iOS/iPadOS, safeAreaInset is required so the List is a direct
+            // child of NavigationStack — a VStack wrapper breaks hit testing on iPad.
             tabContent
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    VStack(spacing: 0) {
-                        tabPicker
-                            .padding(.horizontal)
-                            .padding(.top, 8)
-                            .padding(.bottom, 4)
-
-                        Divider()
-                            .accessibilityHidden(true)
-                    }
-                    .background(.bar)
-                }
-                .navigationTitle(selectedTab.rawValue)
-                #if os(iOS)
+                .safeAreaInset(edge: .top, spacing: 0) { tabPickerBar }
                 .navigationBarTitleDisplayMode(.inline)
-                #endif
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { dismiss() }
-                    }
-                }
+            #endif
+        }
+        .navigationTitle(selectedTab.rawValue)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done") { dismiss() }
+            }
         }
         .presentationDetents([.large])
         .onAppear {
             chatViewModel.refreshModels()
             managementViewModel.invalidateModelCache()
         }
+    }
+
+    private var tabPickerBar: some View {
+        VStack(spacing: 0) {
+            tabPicker
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+            Divider()
+                .accessibilityHidden(true)
+        }
+        .background(.bar)
     }
 
     // MARK: - Tab Picker
@@ -235,6 +246,35 @@ private struct ModelDownloadTab: View {
         @Bindable var viewModel = viewModel
 
         List {
+            Section {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    TextField("Search HuggingFace models...", text: $viewModel.searchQuery)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .keyboardType(.webSearch)
+                        .submitLabel(.search)
+                        #endif
+                        .onSubmit {
+                            Task { await viewModel.search() }
+                        }
+                        .accessibilityLabel("Search HuggingFace models")
+                    if !viewModel.searchQuery.isEmpty {
+                        Button {
+                            viewModel.searchQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
+                    }
+                }
+            }
+
             WhyDownloadView()
 
             Section("Recommended for Your Device") {
@@ -305,10 +345,6 @@ private struct ModelDownloadTab: View {
                     .accessibilityLabel("Search error: \(error)")
                 }
             }
-        }
-        .searchable(text: $viewModel.searchQuery, prompt: "Search HuggingFace models...")
-        .onSubmit(of: .search) {
-            Task { await viewModel.search() }
         }
         .onChange(of: viewModel.completedDownloadCount) {
             viewModel.invalidateModelCache()

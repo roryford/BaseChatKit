@@ -96,4 +96,18 @@ final class ErrorDescriptionTests: XCTestCase {
         XCTAssertTrue(desc.contains("generation") || desc.contains("progress"),
                        "Should mention generation in progress")
     }
+
+    // MARK: - BackendError conformance
+
+    func test_inferenceError_conformsToBackendError() {
+        let error: any BackendError = InferenceError.alreadyGenerating
+        // The cast succeeds if InferenceError conforms to BackendError.
+        XCTAssertTrue(error is InferenceError)
+    }
+
+    func test_cloudBackendError_conformsToBackendError() {
+        let error: any BackendError = CloudBackendError.missingAPIKey
+        // The cast succeeds if CloudBackendError conforms to BackendError.
+        XCTAssertTrue(error is CloudBackendError)
+    }
 }

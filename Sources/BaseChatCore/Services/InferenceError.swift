@@ -27,4 +27,14 @@ public enum InferenceError: LocalizedError {
             return "Generation error: \(message)"
         }
     }
+
+    public var isRetryable: Bool {
+        switch self {
+        case .alreadyGenerating:
+            return true
+        case .modelNotFound, .modelLoadFailed, .inferenceFailure,
+             .memoryInsufficient, .generationError:
+            return false
+        }
+    }
 }
