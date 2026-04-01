@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import BaseChatCore
 
 /// Unified model management sheet combining model selection, download, and storage.
@@ -242,6 +243,15 @@ private struct ModelDownloadTab: View {
     @Environment(ModelManagementViewModel.self) private var viewModel
     @Environment(ChatViewModel.self) private var chatViewModel
 
+    @State private var showImporter = false
+    @State private var importSuccessMessage: String?
+    @State private var importErrorMessage: String?
+
+    private static var importContentTypes: [UTType] {
+        let gguf = UTType(filenameExtension: "gguf") ?? .data
+        return [gguf, .folder]
+    }
+
     var body: some View {
         @Bindable var viewModel = viewModel
 
@@ -273,9 +283,26 @@ private struct ModelDownloadTab: View {
                         .accessibilityLabel("Clear search")
                     }
                 }
+
+                Button {
+                    importSuccessMessage = nil
+                    importErrorMessage = nil
+                    showImporter = true
+                } label: {
+                    Label("Import Local Model", systemImage: "plus.circle")
+                }
+                .accessibilityLabel("Import local model")
             }
 
             WhyDownloadView()
+
+            if let message = importSuccessMessage {
+                Section {
+                    Label(message, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .accessibilityLabel(message)
+                }
+            }
 
             Section("Recommended for Your Device") {
                 if viewModel.recommendedModels.isEmpty {
@@ -332,7 +359,7 @@ private struct ModelDownloadTab: View {
                 }
             }
 
-            if let error = viewModel.searchError {
+            if let error = importErrorMessage ?? viewModel.searchError {
                 Section {
                     Label {
                         Text(error)
@@ -350,8 +377,43 @@ private struct ModelDownloadTab: View {
             viewModel.invalidateModelCache()
             chatViewModel.refreshModels()
         }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: Self.importContentTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handleImport(result)
+        }
         .onAppear {
             viewModel.loadRecommendations()
+        }
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            do {
+                let imported = try viewModel.importModel(from: url)
+                chatViewModel.refreshModels()
+                importErrorMessage = nil
+                importSuccessMessage = "Imported \(imported.name). Open Select to use it."
+            } catch {
+                importSuccessMessage = nil
+                importErrorMessage = error.localizedDescription
+            }
+
+        case .failure(let error):
+            importSuccessMessage = nil
+            importErrorMessage = error.localizedDescription
         }
     }
 }

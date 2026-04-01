@@ -2,6 +2,17 @@ import Foundation
 import Observation
 import BaseChatCore
 
+public enum ModelImportError: LocalizedError, Equatable {
+    case unsupportedFormat
+
+    public var errorDescription: String? {
+        switch self {
+        case .unsupportedFormat:
+            return "Unsupported model format. Import a .gguf file or an MLX model folder containing config.json."
+        }
+    }
+}
+
 /// View model for the model browser and storage management sheets.
 ///
 /// Coordinates HuggingFace search, curated recommendations, downloads, and
@@ -277,6 +288,20 @@ public final class ModelManagementViewModel {
         Log.download.info("Deleted model: \(model.name)")
     }
 
+    /// Imports a local model file or directory into the app's models directory.
+    @discardableResult
+    public func importModel(from sourceURL: URL) throws -> ModelInfo {
+        let destination = try modelStorage.importModel(from: sourceURL)
+
+        if let imported = importedModel(at: destination) {
+            invalidateModelCache()
+            return imported
+        }
+
+        try? FileManager.default.removeItem(at: destination)
+        throw ModelImportError.unsupportedFormat
+    }
+
     // MARK: - Device Capability Queries
 
     /// Whether this device has enough RAM to run a model of the given size.
@@ -304,5 +329,17 @@ public final class ModelManagementViewModel {
     /// Returns the active download state for a model, if any.
     public func downloadState(for model: DownloadableModel) -> DownloadState? {
         activeDownloads[model.id]
+    }
+
+    private func importedModel(at url: URL) -> ModelInfo? {
+        if let gguf = ModelInfo(ggufURL: url) {
+            return gguf
+        }
+
+        if let mlx = ModelInfo(mlxDirectory: url) {
+            return mlx
+        }
+
+        return nil
     }
 }
