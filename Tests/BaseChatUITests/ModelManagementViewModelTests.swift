@@ -187,6 +187,30 @@ final class ModelManagementViewModelTests: XCTestCase {
         )
     }
 
+    func test_liveFactory_usesInjectedSearchService() async {
+        let mock = MockHuggingFaceService()
+        mock.searchResults = [
+            DownloadableModel(
+                repoID: "test/repo",
+                fileName: "configured.gguf",
+                displayName: "Configured Model",
+                modelType: .gguf,
+                sizeBytes: 2_000_000_000
+            )
+        ]
+
+        let vm = ModelManagementViewModel.live(
+            huggingFaceService: mock,
+            downloadManager: BackgroundDownloadManager()
+        )
+        vm.searchQuery = "configured"
+
+        await vm.search()
+
+        XCTAssertEqual(vm.searchResults.map(\.displayName), ["Configured Model"])
+        XCTAssertNil(vm.searchError)
+    }
+
     // MARK: - Device Capability Queries
 
     func test_canRunModel_delegatesToDeviceCapability() {
