@@ -56,12 +56,12 @@ final class ChatViewModelTests: XCTestCase {
     }
 
     /// Removes a file at the given URL if it exists.
-    private func removeFile(at url: URL) {
+    private nonisolated func removeFile(at url: URL) {
         try? FileManager.default.removeItem(at: url)
     }
 
     /// Removes all .gguf files from the models directory created during the test.
-    private var createdFiles: [URL] = []
+    private nonisolated(unsafe) var createdFiles: [URL] = []
 
     override func tearDown() {
         super.tearDown()

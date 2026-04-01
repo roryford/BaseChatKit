@@ -268,9 +268,26 @@ final class AnchoredCompressorTests: XCTestCase {
         let customTemplate = "Summarize this: {old_nodes_text}"
         compressor.summaryTemplate = customTemplate
 
-        var capturedPrompt: String?
+        final class PromptBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: String?
+
+            func set(_ prompt: String) {
+                lock.lock()
+                value = prompt
+                lock.unlock()
+            }
+
+            func get() -> String? {
+                lock.lock()
+                defer { lock.unlock() }
+                return value
+            }
+        }
+
+        let promptBox = PromptBox()
         compressor.generateFn = { prompt in
-            capturedPrompt = prompt
+            promptBox.set(prompt)
             return "CHARACTERS: Bob\nLOCATION: City"
         }
 
@@ -284,7 +301,7 @@ final class AnchoredCompressorTests: XCTestCase {
             tokenizer: tokenizer
         )
 
-        guard let prompt = capturedPrompt else {
+        guard let prompt = promptBox.get() else {
             XCTFail("generateFn was not called")
             return
         }

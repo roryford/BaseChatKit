@@ -3,13 +3,13 @@ import SwiftData
 @testable import BaseChatUI
 import BaseChatCore
 
+@MainActor
 final class SessionManagerViewModelTests: XCTestCase {
 
     private var container: ModelContainer!
     private var context: ModelContext!
     private var vm: SessionManagerViewModel!
 
-    @MainActor
     override func setUp() {
         super.setUp()
         let schema = Schema([ChatSession.self, ChatMessage.self, SamplerPreset.self])
