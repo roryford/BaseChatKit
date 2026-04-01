@@ -14,7 +14,21 @@ import Foundation
 /// )
 /// ```
 public struct BaseChatConfiguration: Sendable {
-    public nonisolated(unsafe) static var shared = BaseChatConfiguration()
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var _shared = BaseChatConfiguration()
+
+    public static var shared: BaseChatConfiguration {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _shared
+        }
+        set {
+            lock.lock()
+            _shared = newValue
+            lock.unlock()
+        }
+    }
 
     /// Display name used in export headers, empty states, etc.
     public var appName: String

@@ -24,8 +24,13 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - State
 
-    public private(set) var isModelLoaded = false
-    public private(set) var isGenerating = false
+    public var isModelLoaded: Bool {
+        withStateLock { _isModelLoaded }
+    }
+
+    public var isGenerating: Bool {
+        withStateLock { _isGenerating }
+    }
 
     // MARK: - Capabilities
 
@@ -38,11 +43,20 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Private
 
+    private let stateLock = NSLock()
+    private var _isModelLoaded = false
+    private var _isGenerating = false
     private var session: LanguageModelSession?
     private var generationTask: Task<Void, Never>?
     /// Tracks the system prompt used to create the current session, so we only
     /// recreate when the prompt actually changes.
     private var currentSystemPrompt: String?
+
+    private func withStateLock<T>(_ body: () throws -> T) rethrows -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return try body()
+    }
 
     // MARK: - Init
 
@@ -88,16 +102,20 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         // Intentionally NOT assigning probeSession to self.session — see comment above.
         // session remains nil; generate() will create a clean session on first use.
 
-        isModelLoaded = true
+        withStateLock {
+            _isModelLoaded = true
+        }
         Self.logger.info("Foundation backend loaded")
     }
 
     public func unloadModel() {
         stopGeneration()
-        session = nil
-        currentSystemPrompt = nil
-        isModelLoaded = false
-        isGenerating = false
+        withStateLock {
+            session = nil
+            currentSystemPrompt = nil
+            _isModelLoaded = false
+            _isGenerating = false
+        }
         Self.logger.info("Foundation backend unloaded")
     }
 
@@ -108,36 +126,44 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> AsyncThrowingStream<String, Error> {
-        guard isModelLoaded else {
-            throw InferenceError.inferenceFailure("No model loaded")
-        }
-        guard !isGenerating else {
-            throw InferenceError.alreadyGenerating
-        }
-
-        isGenerating = true
-        Self.logger.debug("Foundation generate started")
-
-        // Reuse the existing session to preserve conversation history.
-        // Only recreate if the system prompt changed or no session exists.
-        let needsNewSession = session == nil || systemPrompt != currentSystemPrompt
-        let activeSession: LanguageModelSession
-        if needsNewSession {
-            if let systemPrompt, !systemPrompt.isEmpty {
-                activeSession = LanguageModelSession(instructions: systemPrompt)
-            } else {
-                activeSession = LanguageModelSession()
+        let activeSession: LanguageModelSession = try withStateLock {
+            guard _isModelLoaded else {
+                throw InferenceError.inferenceFailure("No model loaded")
             }
-            session = activeSession
-            currentSystemPrompt = systemPrompt
-        } else {
-            activeSession = session!
+            guard !_isGenerating else {
+                throw InferenceError.alreadyGenerating
+            }
+            _isGenerating = true
+
+            // Reuse the existing session to preserve conversation history.
+            // Only recreate if the system prompt changed or no session exists.
+            let needsNewSession = session == nil || systemPrompt != currentSystemPrompt
+            if needsNewSession {
+                if let systemPrompt, !systemPrompt.isEmpty {
+                    session = LanguageModelSession(instructions: systemPrompt)
+                } else {
+                    session = LanguageModelSession()
+                }
+                currentSystemPrompt = systemPrompt
+            }
+
+            return session!
         }
+
+        Self.logger.debug("Foundation generate started")
 
         return AsyncThrowingStream { [weak self] continuation in
             let task = Task { [backend = self] in
+                guard let backend else {
+                    continuation.finish()
+                    return
+                }
+
                 defer {
-                    backend?.isGenerating = false
+                    backend.withStateLock {
+                        backend._isGenerating = false
+                        backend.generationTask = nil
+                    }
                     Self.logger.debug("Foundation generate finished")
                 }
 
@@ -177,7 +203,9 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                 continuation.finish()
             }
 
-            self?.generationTask = task
+            self?.withStateLock {
+                self?.generationTask = task
+            }
 
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
@@ -188,16 +216,21 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
     // MARK: - Conversation Reset
 
     public func resetConversation() {
-        session = nil
-        currentSystemPrompt = nil
+        withStateLock {
+            session = nil
+            currentSystemPrompt = nil
+        }
         Self.logger.info("Foundation conversation reset")
     }
 
     // MARK: - Control
 
     public func stopGeneration() {
-        generationTask?.cancel()
-        generationTask = nil
+        let task = withStateLock { () -> Task<Void, Never>? in
+            defer { generationTask = nil }
+            return generationTask
+        }
+        task?.cancel()
     }
 
 }
