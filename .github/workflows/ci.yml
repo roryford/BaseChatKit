@@ -28,9 +28,14 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-build-${{ hashFiles('Package.resolved') }}-
             ${{ runner.os }}-${{ runner.arch }}-build-
 
-      - name: Run tests
-        run: swift test --filter "BaseChatCoreTests|BaseChatUITests"
+      - name: Run CI smoke tests
+        run: swift test --filter "BaseChatCoreTests|BaseChatUITests|BaseChatBackendsTests"
 
-      # BaseChatBackendsTests and BaseChatE2ETests require physical hardware
-      # or specific OS versions (iOS 26 / macOS 26 for FoundationBackend).
-      # Run these locally before merging backend changes.
+      # CI smoke profile (GitHub macOS Apple Silicon runners):
+      # - Runs BaseChatCoreTests + BaseChatUITests + BaseChatBackendsTests.
+      # - BaseChatBackendsTests runs without MLX/Llama traits, so only CI-safe
+      #   cloud/SSE and non-hardware tests execute.
+      # Local-only coverage:
+      # - Run `swift test --filter BaseChatBackendsTests --traits MLX,Llama` on
+      #   Apple Silicon for MLX/llama.cpp paths.
+      # - Run `swift test --filter BaseChatE2ETests` on physical hardware.

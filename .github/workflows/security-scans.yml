@@ -1,0 +1,48 @@
+name: Security Scans
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Default to read-only token; jobs only elevate if truly necessary.
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency vulnerability review
+    # Dependency Review compares base/head and is most useful on PRs.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail on newly introduced vulnerable dependencies
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          vulnerability-check: true
+          license-check: false
+
+  secret-scan:
+    name: Secret leakage scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          # TruffleHog uses git history to diff PR/push ranges.
+          fetch-depth: 0
+
+      - name: Scan changed commits for leaked secrets
+        uses: trufflesecurity/trufflehog@v3.90.5
+        with:
+          # Keep signal high by failing only on verifiable active secrets.
+          extra_args: --results=verified

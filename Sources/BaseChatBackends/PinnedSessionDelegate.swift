@@ -6,7 +6,8 @@ import BaseChatCore
 ///
 /// Validates the server's leaf certificate SPKI (Subject Public Key Info) SHA-256
 /// hash against a set of known pins for Anthropic and OpenAI APIs. Connections to
-/// unknown hosts (custom endpoints, localhost) fall through to default trust evaluation.
+/// unknown hosts (custom endpoints) fall through to default trust evaluation.
+/// Localhost hosts always bypass pinning.
 ///
 /// Pin rotation: when a provider rotates certificates, update the pin sets below.
 /// Include at least one backup pin per host to avoid lockout during rotation.
@@ -25,8 +26,11 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
     /// ```
     ///
     /// These pins are intentionally left empty and must be populated with actual
-    /// SPKI hashes before enabling pinning in production. The delegate falls back
-    /// to default trust evaluation when no pins are configured for a host.
+    /// SPKI hashes before enabling pinning in production.
+    ///
+    /// `api.openai.com` and `api.anthropic.com` are treated as required pinned
+    /// production hosts: missing or empty pin sets fail closed.
+    /// Unknown custom hosts continue to use default trust when no pins are set.
     // NSLock guards concurrent reads/writes from multiple URLSession delegate
     // callback threads, which can arrive on arbitrary background threads.
     private static let _pinnedHostsLock = NSLock()
@@ -52,6 +56,12 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
     private static let bypassHosts: Set<String> = [
         "localhost", "127.0.0.1", "::1"
     ]
+    
+    /// Known production hosts that must have non-empty pin sets configured.
+    private static let requiredPinnedHosts: Set<String> = [
+        "api.openai.com",
+        "api.anthropic.com"
+    ]
 
     // MARK: - URLSessionDelegate
 
@@ -60,8 +70,7 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let serverTrust = challenge.protectionSpace.serverTrust else {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust else {
             completionHandler(.performDefaultHandling, nil)
             return
         }
@@ -74,13 +83,25 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
             return
         }
 
-        // If no pins are configured for this host, fall back to default trust.
-        // Log a warning in debug builds so developers know pinning is inactive —
-        // silently falling back would make it easy to deploy without real pins.
         let pins = Self.pinnedHosts[host]
+        if Self.requiredPinnedHosts.contains(host) {
+            guard let requiredPins = pins, !requiredPins.isEmpty else {
+                Log.network.error("PinnedSessionDelegate: no certificate pins configured for required production host \(host, privacy: .public). Cancelling authentication challenge (fail-closed).")
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+        }
+
+        // If no pins are configured for a custom host, fall back to default trust.
         guard let expectedPins = pins, !expectedPins.isEmpty else {
-            Log.network.warning("PinnedSessionDelegate: no pins configured for \(host, privacy: .public). Falling back to default trust evaluation.")
+            Log.network.warning("PinnedSessionDelegate: no pins configured for custom host \(host, privacy: .public). Falling back to default trust evaluation.")
             completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        
+        guard let serverTrust = challenge.protectionSpace.serverTrust else {
+            Log.network.error("PinnedSessionDelegate: missing server trust for pinned host \(host, privacy: .public). Cancelling authentication challenge.")
+            completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
