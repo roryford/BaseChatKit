@@ -17,8 +17,19 @@ final class FoundationBackendUnitTests: XCTestCase {
 
     private var backend: FoundationBackend!
 
-    override func setUp() {
-        super.setUp()
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        // XCTest discovers and invokes test methods via the ObjC runtime, bypassing
+        // Swift's @available check on the class. Without this guard, any test that
+        // calls FoundationBackend.isAvailable (which accesses SystemLanguageModel —
+        // a macOS 26 API) crashes the process on older runners before XCTSkipUnless
+        // can run. ProcessInfo gives us a runtime availability check that the compiler
+        // won't flag as redundant (unlike #available inside an @available class).
+        guard ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
+        ) else {
+            throw XCTSkip("FoundationModels requires iOS 26 / macOS 26")
+        }
         backend = FoundationBackend()
     }
 

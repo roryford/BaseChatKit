@@ -66,6 +66,14 @@ final class PinnedSessionDelegateTests: XCTestCase {
         await fulfillment(of: [expectation], timeout: 2.0)
         XCTAssertEqual(receivedDisposition, .performDefaultHandling)
     }
+    
+    func test_requiredProductionHost_openAI_noPins_cancelsChallenge() async {
+        await verifyRequiredHostNoPinsCancels("api.openai.com")
+    }
+    
+    func test_requiredProductionHost_anthropic_noPins_cancelsChallenge() async {
+        await verifyRequiredHostNoPinsCancels("api.anthropic.com")
+    }
 
     // MARK: - Non-ServerTrust Challenge
 
@@ -149,6 +157,30 @@ final class PinnedSessionDelegateTests: XCTestCase {
         await fulfillment(of: [expectation], timeout: 2.0)
         XCTAssertEqual(receivedDisposition, .performDefaultHandling,
                        "Bypass host \(host) should get .performDefaultHandling")
+    }
+    
+    private func verifyRequiredHostNoPinsCancels(_ host: String) async {
+        let savedPins = PinnedSessionDelegate.pinnedHosts
+        PinnedSessionDelegate.pinnedHosts = [:]
+        defer { PinnedSessionDelegate.pinnedHosts = savedPins }
+        
+        let delegate = PinnedSessionDelegate()
+        let challenge = makeChallenge(host: host)
+        
+        let expectation = XCTestExpectation(description: "completion called for required host \(host)")
+        var receivedDisposition: URLSession.AuthChallengeDisposition?
+        
+        delegate.urlSession(
+            URLSession.shared,
+            didReceive: challenge
+        ) { disposition, _ in
+            receivedDisposition = disposition
+            expectation.fulfill()
+        }
+        
+        await fulfillment(of: [expectation], timeout: 2.0)
+        XCTAssertEqual(receivedDisposition, .cancelAuthenticationChallenge,
+                       "Required production host \(host) should fail closed when no pins are configured")
     }
 
     private func makeChallenge(host: String) -> URLAuthenticationChallenge {

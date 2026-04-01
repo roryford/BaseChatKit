@@ -275,7 +275,7 @@ Templates auto-detect from GGUF metadata when available. User content is sanitis
 
 - API keys stored in Keychain with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
 - Keys read just-in-time from Keychain, never held as stored properties
-- Certificate pinning support via `PinnedSessionDelegate` — disabled by default, opt-in by populating `pinnedHosts` with SPKI SHA-256 hashes for your endpoints
+- Certificate pinning support via `PinnedSessionDelegate` — configure `pinnedHosts` with SPKI SHA-256 hashes; `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing/empty, while localhost and custom hosts retain existing bypass/default-trust behavior
 - HTTPS enforced for non-localhost endpoints
 - User content sanitised in prompt templates to prevent injection
 - Sensitive data uses `privacy: .private` in os.Logger calls
