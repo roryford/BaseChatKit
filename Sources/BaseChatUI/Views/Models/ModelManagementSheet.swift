@@ -57,15 +57,37 @@ public struct ModelManagementSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
             #endif
         }
-                            ModelSearchField(text: $viewModel.searchQuery)
+        .navigationTitle(selectedTab.rawValue)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        .presentationDetents([.large])
+        .onAppear {
+            chatViewModel.refreshModels()
+            managementViewModel.invalidateModelCache()
+        }
+    }
+
+    private var tabPickerBar: some View {
+        VStack(spacing: 0) {
+            tabPicker
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+            Divider()
+                .accessibilityHidden(true)
+        }
+        .background(.bar)
+    }
+
     // MARK: - Tab Picker
 
     @ViewBuilder
     private var tabPicker: some View {
         let tabs = availableTabs
-                    .onChange(of: viewModel.searchQuery) { _, _ in
-                        Task { await viewModel.search() }
-                    }
         if tabs.count > 1 {
             Picker("Section", selection: $selectedTab) {
                 ForEach(tabs, id: \.self) { tab in
@@ -76,43 +98,6 @@ public struct ModelManagementSheet: View {
             .pickerStyle(.segmented)
             .accessibilityLabel("Model management section")
         }
-            private struct ModelSearchField: View {
-
-                @Binding var text: String
-
-                var body: some View {
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-
-                        searchTextField
-
-                        if !text.isEmpty {
-                            Button {
-                                text = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Clear search")
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                @ViewBuilder
-                private var searchTextField: some View {
-                    #if os(iOS)
-                    TextField("Search HuggingFace models...", text: $text)
-                        .textInputAutocapitalization(.never)
-                        .disableAutocorrection(true)
-                        .submitLabel(.search)
-                    #else
-                    TextField("Search HuggingFace models...", text: $text)
-                    #endif
-                }
-            }
     }
 
     // MARK: - Tab Content
