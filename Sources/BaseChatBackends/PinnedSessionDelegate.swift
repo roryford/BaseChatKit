@@ -34,7 +34,7 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
     // NSLock guards concurrent reads/writes from multiple URLSession delegate
     // callback threads, which can arrive on arbitrary background threads.
     private static let _pinnedHostsLock = NSLock()
-    private static var _pinnedHosts: [String: Set<String>] = [:]
+    private nonisolated(unsafe) static var _pinnedHosts: [String: Set<String>] = [:]
 
     public static var pinnedHosts: [String: Set<String>] {
         get {

@@ -19,7 +19,7 @@ public enum MemoryPressureLevel: String, Sendable {
 ///
 /// Uses `DispatchSource.makeMemoryPressureSource`, which works identically on iOS and macOS.
 @Observable
-public final class MemoryPressureHandler {
+public final class MemoryPressureHandler: @unchecked Sendable {
 
     // MARK: - Published State
 

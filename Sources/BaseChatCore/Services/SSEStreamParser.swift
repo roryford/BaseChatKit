@@ -35,7 +35,7 @@ public struct SSEStreamParser {
     ///
     /// Yields the payload of each `data:` line (with the prefix stripped).
     /// Stops when the stream ends or when `[DONE]` is received.
-    public static func parse<S: AsyncSequence>(
+    public static func parse<S: AsyncSequence & Sendable>(
         bytes: S
     ) -> AsyncThrowingStream<String, Error> where S.Element == UInt8 {
         AsyncThrowingStream { continuation in
@@ -105,7 +105,7 @@ public struct SSEStreamParser {
     ///   - handler: A payload handler that interprets the provider's JSON format.
     ///   - onUsage: Called when usage information is extracted from a payload.
     /// - Returns: An `AsyncThrowingStream` of text tokens.
-    public static func streamTokens<S: AsyncSequence>(
+    public static func streamTokens<S: AsyncSequence & Sendable>(
         from bytes: S,
         using handler: some SSEPayloadHandler,
         onUsage: (@Sendable (Int?, Int?) -> Void)? = nil

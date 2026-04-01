@@ -50,5 +50,5 @@ public struct CuratedModel: Identifiable, Sendable {
     ///
     /// This is empty by default — apps should populate it with their own list
     /// at startup or by subclassing/extending CuratedModel as needed.
-    public static var all: [CuratedModel] = []
+    public nonisolated(unsafe) static var all: [CuratedModel] = []
 }

@@ -52,7 +52,7 @@ public struct CompressionStats {
 ///
 /// Conforming types implement a single `compress` method that takes the full message history
 /// and returns a set of messages sized to the available token budget.
-public protocol ContextCompressor {
+public protocol ContextCompressor: Sendable {
     var strategyName: String { get }
     func compress(
         messages: [CompressibleMessage],

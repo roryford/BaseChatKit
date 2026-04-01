@@ -135,9 +135,9 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         }
 
         return AsyncThrowingStream { [weak self] continuation in
-            let task = Task {
+            let task = Task { [backend = self] in
                 defer {
-                    self?.isGenerating = false
+                    backend?.isGenerating = false
                     Self.logger.debug("Foundation generate finished")
                 }
 

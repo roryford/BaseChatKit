@@ -14,7 +14,7 @@ import Foundation
 /// )
 /// ```
 public struct BaseChatConfiguration: Sendable {
-    public static var shared = BaseChatConfiguration()
+    public nonisolated(unsafe) static var shared = BaseChatConfiguration()
 
     /// Display name used in export headers, empty states, etc.
     public var appName: String
