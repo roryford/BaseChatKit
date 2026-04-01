@@ -80,6 +80,10 @@ final class CompressionP0ExtractiveEdgeCaseTests: XCTestCase {
             pinnedContents.isSubset(of: resultContents),
             "All pinned messages must survive even under severe budget pressure"
         )
+        XCTAssertTrue(
+            result.messages.contains(where: { $0.content == messages.last?.content }),
+            "Newest message must always be preserved, even when pinned messages dominate budget"
+        )
 
         let outputTokens = result.messages.reduce(0) { partial, message in
             partial + tokenizer.tokenCount(message.content)

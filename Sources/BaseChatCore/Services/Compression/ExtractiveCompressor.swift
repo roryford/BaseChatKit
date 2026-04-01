@@ -116,6 +116,14 @@ public final class ExtractiveCompressor: ContextCompressor {
             }
         }
 
+        // Invariant: newest message must always be preserved, even when pinned
+        // messages have already consumed the tail budget.
+        let newestIndex = messages.count - 1
+        if !tailIndices.contains(newestIndex) {
+            tailIndices.insert(newestIndex)
+            tailTokensUsed += messageTokens[newestIndex]
+        }
+
         // --- Step 2: Score candidate messages ---
         // Candidates are messages not in the tail and not pinned.
         struct ScoredCandidate {
