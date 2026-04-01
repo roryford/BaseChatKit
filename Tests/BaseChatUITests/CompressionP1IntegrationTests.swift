@@ -11,12 +11,12 @@ final class CompressionP1IntegrationTests: XCTestCase {
     private var vm: ChatViewModel!
     private var mock: MockInferenceBackend!
 
-    override func setUp() {
-        super.setUp()
+    override func setUpWithError() throws {
+        try super.setUpWithError()
 
         let schema = Schema(BaseChatSchema.allModelTypes)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try! ModelContainer(for: schema, configurations: [config])
+        container = try ModelContainer(for: schema, configurations: [config])
         context = container.mainContext
 
         mock = MockInferenceBackend()
