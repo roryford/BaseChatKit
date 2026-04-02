@@ -42,12 +42,12 @@ public final class MidStreamErrorBackend: InferenceBackend, @unchecked Sendable 
         let tokens = tokensBeforeError
         let error = errorToThrow
         isGenerating = true
-        return AsyncThrowingStream { [weak self] continuation in
+        return AsyncThrowingStream { [self] continuation in
             Task {
                 for token in tokens {
                     continuation.yield(token)
                 }
-                self?.isGenerating = false
+                self.isGenerating = false
                 continuation.finish(throwing: error)
             }
         }
