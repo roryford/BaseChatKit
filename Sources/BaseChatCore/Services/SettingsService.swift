@@ -7,8 +7,7 @@ import SwiftUI
 /// Per-session overrides live in `ChatSession`; when a session's override is
 /// `nil`, the view model falls back to these global defaults.
 @Observable
-@MainActor
-public final class SettingsService {
+public final class SettingsService: @unchecked Sendable {
 
     public static let shared = SettingsService()
 
