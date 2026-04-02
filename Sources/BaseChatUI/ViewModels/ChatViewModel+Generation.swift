@@ -3,6 +3,8 @@ import BaseChatCore
 
 // MARK: - ChatViewModel + Generation Core
 
+/// Buffers streamed tokens and emits coalesced batches to reduce high-frequency
+/// observable mutations that would otherwise trigger excessive SwiftUI re-renders.
 struct StreamingTokenBatcher {
     private let interval: Duration
     private let maxBufferedCharacters: Int
@@ -34,10 +36,7 @@ struct StreamingTokenBatcher {
     }
 
     private func shouldFlush(now: ContinuousClock.Instant) -> Bool {
-        if buffered.count >= maxBufferedCharacters {
-            return true
-        }
-        return now - lastFlush >= interval
+        buffered.count >= maxBufferedCharacters || now - lastFlush >= interval
     }
 }
 

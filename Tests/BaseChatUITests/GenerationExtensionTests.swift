@@ -284,7 +284,7 @@ final class GenerationExtensionTests: XCTestCase {
         XCTAssertEqual(vm.messages[1].content, "Hi")
     }
 
-    func test_streamingBatching_preservesAllTokensWhenFlushesAtCompletion() async {
+    func test_streamingBatching_preservesAllTokensWhenFlushAtCompletion() async {
         let mock = MockInferenceBackend()
         mock.tokensToYield = ["A", "B", "C", "D", "E"]
         let vm = makeVM(backend: mock)
