@@ -16,8 +16,8 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
     /// Per-test isolated key to avoid parallel test interference on UserDefaults.standard.
     private var isolatedKey: String!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         manager = BackgroundDownloadManager()
         isolatedKey = "com.basechatkit.tests.pending-\(UUID().uuidString)"
 
@@ -26,7 +26,7 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
@@ -37,7 +37,7 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         }
         isolatedKey = nil
         manager = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Helpers

@@ -8,8 +8,8 @@ final class ModelManagementViewModelTests: XCTestCase {
 
     private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         // Provide curated models for tests that depend on recommendations.
         // In production, the app populates CuratedModel.all at startup.
         CuratedModel.all = [
@@ -52,9 +52,9 @@ final class ModelManagementViewModelTests: XCTestCase {
         ]
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         CuratedModel.all = []
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Default State

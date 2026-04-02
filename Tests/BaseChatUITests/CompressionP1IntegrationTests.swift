@@ -28,12 +28,12 @@ final class CompressionP1IntegrationTests: XCTestCase {
         vm.configure(modelContext: context)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         vm = nil
         mock = nil
         context = nil
         container = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func test_multiSessionPins_areIsolatedAcrossSwitchesAndPersistence() {

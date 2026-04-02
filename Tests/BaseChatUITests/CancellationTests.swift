@@ -17,8 +17,8 @@ final class CancellationTests: XCTestCase {
 
     // MARK: - Setup / Teardown
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await try await super.setUp()
 
         let schema = Schema(BaseChatSchema.allModelTypes)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -37,7 +37,7 @@ final class CancellationTests: XCTestCase {
         sessionManager.configure(modelContext: context)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         vm?.stopGeneration()
         vm?.inferenceService.unloadModel()
         vm = nil
@@ -45,7 +45,7 @@ final class CancellationTests: XCTestCase {
         slowBackend = nil
         context = nil
         container = nil
-        super.tearDown()
+        try await try await super.tearDown()
     }
 
     // MARK: - Helpers

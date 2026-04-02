@@ -63,8 +63,8 @@ final class ChatViewModelTests: XCTestCase {
     /// Removes all .gguf files from the models directory created during the test.
     private nonisolated(unsafe) var createdFiles: [URL] = []
 
-    override func tearDown() {
-        super.tearDown()
+    override func tearDown() async throws {
+        try await super.tearDown()
         for url in createdFiles {
             removeFile(at: url)
         }
