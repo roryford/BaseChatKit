@@ -112,6 +112,8 @@ public final class ChatViewModel {
     public var temperature: Float = 0.7
     public var topP: Float = 0.9
     public var repeatPenalty: Float = 1.1
+    var streamingUpdateInterval: Duration = .milliseconds(33)
+    var streamingBatchCharacterLimit: Int = 128
 
     /// Whether to automatically stop generation when repetitive looping is detected.
     /// Defaults to `true`. Disable for apps that handle loop detection themselves.

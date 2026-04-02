@@ -284,6 +284,20 @@ final class GenerationExtensionTests: XCTestCase {
         XCTAssertEqual(vm.messages[1].content, "Hi")
     }
 
+    func test_streamingBatching_preservesAllTokensWhenFlushesAtCompletion() async {
+        let mock = MockInferenceBackend()
+        mock.tokensToYield = ["A", "B", "C", "D", "E"]
+        let vm = makeVM(backend: mock)
+        vm.streamingUpdateInterval = .seconds(60)
+        vm.streamingBatchCharacterLimit = 10_000
+
+        vm.inputText = "batch"
+        await vm.sendMessage()
+
+        let assistant = vm.messages.first(where: { $0.role == .assistant })
+        XCTAssertEqual(assistant?.content, "ABCDE")
+    }
+
     // MARK: - 5. isGenerating Flag Transitions
 
     func test_isGenerating_falseAfterSuccessfulGeneration() async {
