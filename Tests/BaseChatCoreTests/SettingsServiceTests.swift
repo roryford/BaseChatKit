@@ -1,6 +1,7 @@
 import XCTest
 @testable import BaseChatCore
 
+@MainActor
 final class SettingsServiceTests: XCTestCase {
 
     private var suiteName: String!
