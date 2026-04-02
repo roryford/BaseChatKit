@@ -277,4 +277,45 @@ final class ModelManagementViewModelTests: XCTestCase {
             "Error should mention download manager"
         )
     }
+
+    // MARK: - Local Model Import
+
+    func test_importModel_withGGUF_copiesFileIntoModelsDirectory() throws {
+        let vm = ModelManagementViewModel()
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelImport-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let fileName = "imported-\(UUID().uuidString).gguf"
+        let sourceURL = tempDir.appendingPathComponent(fileName)
+        try Data(repeating: 0xAB, count: 4096).write(to: sourceURL)
+
+        let imported = try vm.importModel(from: sourceURL)
+        let importedURL = URL(fileURLWithPath: vm.modelsDirectoryPath).appendingPathComponent(fileName)
+        defer { try? FileManager.default.removeItem(at: importedURL) }
+
+        XCTAssertEqual(imported.fileName, fileName)
+        XCTAssertEqual(imported.modelType, .gguf)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: importedURL.path))
+    }
+
+    func test_importModel_withUnsupportedFile_throwsAndRemovesCopy() throws {
+        let vm = ModelManagementViewModel()
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelImportUnsupported-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let fileName = "unsupported-\(UUID().uuidString).txt"
+        let sourceURL = tempDir.appendingPathComponent(fileName)
+        try Data("not a model".utf8).write(to: sourceURL)
+
+        XCTAssertThrowsError(try vm.importModel(from: sourceURL)) { error in
+            XCTAssertEqual(error as? ModelImportError, .unsupportedFormat)
+        }
+
+        let importedURL = URL(fileURLWithPath: vm.modelsDirectoryPath).appendingPathComponent(fileName)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: importedURL.path))
+    }
 }
