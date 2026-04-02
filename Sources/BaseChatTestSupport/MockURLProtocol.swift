@@ -39,10 +39,15 @@ public final class MockURLProtocol: URLProtocol {
 
     /// Thread-safe storage for stubs keyed by absolute URL string.
     private static let lock = NSLock()
-    private static var stubs: [String: StubbedResponse] = [:]
+    private nonisolated(unsafe) static var stubs: [String: StubbedResponse] = [:]
+    private nonisolated(unsafe) static var _capturedRequests: [URLRequest] = []
 
     /// All requests intercepted since the last `reset()` call, in order.
-    public private(set) static var capturedRequests: [URLRequest] = []
+    public static var capturedRequests: [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _capturedRequests
+    }
 
     /// Registers a canned response for a URL.
     public static func stub(url: URL, response: StubbedResponse) {
@@ -56,7 +61,7 @@ public final class MockURLProtocol: URLProtocol {
         lock.lock()
         defer { lock.unlock() }
         stubs.removeAll()
-        capturedRequests.removeAll()
+        _capturedRequests.removeAll()
     }
 
     /// Finds a stub matching the URL — tries exact match first, then path-contains match.
@@ -106,7 +111,7 @@ public final class MockURLProtocol: URLProtocol {
     public override func startLoading() {
         // Capture every intercepted request for later inspection.
         Self.lock.lock()
-        Self.capturedRequests.append(request)
+        Self._capturedRequests.append(request)
         Self.lock.unlock()
 
         guard let url = request.url,

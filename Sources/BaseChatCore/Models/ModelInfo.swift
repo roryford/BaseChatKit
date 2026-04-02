@@ -11,7 +11,7 @@ public enum ModelType: Hashable, Sendable {
 }
 
 /// Represents a model available on disk (either a GGUF file or an MLX model directory).
-public struct ModelInfo: Identifiable, Hashable {
+public struct ModelInfo: Identifiable, Hashable, Sendable {
     public let id: UUID
     public let name: String
     public let fileName: String

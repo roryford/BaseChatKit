@@ -50,5 +50,19 @@ public struct CuratedModel: Identifiable, Sendable {
     ///
     /// This is empty by default — apps should populate it with their own list
     /// at startup or by subclassing/extending CuratedModel as needed.
-    public static var all: [CuratedModel] = []
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var _all: [CuratedModel] = []
+
+    public static var all: [CuratedModel] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _all
+        }
+        set {
+            lock.lock()
+            _all = newValue
+            lock.unlock()
+        }
+    }
 }

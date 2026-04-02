@@ -55,14 +55,14 @@ public final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvide
             usage = usageToReport
         }
 
-        return AsyncThrowingStream { [weak self] continuation in
+        return AsyncThrowingStream { [self] continuation in
             Task {
                 for token in tokens {
                     if Task.isCancelled { break }
                     continuation.yield(token)
                 }
-                self?.lastUsage = usage
-                self?.isGenerating = false
+                self.lastUsage = usage
+                self.isGenerating = false
                 continuation.finish()
             }
         }

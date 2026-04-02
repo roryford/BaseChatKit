@@ -22,18 +22,20 @@ final class CompressionPerformanceTests: XCTestCase {
 
     func testPerf_compress_100messages() {
         let messages = makeMessages(count: 100)
+        let compressor = self.compressor
+        let tokenizer = self.tokenizer
         measure {
-            let exp = expectation(description: "compress_100")
-            Task {
-                _ = await self.compressor.compress(
+            let semaphore = DispatchSemaphore(value: 0)
+            Task.detached {
+                _ = await compressor.compress(
                     messages: messages,
                     systemPrompt: Self.systemPrompt,
                     contextSize: 2048,
-                    tokenizer: self.tokenizer
+                    tokenizer: tokenizer
                 )
-                exp.fulfill()
+                semaphore.signal()
             }
-            waitForExpectations(timeout: 10)
+            XCTAssertEqual(semaphore.wait(timeout: .now() + 10), .success)
         }
     }
 
@@ -41,18 +43,20 @@ final class CompressionPerformanceTests: XCTestCase {
 
     func testPerf_compress_500messages() {
         let messages = makeMessages(count: 500)
+        let compressor = self.compressor
+        let tokenizer = self.tokenizer
         measure {
-            let exp = expectation(description: "compress_500")
-            Task {
-                _ = await self.compressor.compress(
+            let semaphore = DispatchSemaphore(value: 0)
+            Task.detached {
+                _ = await compressor.compress(
                     messages: messages,
                     systemPrompt: Self.systemPrompt,
                     contextSize: 2048,
-                    tokenizer: self.tokenizer
+                    tokenizer: tokenizer
                 )
-                exp.fulfill()
+                semaphore.signal()
             }
-            waitForExpectations(timeout: 10)
+            XCTAssertEqual(semaphore.wait(timeout: .now() + 10), .success)
         }
     }
 }

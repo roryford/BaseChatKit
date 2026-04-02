@@ -6,7 +6,7 @@ import Foundation
 ///
 /// The newest messages are always kept verbatim (the "tail"), and pinned messages are
 /// never evicted. Remaining messages compete for the leftover budget by score.
-public final class ExtractiveCompressor: ContextCompressor {
+public final class ExtractiveCompressor: ContextCompressor, @unchecked Sendable {
     public let strategyName = "extractive"
 
     /// Fraction of the history budget reserved for the verbatim tail (newest messages).

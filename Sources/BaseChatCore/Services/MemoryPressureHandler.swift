@@ -19,7 +19,7 @@ public enum MemoryPressureLevel: String, Sendable {
 ///
 /// Uses `DispatchSource.makeMemoryPressureSource`, which works identically on iOS and macOS.
 @Observable
-public final class MemoryPressureHandler {
+public final class MemoryPressureHandler: @unchecked Sendable {
 
     // MARK: - Published State
 
@@ -81,7 +81,8 @@ public final class MemoryPressureHandler {
 
         newSource.setCancelHandler { [weak self] in
             // Ensure we nil out the source on cancellation to allow re-start.
-            Task { @MainActor in
+            // Weak capture in the Task prevents sending self across isolation boundaries.
+            Task { @MainActor [weak self] in
                 self?.source = nil
             }
         }

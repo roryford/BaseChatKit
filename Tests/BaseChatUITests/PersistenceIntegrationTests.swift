@@ -16,8 +16,8 @@ final class PersistenceIntegrationTests: XCTestCase {
     private var vm: ChatViewModel!
     private var mock: MockInferenceBackend!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
 
         let schema = Schema(BaseChatSchema.allModelTypes)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -33,12 +33,12 @@ final class PersistenceIntegrationTests: XCTestCase {
         vm.configure(modelContext: context)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         vm = nil
         mock = nil
         context = nil
         container = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Helpers

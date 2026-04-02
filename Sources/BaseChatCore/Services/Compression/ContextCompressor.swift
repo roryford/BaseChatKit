@@ -12,7 +12,7 @@ public enum CompressionMode: String, CaseIterable, Identifiable {
 
 /// The output of a compression pass, containing messages ready for inference and
 /// statistics about what the compressor did.
-public struct CompressionResult {
+public struct CompressionResult: Sendable {
     public let messages: [(role: String, content: String)]  // ready for inferenceService.generate
     public let stats: CompressionStats
 
@@ -23,7 +23,7 @@ public struct CompressionResult {
 }
 
 /// Diagnostic statistics produced alongside every compression result.
-public struct CompressionStats {
+public struct CompressionStats: Sendable {
     public let strategy: String           // "extractive", "anchored", "anchored-fallback"
     public let originalNodeCount: Int
     public let outputMessageCount: Int
@@ -52,7 +52,7 @@ public struct CompressionStats {
 ///
 /// Conforming types implement a single `compress` method that takes the full message history
 /// and returns a set of messages sized to the available token budget.
-public protocol ContextCompressor {
+public protocol ContextCompressor: Sendable {
     var strategyName: String { get }
     func compress(
         messages: [CompressibleMessage],

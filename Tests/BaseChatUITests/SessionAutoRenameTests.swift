@@ -11,8 +11,8 @@ final class SessionAutoRenameTests: XCTestCase {
     private var context: ModelContext!
     private var vm: SessionManagerViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         let schema = Schema([ChatSession.self, ChatMessage.self, SamplerPreset.self])
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try! ModelContainer(for: schema, configurations: [config])
@@ -21,11 +21,11 @@ final class SessionAutoRenameTests: XCTestCase {
         vm.configure(modelContext: context)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         container = nil
         context = nil
         vm = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Helpers

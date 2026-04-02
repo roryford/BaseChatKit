@@ -73,5 +73,5 @@ let package = Package(
             dependencies: ["BaseChatBackends", "BaseChatCore", "BaseChatTestSupport"]
         ),
     ],
-    swiftLanguageModes: [.v5]
+    swiftLanguageModes: [.v6]
 )

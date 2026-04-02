@@ -35,13 +35,13 @@ public final class MockTokenizerVendorBackend: InferenceBackend,
         guard isModelLoaded else { throw InferenceError.inferenceFailure("No model loaded") }
         isGenerating = true
         let tokens = tokensToYield
-        return AsyncThrowingStream { [weak self] continuation in
+        return AsyncThrowingStream { [self] continuation in
             Task {
                 for token in tokens {
                     if Task.isCancelled { break }
                     continuation.yield(token)
                 }
-                self?.isGenerating = false
+                self.isGenerating = false
                 continuation.finish()
             }
         }

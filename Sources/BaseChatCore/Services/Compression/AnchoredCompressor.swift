@@ -3,7 +3,7 @@ import Foundation
 /// Compressor that summarizes old messages via an inference call, then prepends the
 /// summary to a verbatim tail of recent messages. Falls back to ``ExtractiveCompressor``
 /// on any error (missing generate function, failed inference, oversized summary).
-public final class AnchoredCompressor: ContextCompressor {
+public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
     public let strategyName = "anchored"
 
     /// Fraction of the history budget reserved for the verbatim recent tail.

@@ -7,8 +7,8 @@ final class DownloadManagerTests: XCTestCase {
     private var manager: BackgroundDownloadManager!
     private var tempDirectory: URL!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         manager = BackgroundDownloadManager()
 
         // Create a temporary directory for test files.
@@ -17,14 +17,14 @@ final class DownloadManagerTests: XCTestCase {
         try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         // Clean up temp files.
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
         tempDirectory = nil
         manager = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Disk Space
