@@ -238,7 +238,7 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
 
         var body: [String: Any] = [
             "prompt": prompt,
-            "max_length": Int(config.maxTokens),
+            "max_length": config.maxOutputTokens ?? Int(config.maxTokens),
             "temperature": config.temperature,
             "top_p": config.topP,
             "top_k": config.topK.map { Int($0) } ?? 40,

@@ -121,6 +121,8 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                     let input = try await modelContainer.perform { context in
                         try await context.processor.prepare(input: .init(messages: messages))
                     }
+                    let outputLimit = config.maxOutputTokens
+                    var outputTokenCount = 0
                     let stream = try await modelContainer.generate(
                         input: input,
                         parameters: generateConfig
@@ -129,6 +131,11 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                         if Task.isCancelled { break }
                         if let text = generation.chunk {
                             continuation.yield(text)
+                            // Each chunk from MLX corresponds to one token.
+                            if let limit = outputLimit {
+                                outputTokenCount += 1
+                                if outputTokenCount >= limit { break }
+                            }
                         }
                     }
                 } catch {

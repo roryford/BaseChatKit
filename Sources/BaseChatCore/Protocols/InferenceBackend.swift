@@ -9,13 +9,21 @@ public struct GenerationConfig: Sendable {
     public var topK: Int32?
     public var typicalP: Float?
 
+    /// Maximum number of tokens the model should generate in a single response.
+    ///
+    /// Cloud backends send this as their `max_tokens` API parameter.
+    /// Local backends (Foundation, MLX, llama.cpp) use it to cap the generation loop.
+    /// `nil` means no explicit limit beyond the backend's own defaults.
+    public var maxOutputTokens: Int?
+
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
         repeatPenalty: Float = 1.1,
         maxTokens: Int32 = 512,
         topK: Int32? = nil,
-        typicalP: Float? = nil
+        typicalP: Float? = nil,
+        maxOutputTokens: Int? = 2048
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -23,6 +31,7 @@ public struct GenerationConfig: Sendable {
         self.maxTokens = maxTokens
         self.topK = topK
         self.typicalP = typicalP
+        self.maxOutputTokens = maxOutputTokens
     }
 }
 

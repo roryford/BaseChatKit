@@ -253,7 +253,7 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
             "stream_options": ["include_usage": true],
             "temperature": config.temperature,
             "top_p": config.topP,
-            "max_tokens": Int(config.maxTokens)
+            "max_tokens": config.maxOutputTokens ?? Int(config.maxTokens)
         ]
 
         var request = URLRequest(url: completionsURL)
