@@ -33,7 +33,11 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         supportedParameters: [.temperature, .topP, .repeatPenalty],
         maxContextTokens: 8192,
         requiresPromptTemplate: false,
-        supportsSystemPrompt: true
+        supportsSystemPrompt: true,
+        supportsToolCalling: false,
+        supportsStructuredOutput: false,
+        cancellationStyle: .cooperative,
+        supportsTokenCounting: true
     )
 
     // MARK: - Private

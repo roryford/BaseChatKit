@@ -38,7 +38,11 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         supportedParameters: [.temperature],
         maxContextTokens: 4096,
         requiresPromptTemplate: false,
-        supportsSystemPrompt: true
+        supportsSystemPrompt: true,
+        supportsToolCalling: false,
+        supportsStructuredOutput: false,
+        cancellationStyle: .cooperative,
+        supportsTokenCounting: false
     )
 
     // MARK: - Private

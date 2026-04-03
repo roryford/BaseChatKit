@@ -32,7 +32,11 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
         supportedParameters: [.temperature, .topP, .repeatPenalty],
         maxContextTokens: 4096,
         requiresPromptTemplate: false,
-        supportsSystemPrompt: true
+        supportsSystemPrompt: true,
+        supportsToolCalling: false,
+        supportsStructuredOutput: false,
+        cancellationStyle: .cooperative,
+        supportsTokenCounting: false
     )) {
         self.capabilities = capabilities
     }
