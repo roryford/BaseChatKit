@@ -70,7 +70,7 @@ let package = Package(
         ),
         .testTarget(
             name: "BaseChatE2ETests",
-            dependencies: ["BaseChatBackends", "BaseChatCore", "BaseChatTestSupport"]
+            dependencies: ["BaseChatBackends", "BaseChatUI", "BaseChatCore", "BaseChatTestSupport"]
         ),
     ],
     swiftLanguageModes: [.v6]
