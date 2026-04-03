@@ -23,7 +23,7 @@ struct LoopDetectionE2ETests {
 
     // MARK: - Helpers
 
-    private func makeVM(backend: MockInferenceBackend) -> ChatViewModel {
+    private func makeVM(backend: MockInferenceBackend) throws -> ChatViewModel {
         backend.isModelLoaded = true
         let service = InferenceService(backend: backend, name: "Mock")
         let persistence = SwiftDataPersistenceProvider(modelContext: context)
@@ -32,7 +32,7 @@ struct LoopDetectionE2ETests {
 
         let sessionManager = SessionManagerViewModel()
         sessionManager.configure(persistence: persistence)
-        let session = try! sessionManager.createSession(title: "Test")
+        let session = try sessionManager.createSession(title: "Test")
         sessionManager.activeSession = session
         vm.switchToSession(session)
 
@@ -41,12 +41,12 @@ struct LoopDetectionE2ETests {
 
     // MARK: - Loop detection stops generation early
 
-    @Test func repetitiveTokens_detectedAndStopped() async {
+    @Test func repetitiveTokens_detectedAndStopped() async throws {
         let mock = MockInferenceBackend()
         let repeatedChunk = "The world ended now. "
         let totalChunks = 200
         mock.tokensToYield = Array(repeating: repeatedChunk, count: totalChunks)
-        let vm = makeVM(backend: mock)
+        let vm = try makeVM(backend: mock)
 
         vm.inputText = "Hello"
         await vm.sendMessage()
@@ -62,29 +62,31 @@ struct LoopDetectionE2ETests {
         )
 
         // Assistant message should exist with partial content.
-        let assistant = vm.messages.first(where: { $0.role == .assistant })
-        #expect(assistant != nil, "Partial assistant message should be preserved")
+        let assistant = try #require(
+            vm.messages.first(where: { $0.role == .assistant }),
+            "Partial assistant message should be preserved"
+        )
         #expect(
-            !assistant!.content.isEmpty,
+            !assistant.content.isEmpty,
             "Assistant message should have non-empty partial content"
         )
 
         // Fewer tokens than the full 200 chunks should have been accumulated.
         let fullLength = repeatedChunk.count * totalChunks
         #expect(
-            assistant!.content.count < fullLength,
-            "Content length \(assistant!.content.count) should be less than full \(fullLength)"
+            assistant.content.count < fullLength,
+            "Content length \(assistant.content.count) should be less than full \(fullLength)"
         )
     }
 
     // MARK: - Loop detection disabled yields all tokens
 
-    @Test func repetitiveTokens_allYielded_whenDetectionDisabled() async {
+    @Test func repetitiveTokens_allYielded_whenDetectionDisabled() async throws {
         let mock = MockInferenceBackend()
         let repeatedChunk = "The world ended now. "
         let totalChunks = 200
         mock.tokensToYield = Array(repeating: repeatedChunk, count: totalChunks)
-        let vm = makeVM(backend: mock)
+        let vm = try makeVM(backend: mock)
         vm.loopDetectionEnabled = false
 
         vm.inputText = "Hello"
@@ -92,12 +94,11 @@ struct LoopDetectionE2ETests {
 
         #expect(!vm.isGenerating)
 
-        let assistant = vm.messages.first(where: { $0.role == .assistant })
-        #expect(assistant != nil)
+        let assistant = try #require(vm.messages.first(where: { $0.role == .assistant }))
 
         let expectedFull = String(repeating: repeatedChunk, count: totalChunks)
         #expect(
-            assistant!.content == expectedFull,
+            assistant.content == expectedFull,
             "All tokens should be accumulated when loop detection is off"
         )
         #expect(vm.errorMessage == nil, "No error should be set when loop detection is disabled")
@@ -105,25 +106,28 @@ struct LoopDetectionE2ETests {
 
     // MARK: - Partial content persists across session reload
 
-    @Test func loopStop_partialContent_survivesSessionReload() async {
+    @Test func loopStop_partialContent_survivesSessionReload() async throws {
         let mock = MockInferenceBackend()
         let repeatedChunk = "The world ended now. "
         mock.tokensToYield = Array(repeating: repeatedChunk, count: 200)
-        let vm = makeVM(backend: mock)
-        let session = vm.activeSession!
+        let vm = try makeVM(backend: mock)
+        let session = try #require(vm.activeSession)
 
         vm.inputText = "Hello"
         await vm.sendMessage()
 
-        let partialContent = vm.messages.first(where: { $0.role == .assistant })!.content
+        let assistant = try #require(vm.messages.first(where: { $0.role == .assistant }))
+        let partialContent = assistant.content
 
         // Reload the session to verify persistence round-trip.
         vm.switchToSession(session)
 
-        let reloaded = vm.messages.first(where: { $0.role == .assistant })
-        #expect(reloaded != nil, "Assistant message should survive session reload")
+        let reloaded = try #require(
+            vm.messages.first(where: { $0.role == .assistant }),
+            "Assistant message should survive session reload"
+        )
         #expect(
-            reloaded!.content == partialContent,
+            reloaded.content == partialContent,
             "Reloaded content should match partial content from loop stop"
         )
     }

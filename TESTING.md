@@ -19,7 +19,7 @@ This document describes BaseChatKit's testing philosophy, architecture, and patt
 
 ## Testing Pyramid
 
-BaseChatKit uses a four-layer testing pyramid. Each layer catches different classes of bugs at different costs:
+BaseChatKit uses a five-layer testing pyramid. Each layer catches different classes of bugs at different costs:
 
 ```
          ╱  XCUITests (Example app)         ╲   Few, slow, high confidence
@@ -51,7 +51,7 @@ Tests that wire together 2+ real components. The most common pattern is ChatView
 
 ### Layer 4 — Headless E2E Tests
 
-Tests that use *no mocks at all* (or mock only the network layer). These exercise real pipelines end-to-end without requiring a UI or hardware.
+Tests that use real components wired together — real ViewModels, real SwiftData, real compression pipelines — with only the inference backend mocked (to avoid hardware dependencies). These exercise real pipelines end-to-end without requiring a UI or hardware.
 
 **Examples:** `ContextOverflowE2ETests`, `DownloadValidationE2ETests`, `CloudBackendSSETests`
 
@@ -70,7 +70,7 @@ UI automation tests that launch the real Example app in a simulator and drive it
 | `BaseChatCoreTests` | Unit, Integration | Yes | None | Mixed (XCTest + Swift Testing) |
 | `BaseChatUITests` | Integration | Yes | None | XCTest |
 | `BaseChatBackendsTests` | Unit, E2E | Partial | MLX/Llama need Apple Silicon | Mixed |
-| `BaseChatE2ETests` | E2E | No | Apple Silicon | Swift Testing |
+| `BaseChatE2ETests` | E2E | Yes | None (mock backends) | Swift Testing |
 | `BaseChatDemoUITests` | XCUITest | No | Simulator | XCTest (XCUIApplication) |
 
 ### Running tests

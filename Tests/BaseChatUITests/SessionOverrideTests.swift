@@ -22,19 +22,20 @@ final class SessionOverrideTests: XCTestCase {
 
         let schema = Schema(BaseChatSchema.allModelTypes)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try! ModelContainer(for: schema, configurations: [config])
+        container = try ModelContainer(for: schema, configurations: [config])
         context = container.mainContext
 
         mockBackend = MockInferenceBackend()
         mockBackend.isModelLoaded = true
         mockBackend.tokensToYield = ["ok"]
 
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
         let service = InferenceService(backend: mockBackend, name: "Mock")
         vm = ChatViewModel(inferenceService: service)
-        vm.configure(modelContext: context)
+        vm.configure(persistence: persistence)
 
         sessionManager = SessionManagerViewModel()
-        sessionManager.configure(modelContext: context)
+        sessionManager.configure(persistence: persistence)
     }
 
     override func tearDown() async throws {
@@ -56,8 +57,8 @@ final class SessionOverrideTests: XCTestCase {
         temperature: Float? = nil,
         topP: Float? = nil,
         repeatPenalty: Float? = nil
-    ) -> ChatSessionRecord {
-        var session = try! sessionManager.createSession(title: title)
+    ) throws -> ChatSessionRecord {
+        var session = try sessionManager.createSession(title: title)
         session.temperature = temperature
         session.topP = topP
         session.repeatPenalty = repeatPenalty
@@ -74,7 +75,7 @@ final class SessionOverrideTests: XCTestCase {
     // MARK: - Tests
 
     func test_customOverrides_passedToBackend() async throws {
-        createAndActivateSession(
+        try createAndActivateSession(
             title: "Custom",
             temperature: 0.3,
             topP: 0.5,
@@ -90,7 +91,7 @@ final class SessionOverrideTests: XCTestCase {
     }
 
     func test_noOverrides_usesDefaults() async throws {
-        createAndActivateSession(title: "Default")
+        try createAndActivateSession(title: "Default")
 
         await sendMessage()
 
@@ -102,7 +103,7 @@ final class SessionOverrideTests: XCTestCase {
 
     func test_switchBackToCustomSession_overridesStillApplied() async throws {
         // Session A: custom overrides
-        let sessionA = createAndActivateSession(
+        let sessionA = try createAndActivateSession(
             title: "Session A",
             temperature: 0.3,
             topP: 0.5,
@@ -112,7 +113,7 @@ final class SessionOverrideTests: XCTestCase {
         await sendMessage("From A first")
 
         // Session B: defaults
-        createAndActivateSession(title: "Session B")
+        try createAndActivateSession(title: "Session B")
 
         await sendMessage("From B")
 

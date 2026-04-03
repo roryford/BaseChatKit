@@ -29,19 +29,20 @@ struct ChatTurnRoundTripE2ETests {
         mock.isModelLoaded = true
         mock.tokensToYield = ["Hello", " from", " mock"]
 
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
         let service = InferenceService(backend: mock, name: "MockE2E")
         vm = ChatViewModel(inferenceService: service)
-        vm.configure(modelContext: context)
+        vm.configure(persistence: persistence)
 
         sessionManager = SessionManagerViewModel()
-        sessionManager.configure(modelContext: context)
+        sessionManager.configure(persistence: persistence)
     }
 
     // MARK: - Helpers
 
     @discardableResult
-    private func createAndActivateSession(title: String = "Test Chat") -> ChatSessionRecord {
-        let session = try! sessionManager.createSession(title: title)
+    private func createAndActivateSession(title: String = "Test Chat") throws -> ChatSessionRecord {
+        let session = try sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)
         return session
@@ -58,8 +59,8 @@ struct ChatTurnRoundTripE2ETests {
     // MARK: - Tests
 
     @Test("Single turn: user + assistant messages appear with correct content")
-    func singleTurnRoundTrip() async {
-        let session = createAndActivateSession()
+    func singleTurnRoundTrip() async throws {
+        let session = try createAndActivateSession()
 
         mock.tokensToYield = ["Good", " morning"]
         vm.inputText = "Hello"
@@ -78,8 +79,8 @@ struct ChatTurnRoundTripE2ETests {
     }
 
     @Test("Multi-turn: all 4 messages present and ordered")
-    func multiTurnRoundTrip() async {
-        let session = createAndActivateSession()
+    func multiTurnRoundTrip() async throws {
+        let session = try createAndActivateSession()
 
         mock.tokensToYield = ["Reply", " one"]
         vm.inputText = "First"
@@ -104,8 +105,8 @@ struct ChatTurnRoundTripE2ETests {
     }
 
     @Test("New session starts empty")
-    func newSessionIsEmpty() async {
-        let sessionA = createAndActivateSession(title: "Session A")
+    func newSessionIsEmpty() async throws {
+        try createAndActivateSession(title: "Session A")
 
         mock.tokensToYield = ["Alpha"]
         vm.inputText = "Question"
@@ -113,22 +114,21 @@ struct ChatTurnRoundTripE2ETests {
         #expect(vm.messages.count == 2)
 
         // Switch to a brand-new session
-        let sessionB = createAndActivateSession(title: "Session B")
-        _ = sessionB
+        try createAndActivateSession(title: "Session B")
 
         #expect(vm.messages.isEmpty, "New session should have no messages")
     }
 
     @Test("Switch back reloads messages from SwiftData")
-    func switchBackReloadsMessages() async {
-        let sessionA = createAndActivateSession(title: "Session A")
+    func switchBackReloadsMessages() async throws {
+        let sessionA = try createAndActivateSession(title: "Session A")
 
         mock.tokensToYield = ["Alpha", " reply"]
         vm.inputText = "Alpha question"
         await vm.sendMessage()
 
         // Switch to session B
-        createAndActivateSession(title: "Session B")
+        try createAndActivateSession(title: "Session B")
         #expect(vm.messages.isEmpty)
 
         // Switch back to session A
@@ -140,8 +140,8 @@ struct ChatTurnRoundTripE2ETests {
     }
 
     @Test("Database persistence: direct ModelContext fetch matches")
-    func databasePersistenceVerification() async {
-        let session = createAndActivateSession()
+    func databasePersistenceVerification() async throws {
+        let session = try createAndActivateSession()
 
         mock.tokensToYield = ["Persisted", " response"]
         vm.inputText = "Persist me"

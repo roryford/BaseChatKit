@@ -45,7 +45,7 @@ final class SamplerPresetRoundTripTests: XCTestCase {
         XCTAssertEqual(fetched.temperature, 0.2, accuracy: 0.001)
         XCTAssertEqual(fetched.topP, 0.85, accuracy: 0.001)
         XCTAssertEqual(fetched.repeatPenalty, 1.05, accuracy: 0.001)
-        XCTAssertNotNil(fetched.createdAt)
+        XCTAssertLessThanOrEqual(fetched.createdAt, Date())
     }
 
     // MARK: - Update round-trip

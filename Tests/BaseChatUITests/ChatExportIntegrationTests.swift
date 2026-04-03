@@ -17,10 +17,11 @@ final class ChatExportIntegrationTests: XCTestCase {
         try await super.setUp()
         let schema = Schema(BaseChatSchema.allModelTypes)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try! ModelContainer(for: schema, configurations: [config])
+        container = try ModelContainer(for: schema, configurations: [config])
         context = container.mainContext
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
         sessionManager = SessionManagerViewModel()
-        sessionManager.configure(modelContext: context)
+        sessionManager.configure(persistence: persistence)
     }
 
     override func tearDown() async throws {
@@ -41,8 +42,9 @@ final class ChatExportIntegrationTests: XCTestCase {
 
     private func makeViewModel(backend: MockInferenceBackend) -> ChatViewModel {
         let service = InferenceService(backend: backend, name: "ExportTest")
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
         let vm = ChatViewModel(inferenceService: service)
-        vm.configure(modelContext: context)
+        vm.configure(persistence: persistence)
         return vm
     }
 
@@ -50,8 +52,8 @@ final class ChatExportIntegrationTests: XCTestCase {
     private func createAndActivateSession(
         vm: ChatViewModel,
         title: String = "Test Chat"
-    ) -> ChatSessionRecord {
-        let session = try! sessionManager.createSession(title: title)
+    ) throws -> ChatSessionRecord {
+        let session = try sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)
         return session
@@ -59,10 +61,10 @@ final class ChatExportIntegrationTests: XCTestCase {
 
     // MARK: - Multi-turn markdown export
 
-    func test_multiTurnConversation_markdownExport_containsAllTurns() async {
+    func test_multiTurnConversation_markdownExport_containsAllTurns() async throws {
         let backend = makeMockBackend(tokens: ["Hello", " there!"])
         let vm = makeViewModel(backend: backend)
-        createAndActivateSession(vm: vm, title: "Story Time")
+        try createAndActivateSession(vm: vm, title: "Story Time")
 
         // Turn 1
         vm.inputText = "Hi"
@@ -98,18 +100,18 @@ final class ChatExportIntegrationTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Sure, here you go."), "Second assistant reply should appear")
 
         // Verify ordering: first user turn appears before second
-        let hiRange = markdown.range(of: "\nHi\n")!
-        let storyRange = markdown.range(of: "Tell me a story")!
+        let hiRange = try XCTUnwrap(markdown.range(of: "\nHi\n"), "First user message not found in markdown")
+        let storyRange = try XCTUnwrap(markdown.range(of: "Tell me a story"), "Second user message not found in markdown")
         XCTAssertTrue(hiRange.lowerBound < storyRange.lowerBound,
                       "First user message should precede the second")
     }
 
     // MARK: - Multi-turn plaintext export
 
-    func test_multiTurnConversation_plaintextExport_containsAllTurns() async {
+    func test_multiTurnConversation_plaintextExport_containsAllTurns() async throws {
         let backend = makeMockBackend(tokens: ["I'm", " fine."])
         let vm = makeViewModel(backend: backend)
-        createAndActivateSession(vm: vm, title: "Casual Chat")
+        try createAndActivateSession(vm: vm, title: "Casual Chat")
 
         // Turn 1
         vm.inputText = "How are you?"
@@ -142,10 +144,10 @@ final class ChatExportIntegrationTests: XCTestCase {
 
     // MARK: - Session title in export
 
-    func test_export_sessionTitle_appearsInBothFormats() async {
+    func test_export_sessionTitle_appearsInBothFormats() async throws {
         let backend = makeMockBackend(tokens: ["Noted."])
         let vm = makeViewModel(backend: backend)
-        createAndActivateSession(vm: vm, title: "Important Discussion")
+        try createAndActivateSession(vm: vm, title: "Important Discussion")
 
         vm.inputText = "Remember this"
         await vm.sendMessage()
@@ -169,10 +171,10 @@ final class ChatExportIntegrationTests: XCTestCase {
 
     // MARK: - Empty conversation export
 
-    func test_emptyConversation_exportsHeaderOnly() {
+    func test_emptyConversation_exportsHeaderOnly() throws {
         let backend = makeMockBackend(tokens: [])
         let vm = makeViewModel(backend: backend)
-        createAndActivateSession(vm: vm, title: "Empty Session")
+        try createAndActivateSession(vm: vm, title: "Empty Session")
 
         // No messages sent
         let markdown = ChatExportService.export(
