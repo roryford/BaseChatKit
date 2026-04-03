@@ -10,6 +10,10 @@ public struct MessageActionMenuModifier: ViewModifier {
     public let message: ChatMessageRecord
     public let viewModel: ChatViewModel
 
+    @Environment(NarrationViewModel.self) private var narrationViewModel: NarrationViewModel?
+
+    private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
+
     @State private var isEditing: Bool = false
     @State private var editText: String = ""
 
@@ -35,6 +39,10 @@ public struct MessageActionMenuModifier: ViewModifier {
 
                 if message.role == .assistant {
                     regenerateButton
+
+                    if features.showNarration, let narration = narrationViewModel {
+                        narrationButton(narration: narration)
+                    }
                 }
             }
             .sheet(isPresented: $isEditing) {
@@ -84,6 +92,19 @@ public struct MessageActionMenuModifier: ViewModifier {
             }
         } label: {
             Label("Regenerate", systemImage: "arrow.counterclockwise")
+        }
+    }
+
+    private func narrationButton(narration: NarrationViewModel) -> some View {
+        Button {
+            Task {
+                await narration.toggleForMessage(message)
+            }
+        } label: {
+            Label(
+                narration.isNarrating(message.id) ? "Stop Reading" : "Read Aloud",
+                systemImage: narration.isNarrating(message.id) ? "speaker.slash" : "speaker.wave.2"
+            )
         }
     }
 

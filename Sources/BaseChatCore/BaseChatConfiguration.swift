@@ -154,6 +154,16 @@ extension BaseChatConfiguration {
         /// Disable for local-only or offline deployments.
         public var showCloudAPIManagement: Bool
 
+        // MARK: - Narration
+
+        /// Shows the "Read Aloud" button on assistant message bubbles and
+        /// narration playback controls in the chat toolbar.
+        ///
+        /// When enabled, users can tap a speaker icon on any assistant message
+        /// to have it read aloud via text-to-speech. Requires a `NarrationProvider`
+        /// to be configured on `NarrationViewModel`.
+        public var showNarration: Bool
+
         // MARK: - Banners & Hints
 
         /// Shows the upgrade hint banner after the first Foundation model response.
@@ -173,6 +183,7 @@ extension BaseChatConfiguration {
             showGenerationSettings: Bool = true,
             showAdvancedSettings: Bool = true,
             showCloudAPIManagement: Bool = true,
+            showNarration: Bool = false,
             showUpgradeHint: Bool = true
         ) {
             self.showContextIndicator = showContextIndicator
@@ -183,6 +194,7 @@ extension BaseChatConfiguration {
             self.showGenerationSettings = showGenerationSettings
             self.showAdvancedSettings = showAdvancedSettings
             self.showCloudAPIManagement = showCloudAPIManagement
+            self.showNarration = showNarration
             self.showUpgradeHint = showUpgradeHint
         }
     }

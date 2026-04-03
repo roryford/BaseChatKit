@@ -8,6 +8,7 @@ import BaseChatCore
 public struct ChatView: View {
 
     @Environment(ChatViewModel.self) private var viewModel
+    @Environment(NarrationViewModel.self) private var narrationViewModel: NarrationViewModel?
 
     private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
 
@@ -40,6 +41,12 @@ public struct ChatView: View {
 
             if features.showUpgradeHint && viewModel.showUpgradeHint {
                 upgradeHintBanner
+            }
+
+            if let narration = narrationViewModel,
+               features.showNarration,
+               narration.state != .idle {
+                narrationPlaybackBar(narration: narration)
             }
 
             Divider()
@@ -332,6 +339,47 @@ public struct ChatView: View {
         }
         .padding()
         .frame(minWidth: 280)
+    }
+
+    // MARK: - Narration Playback Bar
+
+    private func narrationPlaybackBar(narration: NarrationViewModel) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "speaker.wave.2.fill")
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+
+            Text("Reading aloud")
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if case .speaking = narration.state {
+                Button { narration.pause() } label: {
+                    Image(systemName: "pause.fill")
+                        .font(.callout)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Pause narration")
+            } else if case .paused = narration.state {
+                Button { narration.resume() } label: {
+                    Image(systemName: "play.fill")
+                        .font(.callout)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Resume narration")
+            }
+
+            Button { narration.stopAll() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop narration")
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.fill.quaternary)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     // MARK: - Helpers

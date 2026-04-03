@@ -15,6 +15,9 @@ public struct MessageBubbleView: View {
     public let isPinned: Bool
 
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(NarrationViewModel.self) private var narrationViewModel: NarrationViewModel?
+
+    private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
 
     public init(message: ChatMessageRecord, isStreaming: Bool, isPinned: Bool = false) {
         self.message = message
@@ -92,6 +95,10 @@ public struct MessageBubbleView: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
+
+                    if features.showNarration, let narration = narrationViewModel {
+                        narrationButton(narration: narration)
+                    }
                 }
             }
         }
@@ -115,6 +122,22 @@ public struct MessageBubbleView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Narration Button
+
+    private func narrationButton(narration: NarrationViewModel) -> some View {
+        Button {
+            Task {
+                await narration.toggleForMessage(message)
+            }
+        } label: {
+            Image(systemName: narration.isSpeaking(message.id) ? "speaker.slash.fill" : "speaker.wave.2")
+                .font(.caption)
+                .foregroundStyle(narration.isNarrating(message.id) ? Color.accentColor : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(narration.isNarrating(message.id) ? "Stop narration" : "Read aloud")
     }
 
     // MARK: - Pin Indicator

@@ -25,6 +25,7 @@ Small, purpose-built apps that each showcase a single feature. Open `Examples/Ba
 | Example | Scheme | What It Shows |
 |---------|--------|---------------|
 | [MinimalExample](Examples/MinimalExample/) | `MinimalExample_iOS` / `MinimalExample_macOS` | Bare-minimum BaseChatKit app (~40 lines) |
+| [NarrationExample](Examples/NarrationExample/) | `NarrationExample_iOS` / `NarrationExample_macOS` | Text-to-speech narration with AVSpeechSynthesizer |
 
 More examples ship alongside new features — see each example's README for details.
 
