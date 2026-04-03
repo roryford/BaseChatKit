@@ -62,8 +62,15 @@ struct MemoryPressureUnloadE2ETests {
         mock.tokensToYield = ["Hello"]
         vm.inputText = "Test prompt"
         await vm.sendMessage()
-        #expect(!vm.messages.isEmpty,
-            "Should have messages after successful generation")
+        #expect(vm.errorMessage == nil,
+            "Generation should complete without error")
+        let assistantMsg = vm.messages.last { $0.role == .assistant }
+        #expect(assistantMsg != nil,
+            "An assistant message should exist after generation")
+        #expect(assistantMsg?.content.contains("Hello") == true,
+            "Assistant message should contain the expected token, got: \(assistantMsg?.content ?? "nil")")
+        #expect(!(assistantMsg?.content.isEmpty ?? true),
+            "Assistant message content should be non-empty")
 
         // --- Phase 2: Critical pressure fires ---
         handler.pressureLevel = .critical
@@ -139,12 +146,17 @@ struct MemoryPressureUnloadE2ETests {
             await vm.sendMessage()
         }
 
-        // Poll until generation begins rather than using a fixed sleep.
-        for _ in 0..<50 {
-            if vm.isGenerating { break }
+        // Poll until generation begins with a deadline-based timeout.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !vm.isGenerating && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(vm.isGenerating, "Precondition: should be generating")
+        guard vm.isGenerating else {
+            genTask.cancel()
+            await genTask.value
+            Issue.record("Precondition failed: generation did not start within 2s")
+            return
+        }
 
         // Simulate critical memory pressure mid-generation.
         handler.pressureLevel = .critical
@@ -157,6 +169,8 @@ struct MemoryPressureUnloadE2ETests {
         // Wait for the generation task to finish (it should exit gracefully).
         await genTask.value
 
+        #expect(!vm.isGenerating,
+            "Generation should have stopped after critical pressure")
         #expect(vm.errorMessage != nil,
             "Error message should be set after critical pressure during generation")
     }
