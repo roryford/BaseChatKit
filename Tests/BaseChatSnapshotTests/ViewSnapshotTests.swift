@@ -14,12 +14,17 @@ import BaseChatCore
 /// ChatView, model management views) are excluded — they need a full app environment.
 /// This covers the self-contained indicator and bubble views (13 of 26 previews).
 ///
-/// On first run, set `isRecording = .all` to generate reference snapshots.
+/// On first run, set `recordMode = .all` to generate reference snapshots.
 @MainActor
 final class ViewSnapshotTests: XCTestCase {
 
-    // Set to .all to record new reference snapshots, then set back to nil.
-    private let recordMode: SnapshotTestingConfiguration.Record? = nil
+    // Set to .all to record new reference snapshots, then set back to .missing.
+    private let recordMode: SnapshotTestingConfiguration.Record? = .missing
+
+    // Fixed identifiers so `.dump` output is deterministic across runs.
+    private let fixedID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    private let fixedSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+    private let fixedDate = Date(timeIntervalSinceReferenceDate: 0)
 
     private func assertDumpSnapshot<V: View>(
         _ view: V,
@@ -49,7 +54,7 @@ final class ViewSnapshotTests: XCTestCase {
     func test_messageBubble_userMessage() {
         assertDumpSnapshot(
             MessageBubbleView(
-                message: ChatMessageRecord(role: .user, content: "Hello, tell me a story.", sessionID: UUID()),
+                message: ChatMessageRecord(id: fixedID, role: .user, content: "Hello, tell me a story.", timestamp: fixedDate, sessionID: fixedSessionID),
                 isStreaming: false
             ),
             named: "user_message"
@@ -59,7 +64,7 @@ final class ViewSnapshotTests: XCTestCase {
     func test_messageBubble_assistantMessage() {
         assertDumpSnapshot(
             MessageBubbleView(
-                message: ChatMessageRecord(role: .assistant, content: "Once upon a time...", sessionID: UUID()),
+                message: ChatMessageRecord(id: fixedID, role: .assistant, content: "Once upon a time...", timestamp: fixedDate, sessionID: fixedSessionID),
                 isStreaming: false
             ),
             named: "assistant_message"
@@ -69,7 +74,7 @@ final class ViewSnapshotTests: XCTestCase {
     func test_messageBubble_assistantStreaming() {
         assertDumpSnapshot(
             MessageBubbleView(
-                message: ChatMessageRecord(role: .assistant, content: "Once upon a time...", sessionID: UUID()),
+                message: ChatMessageRecord(id: fixedID, role: .assistant, content: "Once upon a time...", timestamp: fixedDate, sessionID: fixedSessionID),
                 isStreaming: true
             ),
             named: "assistant_streaming"
@@ -79,7 +84,7 @@ final class ViewSnapshotTests: XCTestCase {
     func test_messageBubble_systemMessage() {
         assertDumpSnapshot(
             MessageBubbleView(
-                message: ChatMessageRecord(role: .system, content: "You are a creative assistant.", sessionID: UUID()),
+                message: ChatMessageRecord(id: fixedID, role: .system, content: "You are a creative assistant.", timestamp: fixedDate, sessionID: fixedSessionID),
                 isStreaming: false
             ),
             named: "system_message"
@@ -177,7 +182,8 @@ final class ViewSnapshotTests: XCTestCase {
 
     func test_whyDownloadView() {
         assertDumpSnapshot(
-            WhyDownloadView(),
+            WhyDownloadView()
+                .environment(ModelManagementViewModel()),
             named: "why_download"
         )
     }
