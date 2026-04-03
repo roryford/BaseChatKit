@@ -154,6 +154,13 @@ extension BaseChatConfiguration {
         /// Disable for local-only or offline deployments.
         public var showCloudAPIManagement: Bool
 
+        /// Shows the "Discover Local Servers" button in model management.
+        ///
+        /// When enabled, the UI displays a button that scans the local network
+        /// for running inference servers (Ollama, KoboldCpp, LM Studio, etc.).
+        /// Disable for deployments that don't use local servers.
+        public var showServerDiscovery: Bool
+
         // MARK: - Banners & Hints
 
         /// Shows the upgrade hint banner after the first Foundation model response.
@@ -173,6 +180,7 @@ extension BaseChatConfiguration {
             showGenerationSettings: Bool = true,
             showAdvancedSettings: Bool = true,
             showCloudAPIManagement: Bool = true,
+            showServerDiscovery: Bool = true,
             showUpgradeHint: Bool = true
         ) {
             self.showContextIndicator = showContextIndicator
@@ -183,6 +191,7 @@ extension BaseChatConfiguration {
             self.showGenerationSettings = showGenerationSettings
             self.showAdvancedSettings = showAdvancedSettings
             self.showCloudAPIManagement = showCloudAPIManagement
+            self.showServerDiscovery = showServerDiscovery
             self.showUpgradeHint = showUpgradeHint
         }
     }
