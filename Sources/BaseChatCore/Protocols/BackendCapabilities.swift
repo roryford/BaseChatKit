@@ -5,6 +5,8 @@ public enum GenerationParameter: String, CaseIterable, Sendable {
     case temperature
     case topP
     case repeatPenalty
+    case topK
+    case typicalP
 }
 
 /// Describes what an inference backend supports.

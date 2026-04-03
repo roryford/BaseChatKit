@@ -6,17 +6,23 @@ public struct GenerationConfig: Sendable {
     public var topP: Float
     public var repeatPenalty: Float
     public var maxTokens: Int32
+    public var topK: Int32?
+    public var typicalP: Float?
 
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
         repeatPenalty: Float = 1.1,
-        maxTokens: Int32 = 512
+        maxTokens: Int32 = 512,
+        topK: Int32? = nil,
+        typicalP: Float? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
         self.repeatPenalty = repeatPenalty
         self.maxTokens = maxTokens
+        self.topK = topK
+        self.typicalP = typicalP
     }
 }
 

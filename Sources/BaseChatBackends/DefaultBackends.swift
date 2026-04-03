@@ -32,6 +32,7 @@ public enum DefaultBackends {
     static func backendTypeName(for provider: APIProvider) -> String? {
         switch provider {
         case .claude:                              return "ClaudeBackend"
+        case .koboldCpp:                           return "KoboldCppBackend"
         case .openAI, .ollama, .lmStudio, .custom: return "OpenAIBackend"
         }
     }
@@ -62,6 +63,7 @@ public enum DefaultBackends {
         service.registerCloudBackendFactory { provider in
             switch provider {
             case .claude: return ClaudeBackend()
+            case .koboldCpp: return KoboldCppBackend()
             case .openAI, .ollama, .lmStudio, .custom: return OpenAIBackend()
             }
         }
