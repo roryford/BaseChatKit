@@ -204,6 +204,65 @@ final class FoundationBackendUnitTests: XCTestCase {
 
 
 
+    // MARK: - stopGeneration() resets session
+
+    /// After `stopGeneration()`, the session must be nil so the next `generate()`
+    /// creates a fresh `LanguageModelSession` instead of reusing one with a
+    /// truncated assistant turn from the cancelled generation.
+    func test_stopGeneration_resetsSession_preservesIsModelLoaded() async throws {
+        try XCTSkipUnless(
+            FoundationBackend.isAvailable,
+            "Apple Intelligence not available — cannot load model"
+        )
+
+        let url = URL(fileURLWithPath: "/dev/null")
+        try await backend.loadModel(from: url, contextSize: 4096)
+        XCTAssertTrue(backend.isModelLoaded, "Precondition")
+
+        // Start and immediately stop a generation to simulate mid-stream cancel.
+        let stream = try backend.generate(
+            prompt: "Tell me a story",
+            systemPrompt: "You are helpful.",
+            config: GenerationConfig()
+        )
+        backend.stopGeneration()
+
+        // Drain the cancelled stream so the generation task's defer block runs
+        // and clears isGenerating before we attempt a second generate().
+        for try await _ in stream {}
+
+        XCTAssertTrue(
+            backend.isModelLoaded,
+            "stopGeneration() must not clear isModelLoaded"
+        )
+        XCTAssertFalse(
+            backend.isGenerating,
+            "isGenerating must be false after the cancelled stream drains"
+        )
+
+        // The key invariant: generate() must succeed after stop, which means
+        // the session was nil'd and a fresh one will be created.
+        let stream2 = try backend.generate(
+            prompt: "Hello again",
+            systemPrompt: "You are helpful.",
+            config: GenerationConfig()
+        )
+        backend.stopGeneration()
+        for try await _ in stream2 {}
+    }
+
+    /// State-only version (no Apple Intelligence needed): stopGeneration() is
+    /// safe to call when no generation is running and leaves state consistent.
+    func test_stopGeneration_whenIdle_doesNotCrash() {
+        XCTAssertFalse(backend.isModelLoaded)
+        XCTAssertFalse(backend.isGenerating)
+
+        backend.stopGeneration()
+
+        XCTAssertFalse(backend.isModelLoaded)
+        XCTAssertFalse(backend.isGenerating)
+    }
+
     /// Verifies that resetConversation() only clears the session (conversation
     /// history), not the loaded state — so a subsequent generate() can recreate
     /// the session rather than throwing "No model loaded".

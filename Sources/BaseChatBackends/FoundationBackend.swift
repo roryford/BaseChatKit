@@ -231,6 +231,13 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
             return generationTask
         }
         task?.cancel()
+
+        // Discard the session after cancellation so the partial response
+        // doesn't corrupt the conversation history for subsequent turns.
+        withStateLock {
+            session = nil
+            currentSystemPrompt = nil
+        }
     }
 
 }
