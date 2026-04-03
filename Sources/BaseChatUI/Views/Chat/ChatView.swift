@@ -160,16 +160,11 @@ public struct ChatView: View {
     // MARK: - Loading
 
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .controlSize(.large)
-            Text("Setting things up...")
-                .font(.headline)
-                .foregroundStyle(.secondary)
+        Group {
+            if case .modelLoading(let progress) = viewModel.activityPhase {
+                ModelLoadingIndicatorView(progress: progress)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Setting things up, please wait")
     }
 
     // MARK: - No Model Loaded

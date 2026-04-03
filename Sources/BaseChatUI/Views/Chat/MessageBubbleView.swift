@@ -133,22 +133,13 @@ public struct MessageBubbleView: View {
     // MARK: - Streaming Indicator
 
     private var streamingPlaceholder: some View {
-        ProgressView()
-            .controlSize(.small)
+        TypingIndicatorView()
             .padding(.vertical, 4)
-            .accessibilityLabel("Generating response")
     }
 
     private var streamingIndicator: some View {
-        HStack(spacing: 4) {
-            Text("...")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .symbolEffect(.pulse)
-            ProgressView()
-                .controlSize(.mini)
-        }
-        .accessibilityLabel("Still generating")
+        StreamingCursorView()
+            .accessibilityLabel("Still generating")
     }
 
     // MARK: - Timestamp

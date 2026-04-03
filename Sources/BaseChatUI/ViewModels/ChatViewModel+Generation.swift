@@ -47,10 +47,10 @@ extension ChatViewModel {
     /// Handles context trimming, token usage capture, empty response cleanup,
     /// and the Foundation model upgrade hint.
     func generateIntoMessage(_ assistantMessage: ChatMessageRecord) async {
-        isGenerating = true
+        activityPhase = .waitingForFirstToken
         let messageID = assistantMessage.id
         defer {
-            isGenerating = false
+            activityPhase = .idle
             inferenceService.generationDidFinish()
         }
 
@@ -121,6 +121,9 @@ extension ChatViewModel {
                     for try await token in stream {
                         if Task.isCancelled { break }
                         tokenCount += 1
+                        if tokenCount == 1 {
+                            self.activityPhase = .streaming
+                        }
                         if let batch = batcher.append(token, now: ContinuousClock.now),
                            let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
                             self.messages[idx].content += batch
