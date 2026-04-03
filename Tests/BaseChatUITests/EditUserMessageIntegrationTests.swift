@@ -13,7 +13,7 @@ import BaseChatTestSupport
 /// 4. Preserves the original message ID (no phantom inserts)
 /// 5. Removes subsequent messages and regenerates the assistant response
 @MainActor
-final class EditUserMessageTests: XCTestCase {
+final class EditUserMessageIntegrationTests: XCTestCase {
 
     private var container: ModelContainer!
     private var context: ModelContext!
@@ -96,6 +96,10 @@ final class EditUserMessageTests: XCTestCase {
                        "In-memory user message content should be updated")
         XCTAssertEqual(vm.messages[0].role, .user,
                        "Role should remain .user after edit")
+        XCTAssertEqual(vm.messages.count, 2,
+                       "Should have exactly 2 messages after edit (user + regenerated assistant)")
+        XCTAssertEqual(vm.messages[1].content, "New reply",
+                       "Assistant response should be regenerated with new tokens")
     }
 
     // MARK: - Edit Persists To SwiftData
@@ -114,6 +118,8 @@ final class EditUserMessageTests: XCTestCase {
         let dbMessages = fetchMessages(for: session.id)
         XCTAssertEqual(dbMessages.first(where: { $0.role == .user })?.content, "After edit",
                        "Edited content should be persisted to SwiftData")
+        XCTAssertEqual(dbMessages.first(where: { $0.role == .assistant })?.content, "After edit reply",
+                       "Regenerated assistant response should be persisted to SwiftData")
     }
 
     // MARK: - Edit Does Not Create Duplicate Messages
@@ -188,7 +194,9 @@ final class EditUserMessageTests: XCTestCase {
         XCTAssertEqual(vm.messages.count, 2,
                        "Editing first message should remove all subsequent messages")
         XCTAssertEqual(vm.messages[0].content, "Edited Q1")
+        XCTAssertEqual(vm.messages[0].role, .user)
         XCTAssertEqual(vm.messages[1].content, "Regenerated")
+        XCTAssertEqual(vm.messages[1].role, .assistant)
 
         // Database should match
         let dbMessages = fetchMessages(for: session.id)
@@ -215,6 +223,8 @@ final class EditUserMessageTests: XCTestCase {
         XCTAssertEqual(dbMessages.count, messageCountBefore,
                        "Editing with same content should not create extra messages")
         XCTAssertEqual(dbMessages[0].content, "Question")
+        XCTAssertEqual(dbMessages[1].content, "Regenerated reply",
+                       "Assistant response should be regenerated even when user content is unchanged")
     }
 
     // MARK: - Edit Nonexistent Message Is No-Op
