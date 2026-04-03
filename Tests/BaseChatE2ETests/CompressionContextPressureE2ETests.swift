@@ -64,7 +64,15 @@ struct CompressionContextPressureE2ETests {
     /// contextSize=600, available = 600 - 512 = 88, threshold at 75% = 66 tokens = 264 chars.
     /// 5 user+assistant pairs × ~160 chars each = ~1600 chars = ~400 tokens → well above.
     private func fillContext() async {
-        vm.contextMaxTokens = 600
+        // Set via backend capabilities so resolveContextSize() returns 600 consistently.
+        // Setting vm.contextMaxTokens directly would be overwritten by updateContextEstimate()
+        // after each sendMessage(), since it resolves from backend capabilities (default 4096).
+        mock.capabilities = BackendCapabilities(
+            supportedParameters: mock.capabilities.supportedParameters,
+            maxContextTokens: 600,
+            requiresPromptTemplate: mock.capabilities.requiresPromptTemplate,
+            supportsSystemPrompt: mock.capabilities.supportsSystemPrompt
+        )
 
         for i in 0..<5 {
             mock.tokensToYield = [String(repeating: "r", count: 160)]
@@ -79,6 +87,9 @@ struct CompressionContextPressureE2ETests {
     func fullFlow_compressionFires_generationContinues() async throws {
         let session = try createAndActivateSession()
         await fillContext()
+
+        // Verify context cap survived fillContext() — guards against updateContextEstimate() resetting it
+        #expect(vm.contextMaxTokens == 600)
 
         // Next message should trigger compression
         mock.tokensToYield = ["Final", " answer"]
@@ -106,6 +117,8 @@ struct CompressionContextPressureE2ETests {
         try createAndActivateSession()
         await fillContext()
 
+        #expect(vm.contextMaxTokens == 600)
+
         mock.tokensToYield = ["Post", " compression"]
         vm.inputText = "After filling"
         await vm.sendMessage()
@@ -125,6 +138,8 @@ struct CompressionContextPressureE2ETests {
     func multiTurn_afterCompression_vmRemainsUsable() async throws {
         try createAndActivateSession()
         await fillContext()
+
+        #expect(vm.contextMaxTokens == 600)
 
         // First post-compression message
         mock.tokensToYield = ["First", " post"]
@@ -146,6 +161,8 @@ struct CompressionContextPressureE2ETests {
     func compressedMessages_surviveSessionReload() async throws {
         let session = try createAndActivateSession()
         await fillContext()
+
+        #expect(vm.contextMaxTokens == 600)
 
         mock.tokensToYield = ["Persisted"]
         vm.inputText = "Persist after compress"
