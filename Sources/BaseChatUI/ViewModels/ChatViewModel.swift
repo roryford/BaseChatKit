@@ -219,6 +219,15 @@ public final class ChatViewModel {
     /// Cached per-message token counts keyed by message ID, to avoid recalculating all messages.
     var tokenCountCache: [UUID: Int] = [:]
 
+    /// Number of messages to load per page when paginating history.
+    static let messagePageSize = 50
+
+    /// Whether older messages are available to load above the current page.
+    public internal(set) var hasOlderMessages: Bool = false
+
+    /// Whether a page of older messages is currently being fetched.
+    public internal(set) var isLoadingOlderMessages: Bool = false
+
     // MARK: - Initialisation
 
     public init(
@@ -584,6 +593,7 @@ public final class ChatViewModel {
         guard let activeSessionID else {
             messages.removeAll()
             tokenCountCache.removeAll()
+            hasOlderMessages = false
             updateContextEstimate()
             Log.ui.info("Chat cleared")
             return
@@ -593,6 +603,7 @@ public final class ChatViewModel {
             try deleteMessages(for: activeSessionID)
             messages.removeAll()
             tokenCountCache.removeAll()
+            hasOlderMessages = false
             updateContextEstimate()
             Log.ui.info("Chat cleared")
         } catch {
