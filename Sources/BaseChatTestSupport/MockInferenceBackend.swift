@@ -25,6 +25,9 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
     public var lastSystemPrompt: String?
     public var lastConfig: GenerationConfig?
 
+    /// Stored so stopGeneration() can terminate the in-flight stream.
+    private var activeContinuation: AsyncThrowingStream<String, Error>.Continuation?
+
     public init(capabilities: BackendCapabilities = BackendCapabilities(
         supportedParameters: [.temperature, .topP, .repeatPenalty],
         maxContextTokens: 4096,
@@ -52,6 +55,10 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
         let tokens = tokensToYield
 
         return AsyncThrowingStream { [self] continuation in
+            self.activeContinuation = continuation
+            continuation.onTermination = { @Sendable _ in
+                self.activeContinuation = nil
+            }
             Task {
                 for token in tokens {
                     if Task.isCancelled { break }
@@ -66,6 +73,8 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
     public func stopGeneration() {
         stopCallCount += 1
         isGenerating = false
+        activeContinuation?.finish()
+        activeContinuation = nil
     }
 
     public func unloadModel() {
