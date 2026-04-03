@@ -269,7 +269,7 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
 
         var body: [String: Any] = [
             "model": modelName,
-            "max_tokens": Int(config.maxTokens),
+            "max_tokens": config.maxOutputTokens ?? Int(config.maxTokens),
             "messages": chatMessages,
             "stream": true,
             "temperature": config.temperature,

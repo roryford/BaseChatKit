@@ -176,6 +176,8 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                         options: options
                     )
 
+                    let outputLimit = config.maxOutputTokens
+                    var outputTokenCount = 0
                     var previousText = ""
                     for try await partial in stream {
                         if Task.isCancelled { break }
@@ -190,6 +192,16 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                             )
                             continuation.yield(newContent)
                             previousText = currentText
+
+                            // Approximate token count using the conservative 3-char heuristic.
+                            // Stops runaway generation for open-ended prompts.
+                            if let limit = outputLimit {
+                                outputTokenCount += max(1, newContent.count / 3)
+                                if outputTokenCount >= limit {
+                                    Self.logger.info("Output token limit (\(limit)) reached")
+                                    break
+                                }
+                            }
                         }
                     }
                 } catch {
