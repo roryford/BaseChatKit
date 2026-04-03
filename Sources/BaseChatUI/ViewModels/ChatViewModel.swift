@@ -113,6 +113,20 @@ public final class ChatViewModel {
     public var topP: Float = 0.9
     public var repeatPenalty: Float = 1.1
 
+    /// Whether to automatically stop generation when repetitive looping is detected.
+    /// Defaults to `true`. Disable for apps that handle loop detection themselves.
+    public var loopDetectionEnabled: Bool = true
+
+    /// Whether to expand macros (e.g., `{{user}}`, `{{date}}`) in the system prompt
+    /// before generation. Defaults to `true`.
+    public var macroExpansionEnabled: Bool = true
+
+    /// Context values for macro expansion. Apps should populate fields relevant to
+    /// their domain (e.g., `userName`, `charName`). Message-related fields
+    /// (`lastMessage`, `lastUserMessage`, `lastCharMessage`) are auto-populated
+    /// from the conversation history if left `nil`.
+    public var macroContext: MacroContext = MacroContext()
+
     /// Prompt template for GGUF backends. Ignored by MLX/Foundation.
     public var selectedPromptTemplate: PromptTemplate {
         get { inferenceService.selectedPromptTemplate }
