@@ -78,7 +78,6 @@ let package = Package(
             dependencies: [
                 "BaseChatUI",
                 "BaseChatCore",
-                "BaseChatTestSupport",
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ]
         ),

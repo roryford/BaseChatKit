@@ -3,7 +3,6 @@ import SnapshotTesting
 import SwiftUI
 @testable import BaseChatUI
 import BaseChatCore
-import BaseChatTestSupport
 
 /// Snapshot tests for SwiftUI preview configurations.
 ///
@@ -13,14 +12,14 @@ import BaseChatTestSupport
 ///
 /// Views that require complex environment objects (ChatInputBar, DownloadProgressView,
 /// ChatView, model management views) are excluded — they need a full app environment.
-/// This covers the self-contained indicator and bubble views (16 of 26 previews).
+/// This covers the self-contained indicator and bubble views (13 of 26 previews).
 ///
-/// On first run, set `isRecording = true` to generate reference snapshots.
+/// On first run, set `isRecording = .all` to generate reference snapshots.
 @MainActor
 final class ViewSnapshotTests: XCTestCase {
 
-    // Set to true to record new reference snapshots, then set back to false.
-    private let isRecordMode = false
+    // Set to .all to record new reference snapshots, then set back to nil.
+    private let recordMode: SnapshotTestingConfiguration.Record? = nil
 
     private func assertDumpSnapshot<V: View>(
         _ view: V,
@@ -38,7 +37,7 @@ final class ViewSnapshotTests: XCTestCase {
             of: vc,
             as: .dump,
             named: name,
-            record: isRecordMode,
+            record: recordMode,
             file: file,
             testName: testName,
             line: line
