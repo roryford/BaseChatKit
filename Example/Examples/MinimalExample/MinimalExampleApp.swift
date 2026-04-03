@@ -1,0 +1,48 @@
+import SwiftUI
+import SwiftData
+import BaseChatCore
+import BaseChatUI
+import BaseChatBackends
+
+/// The simplest possible BaseChatKit app — under 40 lines.
+///
+/// This registers all built-in backends, creates an in-memory SwiftData store,
+/// and presents the standard ChatView. No model curation, no custom UI.
+@main
+struct MinimalExampleApp: App {
+    @State private var chatViewModel: ChatViewModel
+    @State private var sessionManager = SessionManagerViewModel()
+
+    private let modelContainer: ModelContainer
+
+    init() {
+        BaseChatConfiguration.shared = BaseChatConfiguration(
+            appName: "Minimal Chat",
+            bundleIdentifier: "com.basechatkit.minimal-example"
+        )
+
+        let service = InferenceService()
+        DefaultBackends.register(with: service)
+
+        let vm = ChatViewModel(inferenceService: service)
+        vm.foundationModelProvider = {
+            if #available(iOS 26, macOS 26, *) {
+                return FoundationBackend.isAvailable
+            }
+            return false
+        }
+        _chatViewModel = State(initialValue: vm)
+
+        let schema = Schema(BaseChatSchema.allModelTypes)
+        self.modelContainer = try! ModelContainer(for: schema)
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            MinimalContentView()
+                .environment(chatViewModel)
+                .environment(sessionManager)
+        }
+        .modelContainer(modelContainer)
+    }
+}
