@@ -241,8 +241,8 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
             "max_length": Int(config.maxTokens),
             "temperature": config.temperature,
             "top_p": config.topP,
-            "top_k": 40,
-            "typical": 1.0,
+            "top_k": config.topK.map { Int($0) } ?? 40,
+            "typical": config.typicalP ?? 1.0,
             "rep_pen": config.repeatPenalty
         ]
 

@@ -46,11 +46,27 @@ public final class ServerDiscoveryViewModel {
     /// Starts scanning for local servers.
     public func startDiscovery() {
         isScanning = true
+
+        // Subscribe to the stream first so the continuation is installed
+        // before startDiscovery yields results. NetworkDiscoveryService's
+        // `discoveredServers` creates a new stream on each access and
+        // installs its continuation via a Task — we capture the stream
+        // eagerly so the continuation is ready when discovery emits.
+        let serverStream = discoveryService.discoveredServers
+
         discoveryTask = Task { [weak self] in
             guard let self else { return }
-            await self.discoveryService.startDiscovery()
 
-            for await servers in self.discoveryService.discoveredServers {
+            // Give the stream's continuation-installation task a chance to run
+            // before we start probing servers.
+            await Task.yield()
+
+            // Start scanning concurrently while we listen for results.
+            Task { [weak self] in
+                await self?.discoveryService.startDiscovery()
+            }
+
+            for await servers in serverStream {
                 guard !Task.isCancelled else { break }
                 self.discoveredServers = servers
             }
