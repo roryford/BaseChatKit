@@ -1,4 +1,4 @@
-import XCTest
+import Testing
 import Foundation
 @testable import BaseChatCore
 import BaseChatTestSupport
@@ -8,7 +8,8 @@ import BaseChatTestSupport
 ///
 /// Uses the real filesystem (temp directories) and `MockInferenceBackend`
 /// so the test runs without hardware but exercises the real validation path.
-final class DownloadValidateLoadGenerateE2ETests: XCTestCase {
+@Suite("Download -> Validate -> Load -> Generate E2E")
+struct DownloadValidateLoadGenerateE2ETests {
 
     /// GGUF magic bytes: "GGUF" in ASCII.
     private static let ggufMagic: [UInt8] = [0x47, 0x47, 0x55, 0x46]
@@ -16,194 +17,176 @@ final class DownloadValidateLoadGenerateE2ETests: XCTestCase {
     private let fm = FileManager.default
     private let manager = BackgroundDownloadManager()
 
-    private var tempDir: URL!
+    // MARK: - Temp Directory Helpers
 
-    override func setUp() async throws {
-        try await super.setUp()
-        tempDir = fm.temporaryDirectory
+    private func makeTempDir() throws -> URL {
+        let dir = fm.temporaryDirectory
             .appendingPathComponent("BaseChatE2E-\(UUID().uuidString)")
-        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 
-    override func tearDown() async throws {
-        if let tempDir {
-            try? fm.removeItem(at: tempDir)
+    private func cleanup(_ url: URL) {
+        try? fm.removeItem(at: url)
+    }
+
+    /// Writes a valid GGUF file (correct magic + >1 MB) to the given directory.
+    private func writeValidGGUF(in dir: URL, name: String = "test-model.gguf") throws -> URL {
+        let url = dir.appendingPathComponent(name)
+        var data = Data(Self.ggufMagic)
+        data.append(Data(repeating: 0xFF, count: 1_100_000))
+        try data.write(to: url)
+        return url
+    }
+
+    /// Collects all tokens from an async stream into a single string.
+    private func collect(_ stream: AsyncThrowingStream<String, Error>) async throws -> String {
+        var output = ""
+        for try await token in stream {
+            output += token
         }
-        try await super.tearDown()
+        return output
     }
 
     // MARK: - GGUF Lifecycle
 
-    /// Full lifecycle: write GGUF file -> validate -> load backend -> generate tokens -> verify output.
-    func test_gguf_downloadValidateLoadGenerate() async throws {
-        // 1. Simulate a downloaded GGUF file with valid magic bytes and sufficient size.
-        let modelURL = tempDir.appendingPathComponent("test-model.gguf")
-        var data = Data(Self.ggufMagic)
-        data.append(Data(repeating: 0xFF, count: 1_100_000))
-        try data.write(to: modelURL)
+    @Test("Full GGUF lifecycle: write -> validate -> load -> generate -> verify")
+    func gguf_downloadValidateLoadGenerate() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
 
-        XCTAssertTrue(fm.fileExists(atPath: modelURL.path), "GGUF file must exist on disk")
+        // 1. Write a valid GGUF file to disk.
+        let modelURL = try writeValidGGUF(in: dir)
 
-        // 2. Validate the downloaded file through the real validation pipeline.
-        XCTAssertNoThrow(
-            try manager.validateDownloadedFile(at: modelURL, modelType: .gguf),
-            "Valid GGUF file should pass validation"
-        )
+        // 2. Validate through the real pipeline.
+        try manager.validateDownloadedFile(at: modelURL, modelType: .gguf)
 
-        // 3. Load the validated model into a mock backend.
+        // 3. Load into mock backend and generate.
         let backend = MockInferenceBackend()
         backend.tokensToYield = ["Once", " upon", " a", " time"]
 
-        XCTAssertFalse(backend.isModelLoaded)
+        #expect(!backend.isModelLoaded)
         try await backend.loadModel(from: modelURL, contextSize: 512)
-        XCTAssertTrue(backend.isModelLoaded)
-        XCTAssertEqual(backend.loadModelCallCount, 1)
+        #expect(backend.isModelLoaded)
+        #expect(backend.loadModelCallCount == 1)
 
-        // 4. Generate tokens and collect the full output.
+        // 4. Generate tokens.
         let config = GenerationConfig(temperature: 0.7, maxTokens: 512)
-        let stream = try backend.generate(
+        let output = try await collect(backend.generate(
             prompt: "Tell me a story",
             systemPrompt: "You are a storyteller.",
             config: config
-        )
+        ))
 
-        var output = ""
-        for try await token in stream {
-            output += token
-        }
-
-        // 5. Verify the generated output matches expected tokens.
-        XCTAssertEqual(output, "Once upon a time")
-        XCTAssertEqual(backend.generateCallCount, 1)
-        XCTAssertEqual(backend.lastPrompt, "Tell me a story")
-        XCTAssertEqual(backend.lastSystemPrompt, "You are a storyteller.")
-        XCTAssertFalse(backend.isGenerating)
+        // 5. Verify output and captured arguments.
+        #expect(output == "Once upon a time")
+        #expect(backend.generateCallCount == 1)
+        #expect(backend.lastPrompt == "Tell me a story")
+        #expect(backend.lastSystemPrompt == "You are a storyteller.")
+        #expect(!backend.isGenerating)
     }
 
-    /// Lifecycle with an invalid GGUF file: validation should block the load step.
-    func test_gguf_invalidFile_blocksLoad() async throws {
-        // 1. Write a file with wrong magic bytes.
-        let badModelURL = tempDir.appendingPathComponent("bad-model.gguf")
+    @Test("Invalid GGUF file blocks the load step")
+    func gguf_invalidFile_blocksLoad() throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        // Write a file with wrong magic bytes.
+        let badModelURL = dir.appendingPathComponent("bad-model.gguf")
         var data = Data([0x00, 0x00, 0x00, 0x00])
         data.append(Data(repeating: 0xAA, count: 2_000_000))
         try data.write(to: badModelURL)
 
-        // 2. Validation should reject the file.
-        XCTAssertThrowsError(
+        // Validation rejects the file, so a real caller would never proceed to load.
+        #expect(throws: HuggingFaceError.self) {
             try manager.validateDownloadedFile(at: badModelURL, modelType: .gguf)
-        ) { error in
-            XCTAssertTrue(error is HuggingFaceError, "Expected HuggingFaceError, got \(type(of: error))")
         }
-
-        // 3. Backend should never be loaded — verify by checking the mock was not called.
-        let backend = MockInferenceBackend()
-        XCTAssertFalse(backend.isModelLoaded)
-        XCTAssertEqual(backend.loadModelCallCount, 0)
     }
 
     // MARK: - MLX Lifecycle
 
-    /// Full lifecycle for MLX: write directory with config + weights -> validate -> load -> generate.
-    func test_mlx_downloadValidateLoadGenerate() async throws {
+    @Test("Full MLX lifecycle: write directory -> validate -> load -> generate")
+    func mlx_downloadValidateLoadGenerate() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
         // 1. Simulate a downloaded MLX model directory.
-        let mlxDir = tempDir.appendingPathComponent("test-model-mlx")
+        let mlxDir = dir.appendingPathComponent("test-model-mlx")
         try fm.createDirectory(at: mlxDir, withIntermediateDirectories: true)
 
-        let configPath = mlxDir.appendingPathComponent("config.json")
-        try Data("{\"model_type\":\"llama\"}".utf8).write(to: configPath)
-
-        let weightsPath = mlxDir.appendingPathComponent("model.safetensors")
-        try Data(repeating: 0xAB, count: 1_000).write(to: weightsPath)
-
-        XCTAssertTrue(fm.fileExists(atPath: configPath.path))
-        XCTAssertTrue(fm.fileExists(atPath: weightsPath.path))
+        try Data("{\"model_type\":\"llama\"}".utf8)
+            .write(to: mlxDir.appendingPathComponent("config.json"))
+        try Data(repeating: 0xAB, count: 1_000)
+            .write(to: mlxDir.appendingPathComponent("model.safetensors"))
 
         // 2. Validate through the real pipeline.
-        XCTAssertNoThrow(
-            try manager.validateDownloadedFile(at: mlxDir, modelType: .mlx),
-            "Valid MLX directory should pass validation"
-        )
+        try manager.validateDownloadedFile(at: mlxDir, modelType: .mlx)
 
-        // 3. Load into mock backend.
+        // 3. Load and generate.
         let backend = MockInferenceBackend()
         backend.tokensToYield = ["The", " answer", " is", " 42"]
 
         try await backend.loadModel(from: mlxDir, contextSize: 512)
-        XCTAssertTrue(backend.isModelLoaded)
+        #expect(backend.isModelLoaded)
 
-        // 4. Generate and collect output.
-        let stream = try backend.generate(
+        let output = try await collect(backend.generate(
             prompt: "What is the meaning of life?",
             systemPrompt: nil,
             config: GenerationConfig()
-        )
+        ))
 
-        var output = ""
-        for try await token in stream {
-            output += token
-        }
-
-        XCTAssertEqual(output, "The answer is 42")
-        XCTAssertEqual(backend.generateCallCount, 1)
+        #expect(output == "The answer is 42")
+        #expect(backend.generateCallCount == 1)
     }
 
     // MARK: - Unload After Generate
 
-    /// Verifies the full lifecycle including cleanup: load -> generate -> unload.
-    func test_fullLifecycleWithUnload() async throws {
-        // 1. Create a valid GGUF file.
-        let modelURL = tempDir.appendingPathComponent("lifecycle-model.gguf")
-        var data = Data(Self.ggufMagic)
-        data.append(Data(repeating: 0xCC, count: 1_100_000))
-        try data.write(to: modelURL)
+    @Test("Full lifecycle with unload: load -> generate -> unload -> generate-after-unload fails")
+    func fullLifecycleWithUnload() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
 
+        let modelURL = try writeValidGGUF(in: dir, name: "lifecycle-model.gguf")
         try manager.validateDownloadedFile(at: modelURL, modelType: .gguf)
 
-        // 2. Load and generate.
+        // Load and generate.
         let backend = MockInferenceBackend()
         backend.tokensToYield = ["Done"]
 
         try await backend.loadModel(from: modelURL, contextSize: 512)
-        XCTAssertTrue(backend.isModelLoaded)
+        #expect(backend.isModelLoaded)
 
-        let stream = try backend.generate(
+        let output = try await collect(backend.generate(
             prompt: "Test",
             systemPrompt: nil,
             config: GenerationConfig()
-        )
-        var output = ""
-        for try await token in stream {
-            output += token
-        }
-        XCTAssertEqual(output, "Done")
+        ))
+        #expect(output == "Done")
 
-        // 3. Unload and verify state is cleaned up.
+        // Unload and verify cleanup.
         backend.unloadModel()
-        XCTAssertFalse(backend.isModelLoaded)
-        XCTAssertFalse(backend.isGenerating)
-        XCTAssertEqual(backend.unloadCallCount, 1)
+        #expect(!backend.isModelLoaded)
+        #expect(!backend.isGenerating)
+        #expect(backend.unloadCallCount == 1)
 
-        // 4. Attempting to generate after unload should fail.
-        XCTAssertThrowsError(
-            try backend.generate(prompt: "Should fail", systemPrompt: nil, config: GenerationConfig())
-        ) { error in
-            // MockInferenceBackend throws InferenceError.inferenceFailure when no model is loaded.
-            XCTAssertTrue(
-                "\(error)".contains("No model loaded"),
-                "Expected 'No model loaded' error, got: \(error)"
+        // Generating after unload should throw InferenceError.inferenceFailure.
+        #expect(throws: InferenceError.self) {
+            _ = try backend.generate(
+                prompt: "Should fail",
+                systemPrompt: nil,
+                config: GenerationConfig()
             )
         }
     }
 
     // MARK: - Sequential Load-Generate Cycles
 
-    /// Verifies that the backend can be reloaded and used for multiple generation cycles.
-    func test_multipleLoadGenerateCycles() async throws {
-        let modelURL = tempDir.appendingPathComponent("multi-cycle.gguf")
-        var data = Data(Self.ggufMagic)
-        data.append(Data(repeating: 0xDD, count: 1_100_000))
-        try data.write(to: modelURL)
+    @Test("Multiple load -> generate -> unload cycles reuse the same backend")
+    func multipleLoadGenerateCycles() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
 
+        let modelURL = try writeValidGGUF(in: dir, name: "multi-cycle.gguf")
         try manager.validateDownloadedFile(at: modelURL, modelType: .gguf)
 
         let backend = MockInferenceBackend()
@@ -212,26 +195,21 @@ final class DownloadValidateLoadGenerateE2ETests: XCTestCase {
             backend.tokensToYield = ["Cycle", " \(cycle)"]
 
             try await backend.loadModel(from: modelURL, contextSize: 512)
-            XCTAssertTrue(backend.isModelLoaded)
+            #expect(backend.isModelLoaded)
 
-            let stream = try backend.generate(
+            let output = try await collect(backend.generate(
                 prompt: "Cycle \(cycle)",
                 systemPrompt: nil,
                 config: GenerationConfig()
-            )
-
-            var output = ""
-            for try await token in stream {
-                output += token
-            }
-            XCTAssertEqual(output, "Cycle \(cycle)")
+            ))
+            #expect(output == "Cycle \(cycle)")
 
             backend.unloadModel()
-            XCTAssertFalse(backend.isModelLoaded)
+            #expect(!backend.isModelLoaded)
         }
 
-        XCTAssertEqual(backend.loadModelCallCount, 3)
-        XCTAssertEqual(backend.generateCallCount, 3)
-        XCTAssertEqual(backend.unloadCallCount, 3)
+        #expect(backend.loadModelCallCount == 3)
+        #expect(backend.generateCallCount == 3)
+        #expect(backend.unloadCallCount == 3)
     }
 }
