@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import BaseChatCore
 import BaseChatUI
 
@@ -18,8 +19,9 @@ struct MinimalContentView: View {
                 }
         }
         .onAppear {
-            viewModel.configure(modelContext: modelContext)
-            sessionManager.configure(modelContext: modelContext)
+            let persistence = SwiftDataPersistenceProvider(modelContext: modelContext)
+            viewModel.configure(persistence: persistence)
+            sessionManager.configure(persistence: persistence)
 
             viewModel.refreshModels()
 

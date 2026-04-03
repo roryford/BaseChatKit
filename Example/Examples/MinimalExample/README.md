@@ -10,7 +10,7 @@ The simplest possible BaseChatKit app. Demonstrates the bare minimum setup:
 
 ## Running
 
-1. Open `Examples.xcodeproj` in Xcode
+1. Open `BaseChatExamples.xcodeproj` in Xcode
 2. Select the **MinimalExample** scheme
 3. Build and run on iOS Simulator or Mac
 
