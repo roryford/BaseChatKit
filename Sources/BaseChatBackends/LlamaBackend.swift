@@ -42,7 +42,11 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         supportedParameters: [.temperature, .topP, .repeatPenalty],
         maxContextTokens: 4096,
         requiresPromptTemplate: true,
-        supportsSystemPrompt: true
+        supportsSystemPrompt: true,
+        supportsToolCalling: false,
+        supportsStructuredOutput: false,
+        cancellationStyle: .explicit,
+        supportsTokenCounting: true
     )
 
     // MARK: - Private

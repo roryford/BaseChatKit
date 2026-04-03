@@ -40,7 +40,11 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
             supportedParameters: [.temperature, .topP],
             maxContextTokens: 200_000,
             requiresPromptTemplate: false,
-            supportsSystemPrompt: true
+            supportsSystemPrompt: true,
+            supportsToolCalling: true,
+            supportsStructuredOutput: true,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false
         )
     }
 

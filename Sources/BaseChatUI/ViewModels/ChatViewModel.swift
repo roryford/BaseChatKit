@@ -73,12 +73,26 @@ public final class ChatViewModel {
     /// Editable system prompt prepended to every generation.
     public var systemPrompt: String = ""
 
-    /// Whether a model is currently being loaded.
-    public private(set) var isLoading: Bool = false
+    /// The current phase of backend activity, driving all status indicators.
+    public internal(set) var activityPhase: BackendActivityPhase = .idle {
+        didSet {
+            let wasGenerating = oldValue == .waitingForFirstToken || oldValue == .streaming
+            let nowGenerating = activityPhase == .waitingForFirstToken || activityPhase == .streaming
+            if wasGenerating != nowGenerating {
+                onGeneratingChanged?(nowGenerating)
+            }
+        }
+    }
 
-    /// Whether inference is currently streaming tokens.
-    public internal(set) var isGenerating: Bool = false {
-        didSet { onGeneratingChanged?(isGenerating) }
+    /// Whether a model is currently being loaded. Derived from `activityPhase`.
+    public var isLoading: Bool {
+        if case .modelLoading = activityPhase { return true }
+        return false
+    }
+
+    /// Whether inference is currently streaming tokens. Derived from `activityPhase`.
+    public var isGenerating: Bool {
+        activityPhase == .waitingForFirstToken || activityPhase == .streaming
     }
 
     /// Test-only hook invoked whenever `isGenerating` changes.
@@ -421,8 +435,8 @@ public final class ChatViewModel {
         }
 
         errorMessage = nil
-        isLoading = true
-        defer { isLoading = false }
+        activityPhase = .modelLoading(progress: nil)
+        defer { activityPhase = .idle }
 
         do {
             let contextSize: Int32 = Int32(model.detectedContextLength ?? 2048)
@@ -437,8 +451,8 @@ public final class ChatViewModel {
     /// Loads a cloud API endpoint for the active session.
     public func loadCloudEndpoint(_ endpoint: APIEndpoint) async {
         errorMessage = nil
-        isLoading = true
-        defer { isLoading = false }
+        activityPhase = .modelLoading(progress: nil)
+        defer { activityPhase = .idle }
 
         do {
             try await inferenceService.loadCloudBackend(from: endpoint)
@@ -572,7 +586,7 @@ public final class ChatViewModel {
         generationTask?.cancel()
         generationTask = nil
         inferenceService.stopGeneration()
-        isGenerating = false
+        activityPhase = .idle
 
         // Persist whatever has been generated so far.
         if let lastAssistant = messages.last(where: { $0.role == .assistant }),

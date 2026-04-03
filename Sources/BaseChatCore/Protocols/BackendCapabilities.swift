@@ -9,6 +9,14 @@ public enum GenerationParameter: String, CaseIterable, Sendable {
     case typicalP
 }
 
+/// How the backend responds to a cancellation request.
+public enum CancellationStyle: Sendable, Equatable {
+    /// Cancels via Swift task cancellation.
+    case cooperative
+    /// Requires calling `stopGeneration()` explicitly.
+    case explicit
+}
+
 /// Describes what an inference backend supports.
 ///
 /// The UI reads these to enable/disable controls (e.g., hide the top-p slider
@@ -28,6 +36,23 @@ public struct BackendCapabilities: Sendable {
     /// Whether the backend supports a separate system prompt.
     public let supportsSystemPrompt: Bool
 
+    /// Whether the backend supports tool/function calling.
+    public let supportsToolCalling: Bool
+
+    /// Whether the backend supports structured (JSON schema) output.
+    public let supportsStructuredOutput: Bool
+
+    /// How the backend handles generation cancellation.
+    public let cancellationStyle: CancellationStyle
+
+    /// Whether the backend can count tokens locally before sending a request.
+    public let supportsTokenCounting: Bool
+
+    /// Parameters the UI should present controls for.
+    public var visibleParameters: [GenerationParameter] {
+        GenerationParameter.allCases.filter { supportedParameters.contains($0) }
+    }
+
     public init(
         supportedParameters: Set<GenerationParameter>,
         maxContextTokens: Int32,
@@ -38,5 +63,29 @@ public struct BackendCapabilities: Sendable {
         self.maxContextTokens = maxContextTokens
         self.requiresPromptTemplate = requiresPromptTemplate
         self.supportsSystemPrompt = supportsSystemPrompt
+        self.supportsToolCalling = false
+        self.supportsStructuredOutput = false
+        self.cancellationStyle = .cooperative
+        self.supportsTokenCounting = false
+    }
+
+    public init(
+        supportedParameters: Set<GenerationParameter>,
+        maxContextTokens: Int32,
+        requiresPromptTemplate: Bool,
+        supportsSystemPrompt: Bool,
+        supportsToolCalling: Bool,
+        supportsStructuredOutput: Bool,
+        cancellationStyle: CancellationStyle,
+        supportsTokenCounting: Bool
+    ) {
+        self.supportedParameters = supportedParameters
+        self.maxContextTokens = maxContextTokens
+        self.requiresPromptTemplate = requiresPromptTemplate
+        self.supportsSystemPrompt = supportsSystemPrompt
+        self.supportsToolCalling = supportsToolCalling
+        self.supportsStructuredOutput = supportsStructuredOutput
+        self.cancellationStyle = cancellationStyle
+        self.supportsTokenCounting = supportsTokenCounting
     }
 }

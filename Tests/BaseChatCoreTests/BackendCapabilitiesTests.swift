@@ -52,4 +52,92 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertTrue(caps.supportedParameters.isEmpty)
         XCTAssertEqual(caps.maxContextTokens, 512)
     }
+
+    // MARK: - New Fields Defaults (old initializer)
+
+    func test_oldInitializer_defaultsNewFieldsToFalseAndCooperative() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 2048,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true
+        )
+
+        XCTAssertFalse(caps.supportsToolCalling)
+        XCTAssertFalse(caps.supportsStructuredOutput)
+        XCTAssertEqual(caps.cancellationStyle, .cooperative)
+        XCTAssertFalse(caps.supportsTokenCounting)
+    }
+
+    // MARK: - Full Initializer
+
+    func test_fullInitializer_setsAllFields() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature, .topP],
+            maxContextTokens: 128_000,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: true,
+            supportsStructuredOutput: true,
+            cancellationStyle: .explicit,
+            supportsTokenCounting: true
+        )
+
+        XCTAssertEqual(caps.supportedParameters, [.temperature, .topP])
+        XCTAssertEqual(caps.maxContextTokens, 128_000)
+        XCTAssertFalse(caps.requiresPromptTemplate)
+        XCTAssertTrue(caps.supportsSystemPrompt)
+        XCTAssertTrue(caps.supportsToolCalling)
+        XCTAssertTrue(caps.supportsStructuredOutput)
+        XCTAssertEqual(caps.cancellationStyle, .explicit)
+        XCTAssertTrue(caps.supportsTokenCounting)
+    }
+
+    // MARK: - CancellationStyle
+
+    func test_cancellationStyle_cooperativeAndExplicitAreDistinct() {
+        let cooperative = CancellationStyle.cooperative
+        let explicit = CancellationStyle.explicit
+
+        // Swift enums without associated values are Equatable by default
+        XCTAssertNotEqual(cooperative, explicit)
+    }
+
+    // MARK: - visibleParameters
+
+    func test_visibleParameters_returnsFilteredInAllCasesOrder() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.topP, .temperature, .topK],
+            maxContextTokens: 4096,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true
+        )
+
+        let visible = caps.visibleParameters
+
+        // Should follow GenerationParameter.allCases order, filtered to supported
+        XCTAssertEqual(visible, [.temperature, .topP, .topK])
+    }
+
+    func test_visibleParameters_emptyWhenNoParametersSupported() {
+        let caps = BackendCapabilities(
+            supportedParameters: [],
+            maxContextTokens: 512,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: false
+        )
+
+        XCTAssertTrue(caps.visibleParameters.isEmpty)
+    }
+
+    func test_visibleParameters_allParametersWhenAllSupported() {
+        let caps = BackendCapabilities(
+            supportedParameters: Set(GenerationParameter.allCases),
+            maxContextTokens: 4096,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true
+        )
+
+        XCTAssertEqual(caps.visibleParameters, GenerationParameter.allCases)
+    }
 }
