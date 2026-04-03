@@ -7,8 +7,10 @@ import BaseChatTestSupport
 
 /// E2E: fill context → compression fires → generation continues → messages persist.
 ///
-/// Uses `CharTokenizer` (1 char = 1 token) with a tiny context window so
-/// compression triggers deterministically without real model hardware.
+/// Uses the `HeuristicTokenizer` fallback (~4 chars = 1 token) with a tiny
+/// context window so compression triggers deterministically without real model
+/// hardware. `MockInferenceBackend` does not conform to `TokenizerVendor`,
+/// so `InferenceService.tokenizer` returns `nil` and the heuristic is used.
 @Suite("Compression Under Context Pressure E2E")
 @MainActor
 struct CompressionContextPressureE2ETests {
@@ -90,6 +92,8 @@ struct CompressionContextPressureE2ETests {
         let lastAssistant = vm.messages.last { $0.role == .assistant }
         #expect(lastAssistant != nil)
         #expect(lastAssistant?.content.contains("Final") == true)
+
+        #expect(!vm.isGenerating)
 
         // Messages should be persisted
         let dbMessages = fetchMessages(for: session.id)
