@@ -1,0 +1,238 @@
+import Testing
+import Foundation
+import SwiftData
+@testable import BaseChatUI
+@testable import BaseChatBackends
+import BaseChatCore
+import BaseChatTestSupport
+
+/// Formats a single SSE data line from a JSON string.
+private func sseData(_ json: String) -> Data {
+    Data("data: \(json)\n\n".utf8)
+}
+
+private let sseDone = Data("data: [DONE]\n\n".utf8)
+
+private func makeMockSession() -> URLSession {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [MockURLProtocol.self]
+    return URLSession(configuration: config)
+}
+
+/// E2E: discover server → create endpoint → configure backend → stream tokens.
+///
+/// Chains `MockServerDiscoveryService` → `ServerDiscoveryViewModel` →
+/// `APIEndpoint` (persisted in SwiftData) → `OpenAIBackend` with
+/// `MockURLProtocol` SSE stubs.
+@Suite("Server Discovery → Generate Pipeline E2E", .serialized)
+@MainActor
+struct ServerDiscoveryGenerateE2ETests {
+
+    private let container: ModelContainer
+    private let context: ModelContext
+    private let mockDiscovery: MockServerDiscoveryService
+    private let discoveryVM: ServerDiscoveryViewModel
+
+    init() throws {
+        let schema = Schema(BaseChatSchema.allModelTypes)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        container = try ModelContainer(for: schema, configurations: [config])
+        context = container.mainContext
+
+        mockDiscovery = MockServerDiscoveryService()
+        discoveryVM = ServerDiscoveryViewModel(discoveryService: mockDiscovery)
+    }
+
+    // MARK: - Helpers
+
+    /// Creates an OpenAI-compatible backend configured from a discovered server and model,
+    /// with MockURLProtocol intercepting requests.
+    private func makeBackend(server: DiscoveredServer, model: RemoteModelInfo) -> (OpenAIBackend, URL) {
+        let session = makeMockSession()
+        let backend = OpenAIBackend(urlSession: session)
+        let baseURL = server.baseURL!
+        backend.configure(baseURL: baseURL, apiKey: nil, modelName: model.name)
+        let completionsURL = baseURL.appendingPathComponent("v1/chat/completions")
+        return (backend, completionsURL)
+    }
+
+    private func sseChunks(_ tokens: [String]) -> [Data] {
+        var chunks = tokens.map { token in
+            sseData("""
+            {"choices":[{"delta":{"content":"\(token)"}}]}
+            """)
+        }
+        chunks.append(sseData("""
+        {"choices":[{"delta":{}}],"usage":{"prompt_tokens":10,"completion_tokens":\(tokens.count),"total_tokens":\(10 + tokens.count)}}
+        """))
+        chunks.append(sseDone)
+        return chunks
+    }
+
+    // MARK: - Tests
+
+    @Test("Happy path: discover → select → create endpoint → stream tokens")
+    func discoverSelectConfigureStream() async throws {
+        let server = DiscoveredServer(
+            displayName: "Test Ollama",
+            host: "localhost",
+            port: 11434,
+            serverType: .ollama,
+            models: [RemoteModelInfo(name: "llama3.2", sizeBytes: 2_000_000_000)]
+        )
+        mockDiscovery.serversToEmit = [server]
+
+        // Discover
+        discoveryVM.startDiscovery()
+        // Give the async stream a moment to deliver
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(discoveryVM.discoveredServers.count == 1)
+
+        // Create persisted endpoint
+        let discovered = discoveryVM.discoveredServers[0]
+        let endpoint = discoveryVM.createEndpoint(
+            server: discovered,
+            model: discovered.models[0],
+            modelContext: context
+        )
+        #expect(endpoint.provider == .ollama)
+        #expect(endpoint.modelName == "llama3.2")
+
+        // Configure backend and stub SSE
+        let (backend, url) = makeBackend(server: discovered, model: discovered.models[0])
+        MockURLProtocol.stub(url: url, response: .sse(chunks: sseChunks(["Hello", " world"]), statusCode: 200))
+
+        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        let stream = try backend.generate(prompt: "Hi", systemPrompt: nil, config: GenerationConfig())
+
+        var tokens: [String] = []
+        for try await token in stream { tokens.append(token) }
+
+        #expect(tokens == ["Hello", " world"])
+
+        discoveryVM.stopDiscovery()
+        MockURLProtocol.reset()
+    }
+
+    @Test("Manual probe → configure → stream tokens")
+    func manualProbeAndStream() async throws {
+        let server = DiscoveredServer(
+            displayName: "Manual LM Studio",
+            host: "192.168.1.50",
+            port: 1234,
+            serverType: .lmStudio,
+            models: [RemoteModelInfo(name: "mistral-7b")]
+        )
+        mockDiscovery.probeResult = server
+
+        discoveryVM.manualHost = "192.168.1.50"
+        discoveryVM.manualPort = "1234"
+        await discoveryVM.probeManualEntry()
+
+        #expect(discoveryVM.discoveredServers.count == 1)
+        #expect(discoveryVM.selectedServer != nil)
+
+        let discovered = discoveryVM.discoveredServers[0]
+        let endpoint = discoveryVM.createEndpoint(
+            server: discovered,
+            model: discovered.models[0],
+            modelContext: context
+        )
+        #expect(endpoint.provider == .lmStudio)
+
+        let (backend, url) = makeBackend(server: discovered, model: discovered.models[0])
+        MockURLProtocol.stub(url: url, response: .sse(chunks: sseChunks(["Probed", " reply"]), statusCode: 200))
+
+        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        let stream = try backend.generate(prompt: "Test", systemPrompt: nil, config: GenerationConfig())
+
+        var tokens: [String] = []
+        for try await token in stream { tokens.append(token) }
+
+        #expect(tokens == ["Probed", " reply"])
+
+        MockURLProtocol.reset()
+    }
+
+    @Test("Discovered server becomes unreachable → error propagates")
+    func serverUnreachableAfterDiscovery() async throws {
+        let server = DiscoveredServer(
+            displayName: "Flaky Ollama",
+            host: "localhost",
+            port: 11434,
+            serverType: .ollama,
+            models: [RemoteModelInfo(name: "llama3.2")]
+        )
+        mockDiscovery.serversToEmit = [server]
+        discoveryVM.startDiscovery()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let discovered = discoveryVM.discoveredServers[0]
+        let (backend, url) = makeBackend(server: discovered, model: discovered.models[0])
+
+        // Stub a network error
+        MockURLProtocol.stub(url: url, response: .error(URLError(.networkConnectionLost)))
+
+        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+
+        do {
+            let stream = try backend.generate(prompt: "Hi", systemPrompt: nil, config: GenerationConfig())
+            for try await _ in stream {}
+            Issue.record("Expected an error for unreachable server")
+        } catch {
+            #expect(error is URLError || error is CloudBackendError)
+        }
+
+        discoveryVM.stopDiscovery()
+        MockURLProtocol.reset()
+    }
+
+    @Test("Multiple servers: select second, stream from it")
+    func multipleServersSelectSecond() async throws {
+        let ollama = DiscoveredServer(
+            displayName: "Ollama",
+            host: "localhost",
+            port: 11434,
+            serverType: .ollama,
+            models: [RemoteModelInfo(name: "llama3.2")]
+        )
+        let lmStudio = DiscoveredServer(
+            displayName: "LM Studio",
+            host: "localhost",
+            port: 1234,
+            serverType: .lmStudio,
+            models: [RemoteModelInfo(name: "phi-3")]
+        )
+        mockDiscovery.serversToEmit = [ollama, lmStudio]
+        discoveryVM.startDiscovery()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(discoveryVM.discoveredServers.count == 2)
+
+        // Select the second server
+        let selected = discoveryVM.discoveredServers[1]
+        discoveryVM.selectedServer = selected
+
+        let endpoint = discoveryVM.createEndpoint(
+            server: selected,
+            model: selected.models[0],
+            modelContext: context
+        )
+        #expect(endpoint.provider == .lmStudio)
+        #expect(endpoint.modelName == "phi-3")
+
+        let (backend, url) = makeBackend(server: selected, model: selected.models[0])
+        MockURLProtocol.stub(url: url, response: .sse(chunks: sseChunks(["From", " LM", " Studio"]), statusCode: 200))
+
+        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        let stream = try backend.generate(prompt: "Test", systemPrompt: nil, config: GenerationConfig())
+
+        var tokens: [String] = []
+        for try await token in stream { tokens.append(token) }
+
+        #expect(tokens == ["From", " LM", " Studio"])
+
+        discoveryVM.stopDiscovery()
+        MockURLProtocol.reset()
+    }
+}
