@@ -73,6 +73,7 @@ struct ServerDiscoveryGenerateE2ETests {
 
     @Test("Happy path: discover → select → create endpoint → stream tokens")
     func discoverSelectConfigureStream() async throws {
+        MockURLProtocol.reset()
         let server = DiscoveredServer(
             displayName: "Test Ollama",
             host: "localhost",
@@ -98,6 +99,11 @@ struct ServerDiscoveryGenerateE2ETests {
         #expect(endpoint.provider == .ollama)
         #expect(endpoint.modelName == "llama3.2")
 
+        // Verify the endpoint was persisted to SwiftData
+        let fetched = try context.fetch(FetchDescriptor<APIEndpoint>())
+        #expect(fetched.count == 1)
+        #expect(fetched[0].modelName == "llama3.2")
+
         // Configure backend and stub SSE
         let (backend, url) = makeBackend(server: discovered, model: discovered.models[0])
         MockURLProtocol.stub(url: url, response: .sse(chunks: sseChunks(["Hello", " world"]), statusCode: 200))
@@ -116,6 +122,7 @@ struct ServerDiscoveryGenerateE2ETests {
 
     @Test("Manual probe → configure → stream tokens")
     func manualProbeAndStream() async throws {
+        MockURLProtocol.reset()
         let server = DiscoveredServer(
             displayName: "Manual LM Studio",
             host: "192.168.1.50",
@@ -156,6 +163,7 @@ struct ServerDiscoveryGenerateE2ETests {
 
     @Test("Discovered server becomes unreachable → error propagates")
     func serverUnreachableAfterDiscovery() async throws {
+        MockURLProtocol.reset()
         let server = DiscoveredServer(
             displayName: "Flaky Ollama",
             host: "localhost",
@@ -189,6 +197,7 @@ struct ServerDiscoveryGenerateE2ETests {
 
     @Test("Multiple servers: select second, stream from it")
     func multipleServersSelectSecond() async throws {
+        MockURLProtocol.reset()
         let ollama = DiscoveredServer(
             displayName: "Ollama",
             host: "localhost",
