@@ -40,6 +40,9 @@ public final class MockURLProtocol: URLProtocol {
     /// Thread-safe storage for stubs keyed by absolute URL string.
     private static let lock = NSLock()
     private nonisolated(unsafe) static var stubs: [String: StubbedResponse] = [:]
+    /// Ordered sequences of responses: each call pops the first element.
+    /// When exhausted, falls back to the single-response stub (if any).
+    private nonisolated(unsafe) static var stubSequences: [String: [StubbedResponse]] = [:]
     private nonisolated(unsafe) static var _capturedRequests: [URLRequest] = []
 
     /// All requests intercepted since the last `reset()` call, in order.
@@ -56,18 +59,37 @@ public final class MockURLProtocol: URLProtocol {
         stubs[url.absoluteString] = response
     }
 
+    /// Registers an ordered sequence of responses for a URL.
+    ///
+    /// Each request pops the first element. When the sequence is exhausted,
+    /// falls back to the single-response stub registered via ``stub(url:response:)``.
+    public static func stubSequence(url: URL, responses: [StubbedResponse]) {
+        lock.lock()
+        defer { lock.unlock() }
+        stubSequences[url.absoluteString] = responses
+    }
+
     /// Removes all registered stubs and captured requests.
     public static func reset() {
         lock.lock()
         defer { lock.unlock() }
         stubs.removeAll()
+        stubSequences.removeAll()
         _capturedRequests.removeAll()
     }
 
-    /// Finds a stub matching the URL — tries exact match first, then path-contains match.
+    /// Finds a stub matching the URL — tries sequence first, then exact match, then path-contains.
     private static func findStub(for url: URL) -> StubbedResponse? {
         lock.lock()
         defer { lock.unlock() }
+
+        // Sequence match: pop the first element if available.
+        let key = url.absoluteString
+        if var seq = stubSequences[key], !seq.isEmpty {
+            let next = seq.removeFirst()
+            stubSequences[key] = seq
+            return next
+        }
 
         // Exact match.
         if let stub = stubs[url.absoluteString] {
@@ -98,10 +120,11 @@ public final class MockURLProtocol: URLProtocol {
     // MARK: - URLProtocol Overrides
 
     public override class func canInit(with request: URLRequest) -> Bool {
-        // Intercept all requests when any stubs are registered.
+        // Intercept all requests when any stubs or non-exhausted sequences are registered.
         lock.lock()
         defer { lock.unlock() }
-        return !stubs.isEmpty
+        let hasActiveSequences = stubSequences.values.contains { !$0.isEmpty }
+        return !stubs.isEmpty || hasActiveSequences
     }
 
     public override class func canonicalRequest(for request: URLRequest) -> URLRequest {
