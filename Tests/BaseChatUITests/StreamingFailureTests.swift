@@ -152,6 +152,7 @@ final class StreamingFailureTests: XCTestCase {
         backend.isModelLoaded = true
         backend.tokensToYield = tokens
         let vm = makeViewModel(backend: backend)
+        vm.loopDetectionEnabled = false
         createAndActivateSession(vm: vm)
 
         vm.inputText = "Generate a lot"

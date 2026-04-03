@@ -20,7 +20,13 @@ extension ChatViewModel {
         do {
             // Build the message history, applying compression if the context is filling up.
             let allMessages = messages.filter { $0.id != messageID }
-            let effectiveSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
+            let rawSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
+            let effectiveSystemPrompt: String?
+            if let rawSystemPrompt, macroExpansionEnabled {
+                effectiveSystemPrompt = MacroExpander.expand(rawSystemPrompt, context: buildMacroContext())
+            } else {
+                effectiveSystemPrompt = rawSystemPrompt
+            }
             let activeTokenizer = inferenceService.tokenizer
 
             let compressible = allMessages.map {
@@ -67,12 +73,22 @@ extension ChatViewModel {
                 repeatPenalty: repeatPenalty
             )
 
+            var tokenCount = 0
             let task = Task {
                 do {
                     for try await token in stream {
                         if Task.isCancelled { break }
                         if let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
                             self.messages[idx].content += token
+                            tokenCount += 1
+                            if self.loopDetectionEnabled,
+                               tokenCount % 10 == 0,
+                               self.messages[idx].content.count >= 100,
+                               RepetitionDetector.looksLikeLooping(self.messages[idx].content) {
+                                self.inferenceService.stopGeneration()
+                                self.errorMessage = "Generation stopped: the model appears to be repeating itself."
+                                break
+                            }
                         }
                     }
                 } catch {
@@ -126,5 +142,21 @@ extension ChatViewModel {
         }
 
         updateContextEstimate()
+    }
+
+    /// Builds a complete `MacroContext` by merging user-supplied values with
+    /// auto-derived values from the current conversation.
+    private func buildMacroContext() -> MacroContext {
+        var ctx = macroContext
+        if ctx.lastMessage == nil {
+            ctx.lastMessage = messages.last(where: { $0.role == .user || $0.role == .assistant })?.content
+        }
+        if ctx.lastUserMessage == nil {
+            ctx.lastUserMessage = messages.last(where: { $0.role == .user })?.content
+        }
+        if ctx.lastCharMessage == nil {
+            ctx.lastCharMessage = messages.last(where: { $0.role == .assistant })?.content
+        }
+        return ctx
     }
 }
