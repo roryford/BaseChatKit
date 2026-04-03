@@ -26,6 +26,8 @@ public final class MockPersistenceProvider: ChatPersistenceProvider, @unchecked 
     public var shouldThrowOnInsertMessage: Error?
     public var shouldThrowOnFetchMessages: Error?
     public var shouldThrowOnDeleteMessages: Error?
+    public var fetchRecentMessagesCallCount = 0
+    public var fetchMessagesBeforeCallCount = 0
 
     public init() {}
 
@@ -90,6 +92,24 @@ public final class MockPersistenceProvider: ChatPersistenceProvider, @unchecked 
         return messages
             .filter { $0.sessionID == sessionID }
             .sorted { $0.timestamp < $1.timestamp }
+    }
+
+    public func fetchRecentMessages(for sessionID: UUID, limit: Int) throws -> [ChatMessageRecord] {
+        fetchRecentMessagesCallCount += 1
+        if let error = shouldThrowOnFetchMessages { throw error }
+        let sorted = messages
+            .filter { $0.sessionID == sessionID }
+            .sorted { $0.timestamp < $1.timestamp }
+        return Array(sorted.suffix(limit))
+    }
+
+    public func fetchMessages(for sessionID: UUID, before: Date, limit: Int) throws -> [ChatMessageRecord] {
+        fetchMessagesBeforeCallCount += 1
+        if let error = shouldThrowOnFetchMessages { throw error }
+        let older = messages
+            .filter { $0.sessionID == sessionID && $0.timestamp < before }
+            .sorted { $0.timestamp < $1.timestamp }
+        return Array(older.suffix(limit))
     }
 
     public func deleteMessages(for sessionID: UUID) throws {

@@ -180,8 +180,42 @@ public protocol ChatPersistenceProvider: AnyObject, Sendable {
     /// - Throws: Storage errors from the underlying provider.
     func fetchMessages(for sessionID: UUID) throws -> [ChatMessageRecord]
 
+    /// Fetches the most recent messages for a session, up to `limit`.
+    ///
+    /// Results are returned in ascending timestamp order (oldest first).
+    /// Use ``fetchMessages(for:before:limit:)`` to page backwards from a known timestamp.
+    ///
+    /// - Throws: Storage errors from the underlying provider.
+    func fetchRecentMessages(for sessionID: UUID, limit: Int) throws -> [ChatMessageRecord]
+
+    /// Fetches messages older than `before` for a session, up to `limit`.
+    ///
+    /// Results are returned in ascending timestamp order (oldest first).
+    /// Returns an empty array when no older messages exist.
+    ///
+    /// - Throws: Storage errors from the underlying provider.
+    func fetchMessages(for sessionID: UUID, before: Date, limit: Int) throws -> [ChatMessageRecord]
+
     /// Deletes all messages for a session.
     ///
     /// - Throws: Storage errors from the underlying provider.
     func deleteMessages(for sessionID: UUID) throws
+}
+
+// MARK: - Default pagination implementations
+
+extension ChatPersistenceProvider {
+
+    /// Default: fetches all messages then returns the last `limit`.
+    public func fetchRecentMessages(for sessionID: UUID, limit: Int) throws -> [ChatMessageRecord] {
+        let all = try fetchMessages(for: sessionID)
+        return Array(all.suffix(limit))
+    }
+
+    /// Default: fetches all messages then filters to those before `before`.
+    public func fetchMessages(for sessionID: UUID, before: Date, limit: Int) throws -> [ChatMessageRecord] {
+        let all = try fetchMessages(for: sessionID)
+        let older = all.filter { $0.timestamp < before }
+        return Array(older.suffix(limit))
+    }
 }

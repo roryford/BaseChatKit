@@ -107,6 +107,28 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
         return try modelContext.fetch(descriptor).map { $0.toRecord() }
     }
 
+    public func fetchRecentMessages(for sessionID: UUID, limit: Int) throws -> [ChatMessageRecord] {
+        // Fetch newest-first, take `limit`, then reverse to ascending order.
+        var descriptor = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate { $0.sessionID == sessionID },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        descriptor.fetchLimit = limit
+        let results = try modelContext.fetch(descriptor)
+        return results.reversed().map { $0.toRecord() }
+    }
+
+    public func fetchMessages(for sessionID: UUID, before: Date, limit: Int) throws -> [ChatMessageRecord] {
+        // Fetch messages older than `before`, newest-first, take `limit`, then reverse.
+        var descriptor = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate { $0.sessionID == sessionID && $0.timestamp < before },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        descriptor.fetchLimit = limit
+        let results = try modelContext.fetch(descriptor)
+        return results.reversed().map { $0.toRecord() }
+    }
+
     public func deleteMessages(for sessionID: UUID) throws {
         let descriptor = FetchDescriptor<ChatMessage>(
             predicate: #Predicate { $0.sessionID == sessionID }

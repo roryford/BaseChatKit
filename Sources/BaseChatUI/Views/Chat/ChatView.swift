@@ -222,6 +222,16 @@ public struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 4) {
+                    // Trigger for loading older messages when the user scrolls to the top.
+                    if viewModel.hasOlderMessages {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .onAppear {
+                                loadOlderAndRestore(proxy: proxy)
+                            }
+                    }
+
                     if viewModel.messages.isEmpty && !viewModel.isGenerating {
                         emptyPlaceholder
                     }
@@ -243,8 +253,13 @@ public struct ChatView: View {
                 }
                 .padding(.vertical, 8)
             }
+            .defaultScrollAnchor(.bottom)
             .onChange(of: viewModel.messages.count) {
-                scrollToBottom(proxy: proxy)
+                // Only auto-scroll to bottom for new messages appended at the end,
+                // not when older messages are prepended at the top.
+                if !viewModel.isLoadingOlderMessages {
+                    scrollToBottom(proxy: proxy)
+                }
             }
             .onChange(of: viewModel.messages.last?.content) {
                 scrollToBottom(proxy: proxy)
@@ -340,6 +355,17 @@ public struct ChatView: View {
         viewModel.isGenerating
         && message.role == .assistant
         && message.id == viewModel.messages.last?.id
+    }
+
+    /// Loads the next page of older messages and scrolls back to the anchor
+    /// so the viewport doesn't jump when content is prepended above.
+    private func loadOlderAndRestore(proxy: ScrollViewProxy) {
+        guard let anchorID = viewModel.loadOlderMessages() else { return }
+        // Scroll back to the message that was at the top before prepend,
+        // keeping it at the top of the viewport to prevent visible jump.
+        DispatchQueue.main.async {
+            proxy.scrollTo(anchorID, anchor: .top)
+        }
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
