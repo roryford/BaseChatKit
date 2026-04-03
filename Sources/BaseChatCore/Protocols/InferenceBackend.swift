@@ -54,6 +54,20 @@ public protocol InferenceBackend: AnyObject, Sendable {
     ) throws -> AsyncThrowingStream<String, Error>
 
     /// Requests that the current generation stop as soon as possible.
+    ///
+    /// ## Contract
+    ///
+    /// After `stopGeneration()` returns, the backend **must** satisfy all of:
+    ///
+    /// 1. **Cancel in-flight generation** — any running `generate()` stream is
+    ///    terminated. The stream's `onTermination` handler fires.
+    /// 2. **Ready for reuse** — the backend accepts a new `generate()` call
+    ///    without requiring `loadModel()` or `resetConversation()` first.
+    ///    There must be no corrupted sessions or stale state.
+    /// 3. **`isGenerating` is `false`** — callers can check this synchronously
+    ///    to confirm the stop took effect.
+    ///
+    /// Calling `stopGeneration()` when no generation is in progress is a no-op.
     func stopGeneration()
 
     /// Unloads the model and frees all associated memory.
