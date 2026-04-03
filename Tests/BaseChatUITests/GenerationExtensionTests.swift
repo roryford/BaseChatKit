@@ -284,7 +284,44 @@ final class GenerationExtensionTests: XCTestCase {
         XCTAssertEqual(vm.messages[1].content, "Hi")
     }
 
-    // MARK: - 5. isGenerating Flag Transitions
+    func test_streamingBatching_preservesAllTokensWhenFlushAtCompletion() async {
+        let mock = MockInferenceBackend()
+        mock.tokensToYield = ["A", "B", "C", "D", "E"]
+        let vm = makeVM(backend: mock)
+        vm.streamingUpdateInterval = .seconds(60)
+        vm.streamingBatchCharacterLimit = 10_000
+
+        vm.inputText = "batch"
+        await vm.sendMessage()
+
+        let assistant = vm.messages.first(where: { $0.role == .assistant })
+        XCTAssertEqual(assistant?.content, "ABCDE")
+    }
+
+    // MARK: - 5. Loop Detection With Batching
+
+    func test_loopDetection_firesWithBatchingEnabled() async {
+        let mock = MockInferenceBackend()
+        // Build a repeating pattern that triggers RepetitionDetector (50+ chars repeated 2x).
+        let chunk = String(repeating: "ABCDEFGHIJ", count: 6) // 60 chars
+        // Emit enough single-char tokens to build chunk twice (120 chars total).
+        let repeatedText = chunk + chunk
+        mock.tokensToYield = repeatedText.map { String($0) }
+        let vm = makeVM(backend: mock)
+        vm.loopDetectionEnabled = true
+        // Use small batch limit so the batcher flushes frequently and detection runs.
+        vm.streamingUpdateInterval = .zero
+        vm.streamingBatchCharacterLimit = 1
+
+        vm.inputText = "loop"
+        await vm.sendMessage()
+
+        XCTAssertNotNil(vm.errorMessage, "Loop detection should fire and set errorMessage")
+        XCTAssertTrue(vm.errorMessage?.contains("repeating itself") == true)
+        XCTAssertEqual(mock.stopCallCount, 1, "stopGeneration should be called once")
+    }
+
+    // MARK: - 6. isGenerating Flag Transitions
 
     func test_isGenerating_falseAfterSuccessfulGeneration() async {
         let mock = MockInferenceBackend()
@@ -320,7 +357,7 @@ final class GenerationExtensionTests: XCTestCase {
         XCTAssertFalse(vm.isGenerating, "isGenerating should be false after stream error")
     }
 
-    // MARK: - 6. generationDidFinish Cleans Up Service State
+    // MARK: - 7. generationDidFinish Cleans Up Service State
 
     func test_generationDidFinish_setsServiceIsGeneratingFalse() async {
         let mock = MockInferenceBackend()
@@ -350,7 +387,7 @@ final class GenerationExtensionTests: XCTestCase {
         )
     }
 
-    // MARK: - 7. Error During Generation Sets errorMessage
+    // MARK: - 8. Error During Generation Sets errorMessage
 
     func test_generationStartError_setsErrorMessage() async {
         let mock = MockInferenceBackend()

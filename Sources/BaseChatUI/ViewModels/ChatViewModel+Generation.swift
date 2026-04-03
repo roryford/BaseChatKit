@@ -3,6 +3,43 @@ import BaseChatCore
 
 // MARK: - ChatViewModel + Generation Core
 
+/// Buffers streamed tokens and emits coalesced batches to reduce high-frequency
+/// observable mutations that would otherwise trigger excessive SwiftUI re-renders.
+struct StreamingTokenBatcher {
+    private let interval: Duration
+    private let maxBufferedCharacters: Int
+    private var buffered = ""
+    private var lastFlush: ContinuousClock.Instant
+
+    init(
+        interval: Duration,
+        maxBufferedCharacters: Int,
+        now: ContinuousClock.Instant = ContinuousClock.now
+    ) {
+        self.interval = interval
+        self.maxBufferedCharacters = maxBufferedCharacters
+        self.lastFlush = now
+    }
+
+    mutating func append(_ token: String, now: ContinuousClock.Instant) -> String? {
+        buffered += token
+        guard shouldFlush(now: now) else { return nil }
+        return flush(now: now)
+    }
+
+    mutating func flush(now: ContinuousClock.Instant) -> String? {
+        guard !buffered.isEmpty else { return nil }
+        let batch = buffered
+        buffered = ""
+        lastFlush = now
+        return batch
+    }
+
+    private func shouldFlush(now: ContinuousClock.Instant) -> Bool {
+        buffered.count >= maxBufferedCharacters || now - lastFlush >= interval
+    }
+}
+
 extension ChatViewModel {
 
     /// Streams tokens from the inference service into an assistant message.
@@ -75,14 +112,19 @@ extension ChatViewModel {
 
             var tokenCount = 0
             let task = Task {
+                var batcher = StreamingTokenBatcher(
+                    interval: streamingUpdateInterval,
+                    maxBufferedCharacters: streamingBatchCharacterLimit
+                )
+
                 do {
                     for try await token in stream {
                         if Task.isCancelled { break }
-                        if let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
-                            self.messages[idx].content += token
-                            tokenCount += 1
+                        tokenCount += 1
+                        if let batch = batcher.append(token, now: ContinuousClock.now),
+                           let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
+                            self.messages[idx].content += batch
                             if self.loopDetectionEnabled,
-                               tokenCount % 10 == 0,
                                self.messages[idx].content.count >= 100,
                                RepetitionDetector.looksLikeLooping(self.messages[idx].content) {
                                 self.inferenceService.stopGeneration()
@@ -96,6 +138,12 @@ extension ChatViewModel {
                         Log.inference.error("Generation stream error: \(error)")
                         errorMessage = "Generation failed: \(error.localizedDescription)"
                     }
+                }
+
+                // Flush remaining buffered tokens after stream ends (normal, error, or cancellation).
+                if let batch = batcher.flush(now: ContinuousClock.now),
+                   let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
+                    self.messages[idx].content += batch
                 }
             }
 
