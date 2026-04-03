@@ -131,7 +131,8 @@ public final class InferenceService {
         systemPrompt: String? = nil,
         temperature: Float = 0.7,
         topP: Float = 0.9,
-        repeatPenalty: Float = 1.1
+        repeatPenalty: Float = 1.1,
+        maxOutputTokens: Int? = 2048
     ) throws -> AsyncThrowingStream<String, Error> {
         guard let backend else {
             throw InferenceError.inferenceFailure("No model loaded")
@@ -140,7 +141,8 @@ public final class InferenceService {
         let config = GenerationConfig(
             temperature: temperature,
             topP: topP,
-            repeatPenalty: repeatPenalty
+            repeatPenalty: repeatPenalty,
+            maxOutputTokens: maxOutputTokens
         )
 
         isGenerating = true
