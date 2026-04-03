@@ -22,6 +22,7 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "2.30.6"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
         .package(url: "https://github.com/mattt/llama.swift", from: "2.8563.0"),
+        .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
     ],
     targets: [
         // Core: models, protocols, services — no heavy ML deps
@@ -71,6 +72,14 @@ let package = Package(
         .testTarget(
             name: "BaseChatE2ETests",
             dependencies: ["BaseChatBackends", "BaseChatUI", "BaseChatCore", "BaseChatTestSupport"]
+        ),
+        .testTarget(
+            name: "BaseChatSnapshotTests",
+            dependencies: [
+                "BaseChatUI",
+                "BaseChatCore",
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]
