@@ -79,10 +79,7 @@ final class CancellationTests: XCTestCase {
     private func sendAndStopMidStream(input: String = "Hello") async throws {
         vm.inputText = input
         let sendTask = Task { await vm.sendMessage() }
-        for _ in 0..<100 {
-            if vm.messages.count >= 2, !(vm.messages.last?.content ?? "").isEmpty { break }
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        await vm.awaitFirstToken()
         vm.stopGeneration()
         await sendTask.value
     }
@@ -145,7 +142,7 @@ final class CancellationTests: XCTestCase {
 
         vm.inputText = "Hello"
         let sendTask = Task { await vm.sendMessage() }
-        try await Task.sleep(for: .milliseconds(150))
+        await vm.awaitGenerating(true)
         vm.clearChat()
         await sendTask.value
 
@@ -161,7 +158,7 @@ final class CancellationTests: XCTestCase {
 
         vm.inputText = "Hello"
         let sendTask = Task { await vm.sendMessage() }
-        try await Task.sleep(for: .milliseconds(100))
+        await vm.awaitGenerating(true)
 
         // Simulate model switch: unload while generating
         vm.inferenceService.unloadModel()
@@ -180,7 +177,7 @@ final class CancellationTests: XCTestCase {
 
         vm.inputText = "Hello"
         let sendTask = Task { await vm.sendMessage() }
-        try await Task.sleep(for: .milliseconds(100))
+        await vm.awaitGenerating(true)
 
         // Unload the old model (simulates switching models)
         vm.inferenceService.unloadModel()

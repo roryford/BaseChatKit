@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import Observation
 @testable import BaseChatUI
 import BaseChatCore
 import BaseChatTestSupport
@@ -55,8 +56,18 @@ final class ServerDiscoveryViewModelTests: XCTestCase {
 
         sut.startDiscovery()
 
-        // Wait briefly for the async stream to deliver
-        try await Task.sleep(for: .milliseconds(100))
+        // Wait for the async stream to deliver using Observation tracking
+        let expectation = XCTestExpectation(description: "Server discovered")
+        if !sut.discoveredServers.isEmpty {
+            expectation.fulfill()
+        } else {
+            withObservationTracking {
+                _ = sut.discoveredServers
+            } onChange: {
+                Task { @MainActor in expectation.fulfill() }
+            }
+        }
+        await fulfillment(of: [expectation], timeout: 2.0)
 
         XCTAssertEqual(sut.discoveredServers.count, 1)
         XCTAssertEqual(sut.discoveredServers.first?.displayName, "Ollama")

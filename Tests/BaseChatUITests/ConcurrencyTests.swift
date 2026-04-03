@@ -98,9 +98,6 @@ final class ConcurrencyTests: XCTestCase {
             await task.value
         }
 
-        // Allow any remaining MainActor work to settle.
-        try await Task.sleep(nanoseconds: 200_000_000)
-
         // Verify: no crash (we got here), messages are non-empty, generation finished.
         XCTAssertFalse(vm.messages.isEmpty, "Messages should be non-empty after rapid sends")
         XCTAssertFalse(vm.isGenerating, "isGenerating should be false after all tasks complete")
@@ -174,9 +171,8 @@ final class ConcurrencyTests: XCTestCase {
             await self.vm.sendMessage()
         }
 
-        // Wait briefly for generation to start.
-        try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertTrue(vm.isGenerating, "Should be generating after first send")
+        // Wait for generation to start.
+        await vm.awaitGenerating(true)
 
         // Send a second message while still generating.
         vm.inputText = "Second message"
@@ -187,9 +183,6 @@ final class ConcurrencyTests: XCTestCase {
         // Wait for both to complete.
         await firstTask.value
         await secondTask.value
-
-        // Allow settling.
-        try await Task.sleep(nanoseconds: 200_000_000)
 
         // sendMessage() does not guard isGenerating, so both messages should have
         // been sent. We should see user messages for both sends.
@@ -220,8 +213,7 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         // Wait for generation to start streaming.
-        try await Task.sleep(nanoseconds: 150_000_000)
-        XCTAssertTrue(vm.isGenerating, "Should be generating on session A")
+        await vm.awaitGenerating(true)
 
         // Switch to session B mid-generation.
         sessionManager.activeSession = sessionB
@@ -298,8 +290,7 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         // Wait for generation to start.
-        try await Task.sleep(nanoseconds: 150_000_000)
-        XCTAssertTrue(vm.isGenerating, "Should be generating")
+        await vm.awaitGenerating(true)
 
         // Capture message count before regenerate attempt.
         let messageCountBefore = vm.messages.count
@@ -313,9 +304,6 @@ final class ConcurrencyTests: XCTestCase {
 
         // Wait for original generation to complete.
         await genTask.value
-
-        // Allow settling.
-        try await Task.sleep(nanoseconds: 100_000_000)
 
         XCTAssertFalse(vm.isGenerating, "isGenerating should be false after generation completes")
 

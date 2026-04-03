@@ -191,9 +191,6 @@ final class MemoryAndConcurrencyTests: XCTestCase {
             await task.value
         }
 
-        // Allow any remaining MainActor work to settle.
-        try await Task.sleep(nanoseconds: 100_000_000)
-
         // Verify: no crash (we got here), messages are present, generation is done.
         XCTAssertFalse(vm.messages.isEmpty,
             "Messages should be non-empty after rapid sends")
@@ -233,8 +230,7 @@ final class MemoryAndConcurrencyTests: XCTestCase {
         }
 
         // Wait for generation to start.
-        try await Task.sleep(nanoseconds: 150_000_000)
-        XCTAssertTrue(vm.isGenerating, "Should be generating")
+        await vm.awaitGenerating(true)
 
         // Attempt to edit the first user message while generating -- should be guarded.
         let messageCountBefore = vm.messages.count
@@ -279,8 +275,7 @@ final class MemoryAndConcurrencyTests: XCTestCase {
         }
 
         // Wait for generation to start streaming.
-        try await Task.sleep(nanoseconds: 150_000_000)
-        XCTAssertTrue(vm.isGenerating, "Should be generating")
+        await vm.awaitGenerating(true)
         XCTAssertFalse(vm.messages.isEmpty, "Should have messages during generation")
 
         // Clear chat while generating.
