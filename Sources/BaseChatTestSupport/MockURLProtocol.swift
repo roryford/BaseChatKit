@@ -120,10 +120,11 @@ public final class MockURLProtocol: URLProtocol {
     // MARK: - URLProtocol Overrides
 
     public override class func canInit(with request: URLRequest) -> Bool {
-        // Intercept all requests when any stubs or sequences are registered.
+        // Intercept all requests when any stubs or non-exhausted sequences are registered.
         lock.lock()
         defer { lock.unlock() }
-        return !stubs.isEmpty || !stubSequences.isEmpty
+        let hasActiveSequences = stubSequences.values.contains { !$0.isEmpty }
+        return !stubs.isEmpty || hasActiveSequences
     }
 
     public override class func canonicalRequest(for request: URLRequest) -> URLRequest {

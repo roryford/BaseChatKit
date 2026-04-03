@@ -18,6 +18,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        MockURLProtocol.reset()
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         session = URLSession(configuration: config)
