@@ -17,8 +17,9 @@ public struct TypingIndicatorView: View {
                     .animation(.easeInOut(duration: 0.4), value: animationPhase)
             }
         }
-        .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(400))
                 animationPhase = (animationPhase + 1) % 3
             }
         }

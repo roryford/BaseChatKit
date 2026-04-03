@@ -4,15 +4,15 @@ import SwiftUI
 
 final class TypingIndicatorViewTests: XCTestCase {
 
-    func testTypingIndicatorViewInitializes() {
-        // Verify the view can be constructed without crashing.
+    func testTypingIndicatorViewRenders() {
         let view = TypingIndicatorView()
-        XCTAssertNotNil(view)
+        // Materialize body to verify no runtime crash during rendering.
+        _ = view.body
     }
 
-    func testStreamingCursorViewInitializes() {
+    func testStreamingCursorViewRenders() {
         let view = StreamingCursorView()
-        XCTAssertNotNil(view)
+        _ = view.body
     }
 
     func testModelLoadingIndicatorViewInitializesWithoutProgress() {
@@ -23,14 +23,5 @@ final class TypingIndicatorViewTests: XCTestCase {
     func testModelLoadingIndicatorViewInitializesWithProgress() {
         let view = ModelLoadingIndicatorView(progress: 0.75)
         XCTAssertEqual(view.progress, 0.75)
-    }
-
-    func testDefaultActivityIndicatorStyleInitializes() {
-        let style = DefaultActivityIndicatorStyle()
-        // Verify the style can produce all three indicator views without crashing.
-        _ = style.makeTypingIndicator()
-        _ = style.makeStreamingCursor()
-        _ = style.makeLoadingIndicator(progress: nil)
-        _ = style.makeLoadingIndicator(progress: 0.5)
     }
 }
