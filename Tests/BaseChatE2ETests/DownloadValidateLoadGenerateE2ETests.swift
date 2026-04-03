@@ -11,49 +11,26 @@ import BaseChatTestSupport
 @Suite("Download -> Validate -> Load -> Generate E2E")
 struct DownloadValidateLoadGenerateE2ETests {
 
-    /// GGUF magic bytes: "GGUF" in ASCII.
-    private static let ggufMagic: [UInt8] = [0x47, 0x47, 0x55, 0x46]
-
     private let fm = FileManager.default
     private let manager = BackgroundDownloadManager()
 
-    // MARK: - Temp Directory Helpers
-
-    private func makeTempDir() throws -> URL {
-        let dir = fm.temporaryDirectory
-            .appendingPathComponent("BaseChatE2E-\(UUID().uuidString)")
-        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    private func cleanup(_ url: URL) {
-        try? fm.removeItem(at: url)
-    }
+    // MARK: - Helpers
 
     /// Writes a valid GGUF file (correct magic + >1 MB) to the given directory.
     private func writeValidGGUF(in dir: URL, name: String = "test-model.gguf") throws -> URL {
         let url = dir.appendingPathComponent(name)
-        var data = Data(Self.ggufMagic)
+        var data = Data(ggufMagic)
         data.append(Data(repeating: 0xFF, count: 1_100_000))
         try data.write(to: url)
         return url
-    }
-
-    /// Collects all tokens from an async stream into a single string.
-    private func collect(_ stream: AsyncThrowingStream<String, Error>) async throws -> String {
-        var output = ""
-        for try await token in stream {
-            output += token
-        }
-        return output
     }
 
     // MARK: - GGUF Lifecycle
 
     @Test("Full GGUF lifecycle: write -> validate -> load -> generate -> verify")
     func gguf_downloadValidateLoadGenerate() async throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         // 1. Write a valid GGUF file to disk.
         let modelURL = try writeValidGGUF(in: dir)
@@ -72,7 +49,7 @@ struct DownloadValidateLoadGenerateE2ETests {
 
         // 4. Generate tokens.
         let config = GenerationConfig(temperature: 0.7, maxTokens: 512)
-        let output = try await collect(backend.generate(
+        let output = try await collectTokens(backend.generate(
             prompt: "Tell me a story",
             systemPrompt: "You are a storyteller.",
             config: config
@@ -88,8 +65,8 @@ struct DownloadValidateLoadGenerateE2ETests {
 
     @Test("Invalid GGUF file blocks the load step")
     func gguf_invalidFile_blocksLoad() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         // Write a file with wrong magic bytes.
         let badModelURL = dir.appendingPathComponent("bad-model.gguf")
@@ -107,8 +84,8 @@ struct DownloadValidateLoadGenerateE2ETests {
 
     @Test("Full MLX lifecycle: write directory -> validate -> load -> generate")
     func mlx_downloadValidateLoadGenerate() async throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         // 1. Simulate a downloaded MLX model directory.
         let mlxDir = dir.appendingPathComponent("test-model-mlx")
@@ -129,7 +106,7 @@ struct DownloadValidateLoadGenerateE2ETests {
         try await backend.loadModel(from: mlxDir, contextSize: 512)
         #expect(backend.isModelLoaded)
 
-        let output = try await collect(backend.generate(
+        let output = try await collectTokens(backend.generate(
             prompt: "What is the meaning of life?",
             systemPrompt: nil,
             config: GenerationConfig()
@@ -143,8 +120,8 @@ struct DownloadValidateLoadGenerateE2ETests {
 
     @Test("Full lifecycle with unload: load -> generate -> unload -> generate-after-unload fails")
     func fullLifecycleWithUnload() async throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let modelURL = try writeValidGGUF(in: dir, name: "lifecycle-model.gguf")
         try manager.validateDownloadedFile(at: modelURL, modelType: .gguf)
@@ -156,7 +133,7 @@ struct DownloadValidateLoadGenerateE2ETests {
         try await backend.loadModel(from: modelURL, contextSize: 512)
         #expect(backend.isModelLoaded)
 
-        let output = try await collect(backend.generate(
+        let output = try await collectTokens(backend.generate(
             prompt: "Test",
             systemPrompt: nil,
             config: GenerationConfig()
@@ -183,8 +160,8 @@ struct DownloadValidateLoadGenerateE2ETests {
 
     @Test("Multiple load -> generate -> unload cycles reuse the same backend")
     func multipleLoadGenerateCycles() async throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let modelURL = try writeValidGGUF(in: dir, name: "multi-cycle.gguf")
         try manager.validateDownloadedFile(at: modelURL, modelType: .gguf)
@@ -197,7 +174,7 @@ struct DownloadValidateLoadGenerateE2ETests {
             try await backend.loadModel(from: modelURL, contextSize: 512)
             #expect(backend.isModelLoaded)
 
-            let output = try await collect(backend.generate(
+            let output = try await collectTokens(backend.generate(
                 prompt: "Cycle \(cycle)",
                 systemPrompt: nil,
                 config: GenerationConfig()

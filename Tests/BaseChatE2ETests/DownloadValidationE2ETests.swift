@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import BaseChatCore
+import BaseChatTestSupport
 
 /// E2E tests for the download validation pipeline using the real filesystem.
 ///
@@ -10,36 +11,19 @@ import Foundation
 @Suite("Download Validation E2E")
 struct DownloadValidationE2ETests {
 
-    /// GGUF magic bytes: "GGUF" in ASCII.
-    private static let ggufMagic: [UInt8] = [0x47, 0x47, 0x55, 0x46]
-
     private let fm = FileManager.default
     private let manager = BackgroundDownloadManager()
-
-    // MARK: - Temp Directory Helpers
-
-    /// Creates a unique temporary directory for one test.
-    private func makeTempDir() throws -> URL {
-        let dir = fm.temporaryDirectory
-            .appendingPathComponent("BaseChatE2E-\(UUID().uuidString)")
-        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    private func cleanup(_ url: URL) {
-        try? fm.removeItem(at: url)
-    }
 
     // MARK: - GGUF Validation
 
     @Test func gguf_validMagicButTooSmall_isRejected() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let fileURL = dir.appendingPathComponent("tiny.gguf")
 
         // Write correct magic bytes but only a few hundred bytes total.
-        var data = Data(Self.ggufMagic)
+        var data = Data(ggufMagic)
         data.append(Data(repeating: 0x00, count: 500))
         try data.write(to: fileURL)
 
@@ -49,8 +33,8 @@ struct DownloadValidationE2ETests {
     }
 
     @Test func gguf_wrongMagicBytes_isRejected() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let fileURL = dir.appendingPathComponent("bad.gguf")
 
@@ -65,13 +49,13 @@ struct DownloadValidationE2ETests {
     }
 
     @Test func gguf_validFile_isAccepted() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let fileURL = dir.appendingPathComponent("model.gguf")
 
         // Write correct magic bytes + enough data to pass the 1MB threshold.
-        var data = Data(Self.ggufMagic)
+        var data = Data(ggufMagic)
         data.append(Data(repeating: 0xFF, count: 1_100_000))
         try data.write(to: fileURL)
 
@@ -80,8 +64,8 @@ struct DownloadValidationE2ETests {
     }
 
     @Test func gguf_emptyFile_isRejected() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let fileURL = dir.appendingPathComponent("empty.gguf")
         fm.createFile(atPath: fileURL.path, contents: Data(), attributes: nil)
@@ -94,8 +78,8 @@ struct DownloadValidationE2ETests {
     // MARK: - MLX Validation
 
     @Test func mlx_directoryMissingConfigJSON_isRejected() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let mlxDir = dir.appendingPathComponent("model-mlx")
         try fm.createDirectory(at: mlxDir, withIntermediateDirectories: true)
@@ -110,8 +94,8 @@ struct DownloadValidationE2ETests {
     }
 
     @Test func mlx_directoryMissingSafetensors_isRejected() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let mlxDir = dir.appendingPathComponent("model-mlx")
         try fm.createDirectory(at: mlxDir, withIntermediateDirectories: true)
@@ -126,8 +110,8 @@ struct DownloadValidationE2ETests {
     }
 
     @Test func mlx_validDirectory_isAccepted() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let mlxDir = dir.appendingPathComponent("model-mlx")
         try fm.createDirectory(at: mlxDir, withIntermediateDirectories: true)
@@ -145,8 +129,8 @@ struct DownloadValidationE2ETests {
     }
 
     @Test func mlx_singleFile_isRejected() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         // A single file is not a valid MLX snapshot.
         let fileURL = dir.appendingPathComponent("tokenizer.json")
@@ -158,8 +142,8 @@ struct DownloadValidationE2ETests {
     }
 
     @Test func mlx_nonExistentFile_isRejected() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let fakeURL = dir.appendingPathComponent("does-not-exist.json")
 
@@ -171,8 +155,8 @@ struct DownloadValidationE2ETests {
     // MARK: - Foundation Type Rejection
 
     @Test func foundation_modelType_isAlwaysRejected() throws {
-        let dir = try makeTempDir()
-        defer { cleanup(dir) }
+        let dir = try makeE2ETempDir()
+        defer { cleanupE2ETempDir(dir) }
 
         let fileURL = dir.appendingPathComponent("anything")
         try Data("data".utf8).write(to: fileURL)
