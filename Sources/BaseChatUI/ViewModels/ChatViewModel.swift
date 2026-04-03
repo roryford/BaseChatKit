@@ -112,7 +112,9 @@ public final class ChatViewModel {
     public var temperature: Float = 0.7
     public var topP: Float = 0.9
     public var repeatPenalty: Float = 1.1
+    /// Minimum interval between batched UI updates during streaming (~30 fps by default).
     public var streamingUpdateInterval: Duration = .milliseconds(33)
+    /// Maximum characters to buffer before forcing a UI flush during streaming.
     public var streamingBatchCharacterLimit: Int = 128
 
     /// Whether to automatically stop generation when repetitive looping is detected.

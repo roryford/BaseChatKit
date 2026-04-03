@@ -112,12 +112,12 @@ extension ChatViewModel {
 
             var tokenCount = 0
             let task = Task {
-                do {
-                    var batcher = StreamingTokenBatcher(
-                        interval: streamingUpdateInterval,
-                        maxBufferedCharacters: streamingBatchCharacterLimit
-                    )
+                var batcher = StreamingTokenBatcher(
+                    interval: streamingUpdateInterval,
+                    maxBufferedCharacters: streamingBatchCharacterLimit
+                )
 
+                do {
                     for try await token in stream {
                         if Task.isCancelled { break }
                         tokenCount += 1
@@ -133,17 +133,17 @@ extension ChatViewModel {
                             }
                         }
                     }
-
-                    // Flush remaining buffered tokens (normal exit or cancellation).
-                    if let batch = batcher.flush(now: ContinuousClock.now),
-                       let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
-                        self.messages[idx].content += batch
-                    }
                 } catch {
                     if !Task.isCancelled {
                         Log.inference.error("Generation stream error: \(error)")
                         errorMessage = "Generation failed: \(error.localizedDescription)"
                     }
+                }
+
+                // Flush remaining buffered tokens after stream ends (normal, error, or cancellation).
+                if let batch = batcher.flush(now: ContinuousClock.now),
+                   let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
+                    self.messages[idx].content += batch
                 }
             }
 
