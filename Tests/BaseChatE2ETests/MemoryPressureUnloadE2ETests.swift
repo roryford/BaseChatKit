@@ -1,4 +1,5 @@
-import XCTest
+import Testing
+import Foundation
 @testable import BaseChatUI
 @testable import BaseChatCore
 import BaseChatTestSupport
@@ -12,8 +13,9 @@ import BaseChatTestSupport
 /// Uses `MockInferenceBackend` rather than a real ML backend so the test runs
 /// without hardware. The DispatchSource-based handler is tested at the unit level;
 /// here we set `pressureLevel` directly to simulate OS events deterministically.
+@Suite("Memory Pressure Unload E2E")
 @MainActor
-final class MemoryPressureUnloadE2ETests: XCTestCase {
+struct MemoryPressureUnloadE2ETests {
 
     // MARK: - Helpers
 
@@ -43,44 +45,43 @@ final class MemoryPressureUnloadE2ETests: XCTestCase {
     /// 2. Critical pressure fires -> model unloads, isModelLoaded becomes false,
     ///    error message is shown.
     /// 3. Pressure returns to nominal -> error clears.
-    func test_fullLifecycle_criticalUnloadsThenNominalRecovers() async {
+    @Test func fullLifecycle_criticalUnloadsThenNominalRecovers() async {
         let handler = MemoryPressureHandler()
         let (vm, mock, _) = makeViewModel(handler: handler)
 
         // --- Phase 1: Healthy state ---
-        XCTAssertTrue(vm.inferenceService.isModelLoaded,
+        #expect(vm.inferenceService.isModelLoaded,
             "Precondition: model should be loaded")
-        XCTAssertNil(vm.errorMessage,
+        #expect(vm.errorMessage == nil,
             "Precondition: no error message")
-        XCTAssertEqual(vm.memoryPressureLevel, .nominal,
+        #expect(vm.memoryPressureLevel == .nominal,
             "Precondition: pressure should be nominal")
-        XCTAssertEqual(mock.unloadCallCount, 0)
+        #expect(mock.unloadCallCount == 0)
 
         // Verify generation works before pressure event.
         mock.tokensToYield = ["Hello"]
         vm.inputText = "Test prompt"
         await vm.sendMessage()
-        XCTAssertFalse(vm.messages.isEmpty,
+        #expect(!vm.messages.isEmpty,
             "Should have messages after successful generation")
 
         // --- Phase 2: Critical pressure fires ---
         handler.pressureLevel = .critical
         vm.handleMemoryPressure()
 
-        // InferenceService.unloadModel() should have been called.
-        XCTAssertEqual(mock.unloadCallCount, 1,
+        #expect(mock.unloadCallCount == 1,
             "unloadModel should be called once at critical pressure")
-        XCTAssertFalse(mock.isModelLoaded,
+        #expect(!mock.isModelLoaded,
             "Backend should report model unloaded")
-        XCTAssertFalse(vm.inferenceService.isModelLoaded,
+        #expect(!vm.inferenceService.isModelLoaded,
             "InferenceService.isModelLoaded should be false after critical pressure")
 
         // User-facing error should explain the unload.
-        XCTAssertNotNil(vm.errorMessage,
+        #expect(vm.errorMessage != nil,
             "Error message should be set after critical pressure")
-        XCTAssertTrue(
-            vm.errorMessage?.lowercased().contains("critical") == true
-            || vm.errorMessage?.lowercased().contains("unload") == true,
+        #expect(
+            vm.errorMessage?.contains("critical") == true
+            || vm.errorMessage?.contains("unloaded") == true,
             "Error should mention critical pressure or unloading, got: \(vm.errorMessage ?? "nil")"
         )
 
@@ -88,28 +89,28 @@ final class MemoryPressureUnloadE2ETests: XCTestCase {
         handler.pressureLevel = .nominal
         vm.handleMemoryPressure()
 
-        XCTAssertNil(vm.errorMessage,
+        #expect(vm.errorMessage == nil,
             "Error message should be cleared when pressure returns to nominal")
         // Model stays unloaded -- the user must reload manually.
-        XCTAssertFalse(vm.inferenceService.isModelLoaded,
+        #expect(!vm.inferenceService.isModelLoaded,
             "Model should remain unloaded after pressure clears (manual reload required)")
     }
 
     // MARK: - Warning Does Not Unload
 
     /// Warning-level pressure should set an advisory error but NOT unload the model.
-    func test_warningPressure_doesNotUnloadModel() {
+    @Test func warningPressure_doesNotUnloadModel() {
         let handler = MemoryPressureHandler()
         let (vm, mock, _) = makeViewModel(handler: handler)
 
         handler.pressureLevel = .warning
         vm.handleMemoryPressure()
 
-        XCTAssertTrue(vm.inferenceService.isModelLoaded,
+        #expect(vm.inferenceService.isModelLoaded,
             "Model should remain loaded at warning level")
-        XCTAssertEqual(mock.unloadCallCount, 0,
+        #expect(mock.unloadCallCount == 0,
             "unloadModel should NOT be called at warning level")
-        XCTAssertNotNil(vm.errorMessage,
+        #expect(vm.errorMessage != nil,
             "Advisory error message should be set at warning level")
     }
 
@@ -117,7 +118,7 @@ final class MemoryPressureUnloadE2ETests: XCTestCase {
 
     /// If memory pressure goes critical while generation is in progress,
     /// the model should be unloaded and generation stopped.
-    func test_criticalDuringGeneration_stopsAndUnloads() async throws {
+    @Test func criticalDuringGeneration_stopsAndUnloads() async throws {
         let slow = SlowMockBackend()
         slow.tokensToYield = (0..<30).map { "tok\($0) " }
         slow.delayPerToken = .milliseconds(50)
@@ -138,22 +139,25 @@ final class MemoryPressureUnloadE2ETests: XCTestCase {
             await vm.sendMessage()
         }
 
-        // Wait for generation to begin streaming.
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertTrue(vm.isGenerating, "Precondition: should be generating")
+        // Poll until generation begins rather than using a fixed sleep.
+        for _ in 0..<50 {
+            if vm.isGenerating { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(vm.isGenerating, "Precondition: should be generating")
 
         // Simulate critical memory pressure mid-generation.
         handler.pressureLevel = .critical
         vm.handleMemoryPressure()
 
         // Model should be unloaded immediately.
-        XCTAssertFalse(vm.inferenceService.isModelLoaded,
+        #expect(!vm.inferenceService.isModelLoaded,
             "Model should be unloaded after critical pressure during generation")
 
         // Wait for the generation task to finish (it should exit gracefully).
         await genTask.value
 
-        XCTAssertNotNil(vm.errorMessage,
+        #expect(vm.errorMessage != nil,
             "Error message should be set after critical pressure during generation")
     }
 
@@ -161,31 +165,31 @@ final class MemoryPressureUnloadE2ETests: XCTestCase {
 
     /// Pressure escalating from warning to critical should trigger unload on the
     /// critical transition, not on the initial warning.
-    func test_escalation_warningThenCritical_unloadsOnCritical() {
+    @Test func escalation_warningThenCritical_unloadsOnCritical() {
         let handler = MemoryPressureHandler()
         let (vm, mock, _) = makeViewModel(handler: handler)
 
         // Step 1: warning -- no unload.
         handler.pressureLevel = .warning
         vm.handleMemoryPressure()
-        XCTAssertEqual(mock.unloadCallCount, 0,
+        #expect(mock.unloadCallCount == 0,
             "No unload at warning level")
-        XCTAssertTrue(vm.inferenceService.isModelLoaded,
+        #expect(vm.inferenceService.isModelLoaded,
             "Model should still be loaded at warning")
 
         // Step 2: escalate to critical -- unload fires.
         handler.pressureLevel = .critical
         vm.handleMemoryPressure()
-        XCTAssertEqual(mock.unloadCallCount, 1,
+        #expect(mock.unloadCallCount == 1,
             "unloadModel should fire when escalating to critical")
-        XCTAssertFalse(vm.inferenceService.isModelLoaded,
+        #expect(!vm.inferenceService.isModelLoaded,
             "Model should be unloaded after critical escalation")
     }
 
     // MARK: - Repeated Critical Is Idempotent
 
     /// Calling handleMemoryPressure twice at critical level should only unload once.
-    func test_repeatedCritical_unloadsOnlyOnce() {
+    @Test func repeatedCritical_unloadsOnlyOnce() {
         let handler = MemoryPressureHandler()
         let (vm, mock, _) = makeViewModel(handler: handler)
 
@@ -193,7 +197,7 @@ final class MemoryPressureUnloadE2ETests: XCTestCase {
         vm.handleMemoryPressure()
         vm.handleMemoryPressure()
 
-        XCTAssertEqual(mock.unloadCallCount, 1,
+        #expect(mock.unloadCallCount == 1,
             "Second critical call should be a no-op (same level guard)")
     }
 
@@ -201,19 +205,19 @@ final class MemoryPressureUnloadE2ETests: XCTestCase {
 
     /// The view model's `memoryPressureLevel` computed property should always
     /// reflect the handler's current state.
-    func test_memoryPressureLevel_reflectsHandler() {
+    @Test func memoryPressureLevel_reflectsHandler() {
         let handler = MemoryPressureHandler()
         let (vm, _, _) = makeViewModel(handler: handler)
 
-        XCTAssertEqual(vm.memoryPressureLevel, .nominal)
+        #expect(vm.memoryPressureLevel == .nominal)
 
         handler.pressureLevel = .warning
-        XCTAssertEqual(vm.memoryPressureLevel, .warning)
+        #expect(vm.memoryPressureLevel == .warning)
 
         handler.pressureLevel = .critical
-        XCTAssertEqual(vm.memoryPressureLevel, .critical)
+        #expect(vm.memoryPressureLevel == .critical)
 
         handler.pressureLevel = .nominal
-        XCTAssertEqual(vm.memoryPressureLevel, .nominal)
+        #expect(vm.memoryPressureLevel == .nominal)
     }
 }
