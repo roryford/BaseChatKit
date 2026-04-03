@@ -34,19 +34,34 @@ public enum MarkdownStripper {
         // Headers: # Header → Header
         text = text.replacing(/(?m)^#{1,6}\s+/, with: "")
 
-        // Bold + italic: ***text*** or ___text___
-        text = text.replacing(/(\*{3}|_{3})(.+?)\1/) { match in
-            String(match.output.2)
+        // Bold + italic: ***text***
+        text = text.replacing(/\*{3}(.+?)\*{3}/) { match in
+            String(match.output.1)
         }
 
-        // Bold: **text** or __text__
-        text = text.replacing(/(\*{2}|_{2})(.+?)\1/) { match in
-            String(match.output.2)
+        // Bold + italic: ___text___ (word-boundary safe — preserves mid-word underscores)
+        text = text.replacing(/(^|\s)_{3}(.+?)_{3}(\s|$)/) { match in
+            String(match.output.1) + String(match.output.2) + String(match.output.3)
         }
 
-        // Italic: *text* or _text_
-        text = text.replacing(/(\*|_)(.+?)\1/) { match in
-            String(match.output.2)
+        // Bold: **text**
+        text = text.replacing(/\*{2}(.+?)\*{2}/) { match in
+            String(match.output.1)
+        }
+
+        // Bold: __text__ (word-boundary safe)
+        text = text.replacing(/(^|\s)_{2}(.+?)_{2}(\s|$)/) { match in
+            String(match.output.1) + String(match.output.2) + String(match.output.3)
+        }
+
+        // Italic: *text*
+        text = text.replacing(/\*(.+?)\*/) { match in
+            String(match.output.1)
+        }
+
+        // Italic: _text_ (word-boundary safe — won't match mid-word underscores)
+        text = text.replacing(/(^|\s)_(.+?)_(\s|$)/) { match in
+            String(match.output.1) + String(match.output.2) + String(match.output.3)
         }
 
         // Strikethrough: ~~text~~

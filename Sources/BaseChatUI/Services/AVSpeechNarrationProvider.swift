@@ -29,7 +29,9 @@ public final class AVSpeechNarrationProvider: NSObject, NarrationProvider, @unch
         synthesizer.stopSpeaking(at: .immediate)
 
         let utterance = AVSpeechUtterance(string: text)
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * rate
+        // rate is 0.0–1.0 from the VM; map linearly to the AVSpeechUtterance range.
+        utterance.rate = AVSpeechUtteranceMinimumSpeechRate
+            + (AVSpeechUtteranceMaximumSpeechRate - AVSpeechUtteranceMinimumSpeechRate) * rate
 
         if let voiceID = voice {
             utterance.voice = AVSpeechSynthesisVoice(identifier: voiceID)

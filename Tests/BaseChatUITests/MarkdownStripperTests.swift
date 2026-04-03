@@ -143,4 +143,15 @@ final class MarkdownStripperTests: XCTestCase {
         let result = MarkdownStripper.strip(input)
         XCTAssertEqual(result, "Title\n\nBold and italic with code and a link.")
     }
+
+    func test_strip_preservesMidWordUnderscores() {
+        let input = "Use snake_case_names in Python."
+        XCTAssertEqual(MarkdownStripper.strip(input), "Use snake_case_names in Python.")
+    }
+
+    func test_strip_removesUnderscoreEmphasisAtWordBoundaries() {
+        XCTAssertEqual(MarkdownStripper.strip("_italic text_"), "italic text")
+        XCTAssertEqual(MarkdownStripper.strip("__bold text__"), "bold text")
+        XCTAssertEqual(MarkdownStripper.strip("___bold italic___"), "bold italic")
+    }
 }

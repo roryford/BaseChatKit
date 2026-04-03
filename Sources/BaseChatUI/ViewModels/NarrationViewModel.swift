@@ -51,20 +51,17 @@ public final class NarrationViewModel {
         syncState()
     }
 
-    /// Toggles narration for a message: starts if idle/different, stops if same.
+    /// Toggles narration for a message: pauses if speaking, resumes if paused,
+    /// or stops any current narration and starts the new message.
     public func toggleForMessage(_ message: ChatMessageRecord) async {
-        if state.messageID == message.id {
-            switch state {
-            case .speaking:
-                provider?.pause()
-                syncState()
-            case .paused:
-                provider?.resume()
-                syncState()
-            case .idle:
-                await speakMessage(message)
-            }
-        } else {
+        switch state {
+        case .speaking(let id) where id == message.id:
+            provider?.pause()
+            syncState()
+        case .paused(let id) where id == message.id:
+            provider?.resume()
+            syncState()
+        default:
             provider?.stop()
             await speakMessage(message)
         }
