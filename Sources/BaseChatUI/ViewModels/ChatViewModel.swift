@@ -77,7 +77,12 @@ public final class ChatViewModel {
     public private(set) var isLoading: Bool = false
 
     /// Whether inference is currently streaming tokens.
-    public internal(set) var isGenerating: Bool = false
+    public internal(set) var isGenerating: Bool = false {
+        didSet { onGeneratingChanged?(isGenerating) }
+    }
+
+    /// Test-only hook invoked whenever `isGenerating` changes.
+    public var onGeneratingChanged: ((Bool) -> Void)?
 
     /// A user-facing error message, shown as a banner. Cleared on next action.
     public var errorMessage: String?
