@@ -1,4 +1,5 @@
 import Foundation
+import MachO
 
 /// Pre-flight memory check before loading a model.
 ///
@@ -33,8 +34,9 @@ public struct MemoryGate: Sendable {
 
     /// Creates a gate using real system values.
     public init() {
-        self.physicalMemoryBytes = ProcessInfo.processInfo.physicalMemory
-        self.availableMemoryBytes = { Self.systemAvailableMemory() }
+        let physical = ProcessInfo.processInfo.physicalMemory
+        self.physicalMemoryBytes = physical
+        self.availableMemoryBytes = { Self.systemAvailableMemory(physicalMemoryBytes: physical) }
         #if os(iOS)
         self.denyBehavior = .throwError
         #else
@@ -97,16 +99,16 @@ public struct MemoryGate: Sendable {
     /// On iOS, uses `os_proc_available_memory()` which returns the number of bytes
     /// the app can allocate before the system starts killing processes.
     /// On macOS, uses Mach VM statistics (free + inactive pages) as a heuristic.
-    private static func systemAvailableMemory() -> UInt64 {
+    private static func systemAvailableMemory(physicalMemoryBytes: UInt64) -> UInt64 {
         #if os(iOS) || os(tvOS) || os(watchOS)
         return UInt64(os_proc_available_memory())
         #else
-        return macAvailableMemory()
+        return macAvailableMemory(physicalMemoryFallback: physicalMemoryBytes)
         #endif
     }
 
     #if os(macOS)
-    private static func macAvailableMemory() -> UInt64 {
+    private static func macAvailableMemory(physicalMemoryFallback: UInt64) -> UInt64 {
         var stats = vm_statistics64_data_t()
         var count = mach_msg_type_number_t(
             MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size
@@ -118,9 +120,9 @@ public struct MemoryGate: Sendable {
         }
         guard result == KERN_SUCCESS else {
             // Fallback: estimate 60% of physical memory.
-            return UInt64(Double(ProcessInfo.processInfo.physicalMemory) * 0.60)
+            return UInt64(Double(physicalMemoryFallback) * 0.60)
         }
-        // vm_page_size is a mutable global; read it through sysctl to satisfy Sendable.
+        // Read the host page size directly via Mach instead of using `vm_page_size`.
         var pageSize: vm_size_t = 0
         host_page_size(mach_host_self(), &pageSize)
         let pageSizeU64 = UInt64(pageSize)

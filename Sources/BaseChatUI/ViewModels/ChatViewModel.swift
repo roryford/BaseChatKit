@@ -260,7 +260,9 @@ public final class ChatViewModel {
         self.modelStorage = modelStorage
         self.memoryPressure = memoryPressure
 
-        inferenceService.memoryGate = MemoryGate()
+        if inferenceService.memoryGate == nil {
+            inferenceService.memoryGate = MemoryGate()
+        }
 
         let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
         self.isFirstRun = !UserDefaults.standard.bool(forKey: firstRunKey)
