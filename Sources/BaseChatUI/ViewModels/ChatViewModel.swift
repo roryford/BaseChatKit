@@ -133,6 +133,7 @@ public final class ChatViewModel {
     public var compressionMode: CompressionMode = .automatic {
         didSet {
             compressionOrchestrator.mode = compressionMode
+            guard !isRestoringSession else { return }
             do {
                 try saveSettingsToSession()
             } catch {
@@ -254,6 +255,7 @@ public final class ChatViewModel {
     var generationTask: Task<Void, Never>?
     private var lastPressureLevel: MemoryPressureLevel = .nominal
     private var isSynchronizingSelection = false
+    private var isRestoringSession = false
 
     /// Cached per-message token counts keyed by message ID, to avoid recalculating all messages.
     var tokenCountCache: [UUID: Int] = [:]
@@ -322,6 +324,9 @@ public final class ChatViewModel {
 
     /// Switches to a different chat session, loading its messages and settings.
     public func switchToSession(_ session: ChatSessionRecord) {
+        isRestoringSession = true
+        defer { isRestoringSession = false }
+
         activeSession = session
         inferenceService.resetConversation()
 

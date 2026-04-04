@@ -288,6 +288,25 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         XCTAssertNil(vm.selectedEndpoint, "Missing endpoint should clear selectedEndpoint")
     }
 
+    func test_switchToSession_doesNotPersistNilSelectionWhenEndpointUnavailable() throws {
+        let (vm, _, persistence) = try makeViewModelWithPersistence()
+
+        let endpoint = APIEndpoint(name: "Delayed Endpoint", provider: .openAI)
+        var session = ChatSessionRecord(title: "Deferred Endpoint Session")
+        session.selectedEndpointID = endpoint.id
+        try persistence.insertSession(session)
+        vm.activeSession = session
+
+        vm.setAvailableEndpoints([])
+        vm.switchToSession(session)
+
+        XCTAssertEqual(persistence.updateSessionCallCount, 0,
+                       "switchToSession should not auto-persist settings while restoring")
+        let stored = try persistence.fetchSessions().first(where: { $0.id == session.id })
+        XCTAssertEqual(stored?.selectedEndpointID, endpoint.id,
+                       "Unresolved endpoint ID should remain persisted until user saves settings")
+    }
+
     func test_saveSettingsToSession_persistsSelectedEndpointID() throws {
         let (vm, _, persistence) = try makeViewModelWithPersistence()
         let endpoint = APIEndpoint(name: "Claude", provider: .claude)
