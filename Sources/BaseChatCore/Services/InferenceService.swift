@@ -19,6 +19,20 @@ public typealias CloudBackendFactory = (APIProvider) -> (any InferenceBackend)?
 /// `registerCloudBackendFactory`. This keeps BaseChatCore free of any
 /// direct dependency on MLX, llama.cpp, Foundation Models, or cloud SDKs —
 /// those are registered by the app or the BaseChatBackends target at startup.
+///
+/// ## Load lifecycle guarantees
+///
+/// - **Latest-wins requests**: each `loadModel` / `loadCloudBackend` call creates
+///   a new load request token; only the newest in-flight token may commit.
+/// - **Stale completion suppression**: if an older request finishes after a newer
+///   request started, stale successes are unloaded and stale failures are ignored
+///   for state transitions.
+/// - **Unload/preemption invalidation**: `unloadModel()` invalidates all
+///   outstanding requests so late completions cannot restore a model.
+///
+/// These guarantees are service-level coordination semantics. Backend-specific
+/// threading/execution constraints (for example MLX generation's main-thread
+/// requirement) are unchanged.
 @Observable
 @MainActor
 public final class InferenceService {
@@ -69,10 +83,53 @@ public final class InferenceService {
     // MARK: - Private State
 
     private var backend: (any InferenceBackend)?
+    /// Monotonic identity for each load attempt.
+    ///
+    /// Invariants:
+    /// - Tokens are strictly increasing for the lifetime of the service.
+    /// - Only the latest requested token can commit a loaded backend.
+    /// - `unloadModel()` invalidates all tokens issued up to that moment.
+    private struct LoadRequestToken: Hashable, Comparable, Sendable {
+        let rawValue: UInt64
+
+        static let zero = Self(rawValue: 0)
+
+        static func < (lhs: Self, rhs: Self) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+    }
+
+    /// Tracks model-load lifecycle state.
+    ///
+    /// Invariants:
+    /// - `.loading` and `.loaded` always reference a previously issued token.
+    /// - `.loaded` means the loaded backend was committed by the same token.
+    /// - Any completion that does not match the active `.loading` token is stale.
+    private enum LoadPhase: Equatable {
+        case idle
+        case loading(request: LoadRequestToken)
+        case loaded(request: LoadRequestToken)
+    }
+
+    private struct LoadRequestMetadata {
+        let source: String
+        let target: String
+        let backend: String
+        let startedAtUptime: TimeInterval
+    }
+
+    private var nextLoadRequestToken: LoadRequestToken = .zero
+    private var latestRequestedLoadToken: LoadRequestToken?
+    private var invalidatedThroughToken: LoadRequestToken = .zero
+    private var loadPhase: LoadPhase = .idle
+    private var loadRequestMetadataByToken: [LoadRequestToken: LoadRequestMetadata] = [:]
 
     // MARK: - Model Lifecycle
 
     /// Loads a model using the appropriate backend for its format.
+    ///
+    /// If another load request starts before this call completes, this request is
+    /// treated as stale and its completion is suppressed.
     public func loadModel(
         from modelInfo: ModelInfo,
         contextSize: Int32 = 2048
@@ -113,15 +170,30 @@ public final class InferenceService {
             }
         }
 
-        try await newBackend.loadModel(from: modelInfo.url, contextSize: contextSize)
+        let backendName = backendDisplayName(for: modelInfo.modelType)
+        let request = beginLoadRequest(
+            source: "local",
+            target: modelTypeLogLabel(modelInfo.modelType),
+            backend: backendName
+        )
+        do {
+            try await newBackend.loadModel(from: modelInfo.url, contextSize: contextSize)
+        } catch {
+            finishLoadAttemptWithFailure(request, error: error)
+            throw error
+        }
 
-        backend = newBackend
-        isModelLoaded = true
-        activeBackendName = backendDisplayName(for: modelInfo.modelType)
-        Log.inference.info("InferenceService loaded \(modelInfo.name) via \(self.activeBackendName ?? "unknown")")
+        logLoadEvent("load.complete", request: request)
+        guard commitLoadIfCurrent(request: request, backend: newBackend, backendName: backendName) else {
+            newBackend.unloadModel()
+            logLoadEvent("load.suppress", request: request, reason: "stale-success", clearMetadata: true)
+            return
+        }
     }
 
     /// Loads a cloud API backend from an APIEndpoint configuration.
+    ///
+    /// Follows the same latest-wins/stale-suppression semantics as `loadModel`.
     public func loadCloudBackend(from endpoint: APIEndpoint) async throws {
         unloadModel()
 
@@ -160,15 +232,36 @@ public final class InferenceService {
             urlModelConfigurable.configure(baseURL: url, modelName: endpoint.modelName)
         }
 
-        try await newBackend.loadModel(from: url, contextSize: 0)
-        backend = newBackend
-        isModelLoaded = true
-        activeBackendName = endpoint.provider.rawValue
-        Log.inference.info("InferenceService loaded cloud backend: \(endpoint.name) (\(endpoint.provider.rawValue))")
+        let request = beginLoadRequest(
+            source: "cloud",
+            target: endpoint.provider.rawValue,
+            backend: endpoint.provider.rawValue
+        )
+        do {
+            try await newBackend.loadModel(from: url, contextSize: 0)
+        } catch {
+            finishLoadAttemptWithFailure(request, error: error)
+            throw error
+        }
+
+        logLoadEvent("load.complete", request: request)
+        guard commitLoadIfCurrent(
+            request: request,
+            backend: newBackend,
+            backendName: endpoint.provider.rawValue
+        ) else {
+            newBackend.unloadModel()
+            logLoadEvent("load.suppress", request: request, reason: "stale-success", clearMetadata: true)
+            return
+        }
     }
 
     /// Unloads the current model and frees all associated memory.
+    ///
+    /// Also preempts in-flight load requests by invalidating their request tokens.
+    /// Any late completion from an invalidated request is discarded.
     public func unloadModel() {
+        invalidateOutstandingLoads()
         backend?.unloadModel()
         backend = nil
         isModelLoaded = false
@@ -290,6 +383,121 @@ public final class InferenceService {
         }
     }
 
+    private func beginLoadRequest(
+        source: String,
+        target: String,
+        backend: String
+    ) -> LoadRequestToken {
+        let request = LoadRequestToken(rawValue: nextLoadRequestToken.rawValue + 1)
+        nextLoadRequestToken = request
+        latestRequestedLoadToken = request
+        loadPhase = .loading(request: request)
+        loadRequestMetadataByToken[request] = LoadRequestMetadata(
+            source: source,
+            target: target,
+            backend: backend,
+            startedAtUptime: ProcessInfo.processInfo.systemUptime
+        )
+        logLoadEvent("load.start", request: request)
+        return request
+    }
+
+    private func finishLoadAttemptWithFailure(_ request: LoadRequestToken, error: any Error) {
+        guard case .loading(let activeRequest) = loadPhase, activeRequest == request else {
+            logLoadEvent("load.suppress", request: request, reason: "stale-failure", clearMetadata: true)
+            return
+        }
+        loadPhase = .idle
+        logLoadEvent(
+            "load.failed",
+            request: request,
+            reason: String(reflecting: type(of: error)),
+            clearMetadata: true
+        )
+    }
+
+    private func invalidateOutstandingLoads() {
+        if case .loading(let activeRequest) = loadPhase {
+            logLoadEvent("load.cancel", request: activeRequest, reason: "unload")
+        }
+        if let latestRequestedLoadToken {
+            invalidatedThroughToken = max(invalidatedThroughToken, latestRequestedLoadToken)
+        }
+        loadPhase = .idle
+    }
+
+    private func canCommitLoad(_ request: LoadRequestToken) -> Bool {
+        guard request > invalidatedThroughToken else {
+            return false
+        }
+        guard latestRequestedLoadToken == request else {
+            return false
+        }
+        guard case .loading(let activeRequest) = loadPhase, activeRequest == request else {
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    private func commitLoadIfCurrent(
+        request: LoadRequestToken,
+        backend newBackend: any InferenceBackend,
+        backendName: String
+    ) -> Bool {
+        guard canCommitLoad(request) else {
+            return false
+        }
+
+        backend = newBackend
+        isModelLoaded = true
+        activeBackendName = backendName
+        loadPhase = .loaded(request: request)
+        logLoadEvent("load.commit", request: request, clearMetadata: true)
+        return true
+    }
+
+    private func modelTypeLogLabel(_ modelType: ModelType) -> String {
+        switch modelType {
+        case .mlx: "mlx"
+        case .gguf: "gguf"
+        case .foundation: "foundation"
+        }
+    }
+
+    private func logLoadEvent(
+        _ event: String,
+        request: LoadRequestToken,
+        reason: String? = nil,
+        clearMetadata: Bool = false
+    ) {
+        let metadata = loadRequestMetadataByToken[request]
+        let latencyMs = metadata.map {
+            max(0, Int((ProcessInfo.processInfo.systemUptime - $0.startedAtUptime) * 1_000))
+        }
+
+        var message = "event=\(event) req=\(request.rawValue)"
+        if let metadata {
+            message += " source=\(metadata.source) target=\(metadata.target) backend=\(metadata.backend)"
+        }
+        if let latencyMs {
+            message += " latency_ms=\(latencyMs)"
+        }
+        if let reason {
+            message += " reason=\(reason)"
+        }
+
+        if event == "load.failed" {
+            Log.inference.error("\(message, privacy: .public)")
+        } else {
+            Log.inference.info("\(message, privacy: .public)")
+        }
+
+        if clearMetadata {
+            loadRequestMetadataByToken.removeValue(forKey: request)
+        }
+    }
+
     // MARK: - Initializers
 
     public nonisolated init() {}
@@ -300,6 +508,10 @@ public final class InferenceService {
         self.backend = backend
         self.isModelLoaded = true
         self.activeBackendName = name
+        let request = LoadRequestToken(rawValue: 1)
+        self.nextLoadRequestToken = request
+        self.latestRequestedLoadToken = request
+        self.loadPhase = .loaded(request: request)
     }
     #endif
 

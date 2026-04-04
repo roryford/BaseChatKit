@@ -222,6 +222,156 @@ final class InferenceServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - Load lifecycle races
+
+    func test_loadModel_rapidModelSwitch_latestRequestWins_staleCompletionSuppressed() async throws {
+        let service = InferenceService()
+        let firstBackend = ControlledLoadBackend()
+        let secondBackend = ControlledLoadBackend()
+
+        service.registerBackendFactory { modelType in
+            switch modelType {
+            case .gguf:
+                firstBackend
+            case .foundation:
+                secondBackend
+            case .mlx:
+                nil
+            }
+        }
+
+        let firstTask = Task {
+            try await service.loadModel(from: makeModelInfo(name: "First", modelType: .gguf))
+        }
+        await firstBackend.waitUntilLoadStarted()
+
+        let secondTask = Task {
+            try await service.loadModel(from: makeModelInfo(name: "Second", modelType: .foundation))
+        }
+        await secondBackend.waitUntilLoadStarted()
+
+        await secondBackend.releaseLoadSuccess()
+        try await secondTask.value
+
+        XCTAssertTrue(service.isModelLoaded)
+        XCTAssertEqual(service.activeBackendName, "Apple")
+
+        await firstBackend.releaseLoadSuccess()
+        try await firstTask.value
+
+        XCTAssertEqual(firstBackend.unloadCallCount, 1, "Stale backend should be unloaded when completion is discarded")
+        XCTAssertEqual(secondBackend.unloadCallCount, 0)
+        XCTAssertEqual(service.activeBackendName, "Apple")
+    }
+
+    func test_loadCloudBackend_rapidEndpointSwitch_latestRequestWins_staleCompletionSuppressed() async throws {
+        let service = InferenceService()
+        let firstBackend = ControlledLoadBackend()
+        let secondBackend = ControlledLoadBackend()
+
+        service.registerCloudBackendFactory { provider in
+            switch provider {
+            case .ollama:
+                firstBackend
+            case .lmStudio:
+                secondBackend
+            default:
+                nil
+            }
+        }
+
+        let firstEndpoint = makeEndpoint(name: "First", provider: .ollama, modelName: "first-model")
+        let secondEndpoint = makeEndpoint(name: "Second", provider: .lmStudio, modelName: "second-model")
+
+        let firstTask = Task {
+            try await service.loadCloudBackend(from: firstEndpoint)
+        }
+        await firstBackend.waitUntilLoadStarted()
+
+        let secondTask = Task {
+            try await service.loadCloudBackend(from: secondEndpoint)
+        }
+        await secondBackend.waitUntilLoadStarted()
+
+        await secondBackend.releaseLoadSuccess()
+        try await secondTask.value
+
+        XCTAssertTrue(service.isModelLoaded)
+        XCTAssertEqual(service.activeBackendName, APIProvider.lmStudio.rawValue)
+
+        await firstBackend.releaseLoadSuccess()
+        try await firstTask.value
+
+        XCTAssertEqual(firstBackend.unloadCallCount, 1, "Stale cloud completion should be discarded and unloaded")
+        XCTAssertEqual(secondBackend.unloadCallCount, 0)
+        XCTAssertEqual(service.activeBackendName, APIProvider.lmStudio.rawValue)
+    }
+
+    func test_loadModel_staleFailure_doesNotOverwriteNewerSuccessfulState() async throws {
+        let service = InferenceService()
+        let firstBackend = ControlledLoadBackend()
+        let secondBackend = ControlledLoadBackend()
+
+        service.registerBackendFactory { modelType in
+            switch modelType {
+            case .gguf:
+                firstBackend
+            case .foundation:
+                secondBackend
+            case .mlx:
+                nil
+            }
+        }
+
+        let firstTask = Task {
+            try await service.loadModel(from: makeModelInfo(name: "First", modelType: .gguf))
+        }
+        await firstBackend.waitUntilLoadStarted()
+
+        let secondTask = Task {
+            try await service.loadModel(from: makeModelInfo(name: "Second", modelType: .foundation))
+        }
+        await secondBackend.waitUntilLoadStarted()
+
+        await secondBackend.releaseLoadSuccess()
+        try await secondTask.value
+
+        XCTAssertTrue(service.isModelLoaded)
+        XCTAssertEqual(service.activeBackendName, "Apple")
+
+        await firstBackend.releaseLoadFailure(ControlledLoadTestError.plannedFailure)
+        _ = try? await firstTask.value
+
+        XCTAssertTrue(service.isModelLoaded, "Newer successful load should remain active after stale failure")
+        XCTAssertEqual(service.activeBackendName, "Apple")
+        XCTAssertEqual(secondBackend.unloadCallCount, 0)
+    }
+
+    func test_loadModel_unloadDuringInFlightLoad_invalidatesRequest_preventsCommit() async throws {
+        let service = InferenceService()
+        let backend = ControlledLoadBackend()
+        service.registerBackendFactory { modelType in
+            guard modelType == .gguf else { return nil }
+            return backend
+        }
+
+        let loadTask = Task {
+            try await service.loadModel(from: makeModelInfo(name: "InFlight", modelType: .gguf))
+        }
+        await backend.waitUntilLoadStarted()
+
+        service.unloadModel()
+        XCTAssertFalse(service.isModelLoaded)
+        XCTAssertNil(service.activeBackendName)
+
+        await backend.releaseLoadSuccess()
+        try await loadTask.value
+
+        XCTAssertFalse(service.isModelLoaded, "Unload should invalidate the in-flight request")
+        XCTAssertNil(service.activeBackendName)
+        XCTAssertEqual(backend.unloadCallCount, 1, "Late completion should unload its stale backend")
+    }
+
     // MARK: - Cloud backend interop
 
     func test_generate_cloudBackend_passesConversationHistory() throws {
@@ -439,6 +589,20 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertEqual(secondMock.loadModelCallCount, 1, "Second backend should be loaded")
         XCTAssertTrue(service.isModelLoaded)
     }
+
+    private func makeModelInfo(name: String, modelType: ModelType) -> ModelInfo {
+        ModelInfo(
+            name: name,
+            fileName: "\(name).bin",
+            url: URL(fileURLWithPath: "/\(name).bin"),
+            fileSize: 0,
+            modelType: modelType
+        )
+    }
+
+    private func makeEndpoint(name: String, provider: APIProvider, modelName: String) -> APIEndpoint {
+        APIEndpoint(name: name, provider: provider, modelName: modelName)
+    }
 }
 
 // MARK: - Local mock types for cloud interop tests
@@ -537,8 +701,8 @@ private final class MockCloudURLModelBackend: InferenceBackend,
 }
 
 private final class MockCloudKeychainBackend: InferenceBackend,
-                                              CloudBackendKeychainConfigurable,
-                                              @unchecked Sendable {
+                                               CloudBackendKeychainConfigurable,
+                                               @unchecked Sendable {
     var isModelLoaded: Bool = false
     var isGenerating: Bool = false
     var capabilities: BackendCapabilities = BackendCapabilities(
@@ -574,6 +738,129 @@ private final class MockCloudKeychainBackend: InferenceBackend,
 
     func stopGeneration() {}
     func unloadModel() {
+        isModelLoaded = false
+    }
+}
+
+private enum ControlledLoadTestError: Error, Sendable {
+    case plannedFailure
+}
+
+private actor ControlledLoadGate {
+    enum Release: Sendable {
+        case success
+        case failure(any Error & Sendable)
+    }
+
+    private var didStart = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseDecision: Release?
+    private var releaseWaiters: [CheckedContinuation<Release, Never>] = []
+
+    func markStarted() {
+        didStart = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func waitUntilStarted() async {
+        if didStart {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func waitForRelease() async -> Release {
+        if let releaseDecision {
+            return releaseDecision
+        }
+        return await withCheckedContinuation { continuation in
+            releaseWaiters.append(continuation)
+        }
+    }
+
+    func releaseSuccess() {
+        release(.success)
+    }
+
+    func releaseFailure(_ error: any Error & Sendable) {
+        release(.failure(error))
+    }
+
+    private func release(_ decision: Release) {
+        guard releaseDecision == nil else { return }
+        releaseDecision = decision
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume(returning: decision)
+        }
+    }
+}
+
+private final class ControlledLoadBackend: InferenceBackend,
+                                           CloudBackendURLModelConfigurable,
+                                           @unchecked Sendable {
+    var isModelLoaded = false
+    var isGenerating = false
+    var capabilities: BackendCapabilities = BackendCapabilities(
+        supportedParameters: [.temperature],
+        maxContextTokens: 4096,
+        requiresPromptTemplate: false,
+        supportsSystemPrompt: true
+    )
+
+    var loadModelCallCount = 0
+    var unloadCallCount = 0
+    var configuredBaseURL: URL?
+    var configuredModelName: String?
+
+    private let gate = ControlledLoadGate()
+
+    func configure(baseURL: URL, modelName: String) {
+        configuredBaseURL = baseURL
+        configuredModelName = modelName
+    }
+
+    func waitUntilLoadStarted() async {
+        await gate.waitUntilStarted()
+    }
+
+    func releaseLoadSuccess() async {
+        await gate.releaseSuccess()
+    }
+
+    func releaseLoadFailure(_ error: any Error & Sendable) async {
+        await gate.releaseFailure(error)
+    }
+
+    func loadModel(from url: URL, contextSize: Int32) async throws {
+        loadModelCallCount += 1
+        await gate.markStarted()
+
+        switch await gate.waitForRelease() {
+        case .success:
+            isModelLoaded = true
+        case .failure(let error):
+            throw error
+        }
+    }
+
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+
+    func stopGeneration() {}
+
+    func unloadModel() {
+        unloadCallCount += 1
         isModelLoaded = false
     }
 }
