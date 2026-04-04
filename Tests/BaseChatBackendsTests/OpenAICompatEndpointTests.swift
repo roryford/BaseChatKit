@@ -22,9 +22,12 @@ private func sseData(_ json: String) -> Data {
 private let sseDone = Data("data: [DONE]\n\n".utf8)
 
 /// Creates an OpenAIBackend configured for a unique test URL.
-/// Resets `MockURLProtocol` to ensure clean state.
+///
+/// Each call uses a UUID-based hostname, so stubs from different tests
+/// never collide. We do NOT call `MockURLProtocol.reset()` here because
+/// that clears ALL global stubs and would corrupt concurrent test suites
+/// (e.g. CloudBackendSSETests) that also use MockURLProtocol.
 private func makeOllamaBackend() -> (OpenAIBackend, URL) {
-    MockURLProtocol.reset()
     let session = makeMockSession()
     let backend = OpenAIBackend(urlSession: session)
     let baseURL = URL(string: "http://ollama-\(UUID().uuidString).test")!
@@ -33,7 +36,6 @@ private func makeOllamaBackend() -> (OpenAIBackend, URL) {
 }
 
 private func makeKoboldCppBackend() -> (OpenAIBackend, URL) {
-    MockURLProtocol.reset()
     let session = makeMockSession()
     let backend = OpenAIBackend(urlSession: session)
     let baseURL = URL(string: "http://koboldcpp-\(UUID().uuidString).test")!
@@ -42,7 +44,6 @@ private func makeKoboldCppBackend() -> (OpenAIBackend, URL) {
 }
 
 private func makeCompatBackend(modelName: String) -> (OpenAIBackend, URL) {
-    MockURLProtocol.reset()
     let session = makeMockSession()
     let backend = OpenAIBackend(urlSession: session)
     let baseURL = URL(string: "http://compat-\(UUID().uuidString).test")!
