@@ -69,6 +69,18 @@ public final class MockURLProtocol: URLProtocol {
         stubSequences[url.absoluteString] = responses
     }
 
+    /// Removes the stub (and any sequence) registered for a single URL.
+    ///
+    /// Prefer this over ``reset()`` in test teardown — it cleans up only the
+    /// current test's stub without clearing stubs registered by other suites
+    /// that may be running concurrently.
+    public static func unstub(url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        stubs.removeValue(forKey: url.absoluteString)
+        stubSequences.removeValue(forKey: url.absoluteString)
+    }
+
     /// Removes all registered stubs and captured requests.
     public static func reset() {
         lock.lock()
