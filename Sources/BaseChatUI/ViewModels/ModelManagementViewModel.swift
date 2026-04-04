@@ -146,17 +146,18 @@ public final class ModelManagementViewModel {
 
     // MARK: - Recommendations
 
-    /// Loads curated model recommendations for this device's capability tier.
-    public func loadRecommendations() {
-        guard let service = huggingFaceService else {
-            // No service wired yet — fall back to showing curated models directly.
-            recommendedModels = CuratedModel.all
-                .filter { $0.recommendedFor.contains(recommendation) }
-                .map { DownloadableModel(from: $0) }
-            return
+    /// Loads curated model recommendations for this device's capability tier,
+    /// or a caller-supplied curated preset when specific model IDs are preferred.
+    public func loadRecommendations(preferredModelIDs: Set<String>? = nil) {
+        let curatedModels: [CuratedModel]
+
+        if let preferredModelIDs, !preferredModelIDs.isEmpty {
+            curatedModels = CuratedModel.all.filter { preferredModelIDs.contains($0.id) }
+        } else {
+            curatedModels = CuratedModel.all.filter { $0.recommendedFor.contains(recommendation) }
         }
 
-        recommendedModels = service.curatedModels(for: recommendation)
+        recommendedModels = curatedModels.map { DownloadableModel(from: $0) }
     }
 
     // MARK: - Search
