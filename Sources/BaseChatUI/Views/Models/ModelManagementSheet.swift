@@ -14,6 +14,10 @@ public struct ModelManagementSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
+    private let initialTab: Tab
+    private let recommendedModelIDs: Set<String>?
+    private let recommendationTitle: String?
+    private let recommendationMessage: String?
 
     public enum Tab: String, CaseIterable {
         case select = "Select"
@@ -37,9 +41,20 @@ public struct ModelManagementSheet: View {
         return tabs
     }
 
-    @State private var selectedTab: Tab = .select
+    @State private var selectedTab: Tab
 
-    public init() {}
+    public init(
+        initialTab: Tab = .select,
+        recommendedModelIDs: Set<String>? = nil,
+        recommendationTitle: String? = nil,
+        recommendationMessage: String? = nil
+    ) {
+        self.initialTab = initialTab
+        self.recommendedModelIDs = recommendedModelIDs
+        self.recommendationTitle = recommendationTitle
+        self.recommendationMessage = recommendationMessage
+        _selectedTab = State(initialValue: initialTab)
+    }
 
     public var body: some View {
         NavigationStack {
@@ -72,6 +87,11 @@ public struct ModelManagementSheet: View {
         }
         .presentationDetents([.large])
         .onAppear {
+            if !availableTabs.contains(selectedTab) {
+                selectedTab = .select
+            } else if selectedTab != initialTab {
+                selectedTab = initialTab
+            }
             chatViewModel.refreshModels()
             managementViewModel.invalidateModelCache()
         }
@@ -115,7 +135,11 @@ public struct ModelManagementSheet: View {
         case .select:
             ModelSelectTab(onSelect: { dismiss() })
         case .download:
-            ModelDownloadTab()
+            ModelDownloadTab(
+                recommendedModelIDs: recommendedModelIDs,
+                recommendationTitle: recommendationTitle,
+                recommendationMessage: recommendationMessage
+            )
         case .storage:
             ModelStorageTab()
         }
@@ -249,6 +273,10 @@ private struct ModelDownloadTab: View {
     @Environment(ModelManagementViewModel.self) private var viewModel
     @Environment(ChatViewModel.self) private var chatViewModel
 
+    let recommendedModelIDs: Set<String>?
+    let recommendationTitle: String?
+    let recommendationMessage: String?
+
     @State private var showImporter = false
     @State private var importSuccessMessage: String?
     @State private var importErrorMessage: String?
@@ -307,6 +335,20 @@ private struct ModelDownloadTab: View {
                     Label(message, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .accessibilityLabel(message)
+                }
+            }
+
+            if let recommendationTitle, let recommendationMessage {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(recommendationTitle)
+                            .font(.headline)
+
+                        Text(recommendationMessage)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
                 }
             }
 
@@ -391,7 +433,7 @@ private struct ModelDownloadTab: View {
             handleImport(result)
         }
         .onAppear {
-            viewModel.loadRecommendations()
+            viewModel.loadRecommendations(preferredModelIDs: recommendedModelIDs)
         }
     }
 
