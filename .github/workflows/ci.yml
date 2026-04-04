@@ -49,7 +49,11 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-spm-
 
       - name: Run CI smoke tests
-        run: swift test --filter "BaseChatCoreTests|BaseChatUITests|BaseChatBackendsTests"
+        run: |
+          set -euo pipefail
+          swift test --filter BaseChatCoreTests
+          swift test --filter BaseChatUITests
+          swift test --filter BaseChatBackendsTests
 
       # CI smoke profile (GitHub macOS Apple Silicon runners):
       # - Runs BaseChatCoreTests + BaseChatUITests + BaseChatBackendsTests.
