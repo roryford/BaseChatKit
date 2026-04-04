@@ -212,8 +212,9 @@ struct ServerDiscoveryGenerateE2ETests {
 
     @Test("Multiple servers: select second, stream from it")
     func multipleServersSelectSecond() async throws {
-        MockURLProtocol.reset()
-        defer { discoveryVM.stopDiscovery(); MockURLProtocol.reset() }
+        // UUID hostname isolates this stub from concurrently-running suites — no reset() needed.
+        let lmStudioHost = UUID().uuidString + ".invalid"
+        defer { discoveryVM.stopDiscovery() }
 
         let ollama = DiscoveredServer(
             displayName: "Ollama",
@@ -224,7 +225,7 @@ struct ServerDiscoveryGenerateE2ETests {
         )
         let lmStudio = DiscoveredServer(
             displayName: "LM Studio",
-            host: "localhost",
+            host: lmStudioHost,
             port: 1234,
             serverType: .lmStudio,
             models: [RemoteModelInfo(name: "phi-3")]

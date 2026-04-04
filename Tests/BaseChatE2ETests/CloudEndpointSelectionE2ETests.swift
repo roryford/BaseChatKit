@@ -207,14 +207,14 @@ final class CloudEndpointSelectionE2ETests {
 
     @Test("sendMessage() streams cloud response via MockURLProtocol")
     func sendMessage_streamsCloudResponseViaMockURLProtocol() async throws {
-        MockURLProtocol.reset()
-        defer { MockURLProtocol.reset() }
+        // UUID hostname isolates this stub from concurrently-running suites — no reset() needed.
+        let uniqueHost = UUID().uuidString + ".invalid"
 
         try makeSession(title: "Cloud Chat")
         let endpoint = APIEndpoint(
             name: "Local LM Studio",
             provider: .lmStudio,
-            baseURL: "http://localhost:1234",
+            baseURL: "http://\(uniqueHost)",
             modelName: "local-model"
         )
         try persistEndpoint(endpoint)
