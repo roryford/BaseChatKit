@@ -154,7 +154,7 @@ final class InferenceServiceTests: XCTestCase {
 
     func test_loadCloudBackend_setsIsModelLoaded() async throws {
         let service = InferenceService()
-        let mock = MockInferenceBackend()
+        let mock = MockCloudURLModelBackend()
 
         service.registerCloudBackendFactory { _ in mock }
 
@@ -164,13 +164,16 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertTrue(service.isModelLoaded)
         XCTAssertEqual(service.activeBackendName, APIProvider.ollama.rawValue)
         XCTAssertEqual(mock.loadModelCallCount, 1)
+        XCTAssertEqual(mock.configuredBaseURL?.absoluteString, endpoint.baseURL)
+        XCTAssertEqual(mock.configuredModelName, endpoint.modelName)
+        XCTAssertTrue(mock.didConfigureBeforeLoad)
     }
 
     func test_loadCloudBackend_unloadsExistingModel() async throws {
         let firstMock = MockInferenceBackend()
         let service = InferenceService(backend: firstMock, name: "First")
 
-        let cloudMock = MockInferenceBackend()
+        let cloudMock = MockCloudURLModelBackend()
         service.registerCloudBackendFactory { _ in cloudMock }
 
         let endpoint = APIEndpoint(name: "Ollama", provider: .ollama)
@@ -181,6 +184,42 @@ final class InferenceServiceTests: XCTestCase {
         // New backend is active.
         XCTAssertTrue(service.isModelLoaded)
         XCTAssertEqual(service.activeBackendName, APIProvider.ollama.rawValue)
+    }
+
+    func test_loadCloudBackend_configuresKeychainBackend_beforeLoad() async throws {
+        let service = InferenceService()
+        let mock = MockCloudKeychainBackend()
+        service.registerCloudBackendFactory { _ in mock }
+
+        let endpoint = APIEndpoint(
+            name: "Claude",
+            provider: .claude,
+            baseURL: "https://api.anthropic.com",
+            modelName: "claude-sonnet-4-6"
+        )
+        try await service.loadCloudBackend(from: endpoint)
+
+        XCTAssertEqual(mock.configuredBaseURL?.absoluteString, endpoint.baseURL)
+        XCTAssertEqual(mock.configuredModelName, endpoint.modelName)
+        XCTAssertEqual(mock.configuredKeychainAccount, endpoint.keychainAccount)
+        XCTAssertTrue(mock.didConfigureBeforeLoad)
+    }
+
+    func test_loadCloudBackend_nonConfigurableBackend_throwsError() async {
+        let service = InferenceService()
+        let mock = MockInferenceBackend()
+        service.registerCloudBackendFactory { _ in mock }
+
+        let endpoint = APIEndpoint(name: "Ollama", provider: .ollama)
+
+        do {
+            try await service.loadCloudBackend(from: endpoint)
+            XCTFail("Expected InferenceError.inferenceFailure when backend does not conform to config protocol")
+        } catch InferenceError.inferenceFailure {
+            // expected
+        } catch {
+            XCTFail("Expected InferenceError.inferenceFailure, got \(error)")
+        }
     }
 
     // MARK: - Cloud backend interop
@@ -323,7 +362,7 @@ final class InferenceServiceTests: XCTestCase {
         }
 
         var secondCallCount = 0
-        let secondMock = MockInferenceBackend()
+        let secondMock = MockCloudURLModelBackend()
         service.registerCloudBackendFactory { provider in
             guard provider == .ollama else { return nil }
             secondCallCount += 1
@@ -435,8 +474,8 @@ private final class MockConversationHistoryBackend: InferenceBackend,
 
 /// A mock backend that also adopts TokenUsageProvider.
 private final class MockTokenUsageBackend: InferenceBackend,
-                                           TokenUsageProvider,
-                                           @unchecked Sendable {
+                                            TokenUsageProvider,
+                                            @unchecked Sendable {
     var isModelLoaded: Bool = true
     var isGenerating: Bool = false
     var capabilities: BackendCapabilities = BackendCapabilities(
@@ -457,4 +496,84 @@ private final class MockTokenUsageBackend: InferenceBackend,
 
     func stopGeneration() {}
     func unloadModel() {}
+}
+
+private final class MockCloudURLModelBackend: InferenceBackend,
+                                              CloudBackendURLModelConfigurable,
+                                              @unchecked Sendable {
+    var isModelLoaded: Bool = false
+    var isGenerating: Bool = false
+    var capabilities: BackendCapabilities = BackendCapabilities(
+        supportedParameters: [.temperature],
+        maxContextTokens: 4096,
+        requiresPromptTemplate: false,
+        supportsSystemPrompt: true
+    )
+
+    var loadModelCallCount = 0
+    var configuredBaseURL: URL?
+    var configuredModelName: String?
+    var didConfigureBeforeLoad = false
+
+    func configure(baseURL: URL, modelName: String) {
+        configuredBaseURL = baseURL
+        configuredModelName = modelName
+    }
+
+    func loadModel(from url: URL, contextSize: Int32) async throws {
+        loadModelCallCount += 1
+        isModelLoaded = true
+        didConfigureBeforeLoad = (configuredBaseURL != nil && configuredModelName != nil)
+    }
+
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in continuation.finish() }
+    }
+
+    func stopGeneration() {}
+    func unloadModel() {
+        isModelLoaded = false
+    }
+}
+
+private final class MockCloudKeychainBackend: InferenceBackend,
+                                              CloudBackendKeychainConfigurable,
+                                              @unchecked Sendable {
+    var isModelLoaded: Bool = false
+    var isGenerating: Bool = false
+    var capabilities: BackendCapabilities = BackendCapabilities(
+        supportedParameters: [.temperature],
+        maxContextTokens: 4096,
+        requiresPromptTemplate: false,
+        supportsSystemPrompt: true
+    )
+
+    var configuredBaseURL: URL?
+    var configuredKeychainAccount: String?
+    var configuredModelName: String?
+    var didConfigureBeforeLoad = false
+
+    func configure(baseURL: URL, keychainAccount: String, modelName: String) {
+        configuredBaseURL = baseURL
+        configuredKeychainAccount = keychainAccount
+        configuredModelName = modelName
+    }
+
+    func loadModel(from url: URL, contextSize: Int32) async throws {
+        isModelLoaded = true
+        didConfigureBeforeLoad = (
+            configuredBaseURL != nil
+                && configuredKeychainAccount != nil
+                && configuredModelName != nil
+        )
+    }
+
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in continuation.finish() }
+    }
+
+    func stopGeneration() {}
+    func unloadModel() {
+        isModelLoaded = false
+    }
 }

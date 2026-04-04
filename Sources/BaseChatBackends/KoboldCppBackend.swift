@@ -22,7 +22,7 @@ import BaseChatCore
 /// let stream = try backend.generate(prompt: "### Instruction:\nHello\n### Response:\n", systemPrompt: nil, config: .init())
 /// for try await token in stream { print(token, terminator: "") }
 /// ```
-public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiver, @unchecked Sendable {
+public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiver, CloudBackendURLModelConfigurable, @unchecked Sendable {
 
     // MARK: - Logging
 

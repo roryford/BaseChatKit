@@ -19,7 +19,7 @@ import BaseChatCore
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
 /// for try await token in stream { print(token, terminator: "") }
 /// ```
-public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver, TokenUsageProvider, @unchecked Sendable {
+public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver, TokenUsageProvider, CloudBackendURLModelConfigurable, CloudBackendKeychainConfigurable, @unchecked Sendable {
 
     // MARK: - Logging
 
@@ -119,6 +119,11 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
         self.keychainAccount = keychainAccount
         self.ephemeralAPIKey = nil
         self.modelName = modelName
+    }
+
+    /// Configures the backend for OpenAI-compatible servers that do not require API keys.
+    public func configure(baseURL: URL, modelName: String) {
+        configure(baseURL: baseURL, apiKey: nil, modelName: modelName)
     }
 
     /// Retrieves the API key from Keychain or ephemeral storage.

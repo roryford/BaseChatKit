@@ -172,20 +172,6 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
     // MARK: - switchToSession model-selection restoration
 
-    /// Creates a fake .gguf file in a temp directory for the duration of a test.
-    /// Returns the ModelInfo built from the file and the URL for cleanup.
-    private func makeTempGGUF(named fileName: String = "test-model-restore.gguf") throws -> (ModelInfo, URL) {
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("BaseChatKitTests", isDirectory: true)
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        let url = tmp.appendingPathComponent(fileName)
-        let data = Data(repeating: 0, count: 1024)
-        try data.write(to: url)
-        guard let model = ModelInfo(ggufURL: url) else {
-            throw XCTSkip("Could not create ModelInfo from temp GGUF — skipping")
-        }
-        return (model, url)
-    }
-
     func test_switchToSession_restoresSelectedModel_whenModelInList() throws {
         let (vm, _, _) = try makeViewModelWithPersistence()
 
@@ -228,8 +214,8 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
         vm.switchToSession(session)
 
-        XCTAssertEqual(vm.selectedModel?.id, foundationModel.id,
-            "selectedModel should be unchanged when session's model is not in availableModels")
+        XCTAssertNil(vm.selectedModel,
+            "selectedModel should be cleared when session's model is not in availableModels")
     }
 
     func test_saveSettingsToSession_persistsSelectedModelID() throws {
@@ -248,6 +234,74 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
         XCTAssertEqual(vm.activeSession?.selectedModelID, expectedID,
             "saveSettingsToSession should persist the selected model's UUID to the session")
+    }
+
+    func test_selectionMutualExclusion_selectingEndpoint_clearsModel() {
+        let vm = makeViewModel()
+        vm.selectedModel = ModelInfo.builtInFoundation
+
+        let endpoint = APIEndpoint(name: "OpenAI", provider: .openAI)
+        vm.selectedEndpoint = endpoint
+
+        XCTAssertNil(vm.selectedModel, "Selecting an endpoint should clear selectedModel")
+        XCTAssertEqual(vm.selectedEndpoint?.id, endpoint.id)
+    }
+
+    func test_selectionMutualExclusion_selectingModel_clearsEndpoint() {
+        let vm = makeViewModel()
+        let endpoint = APIEndpoint(name: "OpenAI", provider: .openAI)
+        vm.selectedEndpoint = endpoint
+
+        vm.selectedModel = ModelInfo.builtInFoundation
+
+        XCTAssertNil(vm.selectedEndpoint, "Selecting a model should clear selectedEndpoint")
+        XCTAssertEqual(vm.selectedModel?.id, ModelInfo.builtInFoundation.id)
+    }
+
+    func test_switchToSession_restoresSelectedEndpoint_whenEndpointExists() throws {
+        let (vm, _, _) = try makeViewModelWithPersistence()
+        let endpoint = APIEndpoint(name: "OpenAI", provider: .openAI)
+        vm.setAvailableEndpoints([endpoint])
+        vm.selectedModel = ModelInfo.builtInFoundation
+
+        var session = ChatSessionRecord(title: "Endpoint Session")
+        session.selectedEndpointID = endpoint.id
+        session.selectedModelID = ModelInfo.builtInFoundation.id
+
+        vm.switchToSession(session)
+
+        XCTAssertEqual(vm.selectedEndpoint?.id, endpoint.id)
+        XCTAssertNil(vm.selectedModel, "Endpoint restore should not leak prior model selection")
+    }
+
+    func test_switchToSession_clearsSelectedEndpoint_whenEndpointMissing() throws {
+        let (vm, _, _) = try makeViewModelWithPersistence()
+        let oldEndpoint = APIEndpoint(name: "Old", provider: .openAI)
+        vm.setAvailableEndpoints([oldEndpoint])
+        vm.selectedEndpoint = oldEndpoint
+
+        var session = ChatSessionRecord(title: "Missing Endpoint Session")
+        session.selectedEndpointID = UUID()
+
+        vm.switchToSession(session)
+
+        XCTAssertNil(vm.selectedEndpoint, "Missing endpoint should clear selectedEndpoint")
+    }
+
+    func test_saveSettingsToSession_persistsSelectedEndpointID() throws {
+        let (vm, _, persistence) = try makeViewModelWithPersistence()
+        let endpoint = APIEndpoint(name: "Claude", provider: .claude)
+        vm.setAvailableEndpoints([endpoint])
+
+        let session = ChatSessionRecord(title: "Persist Endpoint Session")
+        try persistence.insertSession(session)
+        vm.activeSession = session
+        vm.selectedEndpoint = endpoint
+
+        try vm.saveSettingsToSession()
+
+        XCTAssertEqual(vm.activeSession?.selectedEndpointID, endpoint.id)
+        XCTAssertNil(vm.activeSession?.selectedModelID, "Endpoint selection should clear model selection")
     }
 
     func test_switchToSession_usesDefaultsForNilSettings() throws {

@@ -57,12 +57,31 @@ public final class ChatViewModel {
     /// All models discovered on disk plus the built-in Foundation model.
     public private(set) var availableModels: [ModelInfo] = []
 
+    /// Enabled cloud endpoints available for selection.
+    public private(set) var availableEndpoints: [APIEndpoint] = []
+
     /// The model the user has selected in the sidebar.
-    public var selectedModel: ModelInfo?
+    public var selectedModel: ModelInfo? {
+        didSet {
+            guard !isSynchronizingSelection else { return }
+            guard selectedModel != nil, selectedEndpoint != nil else { return }
+            isSynchronizingSelection = true
+            selectedEndpoint = nil
+            isSynchronizingSelection = false
+        }
+    }
 
     /// The cloud API endpoint the user has selected, or `nil` for local models.
     /// Setting this clears `selectedModel` and vice versa.
-    public var selectedEndpoint: APIEndpoint?
+    public var selectedEndpoint: APIEndpoint? {
+        didSet {
+            guard !isSynchronizingSelection else { return }
+            guard selectedEndpoint != nil, selectedModel != nil else { return }
+            isSynchronizingSelection = true
+            selectedModel = nil
+            isSynchronizingSelection = false
+        }
+    }
 
     /// Ordered messages for the active session.
     public internal(set) var messages: [ChatMessageRecord] = []
@@ -234,6 +253,7 @@ public final class ChatViewModel {
 
     var generationTask: Task<Void, Never>?
     private var lastPressureLevel: MemoryPressureLevel = .nominal
+    private var isSynchronizingSelection = false
 
     /// Cached per-message token counts keyed by message ID, to avoid recalculating all messages.
     var tokenCountCache: [UUID: Int] = [:]
@@ -316,10 +336,20 @@ public final class ChatViewModel {
             selectedPromptTemplate = template
         }
 
-        // Try to select the session's model
-        if let modelID = session.selectedModelID,
-           let model = availableModels.first(where: { $0.id == modelID }) {
-            selectedModel = model
+        let resolvedEndpoint = session.selectedEndpointID.flatMap { endpointID in
+            availableEndpoints.first(where: { $0.id == endpointID })
+        }
+        let resolvedModel = session.selectedModelID.flatMap { modelID in
+            availableModels.first(where: { $0.id == modelID })
+        }
+
+        if let resolvedEndpoint {
+            selectedEndpoint = resolvedEndpoint
+        } else if let resolvedModel {
+            selectedModel = resolvedModel
+        } else {
+            selectedModel = nil
+            selectedEndpoint = nil
         }
 
         // pinnedMessageIDs must be set before compressionMode: the compressionMode
@@ -346,6 +376,7 @@ public final class ChatViewModel {
         session.repeatPenalty = repeatPenalty
         session.systemPrompt = systemPrompt
         session.selectedModelID = selectedModel?.id
+        session.selectedEndpointID = selectedEndpoint?.id
         session.compressionMode = compressionMode
         session.pinnedMessageIDs = pinnedMessageIDs
         session.updatedAt = Date()
@@ -378,6 +409,17 @@ public final class ChatViewModel {
 
         if let selected = selectedModel, !availableModels.contains(where: { $0.id == selected.id }) {
             selectedModel = nil
+        }
+    }
+
+    /// Replaces the in-memory list of selectable cloud endpoints.
+    ///
+    /// Clears `selectedEndpoint` when that endpoint is no longer available.
+    public func setAvailableEndpoints(_ endpoints: [APIEndpoint]) {
+        availableEndpoints = endpoints
+        if let selected = selectedEndpoint,
+           !availableEndpoints.contains(where: { $0.id == selected.id }) {
+            selectedEndpoint = nil
         }
     }
 

@@ -27,6 +27,7 @@ final class ChatSessionTests: XCTestCase {
         XCTAssertNil(session.promptTemplateRawValue)
         XCTAssertNil(session.contextSizeOverride)
         XCTAssertNil(session.selectedModelID)
+        XCTAssertNil(session.selectedEndpointID)
     }
 
     func test_promptTemplate_roundTrip() {
