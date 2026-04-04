@@ -18,6 +18,9 @@ public final class ChatSession {
     /// The UUID of the selected ModelInfo for this session.
     public var selectedModelID: UUID?
 
+    /// The UUID of the selected APIEndpoint for this session.
+    public var selectedEndpointID: UUID?
+
     // Per-session generation overrides (nil = use global default)
     public var temperature: Float?
     public var topP: Float?

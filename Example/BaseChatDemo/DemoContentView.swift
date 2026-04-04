@@ -33,6 +33,7 @@ struct DemoContentView: View {
         .onAppear {
             viewModel.configure(modelContext: modelContext)
             sessionManager.configure(modelContext: modelContext)
+            viewModel.setAvailableEndpoints(cloudEndpoints)
 
             if !skipAutoModelLoad {
                 viewModel.refreshModels()
@@ -71,17 +72,16 @@ struct DemoContentView: View {
         }
         .onChange(of: viewModel.selectedModel) {
             if viewModel.selectedModel != nil {
-                viewModel.selectedEndpoint = nil
+                Task { await viewModel.loadSelectedModel() }
             }
-            Task { await viewModel.loadSelectedModel() }
         }
         .onChange(of: viewModel.selectedEndpoint) {
-            if viewModel.selectedEndpoint != nil {
-                viewModel.selectedModel = nil
-            }
             if let endpoint = viewModel.selectedEndpoint {
                 Task { await viewModel.loadCloudEndpoint(endpoint) }
             }
+        }
+        .onChange(of: cloudEndpoints) {
+            viewModel.setAvailableEndpoints(cloudEndpoints)
         }
         .onChange(of: sessionManager.activeSession) { _, newSession in
             if let session = newSession {

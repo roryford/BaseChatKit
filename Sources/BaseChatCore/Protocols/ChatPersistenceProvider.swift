@@ -28,6 +28,7 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
     public var updatedAt: Date
     public var systemPrompt: String
     public var selectedModelID: UUID?
+    public var selectedEndpointID: UUID?
     public var temperature: Float?
     public var topP: Float?
     public var repeatPenalty: Float?
@@ -43,6 +44,7 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
         updatedAt: Date = Date(),
         systemPrompt: String = "",
         selectedModelID: UUID? = nil,
+        selectedEndpointID: UUID? = nil,
         temperature: Float? = nil,
         topP: Float? = nil,
         repeatPenalty: Float? = nil,
@@ -57,6 +59,7 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
         self.updatedAt = updatedAt
         self.systemPrompt = systemPrompt
         self.selectedModelID = selectedModelID
+        self.selectedEndpointID = selectedEndpointID
         self.temperature = temperature
         self.topP = topP
         self.repeatPenalty = repeatPenalty

@@ -24,6 +24,7 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
         session.updatedAt = record.updatedAt
         session.systemPrompt = record.systemPrompt
         session.selectedModelID = record.selectedModelID
+        session.selectedEndpointID = record.selectedEndpointID
         session.temperature = record.temperature
         session.topP = record.topP
         session.repeatPenalty = record.repeatPenalty
@@ -43,6 +44,7 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
         session.updatedAt = record.updatedAt
         session.systemPrompt = record.systemPrompt
         session.selectedModelID = record.selectedModelID
+        session.selectedEndpointID = record.selectedEndpointID
         session.temperature = record.temperature
         session.topP = record.topP
         session.repeatPenalty = record.repeatPenalty
@@ -168,6 +170,7 @@ extension ChatSession {
             updatedAt: updatedAt,
             systemPrompt: systemPrompt,
             selectedModelID: selectedModelID,
+            selectedEndpointID: selectedEndpointID,
             temperature: temperature,
             topP: topP,
             repeatPenalty: repeatPenalty,

@@ -7,7 +7,7 @@ import BaseChatCore
 /// Streams completions from the Anthropic Messages API (`/v1/messages`).
 /// Handles Claude-specific SSE event types (`content_block_delta`, etc.)
 /// and authentication via `x-api-key` header.
-public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver, TokenUsageProvider, @unchecked Sendable {
+public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver, TokenUsageProvider, CloudBackendKeychainConfigurable, @unchecked Sendable {
 
     // MARK: - Logging
 

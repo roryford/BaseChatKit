@@ -263,9 +263,7 @@ struct OpenAICompatEndpointTests {
         for try await _ in stream { }
 
         // Verify no Authorization header was sent (apiKey was nil)
-        let captured = MockURLProtocol.capturedRequests.last(where: {
-            $0.url?.absoluteString.contains("v1/chat/completions") == true
-        })
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         #expect(captured != nil)
         let authHeader = captured?.value(forHTTPHeaderField: "Authorization")
         #expect(authHeader == nil, "Ollama doesn't need auth -- no Authorization header should be sent")
@@ -456,9 +454,7 @@ struct OpenAICompatEndpointTests {
         )
         for try await _ in stream { }
 
-        let captured = MockURLProtocol.capturedRequests.last(where: {
-            $0.url?.absoluteString.contains("v1/chat/completions") == true
-        })
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         #expect(captured != nil)
         #expect(captured?.value(forHTTPHeaderField: "Authorization") == nil,
                 "KoboldCpp doesn't require auth -- no header should be present")
@@ -490,9 +486,7 @@ struct OpenAICompatEndpointTests {
         )
         for try await _ in stream { }
 
-        let captured = MockURLProtocol.capturedRequests.last(where: {
-            $0.url?.absoluteString.contains("v1/chat/completions") == true
-        })
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         let body = try extractBody(from: captured)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
 
@@ -537,9 +531,7 @@ struct OpenAICompatEndpointTests {
         )
         for try await _ in stream { }
 
-        let captured = MockURLProtocol.capturedRequests.last(where: {
-            $0.url?.absoluteString.contains("v1/chat/completions") == true
-        })
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         let body = try extractBody(from: captured)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
 
@@ -579,9 +571,7 @@ struct OpenAICompatEndpointTests {
         )
         for try await _ in stream { }
 
-        let captured = MockURLProtocol.capturedRequests.last(where: {
-            $0.url?.absoluteString.contains("v1/chat/completions") == true
-        })
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         let body = try extractBody(from: captured)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         let messages = try #require(json["messages"] as? [[String: Any]])

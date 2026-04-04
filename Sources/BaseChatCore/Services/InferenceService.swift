@@ -136,6 +136,30 @@ public final class InferenceService {
             )
         }
 
+        switch endpoint.provider {
+        case .claude, .openAI, .custom:
+            guard let keychainConfigurable = newBackend as? CloudBackendKeychainConfigurable else {
+                throw InferenceError.inferenceFailure(
+                    "Cloud backend \(type(of: newBackend)) must conform to CloudBackendKeychainConfigurable "
+                    + "for provider \(endpoint.provider.rawValue)."
+                )
+            }
+            keychainConfigurable.configure(
+                baseURL: url,
+                keychainAccount: endpoint.keychainAccount,
+                modelName: endpoint.modelName
+            )
+
+        case .ollama, .lmStudio, .koboldCpp:
+            guard let urlModelConfigurable = newBackend as? CloudBackendURLModelConfigurable else {
+                throw InferenceError.inferenceFailure(
+                    "Cloud backend \(type(of: newBackend)) must conform to CloudBackendURLModelConfigurable "
+                    + "for provider \(endpoint.provider.rawValue)."
+                )
+            }
+            urlModelConfigurable.configure(baseURL: url, modelName: endpoint.modelName)
+        }
+
         try await newBackend.loadModel(from: url, contextSize: 0)
         backend = newBackend
         isModelLoaded = true
@@ -311,4 +335,14 @@ public protocol ConversationHistoryReceiver: AnyObject {
 /// Adopted by cloud backends that track token usage per response.
 public protocol TokenUsageProvider: AnyObject {
     var lastUsage: (promptTokens: Int, completionTokens: Int)? { get }
+}
+
+/// Adopted by cloud backends configured with endpoint URL + model name.
+public protocol CloudBackendURLModelConfigurable: AnyObject {
+    func configure(baseURL: URL, modelName: String)
+}
+
+/// Adopted by cloud backends that resolve API keys via a Keychain account.
+public protocol CloudBackendKeychainConfigurable: AnyObject {
+    func configure(baseURL: URL, keychainAccount: String, modelName: String)
 }
