@@ -86,12 +86,13 @@ struct ServerDiscoveryGenerateE2ETests {
 
     @Test("Happy path: discover → select → create endpoint → stream tokens")
     func discoverSelectConfigureStream() async throws {
-        MockURLProtocol.reset()
-        defer { discoveryVM.stopDiscovery(); MockURLProtocol.reset() }
+        // UUID hostname isolates this stub from concurrently-running suites.
+        let ollamaHost = UUID().uuidString + ".invalid"
+        defer { discoveryVM.stopDiscovery() }
 
         let server = DiscoveredServer(
             displayName: "Test Ollama",
-            host: "localhost",
+            host: ollamaHost,
             port: 11434,
             serverType: .ollama,
             models: [RemoteModelInfo(name: "llama3.2", sizeBytes: 2_000_000_000)]
@@ -121,6 +122,7 @@ struct ServerDiscoveryGenerateE2ETests {
         // Configure backend from persisted endpoint and stub SSE
         let (backend, url) = try makeBackend(endpoint: endpoint)
         MockURLProtocol.stub(url: url, response: .sse(chunks: sseChunks(["Hello", " world"]), statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
         let stream = try backend.generate(prompt: "Hi", systemPrompt: nil, config: GenerationConfig())
@@ -133,19 +135,19 @@ struct ServerDiscoveryGenerateE2ETests {
 
     @Test("Manual probe → configure → stream tokens")
     func manualProbeAndStream() async throws {
-        MockURLProtocol.reset()
-        defer { MockURLProtocol.reset() }
+        // UUID hostname isolates this stub from concurrently-running suites.
+        let probeHost = UUID().uuidString + ".invalid"
 
         let server = DiscoveredServer(
             displayName: "Manual LM Studio",
-            host: "192.168.1.50",
+            host: probeHost,
             port: 1234,
             serverType: .lmStudio,
             models: [RemoteModelInfo(name: "mistral-7b")]
         )
         mockDiscovery.probeResult = server
 
-        discoveryVM.manualHost = "192.168.1.50"
+        discoveryVM.manualHost = probeHost
         discoveryVM.manualPort = "1234"
         await discoveryVM.probeManualEntry()
 
@@ -162,6 +164,7 @@ struct ServerDiscoveryGenerateE2ETests {
 
         let (backend, url) = try makeBackend(endpoint: endpoint)
         MockURLProtocol.stub(url: url, response: .sse(chunks: sseChunks(["Probed", " reply"]), statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
         let stream = try backend.generate(prompt: "Test", systemPrompt: nil, config: GenerationConfig())
@@ -174,12 +177,13 @@ struct ServerDiscoveryGenerateE2ETests {
 
     @Test("Discovered server becomes unreachable → error propagates")
     func serverUnreachableAfterDiscovery() async throws {
-        MockURLProtocol.reset()
-        defer { discoveryVM.stopDiscovery(); MockURLProtocol.reset() }
+        // UUID hostname isolates this stub from concurrently-running suites.
+        let ollamaHost = UUID().uuidString + ".invalid"
+        defer { discoveryVM.stopDiscovery() }
 
         let server = DiscoveredServer(
             displayName: "Flaky Ollama",
-            host: "localhost",
+            host: ollamaHost,
             port: 11434,
             serverType: .ollama,
             models: [RemoteModelInfo(name: "llama3.2")]
@@ -198,6 +202,7 @@ struct ServerDiscoveryGenerateE2ETests {
 
         // Stub a network error
         MockURLProtocol.stub(url: url, response: .error(URLError(.networkConnectionLost)))
+        defer { MockURLProtocol.unstub(url: url) }
 
         try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 
@@ -250,6 +255,7 @@ struct ServerDiscoveryGenerateE2ETests {
 
         let (backend, url) = try makeBackend(endpoint: endpoint)
         MockURLProtocol.stub(url: url, response: .sse(chunks: sseChunks(["From", " LM", " Studio"]), statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
         let stream = try backend.generate(prompt: "Test", systemPrompt: nil, config: GenerationConfig())

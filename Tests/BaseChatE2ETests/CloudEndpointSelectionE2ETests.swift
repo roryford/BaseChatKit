@@ -214,7 +214,7 @@ final class CloudEndpointSelectionE2ETests {
         let endpoint = APIEndpoint(
             name: "Local LM Studio",
             provider: .lmStudio,
-            baseURL: "http://\(uniqueHost)",
+            baseURL: "http://\(uniqueHost):1234",
             modelName: "local-model"
         )
         try persistEndpoint(endpoint)
@@ -225,6 +225,7 @@ final class CloudEndpointSelectionE2ETests {
             url: completionsURL,
             response: .sse(chunks: sseChunks(["Hello", " cloud"]), statusCode: 200)
         )
+        defer { MockURLProtocol.unstub(url: completionsURL) }
 
         vm.selectedEndpoint = endpoint
         await vm.loadCloudEndpoint(endpoint)
