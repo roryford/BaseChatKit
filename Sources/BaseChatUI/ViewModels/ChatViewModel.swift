@@ -465,6 +465,14 @@ public final class ChatViewModel {
 
     // MARK: - Model Loading
 
+    // Two-tier load coordination:
+    // - ChatViewModel (this layer) owns UI task lifecycle via `latestLoadIntentGeneration` —
+    //   superseded async tasks are cancelled before they reach InferenceService.
+    // - InferenceService owns backend state correctness via monotonic LoadRequestToken —
+    //   any stale completion that does reach the service layer is suppressed there.
+    // Together they provide defense-in-depth: this layer avoids redundant load attempts;
+    // InferenceService provides the hard correctness guarantee.
+
     /// Coordinates loading for the currently selected model/endpoint.
     ///
     /// Newest selection always wins; any older in-flight coordinated load intent is
@@ -489,6 +497,9 @@ public final class ChatViewModel {
     /// Does nothing if a load is already in progress. Sets `isLoading` for the duration
     /// and writes to `errorMessage` on failure. Auto-detects the GGUF prompt template
     /// from model metadata before loading.
+    ///
+    /// - Note: Prefer `dispatchSelectedLoad()` for UI-driven loads — it coordinates
+    ///   intent and cancels superseded requests.
     public func loadSelectedModel() async {
         guard !isLoading else { return }
 
@@ -503,6 +514,9 @@ public final class ChatViewModel {
     // MARK: - Cloud Endpoint Loading
 
     /// Loads a cloud API endpoint for the active session.
+    ///
+    /// - Note: Prefer `dispatchSelectedLoad()` for UI-driven loads — it coordinates
+    ///   intent and cancels superseded requests.
     public func loadCloudEndpoint(_ endpoint: APIEndpoint) async {
         await loadCloudEndpointInternal(endpoint, generation: nil)
     }

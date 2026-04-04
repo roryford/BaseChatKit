@@ -118,6 +118,13 @@ public final class InferenceService {
         let startedAtUptime: TimeInterval
     }
 
+    // Two-tier load coordination:
+    // - InferenceService (this layer) owns backend state correctness via monotonic
+    //   LoadRequestToken — stale successes are unloaded and stale failures are ignored.
+    // - ChatViewModel owns UI task lifecycle via `latestLoadIntentGeneration` — it cancels
+    //   superseded async tasks before they reach this layer.
+    // Together they provide defense-in-depth: the VM avoids redundant load attempts;
+    // this layer provides the hard correctness guarantee.
     private var nextLoadRequestToken: LoadRequestToken = .zero
     private var latestRequestedLoadToken: LoadRequestToken?
     private var invalidatedThroughToken: LoadRequestToken = .zero
@@ -179,7 +186,12 @@ public final class InferenceService {
         do {
             try await newBackend.loadModel(from: modelInfo.url, contextSize: contextSize)
         } catch {
-            finishLoadAttemptWithFailure(request, error: error)
+            let isStale = finishLoadAttemptWithFailure(request, error: error)
+            if isStale {
+                // The failure arrived after a newer request superseded this one.
+                // Clean up any partial backend state so resources are not leaked.
+                newBackend.unloadModel()
+            }
             throw error
         }
 
@@ -240,7 +252,11 @@ public final class InferenceService {
         do {
             try await newBackend.loadModel(from: url, contextSize: 0)
         } catch {
-            finishLoadAttemptWithFailure(request, error: error)
+            let isStale = finishLoadAttemptWithFailure(request, error: error)
+            if isStale {
+                // Clean up any partial backend state so resources are not leaked.
+                newBackend.unloadModel()
+            }
             throw error
         }
 
@@ -402,10 +418,12 @@ public final class InferenceService {
         return request
     }
 
-    private func finishLoadAttemptWithFailure(_ request: LoadRequestToken, error: any Error) {
+    /// Returns `true` if the failure was stale (superseded by a newer request).
+    @discardableResult
+    private func finishLoadAttemptWithFailure(_ request: LoadRequestToken, error: any Error) -> Bool {
         guard case .loading(let activeRequest) = loadPhase, activeRequest == request else {
             logLoadEvent("load.suppress", request: request, reason: "stale-failure", clearMetadata: true)
-            return
+            return true
         }
         loadPhase = .idle
         logLoadEvent(
@@ -414,6 +432,7 @@ public final class InferenceService {
             reason: String(reflecting: type(of: error)),
             clearMetadata: true
         )
+        return false
     }
 
     private func invalidateOutstandingLoads() {
@@ -512,6 +531,13 @@ public final class InferenceService {
         self.nextLoadRequestToken = request
         self.latestRequestedLoadToken = request
         self.loadPhase = .loaded(request: request)
+        // Populate metadata so unloadModel() log calls have context for this request.
+        self.loadRequestMetadataByToken[request] = LoadRequestMetadata(
+            source: "debug",
+            target: name,
+            backend: name,
+            startedAtUptime: ProcessInfo.processInfo.systemUptime
+        )
     }
     #endif
 

@@ -182,13 +182,15 @@ final class LoadDispatchCoordinationTests: XCTestCase {
         await waitUntil { vm.isModelLoaded && vm.activeBackendName == "Apple" }
 
         await firstBackend.releaseLoadFailure(ControlledLoadTestError.plannedFailure)
-        await waitUntil { vm.activityPhase == .idle }
+        // Wait for the stale failure's cleanup task to run — the losing backend must
+        // be unloaded even though its failure is suppressed from UI state.
+        await waitUntil { firstBackend.unloadCallCount == 1 }
 
         XCTAssertTrue(vm.isModelLoaded, "Stale failure must not unload the newer successful backend")
         XCTAssertEqual(vm.activeBackendName, "Apple")
         XCTAssertEqual(vm.activityPhase, .idle)
         XCTAssertNil(vm.errorMessage, "Stale failure must not surface an error")
-        XCTAssertEqual(firstBackend.unloadCallCount, 0)
+        XCTAssertEqual(firstBackend.unloadCallCount, 1)
     }
 
     func test_handleMemoryPressureCritical_preemptsPendingLoadAndSuppressesLateCompletion() async {

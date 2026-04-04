@@ -30,6 +30,13 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// tasks that may outlive the initiating method call.
     private let stateLock = NSLock()
 
+    /// Serializes concurrent `initializeModel` C-level calls.
+    ///
+    /// `llama_model_load_from_file` and `llama_free` are not safe to call concurrently.
+    /// This lock ensures at most one detached load task is inside the C API at a time.
+    /// Blocking is acceptable here because the lock is only held inside a detached task.
+    private let loadSerializationLock = NSLock()
+
     private func withStateLock<T>(_ body: () -> T) -> T {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -111,8 +118,10 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             return activeLoadToken
         }
 
-        let loadedResources = try await Task.detached(priority: .userInitiated) {
-            try Self.initializeModel(at: url, requestedContextSize: contextSize)
+        let loadedResources = try await Task.detached(priority: .userInitiated) { [self] in
+            self.loadSerializationLock.lock()
+            defer { self.loadSerializationLock.unlock() }
+            return try Self.initializeModel(at: url, requestedContextSize: contextSize)
         }.value
 
         let didCommit = withStateLock {
