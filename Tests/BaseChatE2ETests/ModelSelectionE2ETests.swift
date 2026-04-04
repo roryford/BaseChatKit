@@ -14,7 +14,7 @@ import BaseChatTestSupport
 /// hardware or real models are needed.
 @Suite("Model Selection E2E")
 @MainActor
-struct ModelSelectionE2ETests {
+final class ModelSelectionE2ETests {
 
     private let container: ModelContainer
     private let context: ModelContext
@@ -47,6 +47,10 @@ struct ModelSelectionE2ETests {
 
         sessionManager = SessionManagerViewModel()
         sessionManager.configure(persistence: persistence)
+    }
+
+    deinit {
+        cleanupE2ETempDir(modelsDir)
     }
 
     // MARK: - Helpers
