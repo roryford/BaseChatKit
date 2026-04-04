@@ -65,7 +65,12 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
             supportedParameters: [.temperature, .topP, .topK, .typicalP, .repeatPenalty],
             maxContextTokens: maxContextLength,
             requiresPromptTemplate: true,
-            supportsSystemPrompt: false
+            supportsSystemPrompt: false,
+            supportsToolCalling: false,
+            supportsStructuredOutput: false,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false,
+            memoryStrategy: .external
         )
     }
 

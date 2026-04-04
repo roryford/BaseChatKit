@@ -9,6 +9,16 @@ public enum GenerationParameter: String, CaseIterable, Sendable {
     case typicalP
 }
 
+/// How the backend loads model weights into memory.
+public enum MemoryStrategy: Sendable, Equatable {
+    /// Model must be fully resident in RAM (e.g., MLX on unified memory).
+    case resident
+    /// Model is memory-mapped; only active pages + KV cache need RAM (e.g., llama.cpp).
+    case mappable
+    /// No local model memory needed (cloud APIs, OS-managed models).
+    case external
+}
+
 /// How the backend responds to a cancellation request.
 public enum CancellationStyle: Sendable, Equatable {
     /// Cancels via Swift task cancellation.
@@ -48,6 +58,9 @@ public struct BackendCapabilities: Sendable {
     /// Whether the backend can count tokens locally before sending a request.
     public let supportsTokenCounting: Bool
 
+    /// How the backend loads model weights into memory.
+    public let memoryStrategy: MemoryStrategy
+
     /// Parameters the UI should present controls for.
     public var visibleParameters: [GenerationParameter] {
         GenerationParameter.allCases.filter { supportedParameters.contains($0) }
@@ -67,6 +80,7 @@ public struct BackendCapabilities: Sendable {
         self.supportsStructuredOutput = false
         self.cancellationStyle = .cooperative
         self.supportsTokenCounting = false
+        self.memoryStrategy = .resident
     }
 
     public init(
@@ -77,7 +91,8 @@ public struct BackendCapabilities: Sendable {
         supportsToolCalling: Bool,
         supportsStructuredOutput: Bool,
         cancellationStyle: CancellationStyle,
-        supportsTokenCounting: Bool
+        supportsTokenCounting: Bool,
+        memoryStrategy: MemoryStrategy = .resident
     ) {
         self.supportedParameters = supportedParameters
         self.maxContextTokens = maxContextTokens
@@ -87,5 +102,6 @@ public struct BackendCapabilities: Sendable {
         self.supportsStructuredOutput = supportsStructuredOutput
         self.cancellationStyle = cancellationStyle
         self.supportsTokenCounting = supportsTokenCounting
+        self.memoryStrategy = memoryStrategy
     }
 }

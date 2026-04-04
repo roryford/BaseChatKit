@@ -41,6 +41,12 @@ public final class InferenceService {
         backend?.capabilities
     }
 
+    // MARK: - Memory Gate
+
+    /// Optional pre-flight memory check. When set, `loadModel()` checks available
+    /// memory before loading and either throws (iOS) or warns (macOS) if insufficient.
+    public var memoryGate: MemoryGate?
+
     // MARK: - Backend Registry
 
     private var backendFactories: [BackendFactory] = []
@@ -79,6 +85,34 @@ public final class InferenceService {
                 + "Register a BackendFactory before loading models."
             )
         }
+
+        // Pre-flight memory check
+        if let gate = memoryGate {
+            let verdict = gate.check(
+                modelFileSize: modelInfo.fileSize,
+                strategy: newBackend.capabilities.memoryStrategy
+            )
+            switch verdict {
+            case .allow:
+                break
+            case .warn(let estimated, let available):
+                let estMB = estimated / 1_048_576
+                let availMB = available / 1_048_576
+                Log.inference.warning("Memory warning: model needs ~\(estMB) MB, \(availMB) MB available")
+            case .deny(let estimated, let available):
+                switch gate.denyBehavior {
+                case .throwError:
+                    throw InferenceError.memoryInsufficient(
+                        required: estimated, available: available
+                    )
+                case .warnOnly:
+                    let estMB = estimated / 1_048_576
+                    let availMB = available / 1_048_576
+                    Log.inference.warning("Memory insufficient: model needs ~\(estMB) MB, \(availMB) MB available. Proceeding (may swap).")
+                }
+            }
+        }
+
         try await newBackend.loadModel(from: modelInfo.url, contextSize: contextSize)
 
         backend = newBackend

@@ -46,7 +46,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         supportsToolCalling: false,
         supportsStructuredOutput: false,
         cancellationStyle: .explicit,
-        supportsTokenCounting: true
+        supportsTokenCounting: true,
+        memoryStrategy: .mappable
     )
 
     // MARK: - Private
