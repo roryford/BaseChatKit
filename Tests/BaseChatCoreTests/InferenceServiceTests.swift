@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import BaseChatCore
 import BaseChatTestSupport
 
@@ -590,6 +591,38 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertTrue(service.isModelLoaded)
     }
 
+    // MARK: - Responsiveness: loadModel must not block the main thread
+
+    func test_loadModel_doesNotCallBackendLoadOnMainThread() async throws {
+        let service = InferenceService()
+        let mock = MockInferenceBackend()
+        service.registerBackendFactory { _ in mock }
+
+        let modelInfo = makeModelInfo(name: "TestModel", modelType: .gguf)
+        try await service.loadModel(from: modelInfo)
+
+        XCTAssertEqual(mock.loadModelCallCount, 1)
+        XCTAssertEqual(mock.loadModelCalledOnMainThread, false,
+                       "loadModel must NOT run on the main thread — blocking there triggers watchdog timeouts")
+    }
+
+    func test_loadCloudBackend_doesNotCallBackendLoadOnMainThread() async throws {
+        let service = InferenceService()
+        let mock = ControlledLoadBackend()
+        service.registerCloudBackendFactory { _ in mock }
+
+        let endpointTask = Task {
+            try await service.loadCloudBackend(from: makeEndpoint(name: "Cloud", provider: .ollama, modelName: "m"))
+        }
+        await mock.waitUntilLoadStarted()
+
+        XCTAssertEqual(mock.loadModelCalledOnMainThread, false,
+                       "cloud loadModel must NOT run on the main thread")
+
+        await mock.releaseLoadSuccess()
+        try await endpointTask.value
+    }
+
     private func makeModelInfo(name: String, modelType: ModelType) -> ModelInfo {
         ModelInfo(
             name: name,
@@ -817,6 +850,7 @@ private final class ControlledLoadBackend: InferenceBackend,
 
     var loadModelCallCount = 0
     var unloadCallCount = 0
+    var loadModelCalledOnMainThread: Bool?
     var configuredBaseURL: URL?
     var configuredModelName: String?
 
@@ -841,6 +875,7 @@ private final class ControlledLoadBackend: InferenceBackend,
 
     func loadModel(from url: URL, contextSize: Int32) async throws {
         loadModelCallCount += 1
+        loadModelCalledOnMainThread = pthread_main_np() != 0
         await gate.markStarted()
 
         switch await gate.waitForRelease() {

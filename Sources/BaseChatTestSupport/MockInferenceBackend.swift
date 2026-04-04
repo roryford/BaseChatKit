@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import BaseChatCore
 
 /// Configurable mock inference backend for testing.
@@ -19,6 +20,10 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
     public var generateCallCount = 0
     public var stopCallCount = 0
     public var unloadCallCount = 0
+
+    /// Records whether `loadModel` was called on the main thread.
+    /// `nil` until `loadModel` has been called at least once.
+    public var loadModelCalledOnMainThread: Bool?
 
     // Capture last generate arguments
     public var lastPrompt: String?
@@ -43,6 +48,7 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
 
     public func loadModel(from url: URL, contextSize: Int32) async throws {
         loadModelCallCount += 1
+        loadModelCalledOnMainThread = pthread_main_np() != 0
         if let error = shouldThrowOnLoad { throw error }
         isModelLoaded = true
     }
