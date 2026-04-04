@@ -50,19 +50,25 @@ public struct ModelManagementSheet: View {
                 tabPickerBar
                 tabContent
             }
+            .navigationTitle(selectedTab.rawValue)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
             #else
             // On iOS/iPadOS, safeAreaInset is required so the List is a direct
             // child of NavigationStack — a VStack wrapper breaks hit testing on iPad.
             tabContent
                 .safeAreaInset(edge: .top, spacing: 0) { tabPickerBar }
                 .navigationBarTitleDisplayMode(.inline)
+                .navigationTitle(selectedTab.rawValue)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
             #endif
-        }
-        .navigationTitle(selectedTab.rawValue)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Done") { dismiss() }
-            }
         }
         .presentationDetents([.large])
         .onAppear {
@@ -557,5 +563,5 @@ private struct ModelStorageTab: View {
     ModelManagementSheet()
         .environment(ChatViewModel())
         .environment(ModelManagementViewModel())
-        .modelContainer(for: [ChatMessage.self, ChatSession.self, SamplerPreset.self, APIEndpoint.self])
+        .modelContainer(for: BaseChatSchema.allModelTypes)
 }
