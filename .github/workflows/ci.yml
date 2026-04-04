@@ -3,33 +3,57 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".github/workflows/ci.yml"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: macos-15-xlarge  # Apple Silicon (arm64) — ~2x faster than Intel
+    runs-on: macos-15  # Apple Silicon (arm64) standard runner to reduce spend
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Select Xcode
+        id: setup-xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
 
-      - name: Cache build artifacts
+      - name: Cache SwiftPM dependencies
         uses: actions/cache@v4
         with:
-          path: .build
-          key: ${{ runner.os }}-${{ runner.arch }}-build-${{ hashFiles('Package.resolved', '**/*.swift') }}
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+          key: ${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.setup-xcode.outputs.xcode-version }}-spm-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-build-${{ hashFiles('Package.resolved') }}-
-            ${{ runner.os }}-${{ runner.arch }}-build-
+            ${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.setup-xcode.outputs.xcode-version }}-spm-
+            ${{ runner.os }}-${{ runner.arch }}-spm-
 
       - name: Run CI smoke tests
-        run: swift test --filter "BaseChatCoreTests|BaseChatUITests|BaseChatBackendsTests"
+        run: |
+          set -euo pipefail
+          swift test --filter BaseChatCoreTests
+          swift test --filter BaseChatUITests
+          swift test --filter BaseChatBackendsTests
 
       # CI smoke profile (GitHub macOS Apple Silicon runners):
       # - Runs BaseChatCoreTests + BaseChatUITests + BaseChatBackendsTests.

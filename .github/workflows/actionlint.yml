@@ -1,0 +1,37 @@
+name: Actionlint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actionlint*"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actionlint*"
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@latest
+
+      - name: Lint GitHub Actions workflows
+        run: |
+          set -euo pipefail
+          ACTIONLINT_BIN="$(go env GOPATH)/bin/actionlint"
+          "$ACTIONLINT_BIN" -color
