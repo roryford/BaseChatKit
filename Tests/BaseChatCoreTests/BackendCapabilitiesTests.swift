@@ -93,6 +93,57 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertTrue(caps.supportsTokenCounting)
     }
 
+    // MARK: - MemoryStrategy
+
+    func test_oldInitializer_defaultsMemoryStrategyToResident() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 2048,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true
+        )
+        XCTAssertEqual(caps.memoryStrategy, .resident)
+    }
+
+    func test_fullInitializer_defaultsMemoryStrategyToResident() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 2048,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: false,
+            supportsStructuredOutput: false,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false
+        )
+        XCTAssertEqual(caps.memoryStrategy, .resident)
+    }
+
+    func test_fullInitializer_setsMemoryStrategy() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 2048,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: false,
+            supportsStructuredOutput: false,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false,
+            memoryStrategy: .external
+        )
+        XCTAssertEqual(caps.memoryStrategy, .external)
+    }
+
+    func test_memoryStrategy_allCasesAreDistinct() {
+        let resident = MemoryStrategy.resident
+        let mappable = MemoryStrategy.mappable
+        let external = MemoryStrategy.external
+
+        XCTAssertNotEqual(resident, mappable)
+        XCTAssertNotEqual(resident, external)
+        XCTAssertNotEqual(mappable, external)
+    }
+
     // MARK: - CancellationStyle
 
     func test_cancellationStyle_cooperativeAndExplicitAreDistinct() {

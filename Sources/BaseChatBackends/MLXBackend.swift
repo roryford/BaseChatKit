@@ -37,7 +37,8 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         supportsToolCalling: false,
         supportsStructuredOutput: false,
         cancellationStyle: .cooperative,
-        supportsTokenCounting: true
+        supportsTokenCounting: true,
+        memoryStrategy: .resident
     )
 
     // MARK: - Private

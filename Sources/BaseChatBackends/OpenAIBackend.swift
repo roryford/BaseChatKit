@@ -63,7 +63,8 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
             supportsToolCalling: true,
             supportsStructuredOutput: true,
             cancellationStyle: .cooperative,
-            supportsTokenCounting: false
+            supportsTokenCounting: false,
+            memoryStrategy: .external
         )
     }
 

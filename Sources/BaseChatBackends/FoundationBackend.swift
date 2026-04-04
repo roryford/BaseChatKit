@@ -42,7 +42,8 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         supportsToolCalling: false,
         supportsStructuredOutput: false,
         cancellationStyle: .cooperative,
-        supportsTokenCounting: false
+        supportsTokenCounting: false,
+        memoryStrategy: .external
     )
 
     // MARK: - Private
