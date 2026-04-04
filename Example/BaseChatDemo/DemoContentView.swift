@@ -71,14 +71,10 @@ struct DemoContentView: View {
             }
         }
         .onChange(of: viewModel.selectedModel) {
-            if viewModel.selectedModel != nil {
-                Task { await viewModel.loadSelectedModel() }
-            }
+            viewModel.dispatchSelectedLoad()
         }
         .onChange(of: viewModel.selectedEndpoint) {
-            if let endpoint = viewModel.selectedEndpoint {
-                Task { await viewModel.loadCloudEndpoint(endpoint) }
-            }
+            viewModel.dispatchSelectedLoad()
         }
         .onChange(of: cloudEndpoints) {
             viewModel.setAvailableEndpoints(cloudEndpoints)
