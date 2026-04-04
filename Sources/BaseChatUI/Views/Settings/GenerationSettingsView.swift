@@ -159,7 +159,7 @@ public struct GenerationSettingsView: View {
                 // Backend Info — inside advanced
                 if showAdvancedSettings {
                     Section("Backend") {
-                        LabeledContent("Backend") {
+                        LabeledContent("Type") {
                             Text(viewModel.activeBackendName ?? "None")
                                 .foregroundStyle(viewModel.activeBackendName != nil ? .primary : .secondary)
                         }
@@ -192,6 +192,7 @@ public struct GenerationSettingsView: View {
                 }
                 } // end features.showAdvancedSettings
             }
+            .formStyle(.grouped)
             .navigationTitle("Generation Settings")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

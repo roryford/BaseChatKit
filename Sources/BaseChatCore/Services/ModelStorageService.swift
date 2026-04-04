@@ -7,9 +7,12 @@ import Foundation
 public final class ModelStorageService {
 
     private let fileManager: FileManager
+    /// Overrides the default Documents-relative directory. Used in tests.
+    private let customDirectory: URL?
 
-    public init(fileManager: FileManager = .default) {
+    public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
         self.fileManager = fileManager
+        self.customDirectory = baseDirectory
     }
 
     // MARK: - Directory
@@ -18,7 +21,9 @@ public final class ModelStorageService {
     ///
     /// Defaults to `<Documents>/<modelsDirectoryName>` on both iOS and macOS,
     /// where the directory name comes from `BaseChatConfiguration.shared.modelsDirectoryName`.
+    /// Can be overridden via `baseDirectory` at init time (used in tests).
     public var modelsDirectory: URL {
+        if let custom = customDirectory { return custom }
         guard let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
             // documentDirectory is always available on Apple platforms.
             // Crash here would indicate a fundamental OS problem.
