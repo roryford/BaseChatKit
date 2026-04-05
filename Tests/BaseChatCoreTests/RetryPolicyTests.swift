@@ -89,6 +89,42 @@ final class RetryPolicyTests: XCTestCase {
         XCTAssertLessThan(callCount, 10, "Should stop before max retries due to delay cap")
     }
 
+    // MARK: - Retries Network Error
+
+    func test_withExponentialBackoff_retriesNetworkError() async throws {
+        var callCount = 0
+        let result: String = try await withExponentialBackoff(baseDelay: 0.01) {
+            callCount += 1
+            if callCount < 3 {
+                throw CloudBackendError.networkError(
+                    underlying: NSError(domain: "test", code: -1)
+                )
+            }
+            return "recovered"
+        }
+        XCTAssertEqual(result, "recovered")
+        XCTAssertEqual(callCount, 3, "Should retry networkError twice before succeeding")
+    }
+
+    // MARK: - Does Not Retry Auth Error
+
+    func test_withExponentialBackoff_doesNotRetryAuthError() async {
+        var callCount = 0
+        do {
+            _ = try await withExponentialBackoff(baseDelay: 0.01) {
+                callCount += 1
+                throw CloudBackendError.authenticationFailed(provider: "Test")
+            }
+            XCTFail("Should have thrown")
+        } catch {
+            guard case CloudBackendError.authenticationFailed = error else {
+                XCTFail("Expected authenticationFailed, got: \(error)")
+                return
+            }
+        }
+        XCTAssertEqual(callCount, 1, "Should not retry non-retryable authenticationFailed error")
+    }
+
     // MARK: - Uses Retry-After Header
 
     func test_usesRetryAfterWhenProvided() async throws {
