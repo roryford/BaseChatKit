@@ -189,10 +189,4 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         }
         return (prompt, completion)
     }
-
-    // MARK: - Unload
-
-    public override func unloadModel() {
-        super.unloadModel()
-    }
 }

@@ -267,10 +267,4 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         }
         return .parseError(message)
     }
-
-    // MARK: - Unload
-
-    public override func unloadModel() {
-        super.unloadModel()
-    }
 }
