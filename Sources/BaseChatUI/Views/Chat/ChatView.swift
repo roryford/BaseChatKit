@@ -103,17 +103,19 @@ public struct ChatView: View {
 
     @ViewBuilder
     private var errorBanner: some View {
-        if let error = viewModel.errorMessage {
+        if let error = viewModel.activeError {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.yellow)
 
-                Text(error)
+                Text(error.message)
                     .font(.callout)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
+                recoveryButton(for: error.recovery)
+
                 Button {
-                    viewModel.errorMessage = nil
+                    viewModel.activeError = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -125,6 +127,33 @@ public struct ChatView: View {
             .background(.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
             .padding(.horizontal)
             .padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func recoveryButton(for recovery: ChatError.Recovery?) -> some View {
+        switch recovery {
+        case .retry:
+            Button("Retry") {
+                viewModel.activeError = nil
+            }
+            .buttonStyle(.borderless)
+            .font(.callout.bold())
+        case .configureAPIKey:
+            Button("Check API Key") {
+                viewModel.activeError = nil
+            }
+            .buttonStyle(.borderless)
+            .font(.callout.bold())
+        case .selectModel:
+            Button("Select Model") {
+                viewModel.activeError = nil
+                showModelManagement = true
+            }
+            .buttonStyle(.borderless)
+            .font(.callout.bold())
+        case .dismissOnly, .none:
+            EmptyView()
         }
     }
 
