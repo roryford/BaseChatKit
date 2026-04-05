@@ -66,6 +66,18 @@ public final class InferenceService {
     private var backendFactories: [BackendFactory] = []
     private var cloudBackendFactories: [CloudBackendFactory] = []
 
+    /// Model types that have at least one registered factory.
+    ///
+    /// Populated by callers via `declareSupport(for:)` at registration time
+    /// so the service can answer capability queries without instantiating backends.
+    private var supportedLocalModelTypes: Set<ModelType> = []
+
+    /// API providers that have at least one registered cloud factory.
+    ///
+    /// Cloud providers are always registered together by `DefaultBackends`, so
+    /// callers declare the full set they support when they register factories.
+    private var supportedCloudProviders: Set<APIProvider> = []
+
     /// Registers a factory that can create a local inference backend.
     ///
     /// Factories are tried in registration order; the first non-nil result wins.
@@ -78,6 +90,22 @@ public final class InferenceService {
     /// Factories are tried in registration order; the first non-nil result wins.
     public func registerCloudBackendFactory(_ factory: @escaping CloudBackendFactory) {
         cloudBackendFactories.append(factory)
+    }
+
+    /// Declares that a registered factory supports the given local model type.
+    ///
+    /// Call this immediately after `registerBackendFactory` for each model type
+    /// the factory handles. `DefaultBackends.register(with:)` calls this automatically.
+    public func declareSupport(for modelType: ModelType) {
+        supportedLocalModelTypes.insert(modelType)
+    }
+
+    /// Declares that a registered factory supports the given API provider.
+    ///
+    /// Call this immediately after `registerCloudBackendFactory` for each provider
+    /// the factory handles. `DefaultBackends.register(with:)` calls this automatically.
+    public func declareSupport(for provider: APIProvider) {
+        supportedCloudProviders.insert(provider)
     }
 
     // MARK: - Private State
@@ -564,6 +592,57 @@ public final class InferenceService {
     /// backends with no tokenizer API (Foundation, cloud) return `nil`.
     public var tokenizer: (any TokenizerProvider)? {
         (backend as? TokenizerVendor)?.tokenizer
+    }
+}
+
+// MARK: - Backend Snapshot
+
+extension InferenceService {
+    /// Returns a value snapshot of the currently declared-supported backends.
+    ///
+    /// Used by `FrameworkCapabilityService` to populate its `enabledBackends`
+    /// property after backend registration completes.
+    public func registeredBackendSnapshot() -> EnabledBackends {
+        EnabledBackends(
+            localModelTypes: supportedLocalModelTypes,
+            cloudProviders: supportedCloudProviders
+        )
+    }
+}
+
+// MARK: - ModelTypeCompatibilityProvider Conformance
+
+extension InferenceService: ModelTypeCompatibilityProvider {
+
+    /// Returns whether a local model type has a registered backend in this service.
+    public func compatibility(for modelType: ModelType) -> ModelCompatibilityResult {
+        if supportedLocalModelTypes.contains(modelType) {
+            return .supported
+        }
+        return .unsupported(reason: unavailableReasonString(for: modelType))
+    }
+
+    /// Returns whether a cloud API provider has a registered backend in this service.
+    public func compatibility(for provider: APIProvider) -> ModelCompatibilityResult {
+        if supportedCloudProviders.contains(provider) {
+            return .supported
+        }
+        // Cloud backends are registered unconditionally when DefaultBackends is used,
+        // so if a provider is missing it means no factory was registered at all.
+        return .unsupported(reason: "No backend registered for \(provider.rawValue). Register a cloud backend factory at startup.")
+    }
+
+    // MARK: - Private helpers
+
+    private func unavailableReasonString(for modelType: ModelType) -> String {
+        switch modelType {
+        case .gguf:
+            return "GGUF models require the llama.cpp backend. Build with the Llama Swift package dependency to enable it."
+        case .mlx:
+            return "MLX models require Apple Silicon and the MLX backend. Build with the MLX Swift package dependency to enable it."
+        case .foundation:
+            return "Apple Foundation Models require iOS 26 / macOS 26 or later."
+        }
     }
 }
 
