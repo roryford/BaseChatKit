@@ -161,39 +161,41 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
                 defer { self?.withStateLock { self?.isGenerating = false } }
 
                 do {
-                    let (bytes, response) = try await session.bytes(for: request)
+                    try await withExponentialBackoff {
+                        let (bytes, response) = try await session.bytes(for: request)
 
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        throw CloudBackendError.networkError(
-                            underlying: URLError(.badServerResponse)
-                        )
-                    }
-
-                    try await Self.checkStatusCode(httpResponse, bytes: bytes)
-
-                    // Ollama streams NDJSON — each line is a complete JSON object.
-                    var lineBuffer = Data()
-                    for try await byte in bytes {
-                        if Task.isCancelled { break }
-
-                        if byte == UInt8(ascii: "\n") {
-                            if !lineBuffer.isEmpty {
-                                if let line = String(data: lineBuffer, encoding: .utf8),
-                                   let token = Self.extractToken(from: line) {
-                                    continuation.yield(token)
-                                }
-                                lineBuffer.removeAll(keepingCapacity: true)
-                            }
-                        } else {
-                            lineBuffer.append(byte)
+                        guard let httpResponse = response as? HTTPURLResponse else {
+                            throw CloudBackendError.networkError(
+                                underlying: URLError(.badServerResponse)
+                            )
                         }
-                    }
 
-                    // Flush any final line without a trailing newline.
-                    if !lineBuffer.isEmpty,
-                       let line = String(data: lineBuffer, encoding: .utf8),
-                       let token = Self.extractToken(from: line) {
-                        continuation.yield(token)
+                        try await Self.checkStatusCode(httpResponse, bytes: bytes)
+
+                        // Ollama streams NDJSON — each line is a complete JSON object.
+                        var lineBuffer = Data()
+                        for try await byte in bytes {
+                            if Task.isCancelled { break }
+
+                            if byte == UInt8(ascii: "\n") {
+                                if !lineBuffer.isEmpty {
+                                    if let line = String(data: lineBuffer, encoding: .utf8),
+                                       let token = Self.extractToken(from: line) {
+                                        continuation.yield(token)
+                                    }
+                                    lineBuffer.removeAll(keepingCapacity: true)
+                                }
+                            } else {
+                                lineBuffer.append(byte)
+                            }
+                        }
+
+                        // Flush any final line without a trailing newline.
+                        if !lineBuffer.isEmpty,
+                           let line = String(data: lineBuffer, encoding: .utf8),
+                           let token = Self.extractToken(from: line) {
+                            continuation.yield(token)
+                        }
                     }
 
                     continuation.finish()
