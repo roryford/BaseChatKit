@@ -15,7 +15,6 @@ final class SchemaMigrationTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-
     // MARK: - BaseChatSchemaV1
 
     func test_schemaV1_versionIdentifier() {
@@ -75,8 +74,8 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertNotNil(container)
     }
 
-    func test_containerFactory_currentSchema_matchesNewestMigrationPlanSchema() {
-        let newestSchema = try! XCTUnwrap(BaseChatMigrationPlan.schemas.last)
+    func test_containerFactory_currentSchema_matchesNewestMigrationPlanSchema() throws {
+        let newestSchema = try XCTUnwrap(BaseChatMigrationPlan.schemas.last)
         XCTAssertEqual(ObjectIdentifier(ModelContainerFactory.currentSchema), ObjectIdentifier(newestSchema))
     }
 
