@@ -184,7 +184,14 @@ public final class InferenceService {
             backend: backendName
         )
         do {
-            try await newBackend.loadModel(from: modelInfo.url, contextSize: contextSize)
+            // Run backend model loading off the main actor so heavy blocking work
+            // (e.g. llama_model_load_from_file, llama_init_from_model) does not
+            // freeze the UI or trigger the iOS watchdog gesture gate timeout.
+            // After the Task completes we resume on @MainActor for the commit step.
+            let url = modelInfo.url
+            try await Task.detached(priority: .userInitiated) {
+                try await newBackend.loadModel(from: url, contextSize: contextSize)
+            }.value
         } catch {
             let isStale = finishLoadAttemptWithFailure(request, error: error)
             if isStale {
@@ -250,7 +257,13 @@ public final class InferenceService {
             backend: endpoint.provider.rawValue
         )
         do {
-            try await newBackend.loadModel(from: url, contextSize: 0)
+            // Run backend initialisation off the main actor for consistency with
+            // local model loading — cloud backends may perform blocking I/O during
+            // their loadModel step (e.g. keychain reads, capability negotiation).
+            let backendURL = url
+            try await Task.detached(priority: .userInitiated) {
+                try await newBackend.loadModel(from: backendURL, contextSize: 0)
+            }.value
         } catch {
             let isStale = finishLoadAttemptWithFailure(request, error: error)
             if isStale {
