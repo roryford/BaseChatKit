@@ -21,7 +21,7 @@ final class PromptAssemblyPerformanceTests: XCTestCase {
             PromptSlot(
                 id: "slot_\(i)",
                 content: "This is extra slot content number \(i) that adds context to the conversation.",
-                depth: i,
+                position: .atDepth(i),
                 label: "Slot \(i)"
             )
         }

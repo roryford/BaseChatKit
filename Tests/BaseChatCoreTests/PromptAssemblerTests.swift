@@ -38,7 +38,7 @@ struct PromptAssemblerTests {
         )
         #expect(result.orderedSlots.count == 1)
         #expect(result.orderedSlots[0].id == "system")
-        #expect(result.orderedSlots[0].depth == 0)
+        #expect(result.orderedSlots[0].position == .systemPreamble)
         #expect(result.orderedSlots[0].content == "Be helpful")
     }
 
@@ -73,17 +73,22 @@ struct PromptAssemblerTests {
         #expect(result.orderedSlots[0].id == "a")
     }
 
-    @Test func test_assemble_slotsAreSortedByDepth() {
+    @Test func test_assemble_slotsAreSortedByPosition() {
+        // atDepth(5) is higher in history (5 messages from bottom) than atDepth(1),
+        // so it should appear first (lower sort index) in the assembled prompt.
+        let messages = (0..<6).map {
+            ChatMessageRecord(role: .user, content: "msg\($0)", sessionID: UUID())
+        }
         let slots = [
-            PromptSlot(id: "deep", content: "deep", depth: 5, label: "Deep"),
-            PromptSlot(id: "shallow", content: "shallow", depth: 1, label: "Shallow"),
+            PromptSlot(id: "deep", content: "deep", position: .atDepth(5), label: "Deep"),
+            PromptSlot(id: "shallow", content: "shallow", position: .atDepth(1), label: "Shallow"),
         ]
         let result = PromptAssembler.assemble(
-            slots: slots, messages: [], systemPrompt: nil,
-            contextSize: 1000, tokenizer: tok
+            slots: slots, messages: messages, systemPrompt: nil,
+            contextSize: 10000, responseBuffer: 0, tokenizer: tok
         )
-        #expect(result.orderedSlots[0].id == "shallow")
-        #expect(result.orderedSlots[1].id == "deep")
+        #expect(result.orderedSlots[0].id == "deep")
+        #expect(result.orderedSlots[1].id == "shallow")
     }
 
     @Test func test_assemble_tokenBudget_capsSlotTokens() {
@@ -113,7 +118,7 @@ struct PromptAssemblerTests {
             contextSize: 100, responseBuffer: 10, tokenizer: tok
         )
         // Available for messages: 100 - 50 - 10 = 40 tokens = 4 history messages of 10 chars
-        // result.messages includes the depth-0 slot as a system message too
+        // result.messages includes the contextSetup slot as a system message too
         let historyMessages = result.messages.filter { $0.role != "system" }
         #expect(historyMessages.count == 4)
     }
@@ -132,9 +137,9 @@ struct PromptAssemblerTests {
 
     // MARK: - Depth Insertion
 
-    @Test func test_assemble_depthSlot_insertedCorrectly() {
+    @Test func test_assemble_atDepthSlot_insertedCorrectly() {
         let slots = [
-            PromptSlot(id: "note", content: "author note", depth: 2, label: "Author's Note"),
+            PromptSlot(id: "note", content: "author note", position: .atDepth(2), label: "Author's Note"),
         ]
         let messages = (0..<5).map { i in
             makeMessage(role: .user, content: "msg\(i)")
@@ -143,8 +148,8 @@ struct PromptAssemblerTests {
             slots: slots, messages: messages, systemPrompt: nil,
             contextSize: 10000, responseBuffer: 0, tokenizer: tok
         )
-        // Depth 2 = 2 turns from bottom. Messages: msg0, msg1, msg2, [note], msg3, msg4
-        let contents = result.messages.map(\.content)
+        // atDepth(2) = 2 turns from bottom. Messages: msg0, msg1, msg2, [note], msg3, msg4
+        let contents = result.messages.map { $0.content }
         #expect(contents.contains("author note"))
         if let noteIndex = contents.firstIndex(of: "author note") {
             // Should be 2 from the end (before last 2 messages)

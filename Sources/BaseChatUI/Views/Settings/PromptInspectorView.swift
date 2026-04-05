@@ -170,7 +170,7 @@ public struct PromptInspectorView: View {
                         Text(slot.label)
                             .font(.body)
                             .foregroundStyle(.primary)
-                        Text("depth \(slot.depth)")
+                        Text(slot.position.displayName)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -192,7 +192,7 @@ public struct PromptInspectorView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(slot.label), depth \(slot.depth), \(slot.tokenCount) tokens")
+            .accessibilityLabel("\(slot.label), \(slot.position.displayName), \(slot.tokenCount) tokens")
             .accessibilityHint(isExpanded ? "Tap to collapse content" : "Tap to expand content")
 
             // Expanded content
@@ -247,35 +247,35 @@ extension PromptInspectorView {
                 label: "System Prompt",
                 content: "You are a helpful assistant. Respond clearly and concisely. Follow the user's instructions carefully.",
                 tokenCount: 24,
-                depth: 0
+                position: .systemPreamble
             ),
             ResolvedSlot(
                 id: "charDef",
                 label: "Character Definition",
                 content: "Name: Aria\nPersonality: Warm, knowledgeable, slightly witty. Speaks in complete sentences.\nScenario: Aria is a librarian at a magical library that contains books from every timeline.",
                 tokenCount: 48,
-                depth: 0
+                position: .contextSetup
             ),
             ResolvedSlot(
                 id: "lorebook_ancient_library",
                 label: "Lorebook: Ancient Library",
                 content: "The Ancient Library of Thessalonica was built in the 3rd century and contains scrolls that rewrite themselves based on the reader's intent.",
                 tokenCount: 32,
-                depth: 1
+                position: .atDepth(1)
             ),
             ResolvedSlot(
                 id: "lorebook_magic_system",
                 label: "Lorebook: Magic System",
                 content: "Magic in this world is powered by resonance — the ability to harmonize one's intent with the ambient flow of arcane energy.",
                 tokenCount: 28,
-                depth: 1
+                position: .atDepth(1)
             ),
             ResolvedSlot(
                 id: "authorsNote",
                 label: "Author's Note",
                 content: "[Write in a descriptive, literary style. Focus on sensory details and character emotions.]",
                 tokenCount: 18,
-                depth: 4
+                position: .atDepth(4)
             ),
         ]
 
