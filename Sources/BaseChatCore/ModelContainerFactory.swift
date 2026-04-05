@@ -13,6 +13,10 @@ import SwiftData
 /// let container = try ModelContainerFactory.makeInMemoryContainer()
 /// ```
 public enum ModelContainerFactory {
+    /// The newest schema version that should be opened for application stores.
+    public static var currentSchema: any VersionedSchema.Type {
+        BaseChatMigrationPlan.schemas.last ?? BaseChatSchemaV1.self
+    }
 
     /// Returns an on-disk `ModelContainer` configured with ``BaseChatMigrationPlan``.
     ///
@@ -24,7 +28,7 @@ public enum ModelContainerFactory {
         configurations: [ModelConfiguration] = [ModelConfiguration()]
     ) throws -> ModelContainer {
         try ModelContainer(
-            for: Schema(versionedSchema: BaseChatSchemaV1.self),
+            for: Schema(versionedSchema: currentSchema),
             migrationPlan: BaseChatMigrationPlan.self,
             configurations: configurations
         )

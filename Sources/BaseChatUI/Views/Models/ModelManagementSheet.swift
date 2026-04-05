@@ -605,5 +605,5 @@ private struct ModelStorageTab: View {
     ModelManagementSheet()
         .environment(ChatViewModel())
         .environment(ModelManagementViewModel())
-        .modelContainer(for: BaseChatSchema.allModelTypes)
+        .modelContainer(try! ModelContainerFactory.makeInMemoryContainer())
 }

@@ -2,15 +2,16 @@ import XCTest
 import SwiftData
 @testable import BaseChatCore
 
+@available(*, deprecated)
 final class BaseChatSchemaTests: XCTestCase {
 
     func test_allModelTypes_containsExpectedTypes() {
-        let typeNames = BaseChatSchema.allModelTypes.map { String(describing: $0) }
+        let ids = BaseChatSchema.allModelTypes.map(ObjectIdentifier.init)
 
-        XCTAssertTrue(typeNames.contains("ChatMessage"), "Missing ChatMessage")
-        XCTAssertTrue(typeNames.contains("ChatSession"), "Missing ChatSession")
-        XCTAssertTrue(typeNames.contains("SamplerPreset"), "Missing SamplerPreset")
-        XCTAssertTrue(typeNames.contains("APIEndpoint"), "Missing APIEndpoint")
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.ChatMessage.self)), "Missing ChatMessage")
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.ChatSession.self)), "Missing ChatSession")
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.SamplerPreset.self)), "Missing SamplerPreset")
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self)), "Missing APIEndpoint")
         XCTAssertEqual(BaseChatSchema.allModelTypes.count, 4,
                        "Expected exactly 4 model types")
     }
