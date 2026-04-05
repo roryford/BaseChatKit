@@ -59,14 +59,35 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
     /// 1. Run the `openssl` pipeline from the doc comment above for each host.
     /// 2. Add the *new* intermediate/root pins to the set **before** removing old ones.
     /// 3. Ship the update. Once no connections use the old chain, remove stale pins.
+    private nonisolated(unsafe) static var _defaultPinsLoaded = false
+
     static func loadDefaultPins() {
-        // Google Trust Services WE1 (intermediate — shared by both hosts)
+        _pinnedHostsLock.lock()
+        defer { _pinnedHostsLock.unlock() }
+        guard !_defaultPinsLoaded else { return }
+        _defaultPinsLoaded = true
+
+        // Google Trust Services WE1 (intermediate �� shared by both hosts)
         let gtsWE1 = "kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4="
         // GTS Root R4 (root CA — backup pin for rotation safety)
         let gtsRootR4 = "mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c="
+        let defaults = Set([gtsWE1, gtsRootR4])
 
-        pinnedHosts["api.anthropic.com"] = Set([gtsWE1, gtsRootR4])
-        pinnedHosts["api.openai.com"] = Set([gtsWE1, gtsRootR4])
+        // Only set defaults if the host app hasn't already configured pins.
+        // Access _pinnedHosts directly — we already hold the lock.
+        for host in ["api.anthropic.com", "api.openai.com"] {
+            if _pinnedHosts[host] == nil {
+                _pinnedHosts[host] = defaults
+            }
+        }
+    }
+
+    /// Resets the one-shot guard so `loadDefaultPins()` can be called again.
+    /// Intended for tests only (`@testable import`).
+    static func resetDefaultPinsForTesting() {
+        _pinnedHostsLock.lock()
+        defer { _pinnedHostsLock.unlock() }
+        _defaultPinsLoaded = false
     }
 
     /// Hosts that bypass pinning entirely (local development servers).
@@ -139,6 +160,7 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
             return
         }
 
+        var seenHashes: [String] = []
         for certificate in certChain {
             guard let publicKey = SecCertificateCopyKey(certificate),
                   let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
@@ -146,6 +168,7 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
             }
             let hash = sha256(data: publicKeyData)
             let base64Hash = hash.base64EncodedString()
+            seenHashes.append(base64Hash)
 
             if expectedPins.contains(base64Hash) {
                 completionHandler(.useCredential, URLCredential(trust: serverTrust))
@@ -153,7 +176,7 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
             }
         }
 
-        Log.network.error("Certificate pin mismatch for \(host). No certificate in chain matched any of \(expectedPins.count) pins.")
+        Log.network.error("Certificate pin mismatch for \(host). No certificate in chain matched any of \(expectedPins.count) pins. Seen hashes: \(seenHashes.joined(separator: ", "))")
         completionHandler(.cancelAuthenticationChallenge, nil)
     }
 

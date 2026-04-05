@@ -80,6 +80,7 @@ final class PinnedSessionDelegateTests: XCTestCase {
     func test_loadDefaultPins_populatesBothHosts() {
         let savedPins = PinnedSessionDelegate.pinnedHosts
         PinnedSessionDelegate.pinnedHosts = [:]
+        PinnedSessionDelegate.resetDefaultPinsForTesting()
         defer { PinnedSessionDelegate.pinnedHosts = savedPins }
 
         PinnedSessionDelegate.loadDefaultPins()
@@ -95,18 +96,45 @@ final class PinnedSessionDelegateTests: XCTestCase {
                                      "Should have at least 2 pins (intermediate + root) for rotation safety")
     }
 
-    func test_loadDefaultPins_isIdempotent() {
+    func test_loadDefaultPins_doesNotOverwriteHostAppPins() {
         let savedPins = PinnedSessionDelegate.pinnedHosts
         PinnedSessionDelegate.pinnedHosts = [:]
+        PinnedSessionDelegate.resetDefaultPinsForTesting()
+        defer { PinnedSessionDelegate.pinnedHosts = savedPins }
+
+        // Simulate a host app setting custom pins before framework init
+        let customPin = "customHostAppPin123="
+        PinnedSessionDelegate.pinnedHosts["api.anthropic.com"] = Set([customPin])
+
+        PinnedSessionDelegate.loadDefaultPins()
+
+        let anthropicPins = PinnedSessionDelegate.pinnedHosts["api.anthropic.com"]
+        XCTAssertEqual(anthropicPins, Set([customPin]),
+                       "loadDefaultPins() must not overwrite pins the host app already configured")
+
+        // OpenAI had no custom pins, so defaults should be applied
+        let openAIPins = PinnedSessionDelegate.pinnedHosts["api.openai.com"]
+        XCTAssertNotNil(openAIPins, "Hosts without custom pins should still get defaults")
+    }
+
+    func test_loadDefaultPins_onlyRunsOnce() {
+        let savedPins = PinnedSessionDelegate.pinnedHosts
+        PinnedSessionDelegate.pinnedHosts = [:]
+        PinnedSessionDelegate.resetDefaultPinsForTesting()
         defer { PinnedSessionDelegate.pinnedHosts = savedPins }
 
         PinnedSessionDelegate.loadDefaultPins()
-        let firstLoad = PinnedSessionDelegate.pinnedHosts
+        let afterFirstLoad = PinnedSessionDelegate.pinnedHosts
 
+        // Clear pins and call again — the guard should prevent re-population
+        PinnedSessionDelegate.pinnedHosts = [:]
         PinnedSessionDelegate.loadDefaultPins()
-        let secondLoad = PinnedSessionDelegate.pinnedHosts
 
-        XCTAssertEqual(firstLoad, secondLoad, "Calling loadDefaultPins() twice should produce identical pin sets")
+        XCTAssertTrue(PinnedSessionDelegate.pinnedHosts.isEmpty,
+                      "Second call to loadDefaultPins() should be a no-op due to one-shot guard")
+
+        // Restore for comparison
+        XCTAssertFalse(afterFirstLoad.isEmpty, "First call should have populated pins")
     }
 
     // MARK: - Non-ServerTrust Challenge
