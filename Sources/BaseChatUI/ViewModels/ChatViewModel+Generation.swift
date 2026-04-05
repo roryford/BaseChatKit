@@ -218,7 +218,10 @@ extension ChatViewModel {
                 } catch is CancellationError {
                     break
                 } catch {
-                    await MainActor.run { self?.backgroundTaskError = error }
+                    let err = error
+                    Task { @MainActor [weak self] in
+                        self?.backgroundTaskError = err
+                    }
                 }
             }
         }
