@@ -1,13 +1,16 @@
 import XCTest
 @testable import BaseChatCore
 import BaseChatTestSupport
+import HuggingFace
 
 final class HuggingFaceServiceTests: XCTestCase {
 
     private var service: HuggingFaceService!
+    private var stubbedURLs: [URL] = []
 
     override func setUp() {
         super.setUp()
+        MockURLProtocol.reset()
         CuratedModel.all = [
             CuratedModel(
                 id: "test-phi",
@@ -62,9 +65,59 @@ final class HuggingFaceServiceTests: XCTestCase {
     }
 
     override func tearDown() {
+        for url in stubbedURLs {
+            MockURLProtocol.unstub(url: url)
+        }
+        stubbedURLs = []
+        MockURLProtocol.reset()
         service = nil
         CuratedModel.all = []
         super.tearDown()
+    }
+
+    private func makeMockService(
+        listResponseJSON: String = "[]",
+        modelDetailsByRepoID: [String: String] = [:]
+    ) -> HuggingFaceService {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let hubClient = HubClient(
+            session: session,
+            host: URL(string: "https://huggingface.co")!,
+            userAgent: "BaseChatKitTests/1.0",
+            cache: nil
+        )
+
+        let listURL = URL(string: "https://huggingface.co/api/models")!
+        MockURLProtocol.stub(
+            url: listURL,
+            response: .immediate(
+                data: Data(listResponseJSON.utf8),
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"]
+            )
+        )
+        stubbedURLs.append(listURL)
+
+        for (repoID, json) in modelDetailsByRepoID {
+            let detailURL = URL(string: "https://huggingface.co/api/models/\(repoID)")!
+            MockURLProtocol.stub(
+                url: detailURL,
+                response: .immediate(
+                    data: Data(json.utf8),
+                    statusCode: 200,
+                    headers: ["Content-Type": "application/json"]
+                )
+            )
+            stubbedURLs.append(detailURL)
+        }
+
+        return HuggingFaceService(hubClient: hubClient)
+    }
+
+    private func decodeModel(from json: String) throws -> Model {
+        try JSONDecoder().decode(Model.self, from: Data(json.utf8))
     }
 
     // MARK: - Curated Models
@@ -268,6 +321,103 @@ final class HuggingFaceServiceTests: XCTestCase {
             "https://huggingface.co/mlx-community/Qwen3-4B-4bit/resolve/main/Qwen3-4B-4bit",
             "MLX download URL should follow the standard HuggingFace resolve/main format"
         )
+    }
+
+    // MARK: - MLX Characterization
+
+    func test_convertModelToDownloadables_mlxRepo_returnsSingleDownloadableDirectory() throws {
+        let repoID = "mlx-community/Gemma-3-4B-it-4bit"
+        let detailedResponse = """
+            {
+                "id": "\(repoID)",
+                "downloads": 42,
+                "pipeline_tag": "text-generation",
+                "siblings": [
+                    { "rfilename": "config.json", "size": 1200 },
+                    { "rfilename": "model.safetensors", "size": 8000 },
+                    { "rfilename": "tokenizer.json", "size": 300 }
+                ]
+            }
+            """
+        let model = try decodeModel(from: detailedResponse)
+        let files = service.convertModelToDownloadables(model)
+        let mlxModel = try XCTUnwrap(files.first)
+
+        XCTAssertEqual(files.count, 1, "MLX repos should surface as one logical downloadable")
+        XCTAssertEqual(mlxModel.modelType, .mlx)
+        XCTAssertEqual(mlxModel.repoID, repoID)
+        XCTAssertEqual(mlxModel.fileName, "Gemma-3-4B-it-4bit")
+        XCTAssertEqual(mlxModel.sizeBytes, 9_500)
+    }
+
+    func test_searchModels_includesMLXReposAlongsideGGUFResults() async throws {
+        let mlxRepoID = "mlx-community/Gemma-3-4B-it-4bit"
+        let ggufRepoID = "bartowski/Mistral-7B-Instruct-v0.3-GGUF"
+        let listResponse = """
+            [
+                {
+                    "id": "\(mlxRepoID)",
+                    "downloads": 2500,
+                    "pipeline_tag": "text-generation",
+                    "siblings": [
+                        { "rfilename": "config.json", "size": 1200 },
+                        { "rfilename": "model.safetensors", "size": 8000 },
+                        { "rfilename": "tokenizer.json", "size": 300 }
+                    ]
+                },
+                {
+                    "id": "\(ggufRepoID)",
+                    "downloads": 1000,
+                    "pipeline_tag": "text-generation",
+                    "siblings": [
+                        { "rfilename": "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf", "size": 4100000000 }
+                    ]
+                }
+            ]
+            """
+        let mlxDetail = """
+            {
+                "id": "\(mlxRepoID)",
+                "downloads": 2500,
+                "pipeline_tag": "text-generation",
+                "siblings": [
+                    { "rfilename": "config.json", "size": 1200 },
+                    { "rfilename": "model.safetensors", "size": 8000 },
+                    { "rfilename": "tokenizer.json", "size": 300 }
+                ]
+            }
+            """
+        let ggufDetail = """
+            {
+                "id": "\(ggufRepoID)",
+                "downloads": 1000,
+                "pipeline_tag": "text-generation",
+                "siblings": [
+                    { "rfilename": "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf", "size": 4100000000 }
+                ]
+            }
+            """
+
+        let service = makeMockService(
+            listResponseJSON: listResponse,
+            modelDetailsByRepoID: [
+                mlxRepoID: mlxDetail,
+                ggufRepoID: ggufDetail,
+            ]
+        )
+
+        let results = try await service.searchModels(query: "gemma")
+
+        XCTAssertTrue(
+            results.contains(where: { $0.repoID == ggufRepoID && $0.modelType == .gguf }),
+            "Search should continue to include GGUF results"
+        )
+        let mlxModel = try XCTUnwrap(
+            results.first(where: { $0.repoID == mlxRepoID && $0.modelType == .mlx }),
+            "Search should include MLX repos as downloadable results"
+        )
+        XCTAssertEqual(mlxModel.fileName, "Gemma-3-4B-it-4bit")
+        XCTAssertEqual(mlxModel.sizeBytes, 9_500)
     }
 
     // MARK: - Curated Model Data Integrity

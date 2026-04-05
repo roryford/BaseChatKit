@@ -9,12 +9,12 @@ final class DownloadManagerTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        manager = BackgroundDownloadManager()
-
-        // Create a temporary directory for test files.
         tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("DownloadManagerTests-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        manager = BackgroundDownloadManager(
+            storageService: ModelStorageService(baseDirectory: tempDirectory)
+        )
     }
 
     override func tearDown() async throws {
@@ -25,6 +25,21 @@ final class DownloadManagerTests: XCTestCase {
         tempDirectory = nil
         manager = nil
         try await super.tearDown()
+    }
+
+    private func makeSnapshotFiles() -> [ModelDownloadFile] {
+        [
+            ModelDownloadFile(
+                relativePath: "config.json",
+                url: URL(string: "https://example.com/config.json")!,
+                sizeBytes: 100
+            ),
+            ModelDownloadFile(
+                relativePath: "weights/model.safetensors",
+                url: URL(string: "https://example.com/weights/model.safetensors")!,
+                sizeBytes: 900
+            ),
+        ]
     }
 
     // MARK: - Disk Space
@@ -284,6 +299,92 @@ final class DownloadManagerTests: XCTestCase {
         if case .cancelled = state.status { } else {
             XCTFail("Expected .cancelled after markCancelled, got: \(state.status)")
         }
+    }
+
+    // MARK: - MLX Snapshot Coordination
+
+    func test_updateSnapshotProgress_aggregatesAcrossFiles() {
+        let model = DownloadableModel(
+            repoID: "mlx-community/Test-4bit",
+            fileName: "Test-4bit",
+            displayName: "Test 4bit",
+            modelType: .mlx,
+            sizeBytes: 1_000
+        )
+        let state = DownloadState(model: model)
+        manager.activeDownloads[model.id] = state
+
+        let stagingDirectory = tempDirectory.appendingPathComponent(".staging-progress", isDirectory: true)
+        try? FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        manager.prepareSnapshotDownload(model: model, files: makeSnapshotFiles(), stagingDirectory: stagingDirectory)
+
+        manager.updateSnapshotProgress(
+            modelID: model.id,
+            relativePath: "config.json",
+            bytesDownloaded: 100,
+            totalBytesExpected: 100
+        )
+        manager.updateSnapshotProgress(
+            modelID: model.id,
+            relativePath: "weights/model.safetensors",
+            bytesDownloaded: 450,
+            totalBytesExpected: 900
+        )
+
+        guard case .downloading(let progress, let bytesDownloaded, let totalBytes) = state.status else {
+            return XCTFail("Expected aggregate snapshot progress to be reflected in DownloadState")
+        }
+        XCTAssertEqual(bytesDownloaded, 550)
+        XCTAssertEqual(totalBytes, 1_000)
+        XCTAssertEqual(progress, 0.55, accuracy: 0.001)
+    }
+
+    func test_completeSnapshotFile_finalizesDirectoryAfterLastFile() throws {
+        let model = DownloadableModel(
+            repoID: "mlx-community/Test-4bit",
+            fileName: "Test-4bit",
+            displayName: "Test 4bit",
+            modelType: .mlx,
+            sizeBytes: 1_000
+        )
+        let state = DownloadState(model: model)
+        manager.activeDownloads[model.id] = state
+
+        let stagingDirectory = tempDirectory.appendingPathComponent(".staging-finalize", isDirectory: true)
+        try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        manager.prepareSnapshotDownload(model: model, files: makeSnapshotFiles(), stagingDirectory: stagingDirectory)
+
+        let configTemp = tempDirectory.appendingPathComponent("config.download")
+        try Data("{}".utf8).write(to: configTemp)
+        try manager.completeSnapshotFile(
+            modelID: model.id,
+            relativePath: "config.json",
+            tempURL: configTemp
+        )
+
+        if case .completed = state.status {
+            return XCTFail("Snapshot should not complete until every file is present")
+        }
+
+        let weightsTemp = tempDirectory.appendingPathComponent("weights.download")
+        try Data(repeating: 0xAB, count: 900).write(to: weightsTemp)
+        try manager.completeSnapshotFile(
+            modelID: model.id,
+            relativePath: "weights/model.safetensors",
+            tempURL: weightsTemp
+        )
+
+        let finalURL = tempDirectory.appendingPathComponent("Test-4bit", isDirectory: true)
+        guard case .completed(let localURL) = state.status else {
+            return XCTFail("Snapshot should complete after the last file is staged")
+        }
+        XCTAssertEqual(localURL.standardizedFileURL.path, finalURL.standardizedFileURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: finalURL.appendingPathComponent("config.json").path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: finalURL.appendingPathComponent("weights/model.safetensors").path
+            )
+        )
     }
 
     // MARK: - Disk Space Edge Cases

@@ -48,8 +48,36 @@ public final class BackgroundDownloadManager: NSObject {
 
     // MARK: - Private State
 
-    /// Maps `URLSessionTask.taskIdentifier` to `DownloadableModel.id` for delegate routing.
-    private var downloadTaskMap: [Int: String] = [:]
+    private struct TaskContext: Codable, Sendable {
+        let modelID: String
+        let relativePath: String?
+        let expectedBytes: Int64
+    }
+
+    private struct SnapshotFileMetadata: Codable, Sendable {
+        let relativePath: String
+        let sizeBytes: UInt64
+    }
+
+    private struct SnapshotProgress: Sendable {
+        var bytesDownloaded: Int64
+        var expectedBytes: Int64
+    }
+
+    private struct SnapshotDownloadContext: Sendable {
+        let stagingDirectory: URL
+        let files: [String: SnapshotFileMetadata]
+        let totalBytes: Int64
+        var progressByFile: [String: SnapshotProgress]
+        var completedFiles: Set<String>
+        var taskIDs: Set<Int>
+    }
+
+    /// Maps `URLSessionTask.taskIdentifier` to task metadata for delegate routing.
+    private var taskContexts: [Int: TaskContext] = [:]
+
+    /// Tracks multi-file MLX downloads by logical model ID.
+    private var snapshotDownloads: [String: SnapshotDownloadContext] = [:]
 
     /// The storage service used to determine where to place completed files.
     private let storageService: ModelStorageService
@@ -108,30 +136,26 @@ public final class BackgroundDownloadManager: NSObject {
     /// - Throws: `HuggingFaceError.insufficientDiskSpace` if there isn't enough room.
     @MainActor @discardableResult
     public func startDownload(_ model: DownloadableModel, downloadURL: URL) async throws -> DownloadState {
-        Log.download.info("Starting download for \(model.displayName) from \(downloadURL)")
+        try await startDownload(model, plan: .singleFile(url: downloadURL))
+    }
 
-        // Check disk space.
+    /// Starts a background download using a resolved download plan.
+    @MainActor @discardableResult
+    public func startDownload(_ model: DownloadableModel, plan: ModelDownloadPlan) async throws -> DownloadState {
         try await checkDiskSpace(requiredBytes: model.sizeBytes)
-
-        // Ensure the models directory exists.
         try storageService.ensureModelsDirectory()
 
-        // Create the download state.
         let state = DownloadState(model: model)
-
-        // Create and start the URLSession download task.
-        let task = backgroundSession.downloadTask(with: downloadURL)
-        task.taskDescription = model.id
-
-        // Track the mapping.
-        downloadTaskMap[task.taskIdentifier] = model.id
         activeDownloads[model.id] = state
 
-        // Persist pending download info for reconnection.
-        savePendingDownload(model: model)
-
-        task.resume()
-        Log.download.info("Download task \(task.taskIdentifier) started for \(model.id)")
+        switch plan {
+        case .singleFile(let url):
+            Log.download.info("Starting single-file download for \(model.displayName) from \(url)")
+            try startSingleFileDownload(model: model, url: url)
+        case .snapshot(let files):
+            Log.download.info("Starting snapshot download for \(model.displayName) with \(files.count) files")
+            try startSnapshotDownload(model: model, files: files)
+        }
 
         return state
     }
@@ -142,16 +166,28 @@ public final class BackgroundDownloadManager: NSObject {
     @MainActor public func cancelDownload(id: String) {
         Log.download.info("Cancelling download: \(id)")
 
-        // Find and cancel the URLSession task.
         backgroundSession.getAllTasks { [weak self] tasks in
             guard let self else { return }
-            for task in tasks where task.taskDescription == id {
-                task.cancel()
+            for task in tasks {
+                let context = self.taskContext(
+                    for: task.taskIdentifier,
+                    taskDescription: task.taskDescription
+                )
+                if context?.modelID == id {
+                    task.cancel()
+                }
             }
 
             Task { @MainActor in
                 self.activeDownloads[id]?.markCancelled()
                 self.removePendingDownload(id: id)
+                if let snapshot = self.snapshotDownloads.removeValue(forKey: id) {
+                    do {
+                        try FileManager.default.removeItem(at: snapshot.stagingDirectory)
+                    } catch {
+                        Log.download.error("Failed to remove snapshot staging directory: \(error.localizedDescription)")
+                    }
+                }
             }
         }
     }
@@ -223,8 +259,17 @@ public final class BackgroundDownloadManager: NSObject {
             guard FileManager.default.fileExists(atPath: configPath) else {
                 throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory is missing config.json")
             }
-            let contents = try FileManager.default.contentsOfDirectory(atPath: fileURL.path)
-            guard contents.contains(where: { $0.hasSuffix(".safetensors") }) else {
+            guard let enumerator = FileManager.default.enumerator(
+                at: fileURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory could not be enumerated")
+            }
+            let hasSafetensors = enumerator
+                .compactMap { $0 as? URL }
+                .contains { $0.pathExtension.lowercased() == "safetensors" }
+            guard hasSafetensors else {
                 throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory contains no .safetensors files")
             }
         case .foundation:
@@ -264,16 +309,248 @@ public final class BackgroundDownloadManager: NSObject {
         Log.download.debug("GGUF file validated successfully at \(fileURL.lastPathComponent)")
     }
 
+    // MARK: - Download Coordination
+
+    @MainActor
+    private func startSingleFileDownload(model: DownloadableModel, url: URL) throws {
+        let task = backgroundSession.downloadTask(with: url)
+        let context = TaskContext(
+            modelID: model.id,
+            relativePath: nil,
+            expectedBytes: Int64(model.sizeBytes)
+        )
+        task.taskDescription = encodeTaskDescription(context)
+        taskContexts[task.taskIdentifier] = context
+        try savePendingDownload(model: model)
+        task.resume()
+        Log.download.info("Download task \(task.taskIdentifier) started for \(model.id)")
+    }
+
+    @MainActor
+    internal func prepareSnapshotDownload(
+        model: DownloadableModel,
+        files: [ModelDownloadFile],
+        stagingDirectory: URL
+    ) {
+        let metadataFiles = files.map { SnapshotFileMetadata(relativePath: $0.relativePath, sizeBytes: $0.sizeBytes) }
+        snapshotDownloads[model.id] = SnapshotDownloadContext(
+            stagingDirectory: stagingDirectory,
+            files: Dictionary(uniqueKeysWithValues: metadataFiles.map { ($0.relativePath, $0) }),
+            totalBytes: Int64(model.sizeBytes),
+            progressByFile: Dictionary(uniqueKeysWithValues: metadataFiles.map {
+                ($0.relativePath, SnapshotProgress(bytesDownloaded: 0, expectedBytes: Int64($0.sizeBytes)))
+            }),
+            completedFiles: [],
+            taskIDs: []
+        )
+    }
+
+    @MainActor
+    private func startSnapshotDownload(model: DownloadableModel, files: [ModelDownloadFile]) throws {
+        let stagingDirectory = try makeSnapshotStagingDirectory()
+        prepareSnapshotDownload(model: model, files: files, stagingDirectory: stagingDirectory)
+        guard var context = snapshotDownloads[model.id] else {
+            throw HuggingFaceError.invalidDownloadedFile(reason: "Failed to create MLX snapshot context")
+        }
+
+        for file in files {
+            let task = backgroundSession.downloadTask(with: file.url)
+            let taskContext = TaskContext(
+                modelID: model.id,
+                relativePath: file.relativePath,
+                expectedBytes: Int64(file.sizeBytes)
+            )
+            task.taskDescription = encodeTaskDescription(taskContext)
+            taskContexts[task.taskIdentifier] = taskContext
+            context.taskIDs.insert(task.taskIdentifier)
+            task.resume()
+        }
+
+        snapshotDownloads[model.id] = context
+        try savePendingDownload(
+            model: model,
+            snapshotFiles: files.map { SnapshotFileMetadata(relativePath: $0.relativePath, sizeBytes: $0.sizeBytes) },
+            stagingDirectoryName: stagingDirectory.lastPathComponent
+        )
+    }
+
+    private func makeSnapshotStagingDirectory() throws -> URL {
+        let url = storageService.modelsDirectory
+            .appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func encodeTaskDescription(_ context: TaskContext) -> String {
+        do {
+            let data = try JSONEncoder().encode(context)
+            guard let string = String(data: data, encoding: .utf8) else {
+                Log.download.error("Failed to encode task description for \(context.modelID)")
+                return context.modelID
+            }
+            return string
+        } catch {
+            Log.download.error("Failed to encode task description for \(context.modelID): \(error.localizedDescription)")
+            return context.modelID
+        }
+    }
+
+    private func taskContext(for taskID: Int, taskDescription: String?) -> TaskContext? {
+        if let context = taskContexts[taskID] {
+            return context
+        }
+        guard let taskDescription else { return nil }
+        if let data = taskDescription.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(TaskContext.self, from: data) {
+            return decoded
+        }
+        return TaskContext(modelID: taskDescription, relativePath: nil, expectedBytes: 0)
+    }
+
+    @MainActor
+    private func removeTaskTracking(taskID: Int, modelID: String) {
+        taskContexts.removeValue(forKey: taskID)
+        guard var snapshot = snapshotDownloads[modelID] else { return }
+        snapshot.taskIDs.remove(taskID)
+        snapshotDownloads[modelID] = snapshot
+    }
+
+    @MainActor
+    internal func updateSnapshotProgress(
+        modelID: String,
+        relativePath: String,
+        bytesDownloaded: Int64,
+        totalBytesExpected: Int64
+    ) {
+        guard var snapshot = snapshotDownloads[modelID] else { return }
+        let fallbackExpected = snapshot.files[relativePath].map { Int64($0.sizeBytes) } ?? 0
+        let expectedBytes = totalBytesExpected > 0 ? totalBytesExpected : fallbackExpected
+        snapshot.progressByFile[relativePath] = SnapshotProgress(
+            bytesDownloaded: bytesDownloaded,
+            expectedBytes: expectedBytes
+        )
+        snapshotDownloads[modelID] = snapshot
+
+        let totalDownloaded = snapshot.progressByFile.values.reduce(0) { $0 + $1.bytesDownloaded }
+        let totalExpected: Int64
+        if snapshot.totalBytes > 0 {
+            totalExpected = snapshot.totalBytes
+        } else {
+            totalExpected = snapshot.progressByFile.values.reduce(0) { $0 + $1.expectedBytes }
+        }
+        activeDownloads[modelID]?.updateProgress(
+            bytesDownloaded: totalDownloaded,
+            totalBytes: totalExpected
+        )
+    }
+
+    @MainActor
+    internal func completeSnapshotFile(
+        modelID: String,
+        relativePath: String,
+        tempURL: URL
+    ) throws {
+        guard var snapshot = snapshotDownloads[modelID] else {
+            throw HuggingFaceError.invalidDownloadedFile(reason: "Missing snapshot context for MLX download")
+        }
+
+        let destination = snapshot.stagingDirectory.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.moveItem(at: tempURL, to: destination)
+
+        let fileSize = (try FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value ?? snapshot.progressByFile[relativePath]?.expectedBytes ?? 0
+        snapshot.completedFiles.insert(relativePath)
+        snapshot.progressByFile[relativePath] = SnapshotProgress(
+            bytesDownloaded: fileSize,
+            expectedBytes: snapshot.progressByFile[relativePath]?.expectedBytes ?? fileSize
+        )
+        snapshotDownloads[modelID] = snapshot
+
+        let totalDownloaded = snapshot.progressByFile.values.reduce(0) { $0 + $1.bytesDownloaded }
+        let totalExpected = snapshot.totalBytes > 0
+            ? snapshot.totalBytes
+            : snapshot.progressByFile.values.reduce(0) { $0 + $1.expectedBytes }
+        activeDownloads[modelID]?.updateProgress(
+            bytesDownloaded: totalDownloaded,
+            totalBytes: totalExpected
+        )
+
+        guard snapshot.completedFiles.count == snapshot.files.count else { return }
+
+        try validateDownloadedFile(at: snapshot.stagingDirectory, modelType: .mlx)
+        let finalURL = storageService.modelsDirectory.appendingPathComponent(activeDownloads[modelID]?.model.fileName ?? snapshot.stagingDirectory.lastPathComponent)
+        if FileManager.default.fileExists(atPath: finalURL.path) {
+            try FileManager.default.removeItem(at: finalURL)
+        }
+        try FileManager.default.moveItem(at: snapshot.stagingDirectory, to: finalURL)
+        activeDownloads[modelID]?.markCompleted(localURL: finalURL)
+        removePendingDownload(id: modelID)
+        snapshotDownloads.removeValue(forKey: modelID)
+    }
+
+    @MainActor
+    private func failSnapshotDownload(modelID: String, error: String, cancelRemainingTasks: Bool) {
+        guard let snapshot = snapshotDownloads[modelID] else {
+            if case .failed = activeDownloads[modelID]?.status {
+                return
+            }
+            activeDownloads[modelID]?.markFailed(error: error)
+            removePendingDownload(id: modelID)
+            return
+        }
+
+        if cancelRemainingTasks {
+            backgroundSession.getAllTasks { [weak self] tasks in
+                guard let self else { return }
+                let activeTaskIDs = snapshot.taskIDs
+                for task in tasks where activeTaskIDs.contains(task.taskIdentifier) {
+                    task.cancel()
+                }
+            }
+        }
+
+        activeDownloads[modelID]?.markFailed(error: error)
+        removePendingDownload(id: modelID)
+        snapshotDownloads.removeValue(forKey: modelID)
+        do {
+            try FileManager.default.removeItem(at: snapshot.stagingDirectory)
+        } catch {
+            Log.download.error("Failed to remove snapshot staging directory: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Persistence (Pending Downloads)
 
-    private func savePendingDownload(model: DownloadableModel) {
+    private func savePendingDownload(
+        model: DownloadableModel,
+        snapshotFiles: [SnapshotFileMetadata] = [],
+        stagingDirectoryName: String? = nil
+    ) throws {
         var pending = defaults.dictionary(forKey: pendingDownloadsKey) as? [String: [String: String]] ?? [:]
-        pending[model.id] = [
+        var entry = [
             "repoID": model.repoID,
             "fileName": model.fileName,
             "displayName": model.displayName,
-            "modelType": model.modelType == .gguf ? "gguf" : "mlx"
+            "modelType": model.modelType == .gguf ? "gguf" : "mlx",
+            "sizeBytes": String(model.sizeBytes),
         ]
+        if !snapshotFiles.isEmpty {
+            let data = try JSONEncoder().encode(snapshotFiles)
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw HuggingFaceError.invalidDownloadedFile(reason: "Failed to encode pending snapshot metadata")
+            }
+            entry["snapshotFiles"] = json
+        }
+        if let stagingDirectoryName {
+            entry["stagingDirectoryName"] = stagingDirectoryName
+        }
+        pending[model.id] = entry
         defaults.set(pending, forKey: pendingDownloadsKey)
     }
 
@@ -302,10 +579,36 @@ public final class BackgroundDownloadManager: NSObject {
                 fileName: fileName,
                 displayName: displayName,
                 modelType: modelType,
-                sizeBytes: 0  // Unknown after restart; progress will update it.
+                sizeBytes: UInt64(info["sizeBytes"] ?? "") ?? 0
             )
             let state = DownloadState(model: model)
             activeDownloads[id] = state
+            if modelType == .mlx,
+               let stagingDirectoryName = info["stagingDirectoryName"],
+               let snapshotJSON = info["snapshotFiles"],
+               let snapshotData = snapshotJSON.data(using: .utf8) {
+                do {
+                    let files = try JSONDecoder().decode([SnapshotFileMetadata].self, from: snapshotData)
+                    snapshotDownloads[id] = SnapshotDownloadContext(
+                        stagingDirectory: storageService.modelsDirectory.appendingPathComponent(
+                            stagingDirectoryName,
+                            isDirectory: true
+                        ),
+                        files: Dictionary(uniqueKeysWithValues: files.map { ($0.relativePath, $0) }),
+                        totalBytes: Int64(model.sizeBytes),
+                        progressByFile: Dictionary(uniqueKeysWithValues: files.map {
+                            ($0.relativePath, SnapshotProgress(
+                                bytesDownloaded: 0,
+                                expectedBytes: Int64($0.sizeBytes)
+                            ))
+                        }),
+                        completedFiles: [],
+                        taskIDs: []
+                    )
+                } catch {
+                    Log.download.error("Failed to restore snapshot metadata for \(id): \(error.localizedDescription)")
+                }
+            }
             Log.download.info("Restored pending download state for \(id)")
         }
     }
@@ -326,11 +629,21 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
         let taskDescription = downloadTask.taskDescription
 
         Task { @MainActor [weak self] in
-            guard let modelID = self?.downloadTaskMap[taskID] ?? taskDescription else { return }
-            self?.activeDownloads[modelID]?.updateProgress(
-                bytesDownloaded: totalBytesWritten,
-                totalBytes: totalBytesExpectedToWrite
-            )
+            guard let self,
+                  let context = self.taskContext(for: taskID, taskDescription: taskDescription) else { return }
+            if let relativePath = context.relativePath {
+                self.updateSnapshotProgress(
+                    modelID: context.modelID,
+                    relativePath: relativePath,
+                    bytesDownloaded: totalBytesWritten,
+                    totalBytesExpected: totalBytesExpectedToWrite
+                )
+            } else {
+                self.activeDownloads[context.modelID]?.updateProgress(
+                    bytesDownloaded: totalBytesWritten,
+                    totalBytes: totalBytesExpectedToWrite
+                )
+            }
         }
     }
 
@@ -357,43 +670,57 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
 
-            guard let modelID = self.downloadTaskMap[taskID] ?? taskDescription else {
+            guard let context = self.taskContext(for: taskID, taskDescription: taskDescription) else {
                 Log.download.error("Completed download has no model ID mapping (task \(taskID))")
                 return
             }
 
-            guard let state = self.activeDownloads[modelID] else {
-                Log.download.error("No DownloadState for completed download: \(modelID)")
+            guard let state = self.activeDownloads[context.modelID] else {
+                Log.download.error("No DownloadState for completed download: \(context.modelID)")
                 return
             }
 
             let model = state.model
 
             do {
-                // Validate the downloaded file.
-                try self.validateDownloadedFile(at: tempURL, modelType: model.modelType)
+                if let relativePath = context.relativePath {
+                    try self.completeSnapshotFile(
+                        modelID: context.modelID,
+                        relativePath: relativePath,
+                        tempURL: tempURL
+                    )
+                } else {
+                    try self.validateDownloadedFile(at: tempURL, modelType: model.modelType)
+                    let destination = self.storageService.modelsDirectory.appendingPathComponent(model.fileName)
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        try FileManager.default.removeItem(at: destination)
+                    }
 
-                // Move to the models directory.
-                let destination = self.storageService.modelsDirectory.appendingPathComponent(model.fileName)
+                    try FileManager.default.moveItem(at: tempURL, to: destination)
+                    Log.download.info("Download complete: \(model.displayName) → \(destination.lastPathComponent)")
 
-                // Remove any existing file at the destination.
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
+                    self.activeDownloads[context.modelID]?.markCompleted(localURL: destination)
+                    self.removePendingDownload(id: context.modelID)
                 }
-
-                try FileManager.default.moveItem(at: tempURL, to: destination)
-                Log.download.info("Download complete: \(model.displayName) → \(destination.lastPathComponent)")
-
-                self.activeDownloads[modelID]?.markCompleted(localURL: destination)
-                self.removePendingDownload(id: modelID)
-                self.downloadTaskMap.removeValue(forKey: taskID)
+                self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
             } catch {
-                Log.download.error("Post-download processing failed for \(modelID): \(error.localizedDescription)")
-                self.activeDownloads[modelID]?.markFailed(error: error.localizedDescription)
-                self.removePendingDownload(id: modelID)
-                self.downloadTaskMap.removeValue(forKey: taskID)
-                // Clean up temp file on failure.
-                try? FileManager.default.removeItem(at: tempURL)
+                Log.download.error("Post-download processing failed for \(context.modelID): \(error.localizedDescription)")
+                if context.relativePath != nil {
+                    self.failSnapshotDownload(
+                        modelID: context.modelID,
+                        error: error.localizedDescription,
+                        cancelRemainingTasks: true
+                    )
+                } else {
+                    self.activeDownloads[context.modelID]?.markFailed(error: error.localizedDescription)
+                    self.removePendingDownload(id: context.modelID)
+                }
+                self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
+                do {
+                    try FileManager.default.removeItem(at: tempURL)
+                } catch {
+                    Log.download.error("Failed to remove temp download \(tempURL.lastPathComponent): \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -412,17 +739,30 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let modelID = self.downloadTaskMap[taskID] ?? taskDescription ?? "unknown"
-            Log.download.error("Download failed for \(modelID): \(errorDesc)")
+            guard let context = self.taskContext(for: taskID, taskDescription: taskDescription) else { return }
+            Log.download.error("Download failed for \(context.modelID): \(errorDesc)")
 
-            // Don't report cancellation as a failure.
             if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
-                self.activeDownloads[modelID]?.markCancelled()
+                if context.relativePath != nil {
+                    if case .failed = self.activeDownloads[context.modelID]?.status {
+                        self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
+                        return
+                    }
+                }
+                self.activeDownloads[context.modelID]?.markCancelled()
             } else {
-                self.activeDownloads[modelID]?.markFailed(error: errorDesc)
+                if context.relativePath != nil {
+                    self.failSnapshotDownload(
+                        modelID: context.modelID,
+                        error: errorDesc,
+                        cancelRemainingTasks: true
+                    )
+                } else {
+                    self.activeDownloads[context.modelID]?.markFailed(error: errorDesc)
+                }
             }
-            self.removePendingDownload(id: modelID)
-            self.downloadTaskMap.removeValue(forKey: taskID)
+            self.removePendingDownload(id: context.modelID)
+            self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
         }
     }
 }

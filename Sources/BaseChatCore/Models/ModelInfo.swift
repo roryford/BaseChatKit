@@ -99,19 +99,36 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         let configURL = url.appendingPathComponent("config.json")
         guard fileManager.fileExists(atPath: configURL.path) else { return nil }
 
-        // Sum the sizes of all files in the directory.
         guard let contents = try? fileManager.contentsOfDirectory(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey],
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
             return nil
         }
 
-        let totalSize = contents.reduce(UInt64(0)) { sum, fileURL in
-            let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-            return sum + UInt64(size)
+        let allFiles = contents.flatMap { child -> [URL] in
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: child.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                return [child]
+            }
+            guard let enumerator = fileManager.enumerator(
+                at: child,
+                includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                return [child]
+            }
+            return enumerator.compactMap { $0 as? URL }
         }
+
+        let totalSize = allFiles.reduce(UInt64(0)) { sum, fileURL in
+            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values?.isRegularFile == true else { return sum }
+            return sum + UInt64(values?.fileSize ?? 0)
+        }
+        let hasSafetensors = allFiles.contains { $0.pathExtension.lowercased() == "safetensors" }
+        guard hasSafetensors else { return nil }
 
         self.id = UUID()
         self.fileName = url.lastPathComponent

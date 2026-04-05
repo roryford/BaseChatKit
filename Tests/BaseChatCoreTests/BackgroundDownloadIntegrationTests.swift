@@ -386,6 +386,78 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         )
     }
 
+    func test_reconnectBackgroundSession_restoresPendingMLXSnapshotMetadata() throws {
+        let realKey = BaseChatConfiguration.shared.pendingDownloadsKey
+        let previousValue = UserDefaults.standard.dictionary(forKey: realKey)
+        defer {
+            if let previousValue {
+                UserDefaults.standard.set(previousValue, forKey: realKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: realKey)
+            }
+        }
+
+        let manager = BackgroundDownloadManager(
+            storageService: ModelStorageService(baseDirectory: tempDirectory)
+        )
+        let model = makeModel(
+            repoID: "mlx-community/Test-4bit",
+            fileName: "Test-4bit",
+            displayName: "Test 4bit",
+            modelType: .mlx,
+            sizeBytes: 1_000
+        )
+        let snapshotFiles = """
+            [
+              { "relativePath": "config.json", "sizeBytes": 100 },
+              { "relativePath": "weights/model.safetensors", "sizeBytes": 900 }
+            ]
+            """
+        let pending: [String: [String: String]] = [
+            model.id: [
+                "repoID": model.repoID,
+                "fileName": model.fileName,
+                "displayName": model.displayName,
+                "modelType": "mlx",
+                "sizeBytes": "1000",
+                "stagingDirectoryName": ".staging-test-mlx",
+                "snapshotFiles": snapshotFiles,
+            ]
+        ]
+        UserDefaults.standard.set(pending, forKey: realKey)
+        UserDefaults.standard.synchronize()
+
+        manager.reconnectBackgroundSession()
+
+        let restored = try XCTUnwrap(manager.activeDownloads[model.id])
+        XCTAssertEqual(restored.model.modelType, .mlx)
+        XCTAssertEqual(restored.model.sizeBytes, 1_000)
+
+        let configTemp = tempDirectory.appendingPathComponent("config.restore")
+        try Data("{}".utf8).write(to: configTemp)
+        try manager.completeSnapshotFile(
+            modelID: model.id,
+            relativePath: "config.json",
+            tempURL: configTemp
+        )
+
+        let weightsTemp = tempDirectory.appendingPathComponent("weights.restore")
+        try Data(repeating: 0xAB, count: 900).write(to: weightsTemp)
+        try manager.completeSnapshotFile(
+            modelID: model.id,
+            relativePath: "weights/model.safetensors",
+            tempURL: weightsTemp
+        )
+
+        guard case .completed(let localURL) = restored.status else {
+            return XCTFail("Restored MLX snapshot should still be completable after reconnect")
+        }
+        XCTAssertEqual(
+            localURL.standardizedFileURL.path,
+            tempDirectory.appendingPathComponent("Test-4bit").standardizedFileURL.path
+        )
+    }
+
     func test_pendingDownload_removedOnCancellation() async throws {
         let realKey = BaseChatConfiguration.shared.pendingDownloadsKey
         defer {
