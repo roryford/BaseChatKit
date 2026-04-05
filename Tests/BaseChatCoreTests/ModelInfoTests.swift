@@ -87,6 +87,22 @@ final class ModelInfoTests: XCTestCase {
         XCTAssertNil(model)
     }
 
+    func test_mlxInit_nestedSafetensors_countsRecursiveSize() throws {
+        let mlxDir = tempDirectory.appendingPathComponent("nested-mlx-model")
+        try FileManager.default.createDirectory(at: mlxDir, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: mlxDir.appendingPathComponent("config.json"))
+
+        let weightsDirectory = mlxDir.appendingPathComponent("weights", isDirectory: true)
+        try FileManager.default.createDirectory(at: weightsDirectory, withIntermediateDirectories: true)
+        let weightsData = Data(repeating: 0xAB, count: 2048)
+        try weightsData.write(to: weightsDirectory.appendingPathComponent("model.safetensors"))
+
+        let model = try XCTUnwrap(ModelInfo(mlxDirectory: mlxDir))
+
+        XCTAssertEqual(model.modelType, .mlx)
+        XCTAssertEqual(model.fileSize, UInt64(2 + weightsData.count))
+    }
+
     // MARK: - Memberwise Initializer
 
     func test_memberwiseInit_setsAllFields() {
@@ -152,6 +168,7 @@ final class ModelInfoTests: XCTestCase {
         let mlxDir = tempDirectory.appendingPathComponent("phi-3-mini-4bit")
         try FileManager.default.createDirectory(at: mlxDir, withIntermediateDirectories: true)
         try Data("{}".utf8).write(to: mlxDir.appendingPathComponent("config.json"))
+        try Data(repeating: 0x00, count: 1).write(to: mlxDir.appendingPathComponent("model.safetensors"))
 
         let model = ModelInfo(mlxDirectory: mlxDir)
 

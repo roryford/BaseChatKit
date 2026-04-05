@@ -93,6 +93,19 @@ public final class ModelManagementViewModel {
         )
     }
 
+    /// Creates a lightweight model manager for Xcode previews.
+    ///
+    /// Skips URLSession background session reconnection and HuggingFace setup,
+    /// which are unnecessary and slow in the preview environment.
+    public static func preview() -> ModelManagementViewModel {
+        ModelManagementViewModel(
+            huggingFaceService: nil,
+            downloadManager: nil,
+            deviceCapability: DeviceCapabilityService(),
+            modelStorage: ModelStorageService()
+        )
+    }
+
     // MARK: - Computed Properties
 
     /// The recommended model size tier for this device.
@@ -223,11 +236,10 @@ public final class ModelManagementViewModel {
             return
         }
 
-        let url = service.downloadURL(for: model)
-
         Task {
             do {
-                let state = try await manager.startDownload(model, downloadURL: url)
+                let plan = try await service.downloadPlan(for: model)
+                let state = try await manager.startDownload(model, plan: plan)
                 trackedDownloads[model.id] = state
                 Log.download.info("Started download: \(model.displayName), id=\(state.id)")
                 startDownloadSync()

@@ -21,6 +21,9 @@ public protocol HuggingFaceServiceProtocol: Sendable {
     /// Fetches all downloadable files (GGUF + MLX) for a specific HuggingFace repo.
     func getModelFiles(repoID: String) async throws -> [DownloadableModel]
 
+    /// Resolves the concrete file download plan for a model.
+    func downloadPlan(for model: DownloadableModel) async throws -> ModelDownloadPlan
+
     /// Constructs the direct download URL for a model file on HuggingFace.
     func downloadURL(for model: DownloadableModel) -> URL
 }
@@ -56,17 +59,12 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
             throw HuggingFaceError.searchFailed(underlying: error)
         }
 
-        // Filter to repos that contain GGUF files (single-file downloadable).
-        // MLX repos require snapshot downloads (multiple files) which is not yet supported.
-        let ggufRepos = response.items.filter { model in
-            guard let siblings = model.siblings else { return false }
-            return siblings.contains { $0.relativeFilename.lowercased().hasSuffix(".gguf") }
-        }
+        let downloadableRepos = response.items.filter(isDownloadableRepo)
 
-        // Fetch each GGUF repo with filesMetadata to get actual file sizes.
+        // Fetch each downloadable repo with filesMetadata to get actual file sizes.
         var allModels: [DownloadableModel] = []
         await withTaskGroup(of: [DownloadableModel].self) { group in
-            for model in ggufRepos {
+            for model in downloadableRepos {
                 group.addTask {
                     do {
                         let detailed = try await self.hubClient.getModel(
@@ -86,7 +84,7 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
             }
         }
 
-        Log.network.info("Search returned \(allModels.count) downloadable files from \(ggufRepos.count) repos")
+        Log.network.info("Search returned \(allModels.count) downloadable files from \(downloadableRepos.count) repos")
         return allModels
     }
 
@@ -124,14 +122,46 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
         return downloadables
     }
 
+    public func downloadPlan(for model: DownloadableModel) async throws -> ModelDownloadPlan {
+        switch model.modelType {
+        case .gguf:
+            return .singleFile(url: downloadURL(for: model))
+        case .mlx:
+            guard let repoIdentifier = Repo.ID(rawValue: model.repoID) else {
+                throw HuggingFaceError.invalidRepoID(model.repoID)
+            }
+            let detailed: Model
+            do {
+                detailed = try await hubClient.getModel(
+                    repoIdentifier,
+                    full: true,
+                    filesMetadata: true
+                )
+            } catch {
+                Log.network.error("Failed to fetch MLX snapshot for \(model.repoID): \(error.localizedDescription)")
+                throw HuggingFaceError.modelNotFound(repoID: model.repoID)
+            }
+            let files = snapshotFiles(from: detailed)
+            guard !files.isEmpty else {
+                throw HuggingFaceError.invalidDownloadedFile(reason: "MLX repo has no snapshot files to download")
+            }
+            return .snapshot(files: files)
+        case .foundation:
+            throw HuggingFaceError.invalidDownloadedFile(reason: "Foundation models cannot be downloaded")
+        }
+    }
+
     // MARK: - Download URL
 
     public func downloadURL(for model: DownloadableModel) -> URL {
-        // HuggingFace direct download: https://huggingface.co/{repoID}/resolve/main/{fileName}
+        downloadURL(repoID: model.repoID, filePath: model.fileName)
+    }
+
+    func downloadURL(repoID: String, filePath: String) -> URL {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "huggingface.co"
-        components.path = "/\(model.repoID)/resolve/main/\(model.fileName)"
+        components.path = "/\(repoID)/resolve/main/\(filePath)"
         // Force unwrap is safe here: we control the components and they are always valid.
         // swiftlint:disable:next force_unwrapping
         return components.url!
@@ -140,10 +170,7 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
     // MARK: - Private Helpers
 
     /// Converts a HuggingFace `Model` into zero or more `DownloadableModel` entries.
-    ///
-    /// Currently only supports GGUF repos (one entry per `.gguf` file).
-    /// MLX repos require snapshot downloads (multiple files) which is not yet implemented.
-    private func convertModelToDownloadables(_ model: Model) -> [DownloadableModel] {
+    internal func convertModelToDownloadables(_ model: Model) -> [DownloadableModel] {
         guard let siblings = model.siblings else { return [] }
 
         let repoID = model.id.rawValue
@@ -171,11 +198,50 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
             ))
         }
 
-        // MLX repos (config.json + .safetensors) are not included in search results
-        // because they require snapshot downloads (multiple files), which is not yet
-        // supported. Users can manually import MLX models via drag-and-drop on macOS.
+        let snapshotFiles = snapshotFiles(from: model)
+        if !snapshotFiles.isEmpty {
+            let repoName = model.id.name
+            results.append(DownloadableModel(
+                repoID: repoID,
+                fileName: repoName,
+                displayName: Self.cleanDisplayName(from: repoName),
+                modelType: .mlx,
+                sizeBytes: snapshotFiles.reduce(0) { $0 + $1.sizeBytes },
+                downloads: model.downloads,
+                isCurated: false,
+                promptTemplate: nil,
+                description: nil
+            ))
+        }
 
         return results
+    }
+
+    private func isDownloadableRepo(_ model: Model) -> Bool {
+        guard let siblings = model.siblings else { return false }
+        return hasGGUFFiles(in: siblings) || isMLXSnapshot(siblings)
+    }
+
+    private func hasGGUFFiles(in siblings: [Model.SiblingInfo]) -> Bool {
+        siblings.contains { $0.relativeFilename.lowercased().hasSuffix(".gguf") }
+    }
+
+    private func isMLXSnapshot(_ siblings: [Model.SiblingInfo]) -> Bool {
+        let lowercasedNames = siblings.map { $0.relativeFilename.lowercased() }
+        let hasConfig = lowercasedNames.contains("config.json")
+        let hasSafetensors = lowercasedNames.contains { $0.hasSuffix(".safetensors") }
+        return hasConfig && hasSafetensors
+    }
+
+    private func snapshotFiles(from model: Model) -> [ModelDownloadFile] {
+        guard let siblings = model.siblings, isMLXSnapshot(siblings) else { return [] }
+        return siblings.map { file in
+            ModelDownloadFile(
+                relativePath: file.relativeFilename,
+                url: downloadURL(repoID: model.id.rawValue, filePath: file.relativeFilename),
+                sizeBytes: UInt64(file.size ?? 0)
+            )
+        }
     }
 
     /// Converts a repo name like "Mistral-7B-Instruct-v0.3-GGUF" into "Mistral 7B Instruct v0.3 GGUF".

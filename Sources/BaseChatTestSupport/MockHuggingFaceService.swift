@@ -10,6 +10,8 @@ public final class MockHuggingFaceService: HuggingFaceServiceProtocol {
         var searchResults: [DownloadableModel] = []
         var searchError: Error?
         var modelFiles: [DownloadableModel] = []
+        var downloadPlans: [String: ModelDownloadPlan] = [:]
+        var downloadPlanError: Error?
         var searchCallCount = 0
     }
 
@@ -34,6 +36,16 @@ public final class MockHuggingFaceService: HuggingFaceServiceProtocol {
         state.withLock { $0.searchCallCount }
     }
 
+    public var downloadPlans: [String: ModelDownloadPlan] {
+        get { state.withLock { $0.downloadPlans } }
+        set { state.withLock { $0.downloadPlans = newValue } }
+    }
+
+    public var downloadPlanError: Error? {
+        get { state.withLock { $0.downloadPlanError } }
+        set { state.withLock { $0.downloadPlanError = newValue } }
+    }
+
     public init() {}
 
     public func searchModels(query: String) async throws -> [DownloadableModel] {
@@ -53,6 +65,15 @@ public final class MockHuggingFaceService: HuggingFaceServiceProtocol {
 
     public func getModelFiles(repoID: String) async throws -> [DownloadableModel] {
         state.withLock { $0.modelFiles }
+    }
+
+    public func downloadPlan(for model: DownloadableModel) async throws -> ModelDownloadPlan {
+        let (error, configuredPlan) = state.withLock { state in
+            (state.downloadPlanError, state.downloadPlans[model.id])
+        }
+        if let error { throw error }
+        if let configuredPlan { return configuredPlan }
+        return .singleFile(url: downloadURL(for: model))
     }
 
     public func downloadURL(for model: DownloadableModel) -> URL {
