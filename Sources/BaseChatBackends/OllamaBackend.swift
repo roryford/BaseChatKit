@@ -63,7 +63,8 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
             supportsStructuredOutput: false,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
-            memoryStrategy: .external
+            memoryStrategy: .external,
+            isRemote: true
         )
     }
 

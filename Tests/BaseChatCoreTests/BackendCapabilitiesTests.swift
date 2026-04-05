@@ -300,6 +300,47 @@ final class BackendCapabilitiesTests: XCTestCase {
         }
     }
 
+    // MARK: - Codable contract (public API shape lock)
+
+    /// Documents the exact JSON field names of BackendCapabilities.
+    /// If this test breaks, you are intentionally changing a public contract — update the fixture.
+    func test_codableContract_roundTrip() throws {
+        let json = """
+        {
+            "supportedParameters": ["temperature", "topP"],
+            "maxContextTokens": 128000,
+            "maxOutputTokens": 8192,
+            "requiresPromptTemplate": false,
+            "supportsSystemPrompt": true,
+            "supportsStreaming": true,
+            "supportsToolCalling": true,
+            "supportsStructuredOutput": true,
+            "cancellationStyle": "cooperative",
+            "supportsTokenCounting": true,
+            "memoryStrategy": "external",
+            "isRemote": false
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(BackendCapabilities.self, from: json)
+        let reencoded = try JSONDecoder().decode(BackendCapabilities.self,
+                            from: JSONEncoder().encode(decoded))
+
+        XCTAssertEqual(decoded, reencoded)
+        XCTAssertEqual(decoded.supportedParameters, [.temperature, .topP])
+        XCTAssertEqual(decoded.maxContextTokens, 128_000)
+        XCTAssertEqual(decoded.maxOutputTokens, 8192)
+        XCTAssertFalse(decoded.requiresPromptTemplate)
+        XCTAssertTrue(decoded.supportsSystemPrompt)
+        XCTAssertTrue(decoded.supportsStreaming)
+        XCTAssertTrue(decoded.supportsToolCalling)
+        XCTAssertTrue(decoded.supportsStructuredOutput)
+        XCTAssertEqual(decoded.cancellationStyle, .cooperative)
+        XCTAssertTrue(decoded.supportsTokenCounting)
+        XCTAssertEqual(decoded.memoryStrategy, .external)
+        XCTAssertFalse(decoded.isRemote)
+    }
+
     // MARK: - PromptAssembler reads contextWindowSize from capabilities
 
     func test_promptAssembler_capabilities_overload_usesContextWindowSize() {
