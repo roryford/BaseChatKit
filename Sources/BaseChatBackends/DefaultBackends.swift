@@ -42,6 +42,8 @@ public enum DefaultBackends {
 
     @MainActor
     public static func register(with service: InferenceService) {
+        PinnedSessionDelegate.loadDefaultPins()
+
         service.registerBackendFactory { modelType in
             switch modelType {
             #if MLX

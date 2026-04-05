@@ -48,9 +48,26 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
             _pinnedHosts = newValue
         }
     }
-    // Populate with actual SPKI SHA-256 base64 hashes before enabling:
-    // pinnedHosts["api.anthropic.com"] = Set(["hash1...", "hash2-backup..."])
-    // pinnedHosts["api.openai.com"] = Set(["hash1...", "hash2-backup..."])
+    /// Populates pin sets for known production hosts on first access.
+    ///
+    /// Pins target the intermediate CA (Google Trust Services WE1) and its
+    /// issuing root (GTS Root R4). Intermediate pins are more stable than leaf
+    /// pins — they survive individual certificate renewals and only change when
+    /// the provider rotates its signing infrastructure.
+    ///
+    /// **Rotation procedure:**
+    /// 1. Run the `openssl` pipeline from the doc comment above for each host.
+    /// 2. Add the *new* intermediate/root pins to the set **before** removing old ones.
+    /// 3. Ship the update. Once no connections use the old chain, remove stale pins.
+    static func loadDefaultPins() {
+        // Google Trust Services WE1 (intermediate — shared by both hosts)
+        let gtsWE1 = "kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4="
+        // GTS Root R4 (root CA — backup pin for rotation safety)
+        let gtsRootR4 = "mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c="
+
+        pinnedHosts["api.anthropic.com"] = Set([gtsWE1, gtsRootR4])
+        pinnedHosts["api.openai.com"] = Set([gtsWE1, gtsRootR4])
+    }
 
     /// Hosts that bypass pinning entirely (local development servers).
     private static let bypassHosts: Set<String> = [
@@ -113,28 +130,31 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
             return
         }
 
-        // Extract the leaf certificate's public key and compute its SPKI SHA-256 hash.
-        guard let leafCert = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
-              let certificate = leafCert.first,
-              let publicKey = SecCertificateCopyKey(certificate) else {
+        // Check every certificate in the chain (leaf, intermediates, root) against
+        // the pin set. This lets us pin intermediates or roots — more stable than
+        // leaf-only pinning because individual server certs rotate frequently.
+        guard let certChain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
+              !certChain.isEmpty else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
-        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
+        for certificate in certChain {
+            guard let publicKey = SecCertificateCopyKey(certificate),
+                  let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
+                continue
+            }
+            let hash = sha256(data: publicKeyData)
+            let base64Hash = hash.base64EncodedString()
+
+            if expectedPins.contains(base64Hash) {
+                completionHandler(.useCredential, URLCredential(trust: serverTrust))
+                return
+            }
         }
 
-        let hash = sha256(data: publicKeyData)
-        let base64Hash = hash.base64EncodedString()
-
-        if expectedPins.contains(base64Hash) {
-            completionHandler(.useCredential, URLCredential(trust: serverTrust))
-        } else {
-            Log.network.error("Certificate pin mismatch for \(host). Expected one of \(expectedPins.count) pins, got: \(base64Hash)")
-            completionHandler(.cancelAuthenticationChallenge, nil)
-        }
+        Log.network.error("Certificate pin mismatch for \(host). No certificate in chain matched any of \(expectedPins.count) pins.")
+        completionHandler(.cancelAuthenticationChallenge, nil)
     }
 
     // MARK: - Helpers

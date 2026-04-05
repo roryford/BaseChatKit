@@ -75,6 +75,40 @@ final class PinnedSessionDelegateTests: XCTestCase {
         await verifyRequiredHostNoPinsCancels("api.anthropic.com")
     }
 
+    // MARK: - Default Pins
+
+    func test_loadDefaultPins_populatesBothHosts() {
+        let savedPins = PinnedSessionDelegate.pinnedHosts
+        PinnedSessionDelegate.pinnedHosts = [:]
+        defer { PinnedSessionDelegate.pinnedHosts = savedPins }
+
+        PinnedSessionDelegate.loadDefaultPins()
+
+        let anthropicPins = PinnedSessionDelegate.pinnedHosts["api.anthropic.com"]
+        let openAIPins = PinnedSessionDelegate.pinnedHosts["api.openai.com"]
+
+        XCTAssertNotNil(anthropicPins, "Anthropic pins should be populated after loadDefaultPins()")
+        XCTAssertNotNil(openAIPins, "OpenAI pins should be populated after loadDefaultPins()")
+        XCTAssertGreaterThanOrEqual(anthropicPins?.count ?? 0, 2,
+                                     "Should have at least 2 pins (intermediate + root) for rotation safety")
+        XCTAssertGreaterThanOrEqual(openAIPins?.count ?? 0, 2,
+                                     "Should have at least 2 pins (intermediate + root) for rotation safety")
+    }
+
+    func test_loadDefaultPins_isIdempotent() {
+        let savedPins = PinnedSessionDelegate.pinnedHosts
+        PinnedSessionDelegate.pinnedHosts = [:]
+        defer { PinnedSessionDelegate.pinnedHosts = savedPins }
+
+        PinnedSessionDelegate.loadDefaultPins()
+        let firstLoad = PinnedSessionDelegate.pinnedHosts
+
+        PinnedSessionDelegate.loadDefaultPins()
+        let secondLoad = PinnedSessionDelegate.pinnedHosts
+
+        XCTAssertEqual(firstLoad, secondLoad, "Calling loadDefaultPins() twice should produce identical pin sets")
+    }
+
     // MARK: - Non-ServerTrust Challenge
 
     func test_nonServerTrustChallenge_returnsDefaultHandling() async {
