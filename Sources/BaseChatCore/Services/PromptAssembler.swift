@@ -135,16 +135,24 @@ public enum PromptAssembler {
         var result: [(role: String, content: String)] = topSlots.map { (role: "system", content: $0.content) }
         var messageTuples = messages.map { (role: $0.role.rawValue, content: $0.content) }
 
-        // Process highest insertion depth first so that earlier inserts don't shift the
-        // indices of later (lower-depth) inserts.
+        // Process lowest depth first (bottom-to-top) using the original message count
+        // for all index calculations, so that earlier inserts don't perturb the targets
+        // of later ones. For slots at the same depth, reverse input order before inserting
+        // so that the final array reflects the original input order.
         let originalCount = messageTuples.count
-        let sorted = historySlots.sorted {
-            $0.position.insertionDepth(messageCount: originalCount) >
-            $1.position.insertionDepth(messageCount: originalCount)
-        }
+        let sorted = historySlots
+            .enumerated()
+            .sorted { lhs, rhs in
+                let ld = lhs.element.position.insertionDepth(messageCount: originalCount)
+                let rd = rhs.element.position.insertionDepth(messageCount: originalCount)
+                // Ascending depth (bottom first); within same depth, reverse offset so
+                // final order matches input order after same-index inserts.
+                return ld == rd ? lhs.offset > rhs.offset : ld < rd
+            }
+            .map(\.element)
         for slot in sorted {
             let depth = slot.position.insertionDepth(messageCount: originalCount)
-            let idx = max(0, messageTuples.count - depth)
+            let idx = max(0, originalCount - depth)
             messageTuples.insert((role: "system", content: slot.content), at: idx)
         }
 

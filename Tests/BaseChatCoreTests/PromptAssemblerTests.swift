@@ -118,7 +118,7 @@ struct PromptAssemblerTests {
             contextSize: 100, responseBuffer: 10, tokenizer: tok
         )
         // Available for messages: 100 - 50 - 10 = 40 tokens = 4 history messages of 10 chars
-        // result.messages includes the depth-0 slot as a system message too
+        // result.messages includes the contextSetup slot as a system message too
         let historyMessages = result.messages.filter { $0.role != "system" }
         #expect(historyMessages.count == 4)
     }

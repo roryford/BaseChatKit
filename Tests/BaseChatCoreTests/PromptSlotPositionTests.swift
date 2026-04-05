@@ -82,6 +82,14 @@ struct PromptSlotPositionTests {
         #expect(!PromptSlotPosition.inline.isTopSlot)
     }
 
+    @Test func test_decode_atDepth_rejectsNegativeDepth() throws {
+        let json = #"{"type":"atDepth","depth":-1}"#
+        let data = Data(json.utf8)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(PromptSlotPosition.self, from: data)
+        }
+    }
+
     // MARK: - Codable round-trip
 
     @Test func test_codable_roundTrip_allCases() throws {
@@ -189,5 +197,31 @@ struct PromptSlotPositionTests {
             contextSize: 10000, responseBuffer: 0, tokenizer: CharTokenizer()
         )
         #expect(result.messages.last?.content == "inline note")
+    }
+
+    @Test func test_assembler_multipleAtDepth_insertionIndicesStable() {
+        // Regression: with two slots at different depths, each slot should end up the
+        // correct number of original messages from the bottom — inserting one slot must
+        // not shift the target index of the other.
+        let messages = (0..<5).map { makeMessage(role: .user, content: "msg\($0)") }
+        let slots = [
+            PromptSlot(id: "deep", content: "deep",    position: .atDepth(4), label: "Deep"),
+            PromptSlot(id: "shallow", content: "shallow", position: .atDepth(1), label: "Shallow"),
+        ]
+        let result = PromptAssembler.assemble(
+            slots: slots, messages: messages, systemPrompt: nil,
+            contextSize: 10000, responseBuffer: 0, tokenizer: CharTokenizer()
+        )
+        let contents = result.messages.map { $0.content }
+        // "deep" should have 4 original messages after it; "shallow" should have 1.
+        guard let deepIdx = contents.firstIndex(of: "deep"),
+              let shallowIdx = contents.firstIndex(of: "shallow") else {
+            Issue.record("slots not found in messages")
+            return
+        }
+        let afterDeep    = contents[(deepIdx + 1)...].filter { $0.hasPrefix("msg") }.count
+        let afterShallow = contents[(shallowIdx + 1)...].filter { $0.hasPrefix("msg") }.count
+        #expect(afterDeep == 4)
+        #expect(afterShallow == 1)
     }
 }
