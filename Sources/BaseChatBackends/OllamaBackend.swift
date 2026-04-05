@@ -37,6 +37,17 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
         category: "network"
     )
 
+    // MARK: - Lock
+
+    private let stateLock = NSLock()
+
+    @discardableResult
+    private func withStateLock<T>(_ body: () throws -> T) rethrows -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return try body()
+    }
+
     // MARK: - Configuration
 
     private var baseURL: URL?
@@ -50,7 +61,7 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
     public var conversationHistory: [(role: String, content: String)]?
 
     public func setConversationHistory(_ messages: [(role: String, content: String)]) {
-        conversationHistory = messages
+        withStateLock { conversationHistory = messages }
     }
 
     public var capabilities: BackendCapabilities {
@@ -64,6 +75,8 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
             memoryStrategy: .external,
+            maxOutputTokens: 128_000,
+            supportsStreaming: true,
             isRemote: true
         )
     }
@@ -96,19 +109,21 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
     ///   - baseURL: Ollama server URL (e.g. `http://localhost:11434`).
     ///   - modelName: Model tag as returned by `/api/tags` (e.g. `"llama3.2:8b"`).
     public func configure(baseURL: URL, modelName: String = "llama3.2") {
-        self.baseURL = baseURL
-        self.modelName = modelName
+        withStateLock {
+            self.baseURL = baseURL
+            self.modelName = modelName
+        }
     }
 
     // MARK: - InferenceBackend
 
     public func loadModel(from url: URL, contextSize: Int32) async throws {
-        guard baseURL != nil else {
+        guard withStateLock({ baseURL }) != nil else {
             throw CloudBackendError.invalidURL(
                 "No base URL configured. Call configure(baseURL:modelName:) first."
             )
         }
-        isModelLoaded = true
+        withStateLock { isModelLoaded = true }
         Self.inferenceLogger.info("OllamaBackend configured for \(self.modelName, privacy: .public) at \(self.baseURL?.host() ?? "unknown", privacy: .public)")
     }
 
@@ -117,18 +132,22 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> AsyncThrowingStream<String, Error> {
-        guard isModelLoaded, let baseURL else {
+        let (loaded, capturedURL) = withStateLock { (isModelLoaded, baseURL) }
+        guard loaded, let baseURL = capturedURL else {
             throw CloudBackendError.invalidURL("Backend not configured. Call loadModel first.")
         }
 
+        let (capturedHistory, capturedModel) = withStateLock { (conversationHistory, modelName) }
         let request = try buildRequest(
             baseURL: baseURL,
+            modelName: capturedModel,
             prompt: prompt,
             systemPrompt: systemPrompt,
-            config: config
+            config: config,
+            history: capturedHistory
         )
 
-        isGenerating = true
+        withStateLock { isGenerating = true }
 
         return AsyncThrowingStream { [weak self] continuation in
             guard let self else {
@@ -139,7 +158,7 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
             let session = self.urlSession
 
             let task = Task { [weak self] in
-                defer { self?.isGenerating = false }
+                defer { self?.withStateLock { self?.isGenerating = false } }
 
                 do {
                     let (bytes, response) = try await session.bytes(for: request)
@@ -188,7 +207,7 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
                 }
             }
 
-            self.currentTask = task
+            withStateLock { currentTask = task }
 
             continuation.onTermination = { _ in
                 task.cancel()
@@ -197,15 +216,19 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
     }
 
     public func stopGeneration() {
-        currentTask?.cancel()
-        currentTask = nil
-        isGenerating = false
+        withStateLock {
+            currentTask?.cancel()
+            currentTask = nil
+            isGenerating = false
+        }
     }
 
     public func unloadModel() {
         stopGeneration()
-        baseURL = nil
-        isModelLoaded = false
+        withStateLock {
+            baseURL = nil
+            isModelLoaded = false
+        }
         Self.inferenceLogger.info("OllamaBackend unloaded")
     }
 
@@ -213,9 +236,11 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
 
     private func buildRequest(
         baseURL: URL,
+        modelName: String,
         prompt: String,
         systemPrompt: String?,
-        config: GenerationConfig
+        config: GenerationConfig,
+        history: [(role: String, content: String)]?
     ) throws -> URLRequest {
         let chatURL = baseURL.appendingPathComponent("api/chat")
 
@@ -223,7 +248,7 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
         if let systemPrompt, !systemPrompt.isEmpty {
             messages.append(["role": "system", "content": systemPrompt])
         }
-        if let history = conversationHistory {
+        if let history {
             messages.append(contentsOf: history.map { ["role": $0.role, "content": $0.content] })
         } else {
             messages.append(["role": "user", "content": prompt])
@@ -249,7 +274,7 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        Self.networkLogger.debug("OllamaBackend request to \(chatURL.absoluteString, privacy: .public) model=\(self.modelName, privacy: .public)")
+        Self.networkLogger.debug("OllamaBackend request to \(chatURL.absoluteString, privacy: .public) model=\(modelName, privacy: .public)")
 
         return request
     }
@@ -271,11 +296,12 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
                 .flatMap { TimeInterval($0) }
             throw CloudBackendError.rateLimited(retryAfter: retryAfter)
         default:
-            var errorBody = ""
+            var errorBodyData = Data()
             for try await byte in bytes {
-                errorBody.append(Character(UnicodeScalar(byte)))
-                if errorBody.count > 2048 { break }
+                errorBodyData.append(byte)
+                if errorBodyData.count > 2048 { break }
             }
+            let errorBody = String(decoding: errorBodyData, as: UTF8.self)
             let message = extractErrorMessage(from: errorBody) ?? "Unexpected server error (status \(statusCode))"
             throw CloudBackendError.serverError(statusCode: statusCode, message: message)
         }

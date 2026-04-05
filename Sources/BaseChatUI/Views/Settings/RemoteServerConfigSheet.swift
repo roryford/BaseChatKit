@@ -13,7 +13,7 @@ import BaseChatCore
 ///     RemoteServerConfigSheet { endpoint in
 ///         // use endpoint
 ///     }
-///     .environment(modelContext)
+///     .modelContext(container.mainContext)
 /// }
 /// ```
 public struct RemoteServerConfigSheet: View {
@@ -57,12 +57,6 @@ public struct RemoteServerConfigSheet: View {
             }
         }
 
-        var requiresAPIKey: Bool {
-            switch self {
-            case .openAICompatible: return false
-            case .ollama, .koboldCpp: return false
-            }
-        }
     }
 
     public var body: some View {
@@ -122,17 +116,15 @@ public struct RemoteServerConfigSheet: View {
                 #endif
                 .autocorrectionDisabled()
 
-            if backendType.requiresAPIKey || !apiKey.isEmpty {
-                SecureField("API Key (optional)", text: $apiKey)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    #endif
-            }
+            SecureField("API Key (optional)", text: $apiKey)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
         } header: {
             Text("Connection")
         } footer: {
-            Text("Local servers (Ollama, KoboldCpp) don't require an API key.")
+            Text("API key is only needed for authenticated endpoints (e.g. vLLM with auth). Leave blank for local Ollama and KoboldCpp servers.")
                 .font(.caption)
         }
     }
