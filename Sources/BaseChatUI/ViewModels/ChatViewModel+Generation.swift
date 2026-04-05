@@ -193,6 +193,35 @@ extension ChatViewModel {
         }
 
         updateContextEstimate()
+
+        // Fire post-generation tasks off @MainActor if we have a non-empty assistant message.
+        if let completedMessage = messages.first(where: { $0.id == messageID }),
+           !completedMessage.content.isEmpty,
+           let session = activeSession {
+            runPostGenerationTasks(message: completedMessage, session: session)
+        }
+    }
+
+    /// Launches post-generation tasks sequentially off `@MainActor`.
+    ///
+    /// A throwing task records its error in ``backgroundTaskError`` and execution
+    /// continues with the next task. Cancellation via ``backgroundTask`` exits the loop.
+    private func runPostGenerationTasks(message: ChatMessageRecord, session: ChatSessionRecord) {
+        let tasks = postGenerationTasks
+        guard !tasks.isEmpty else { return }
+
+        backgroundTask = Task.detached { [weak self, tasks, message, session] in
+            for task in tasks {
+                guard !Task.isCancelled else { break }
+                do {
+                    try await task.run(message: message, session: session)
+                } catch is CancellationError {
+                    break
+                } catch {
+                    await MainActor.run { self?.backgroundTaskError = error }
+                }
+            }
+        }
     }
 
     /// Builds a complete `MacroContext` by merging user-supplied values with

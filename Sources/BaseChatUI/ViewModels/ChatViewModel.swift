@@ -120,6 +120,20 @@ public final class ChatViewModel {
     /// A user-facing error message, shown as a banner. Cleared on next action.
     public var errorMessage: String?
 
+    // MARK: - Post-Generation Tasks
+
+    /// Background tasks to run after each generation completes, in registration order.
+    ///
+    /// Tasks run sequentially off `@MainActor`. A task that throws surfaces its
+    /// error in ``backgroundTaskError`` but does not cancel subsequent tasks.
+    /// All tasks are cancelled when the session is reset via ``switchToSession(_:)``.
+    public var postGenerationTasks: [any PostGenerationTask] = []
+
+    /// The most recent non-fatal error thrown by a post-generation background task.
+    ///
+    /// Surfaced for optional display by the app. Does not interrupt the session.
+    public internal(set) var backgroundTaskError: Error?
+
     // MARK: - Compression
 
     /// IDs of messages that are pinned in the current session.
@@ -258,6 +272,7 @@ public final class ChatViewModel {
     }
 
     var generationTask: Task<Void, Never>?
+    var backgroundTask: Task<Void, Never>?
     private var coordinatedLoadTask: Task<Void, Never>?
     private var latestLoadIntentGeneration: UInt64 = 0
     private var lastPressureLevel: MemoryPressureLevel = .nominal
@@ -336,6 +351,10 @@ public final class ChatViewModel {
 
         activeSession = session
         inferenceService.resetConversation()
+
+        // Cancel any in-flight post-generation background tasks from the prior session.
+        backgroundTask?.cancel()
+        backgroundTask = nil
 
         // Load session's generation settings (fall back to defaults)
         systemPrompt = session.systemPrompt
@@ -775,6 +794,10 @@ public final class ChatViewModel {
         if isGenerating {
             stopGeneration()
         }
+
+        // Cancel any in-flight post-generation background tasks.
+        backgroundTask?.cancel()
+        backgroundTask = nil
 
         guard let activeSessionID else {
             messages.removeAll()
