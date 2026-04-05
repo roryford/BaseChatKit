@@ -1,7 +1,7 @@
 import Foundation
 
 /// A generation parameter that a backend may or may not support.
-public enum GenerationParameter: String, CaseIterable, Sendable {
+public enum GenerationParameter: String, CaseIterable, Sendable, Codable {
     case temperature
     case topP
     case repeatPenalty
@@ -10,7 +10,7 @@ public enum GenerationParameter: String, CaseIterable, Sendable {
 }
 
 /// How the backend loads model weights into memory.
-public enum MemoryStrategy: Sendable, Equatable {
+public enum MemoryStrategy: String, Sendable, Equatable, Codable {
     /// Model must be fully resident in RAM (e.g., MLX on unified memory).
     case resident
     /// Model is memory-mapped; only active pages + KV cache need RAM (e.g., llama.cpp).
@@ -20,7 +20,7 @@ public enum MemoryStrategy: Sendable, Equatable {
 }
 
 /// How the backend responds to a cancellation request.
-public enum CancellationStyle: Sendable, Equatable {
+public enum CancellationStyle: String, Sendable, Equatable, Codable {
     /// Cancels via Swift task cancellation.
     case cooperative
     /// Requires calling `stopGeneration()` explicitly.
@@ -31,12 +31,21 @@ public enum CancellationStyle: Sendable, Equatable {
 ///
 /// The UI reads these to enable/disable controls (e.g., hide the top-p slider
 /// for Apple Foundation Models which only expose temperature).
-public struct BackendCapabilities: Sendable {
+public struct BackendCapabilities: Sendable, Equatable, Codable {
     /// Which sampling parameters the backend accepts.
     public let supportedParameters: Set<GenerationParameter>
 
     /// Maximum context window in tokens.
     public let maxContextTokens: Int32
+
+    /// Effective token limit for this backend/model.
+    ///
+    /// Convenience accessor over `maxContextTokens`. Use this when branching
+    /// generation strategy based on context size (e.g., in `PromptAssembler`).
+    public var contextWindowSize: Int { Int(maxContextTokens) }
+
+    /// Maximum number of tokens the model can generate in a single response.
+    public let maxOutputTokens: Int
 
     /// Whether the caller must format messages into a prompt string
     /// using a `PromptTemplate`. When `false`, the backend applies
@@ -45,6 +54,9 @@ public struct BackendCapabilities: Sendable {
 
     /// Whether the backend supports a separate system prompt.
     public let supportsSystemPrompt: Bool
+
+    /// Whether the backend streams tokens as they are generated.
+    public let supportsStreaming: Bool
 
     /// Whether the backend supports tool/function calling.
     public let supportsToolCalling: Bool
@@ -60,6 +72,9 @@ public struct BackendCapabilities: Sendable {
 
     /// How the backend loads model weights into memory.
     public let memoryStrategy: MemoryStrategy
+
+    /// `true` for backends that send requests over a network (cloud APIs, remote servers).
+    public let isRemote: Bool
 
     /// Parameters the UI should present controls for.
     public var visibleParameters: [GenerationParameter] {
@@ -81,6 +96,9 @@ public struct BackendCapabilities: Sendable {
         self.cancellationStyle = .cooperative
         self.supportsTokenCounting = false
         self.memoryStrategy = .resident
+        self.maxOutputTokens = 4096
+        self.supportsStreaming = true
+        self.isRemote = false
     }
 
     public init(
@@ -92,7 +110,10 @@ public struct BackendCapabilities: Sendable {
         supportsStructuredOutput: Bool,
         cancellationStyle: CancellationStyle,
         supportsTokenCounting: Bool,
-        memoryStrategy: MemoryStrategy = .resident
+        memoryStrategy: MemoryStrategy = .resident,
+        maxOutputTokens: Int = 4096,
+        supportsStreaming: Bool = true,
+        isRemote: Bool = false
     ) {
         self.supportedParameters = supportedParameters
         self.maxContextTokens = maxContextTokens
@@ -103,5 +124,8 @@ public struct BackendCapabilities: Sendable {
         self.cancellationStyle = cancellationStyle
         self.supportsTokenCounting = supportsTokenCounting
         self.memoryStrategy = memoryStrategy
+        self.maxOutputTokens = maxOutputTokens
+        self.supportsStreaming = supportsStreaming
+        self.isRemote = isRemote
     }
 }
