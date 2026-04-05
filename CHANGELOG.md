@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.21](https://github.com/roryford/BaseChatKit/compare/v0.2.20...v0.2.21) (2026-04-05)
+
+
+### Bug Fixes
+
+* populate certificate pins for Anthropic and OpenAI API hosts ([#157](https://github.com/roryford/BaseChatKit/issues/157)) ([3fcceb9](https://github.com/roryford/BaseChatKit/commit/3fcceb938d068968ecfba34b6d695a28be6b56fb))
+
 ## [0.2.20](https://github.com/roryford/BaseChatKit/compare/v0.2.19...v0.2.20) (2026-04-05)
 
 
