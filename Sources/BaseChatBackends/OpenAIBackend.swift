@@ -64,7 +64,10 @@ public final class OpenAIBackend: InferenceBackend, ConversationHistoryReceiver,
             supportsStructuredOutput: true,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
-            memoryStrategy: .external
+            memoryStrategy: .external,
+            maxOutputTokens: 16_384,
+            supportsStreaming: true,
+            isRemote: true
         )
     }
 

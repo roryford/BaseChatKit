@@ -43,7 +43,10 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         supportsStructuredOutput: false,
         cancellationStyle: .cooperative,
         supportsTokenCounting: false,
-        memoryStrategy: .external
+        memoryStrategy: .external,
+        maxOutputTokens: 4096,
+        supportsStreaming: true,
+        isRemote: false
     )
 
     // MARK: - Private
