@@ -29,7 +29,15 @@ extension PromptSlotPosition: Codable {
         switch t {
         case "systemPreamble":  self = .systemPreamble
         case "contextSetup":    self = .contextSetup
-        case "atDepth":         self = .atDepth(try c.decode(Int.self, forKey: .depth))
+        case "atDepth":
+            let depth = try c.decode(Int.self, forKey: .depth)
+            guard depth >= 0 else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .depth, in: c,
+                    debugDescription: "PromptSlotPosition.atDepth depth must be >= 0, got \(depth)"
+                )
+            }
+            self = .atDepth(depth)
         case "topOfHistory":    self = .topOfHistory
         case "bottomOfHistory": self = .bottomOfHistory
         case "inline":          self = .inline
@@ -62,17 +70,21 @@ extension PromptSlotPosition {
         return false
     }
 
-    /// A stable sort key that reflects the order slots appear in the assembled prompt.
+    /// A stable sort key that reflects the order slots appear in the assembled prompt
+    /// (top to bottom; low index = earlier in prompt).
     ///
-    /// Top slots (systemPreamble = 0, contextSetup = 1) come first.
-    /// History slots are ordered by ascending effective depth.
+    /// systemPreamble (0) and contextSetup (1) come first.
+    /// topOfHistory (2) is the highest history position.
+    /// atDepth(n): larger n means higher placement (further from latest turn), so smaller index.
+    /// bottomOfHistory sits just above the last message; inline follows all messages.
     func sortIndex(messageCount: Int) -> Int {
         switch self {
-        case .systemPreamble:           return 0
-        case .contextSetup:             return 1
-        case .bottomOfHistory, .inline: return 2
-        case .atDepth(let n):           return 2 + n
-        case .topOfHistory:             return 2 + messageCount
+        case .systemPreamble:   return 0
+        case .contextSetup:     return 1
+        case .topOfHistory:     return 2
+        case .atDepth(let n):   return 2 + (messageCount - n)
+        case .bottomOfHistory:  return 2 + messageCount
+        case .inline:           return 3 + messageCount
         }
     }
 

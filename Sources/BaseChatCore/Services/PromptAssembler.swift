@@ -67,11 +67,17 @@ public enum PromptAssembler {
         let messageTokens = trimmedMessages.reduce(0) { $0 + tok.tokenCount($1.content) }
         budgetBreakdown["history"] = messageTokens
 
-        // 5. Sort resolved slots by position for final ordering
+        // 5. Sort resolved slots by position for final ordering.
+        // Tiebreak by input-array index to keep declaration order stable for equal positions.
         let mc = trimmedMessages.count
-        let sortedSlots = resolvedSlots.sorted {
-            $0.position.sortIndex(messageCount: mc) < $1.position.sortIndex(messageCount: mc)
-        }
+        let sortedSlots = resolvedSlots
+            .enumerated()
+            .sorted {
+                let li = $0.element.position.sortIndex(messageCount: mc)
+                let ri = $1.element.position.sortIndex(messageCount: mc)
+                return li == ri ? $0.offset < $1.offset : li < ri
+            }
+            .map(\.element)
 
         // 6. Build the final message list, inserting history-positioned slots
         let finalMessages = insertSlotsIntoHistory(slots: sortedSlots, messages: trimmedMessages)
@@ -129,8 +135,8 @@ public enum PromptAssembler {
         var result: [(role: String, content: String)] = topSlots.map { (role: "system", content: $0.content) }
         var messageTuples = messages.map { (role: $0.role.rawValue, content: $0.content) }
 
-        // Compute depths from the original message count so prior insertions don't shift targets.
-        // Process highest depth first to keep insertion indices stable as the array grows.
+        // Process highest insertion depth first so that earlier inserts don't shift the
+        // indices of later (lower-depth) inserts.
         let originalCount = messageTuples.count
         let sorted = historySlots.sorted {
             $0.position.insertionDepth(messageCount: originalCount) >

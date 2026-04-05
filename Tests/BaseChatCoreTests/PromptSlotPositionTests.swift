@@ -25,18 +25,22 @@ struct PromptSlotPositionTests {
     }
 
     @Test func test_sortIndex_atDepth_orderedByN() {
+        // Larger n means higher placement in history (further from latest turn),
+        // so it should have a smaller sort index (appears earlier in the prompt).
         let mc = 10
         #expect(
-            PromptSlotPosition.atDepth(1).sortIndex(messageCount: mc) <
-            PromptSlotPosition.atDepth(5).sortIndex(messageCount: mc)
+            PromptSlotPosition.atDepth(5).sortIndex(messageCount: mc) <
+            PromptSlotPosition.atDepth(1).sortIndex(messageCount: mc)
         )
     }
 
     @Test func test_sortIndex_topOfHistory_higherThanAtDepthMessageCountMinusOne() {
+        // topOfHistory has the lowest history sort index (2), so it appears before
+        // any atDepth(n) slot regardless of n.
         let mc = 5
         #expect(
-            PromptSlotPosition.atDepth(mc - 1).sortIndex(messageCount: mc) <
-            PromptSlotPosition.topOfHistory.sortIndex(messageCount: mc)
+            PromptSlotPosition.topOfHistory.sortIndex(messageCount: mc) <
+            PromptSlotPosition.atDepth(mc - 1).sortIndex(messageCount: mc)
         )
     }
 

@@ -74,16 +74,21 @@ struct PromptAssemblerTests {
     }
 
     @Test func test_assemble_slotsAreSortedByPosition() {
+        // atDepth(5) is higher in history (5 messages from bottom) than atDepth(1),
+        // so it should appear first (lower sort index) in the assembled prompt.
+        let messages = (0..<6).map {
+            ChatMessageRecord(role: .user, content: "msg\($0)", sessionID: UUID())
+        }
         let slots = [
             PromptSlot(id: "deep", content: "deep", position: .atDepth(5), label: "Deep"),
             PromptSlot(id: "shallow", content: "shallow", position: .atDepth(1), label: "Shallow"),
         ]
         let result = PromptAssembler.assemble(
-            slots: slots, messages: [], systemPrompt: nil,
-            contextSize: 1000, tokenizer: tok
+            slots: slots, messages: messages, systemPrompt: nil,
+            contextSize: 10000, responseBuffer: 0, tokenizer: tok
         )
-        #expect(result.orderedSlots[0].id == "shallow")
-        #expect(result.orderedSlots[1].id == "deep")
+        #expect(result.orderedSlots[0].id == "deep")
+        #expect(result.orderedSlots[1].id == "shallow")
     }
 
     @Test func test_assemble_tokenBudget_capsSlotTokens() {
