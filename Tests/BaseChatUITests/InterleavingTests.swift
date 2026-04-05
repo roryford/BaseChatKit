@@ -26,7 +26,7 @@ final class InterleavingTests: XCTestCase {
 
         let schema = Schema(BaseChatSchema.allModelTypes)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try! ModelContainer(for: schema, configurations: [config])
+        container = try ModelContainer(for: schema, configurations: [config])
         context = container.mainContext
 
         slowBackend = SlowMockBackend(tokenCount: 20, delayMilliseconds: 50)
@@ -56,8 +56,8 @@ final class InterleavingTests: XCTestCase {
     // MARK: - Helpers
 
     @discardableResult
-    private func createAndActivateSession(title: String = "Test Chat") -> ChatSessionRecord {
-        let session = try! sessionManager.createSession(title: title)
+    private func createAndActivateSession(title: String = "Test Chat") throws -> ChatSessionRecord {
+        let session = try sessionManager.createSession(title: title)
         sessionManager.activeSession = session
         vm.switchToSession(session)
         return session
@@ -73,7 +73,7 @@ final class InterleavingTests: XCTestCase {
     /// Stops mid-generation then immediately sends a second message.
     /// The first assistant reply should be partial; the second should complete fully.
     func test_stopGeneration_thenImmediateResend_completesSecondGeneration() async throws {
-        createAndActivateSession()
+        try createAndActivateSession()
 
         // Start first generation with the slow 20-token stream.
         vm.inputText = "first message"
@@ -127,7 +127,7 @@ final class InterleavingTests: XCTestCase {
     /// then generates on B. Verifies no tokens from A leak into B.
     func test_sessionSwitch_duringGeneration_noContentLeakage() async throws {
         // Session A: slow 20-token stream with identifiable tokens.
-        let sessionA = createAndActivateSession(title: "Session A")
+        let sessionA = try createAndActivateSession(title: "Session A")
         slowBackend.tokensToYield = (0..<20).map { "alpha\($0) " }
         slowBackend.delayPerToken = .milliseconds(50)
 
@@ -139,7 +139,7 @@ final class InterleavingTests: XCTestCase {
         await vm.awaitFirstToken()
 
         // Create and switch to session B mid-stream.
-        let sessionB = try! sessionManager.createSession(title: "Session B")
+        let sessionB = try sessionManager.createSession(title: "Session B")
         sessionManager.activeSession = sessionB
         vm.switchToSession(sessionB)
 
@@ -189,7 +189,7 @@ final class InterleavingTests: XCTestCase {
     /// Starts generation, stops it, then triggers a model reload.
     /// Verifies generation is stopped and the new model loads successfully.
     func test_rapidModelSwap_duringGeneration_stopsAndReloads() async throws {
-        createAndActivateSession()
+        try createAndActivateSession()
 
         // Start generation with slow tokens.
         vm.inputText = "Hello"
@@ -222,13 +222,10 @@ final class InterleavingTests: XCTestCase {
         // Wait for loading to complete.
         await vm.awaitGenerating(false, timeout: 3.0)
 
-        // Allow the coordinated load task to settle.
-        // The dispatchSelectedLoad task is async — yield to let it finish.
-        let deadline = ContinuousClock.now + .seconds(2)
-        while ContinuousClock.now < deadline {
-            if vm.isModelLoaded { break }
+        // Yield to let the coordinated load task complete.
+        let loadDeadline = ContinuousClock.now + .seconds(2)
+        while !vm.isModelLoaded && ContinuousClock.now < loadDeadline {
             await Task.yield()
-            try? await Task.sleep(for: .milliseconds(10))
         }
 
         XCTAssertFalse(vm.isGenerating, "isGenerating should be false after model reload")

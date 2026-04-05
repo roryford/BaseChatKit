@@ -80,7 +80,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
                     continuation.yield(token)
                 }
                 self.isGenerating = false
-                if let streamError = self.shouldThrowInsideStream {
+                if let streamError = self.shouldThrowInsideStream, !Task.isCancelled {
                     continuation.finish(throwing: streamError)
                     return
                 }
