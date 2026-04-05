@@ -38,7 +38,7 @@ struct PromptAssemblerTests {
         )
         #expect(result.orderedSlots.count == 1)
         #expect(result.orderedSlots[0].id == "system")
-        #expect(result.orderedSlots[0].depth == 0)
+        #expect(result.orderedSlots[0].position == .systemPreamble)
         #expect(result.orderedSlots[0].content == "Be helpful")
     }
 
@@ -73,10 +73,10 @@ struct PromptAssemblerTests {
         #expect(result.orderedSlots[0].id == "a")
     }
 
-    @Test func test_assemble_slotsAreSortedByDepth() {
+    @Test func test_assemble_slotsAreSortedByPosition() {
         let slots = [
-            PromptSlot(id: "deep", content: "deep", depth: 5, label: "Deep"),
-            PromptSlot(id: "shallow", content: "shallow", depth: 1, label: "Shallow"),
+            PromptSlot(id: "deep", content: "deep", position: .atDepth(5), label: "Deep"),
+            PromptSlot(id: "shallow", content: "shallow", position: .atDepth(1), label: "Shallow"),
         ]
         let result = PromptAssembler.assemble(
             slots: slots, messages: [], systemPrompt: nil,
@@ -132,9 +132,9 @@ struct PromptAssemblerTests {
 
     // MARK: - Depth Insertion
 
-    @Test func test_assemble_depthSlot_insertedCorrectly() {
+    @Test func test_assemble_atDepthSlot_insertedCorrectly() {
         let slots = [
-            PromptSlot(id: "note", content: "author note", depth: 2, label: "Author's Note"),
+            PromptSlot(id: "note", content: "author note", position: .atDepth(2), label: "Author's Note"),
         ]
         let messages = (0..<5).map { i in
             makeMessage(role: .user, content: "msg\(i)")
@@ -143,8 +143,8 @@ struct PromptAssemblerTests {
             slots: slots, messages: messages, systemPrompt: nil,
             contextSize: 10000, responseBuffer: 0, tokenizer: tok
         )
-        // Depth 2 = 2 turns from bottom. Messages: msg0, msg1, msg2, [note], msg3, msg4
-        let contents = result.messages.map(\.content)
+        // atDepth(2) = 2 turns from bottom. Messages: msg0, msg1, msg2, [note], msg3, msg4
+        let contents = result.messages.map { $0.content }
         #expect(contents.contains("author note"))
         if let noteIndex = contents.firstIndex(of: "author note") {
             // Should be 2 from the end (before last 2 messages)

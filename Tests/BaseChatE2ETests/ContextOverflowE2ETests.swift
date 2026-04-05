@@ -193,7 +193,7 @@ struct ContextOverflowE2ETests {
 
     @Test func assembler_systemPromptAndSlots_budgetedCorrectly() {
         let slots = [
-            PromptSlot(id: "note", content: "Author's note", depth: 2, label: "Note"),
+            PromptSlot(id: "note", content: "Author's note", position: .atDepth(2), label: "Note"),
         ]
         let messages = (0..<10).map { i in
             makeMessage(
