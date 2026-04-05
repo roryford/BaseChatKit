@@ -45,7 +45,7 @@ public func withExponentialBackoff<T>(
                 throw error
             }
 
-            Log.network.info("Rate limited (attempt \(attempt + 1)/\(maxRetries)). Retrying in \(String(format: "%.1f", delay))s")
+            Log.network.info("Retryable error (attempt \(attempt + 1)/\(maxRetries), \(error)). Retrying in \(String(format: "%.1f", delay))s")
 
             try await Task.sleep(for: .milliseconds(Int(delay * 1000)))
             totalDelayed += delay
