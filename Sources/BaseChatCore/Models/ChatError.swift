@@ -9,7 +9,7 @@ public struct ChatError: Identifiable, Sendable {
     public let id: UUID
     public let kind: Kind
     public let message: String
-    public let underlyingError: (any Error)?
+    public nonisolated(unsafe) let underlyingError: (any Error)?
     public let recovery: Recovery?
 
     public init(
@@ -26,14 +26,14 @@ public struct ChatError: Identifiable, Sendable {
         self.recovery = recovery
     }
 
-    public enum Kind: Sendable {
+    public enum Kind: Equatable, Sendable {
         case generation
         case persistence
         case configuration
         case memoryPressure
     }
 
-    public enum Recovery: Sendable {
+    public enum Recovery: Equatable, Sendable {
         case retry
         case configureAPIKey
         case selectModel
@@ -43,7 +43,8 @@ public struct ChatError: Identifiable, Sendable {
     /// Derives a ChatError from a backend error with appropriate recovery action.
     public static func from(
         _ error: any Error,
-        kind: Kind
+        kind: Kind,
+        context: String? = nil
     ) -> ChatError {
         let recovery: Recovery?
         if let backendError = error as? any BackendError {
@@ -70,9 +71,15 @@ public struct ChatError: Identifiable, Sendable {
             recovery = .dismissOnly
         }
 
+        let message = if let context {
+            "\(context): \(error.localizedDescription)"
+        } else {
+            error.localizedDescription
+        }
+
         return ChatError(
             kind: kind,
-            message: error.localizedDescription,
+            message: message,
             underlyingError: error,
             recovery: recovery
         )

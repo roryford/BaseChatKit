@@ -866,8 +866,8 @@ public final class ChatViewModel {
     // MARK: - Structured Error Surfacing
 
     /// Surfaces an error with structured type information.
-    func surfaceError(_ error: any Error, kind: ChatError.Kind) {
-        activeError = ChatError.from(error, kind: kind)
+    func surfaceError(_ error: any Error, kind: ChatError.Kind, context: String? = nil) {
+        activeError = ChatError.from(error, kind: kind, context: context)
     }
 
     // MARK: - Memory Pressure Monitoring
