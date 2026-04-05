@@ -45,6 +45,7 @@ public final class MidStreamErrorBackend: InferenceBackend, @unchecked Sendable 
         return AsyncThrowingStream { [self] continuation in
             Task {
                 for token in tokens {
+                    if Task.isCancelled { break }
                     continuation.yield(token)
                 }
                 self.isGenerating = false

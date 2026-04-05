@@ -5,7 +5,7 @@ import BaseChatCore
 /// Configurable mock inference backend for testing.
 ///
 /// Shared across all test targets via the `BaseChatTestSupport` module.
-public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
+public final class MockInferenceBackend: InferenceBackend, ConversationHistoryReceiver, @unchecked Sendable {
     public var isModelLoaded: Bool = false
     public var isGenerating: Bool = false
     public var capabilities: BackendCapabilities
@@ -14,6 +14,11 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
     public var tokensToYield: [String] = ["Hello", " world"]
     public var shouldThrowOnGenerate: Error? = nil
     public var shouldThrowOnLoad: Error? = nil
+
+    /// Error to throw INSIDE the stream after yielding all tokens.
+    /// This simulates network/stream failures that real backends deliver
+    /// via the AsyncThrowingStream rather than from generate() itself.
+    public var shouldThrowInsideStream: Error?
 
     // Track calls
     public var loadModelCallCount = 0
@@ -75,6 +80,10 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
                     continuation.yield(token)
                 }
                 self.isGenerating = false
+                if let streamError = self.shouldThrowInsideStream {
+                    continuation.finish(throwing: streamError)
+                    return
+                }
                 continuation.finish()
             }
         }
@@ -91,5 +100,13 @@ public final class MockInferenceBackend: InferenceBackend, @unchecked Sendable {
         unloadCallCount += 1
         isModelLoaded = false
         isGenerating = false
+    }
+
+    // MARK: - ConversationHistoryReceiver
+
+    public var lastReceivedHistory: [(role: String, content: String)]?
+
+    public func setConversationHistory(_ messages: [(role: String, content: String)]) {
+        lastReceivedHistory = messages
     }
 }
