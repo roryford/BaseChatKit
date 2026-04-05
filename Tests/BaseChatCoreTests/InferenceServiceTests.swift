@@ -373,6 +373,65 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertEqual(backend.unloadCallCount, 1, "Late completion should unload its stale backend")
     }
 
+    // MARK: - isGenerating lifecycle
+
+    func test_generate_backendThrowsSynchronously_resetsIsGenerating() async throws {
+        let mock = MockInferenceBackend()
+        mock.isModelLoaded = true
+        mock.shouldThrowOnGenerate = InferenceError.inferenceFailure("boom")
+
+        let service = InferenceService(backend: mock, name: "Mock")
+
+        do {
+            _ = try service.generate(messages: [("user", "hello")])
+            XCTFail("Expected generate to throw")
+        } catch {
+            // expected
+        }
+
+        XCTAssertFalse(service.isGenerating,
+                        "isGenerating must be reset when backend.generate() throws synchronously")
+    }
+
+    func test_generate_streamCompletesNormally_isGeneratingResetByFinish() async throws {
+        let mock = MockInferenceBackend()
+        mock.isModelLoaded = true
+        mock.tokensToYield = ["a", "b"]
+
+        let service = InferenceService(backend: mock, name: "Mock")
+        let stream = try service.generate(messages: [("user", "hi")])
+
+        for try await _ in stream {}
+
+        service.generationDidFinish()
+        XCTAssertFalse(service.isGenerating,
+                        "isGenerating should be false after generationDidFinish()")
+    }
+
+    func test_generate_streamErrorMidStream_isGeneratingStillTrue() async throws {
+        let midStreamBackend = MidStreamErrorBackend(
+            tokensBeforeError: ["partial"],
+            errorToThrow: NSError(domain: "test", code: 1)
+        )
+        let service = InferenceService(backend: midStreamBackend, name: "MidStream")
+
+        let stream = try service.generate(messages: [("user", "hi")])
+
+        var caughtError = false
+        do {
+            for try await _ in stream {}
+        } catch {
+            caughtError = true
+        }
+
+        XCTAssertTrue(caughtError, "Stream should have thrown mid-stream")
+        // The service's isGenerating stays true because only generationDidFinish() resets it.
+        // The backend's own isGenerating is reset by its stream, but InferenceService.isGenerating
+        // is set at the service level (line 328) and only cleared by generationDidFinish() or stopGeneration().
+        XCTAssertTrue(service.isGenerating,
+                       "isGenerating should remain true until generationDidFinish() is called — mid-stream errors don't auto-reset it")
+    }
+
     // MARK: - Cloud backend interop
 
     func test_generate_cloudBackend_passesConversationHistory() throws {

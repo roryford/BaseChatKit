@@ -351,11 +351,16 @@ public final class InferenceService {
             historyReceiver.setConversationHistory(messages)
         }
 
-        return try backend.generate(
-            prompt: prompt,
-            systemPrompt: effectiveSystemPrompt,
-            config: config
-        )
+        do {
+            return try backend.generate(
+                prompt: prompt,
+                systemPrompt: effectiveSystemPrompt,
+                config: config
+            )
+        } catch {
+            isGenerating = false
+            throw error
+        }
     }
 
     /// Token usage from the last cloud API generation, if available.

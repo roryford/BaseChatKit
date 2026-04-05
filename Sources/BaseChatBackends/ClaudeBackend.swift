@@ -74,7 +74,7 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
     private static let pinnedSession: URLSession = {
         let delegate = PinnedSessionDelegate()
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForRequest = 300
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }()
 
