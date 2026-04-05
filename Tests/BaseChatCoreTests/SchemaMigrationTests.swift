@@ -13,12 +13,13 @@ final class SchemaMigrationTests: XCTestCase {
     }
 
     func test_schemaV1_modelsContainsAllExpectedTypes() {
-        let typeNames = BaseChatSchemaV1.models.map { String(describing: $0) }
-        XCTAssertTrue(typeNames.contains("ChatMessage"))
-        XCTAssertTrue(typeNames.contains("ChatSession"))
-        XCTAssertTrue(typeNames.contains("SamplerPreset"))
-        XCTAssertTrue(typeNames.contains("APIEndpoint"))
-        XCTAssertEqual(BaseChatSchemaV1.models.count, 4)
+        let models = BaseChatSchemaV1.models
+        XCTAssertEqual(models.count, 4)
+        let ids = models.map { ObjectIdentifier($0) }
+        XCTAssertTrue(ids.contains(ObjectIdentifier(ChatMessage.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(ChatSession.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(SamplerPreset.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(APIEndpoint.self)))
     }
 
     // MARK: - BaseChatMigrationPlan
@@ -36,9 +37,19 @@ final class SchemaMigrationTests: XCTestCase {
     // MARK: - ModelContainerFactory
 
     func test_containerFactory_opensWithMigrationPlan() throws {
-        // Verifies the container can be initialised with the migration plan without error.
+        // Verifies the container is functional: insert and fetch a ChatMessage.
         let container = try ModelContainerFactory.makeInMemoryContainer()
-        XCTAssertNotNil(container)
+        let context = ModelContext(container)
+        let sessionID = UUID()
+        let message = ChatMessage(role: .user, content: "ping", sessionID: sessionID)
+        context.insert(message)
+        try context.save()
+        let descriptor = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate { $0.sessionID == sessionID }
+        )
+        let fetched = try context.fetch(descriptor)
+        XCTAssertEqual(fetched.count, 1)
+        XCTAssertEqual(fetched.first?.content, "ping")
     }
 
     func test_containerFactory_makeContainer_inMemoryConfig() throws {
