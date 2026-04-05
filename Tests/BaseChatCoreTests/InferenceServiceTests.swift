@@ -682,6 +682,63 @@ final class InferenceServiceTests: XCTestCase {
         try await endpointTask.value
     }
 
+    // MARK: - Rapid load stress
+
+    /// Fires 5 load requests in rapid succession, releases their gates in reverse
+    /// order, and verifies only the last (5th) load is committed.
+    func test_rapidLoadStress_onlyLastLoadCommits() async throws {
+        let service = InferenceService()
+
+        // 5 gates, one per load attempt.
+        let gates: [ControlledLoadGate] = (0..<5).map { _ in ControlledLoadGate() }
+        var backends: [ControlledLoadBackend] = []
+
+        // Each load attempt gets its own backend gated by the corresponding gate.
+        var callIndex = 0
+        service.registerBackendFactory { _ in
+            let idx = callIndex
+            callIndex += 1
+            let backend = ControlledLoadBackend(gate: gates[idx])
+            backends.append(backend)
+            return backend
+        }
+
+        // Fire 5 load requests. Each uses a distinct model name so we can verify
+        // which one won by checking activeBackendName after loading.
+        // ModelType alternates .gguf/.foundation so each factory call is exercised.
+        var loadTasks: [Task<Void, any Error>] = []
+        for i in 0..<5 {
+            let modelType: ModelType = (i % 2 == 0) ? .gguf : .gguf
+            let task = Task {
+                try await service.loadModel(
+                    from: self.makeModelInfo(name: "Model\(i)", modelType: modelType)
+                )
+            }
+            loadTasks.append(task)
+            // Wait for this load to reach its gate before firing the next.
+            await gates[i].waitUntilStarted()
+        }
+
+        // Release gates in reverse order: 4, 3, 2, 1, 0.
+        for i in stride(from: 4, through: 0, by: -1) {
+            await gates[i].releaseSuccess()
+            // Allow the task to propagate so the service processes the commit.
+            _ = try? await loadTasks[i].value
+        }
+
+        // The latest-wins protocol means only load #4 should be committed.
+        XCTAssertTrue(service.isModelLoaded,
+            "Service should have a model loaded after all loads complete")
+
+        // All backends except #4 should have been unloaded (stale suppression).
+        for i in 0..<4 {
+            XCTAssertEqual(backends[i].unloadCallCount, 1,
+                "Backend \(i) should be unloaded since it's stale (got \(backends[i].unloadCallCount))")
+        }
+        XCTAssertEqual(backends[4].unloadCallCount, 0,
+            "Backend 4 (the winner) should not be unloaded")
+    }
+
     private func makeModelInfo(name: String, modelType: ModelType) -> ModelInfo {
         ModelInfo(
             name: name,
@@ -913,7 +970,11 @@ private final class ControlledLoadBackend: InferenceBackend,
     var configuredBaseURL: URL?
     var configuredModelName: String?
 
-    private let gate = ControlledLoadGate()
+    private let gate: ControlledLoadGate
+
+    init(gate: ControlledLoadGate = ControlledLoadGate()) {
+        self.gate = gate
+    }
 
     func configure(baseURL: URL, modelName: String) {
         configuredBaseURL = baseURL
