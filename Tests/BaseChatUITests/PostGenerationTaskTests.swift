@@ -70,6 +70,7 @@ final class PostGenerationTaskTests: XCTestCase {
         await vm.sendMessage()
         await vm.backgroundTask?.value
 
+        // Sabotage verified: removing vm.postGenerationTasks = [task] causes callCount to remain 0
         XCTAssertEqual(task.callCount, 1, "Task should be called once after generation")
     }
 
@@ -136,6 +137,7 @@ final class PostGenerationTaskTests: XCTestCase {
         await vm.backgroundTask?.value
 
         XCTAssertEqual(failingTask.callCount, 1, "Throwing task should still be called")
+        // Sabotage verified: removing the do/catch in ChatViewModel's task loop causes followingTask.callCount to be 0
         XCTAssertEqual(followingTask.callCount, 1, "Task after a throwing task should still run")
     }
 
@@ -155,6 +157,7 @@ final class PostGenerationTaskTests: XCTestCase {
         await vm.backgroundTask?.value
 
         XCTAssertNotNil(vm.backgroundTaskError, "backgroundTaskError should be set when a task throws")
+        XCTAssert(vm.backgroundTaskError is TestError, "Expected TestError but got \(String(describing: vm.backgroundTaskError))")
     }
 
     func test_successfulTask_doesNotSetBackgroundTaskError() async {
@@ -185,12 +188,15 @@ final class PostGenerationTaskTests: XCTestCase {
         vm.inputText = "Hello"
         await vm.sendMessage()
 
+        // Capture the in-flight task before switching sessions.
+        let inflight = vm.backgroundTask
+
         // Background task is now running (slowTask sleeping for 10 s).
         // Switching session cancels it before quickTask gets a chance to run.
         vm.switchToSession(sessionB)
 
-        // Give cooperative cancellation a moment to propagate.
-        try await Task.sleep(for: .milliseconds(50))
+        // Wait for the cancelled task to finish cooperatively — deterministic, no fixed sleep.
+        await inflight?.value
 
         XCTAssertEqual(quickTask.callCount, 0, "Task after cancelled slow task should not run")
     }
@@ -210,6 +216,7 @@ final class PostGenerationTaskTests: XCTestCase {
         // backgroundTask is nil (never scheduled) so awaiting it is a no-op.
         await vm.backgroundTask?.value
 
+        XCTAssertNil(vm.backgroundTask, "backgroundTask should not be scheduled for empty responses")
         XCTAssertEqual(task.callCount, 0, "Task should not be called when the assistant message is empty")
     }
 }

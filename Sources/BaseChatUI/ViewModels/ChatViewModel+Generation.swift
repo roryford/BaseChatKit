@@ -47,6 +47,7 @@ extension ChatViewModel {
     /// Handles context trimming, token usage capture, empty response cleanup,
     /// and the Foundation model upgrade hint.
     func generateIntoMessage(_ assistantMessage: ChatMessageRecord) async {
+        backgroundTaskError = nil
         activityPhase = .waitingForFirstToken
         let messageID = assistantMessage.id
         defer {
@@ -210,7 +211,7 @@ extension ChatViewModel {
         let tasks = postGenerationTasks
         guard !tasks.isEmpty else { return }
 
-        backgroundTask = Task.detached { [weak self, tasks, message, session] in
+        backgroundTask = Task { [weak self, tasks, message, session] in
             for task in tasks {
                 guard !Task.isCancelled else { break }
                 do {
@@ -218,10 +219,7 @@ extension ChatViewModel {
                 } catch is CancellationError {
                     break
                 } catch {
-                    let err = error
-                    Task { @MainActor [weak self] in
-                        self?.backgroundTaskError = err
-                    }
+                    self?.backgroundTaskError = error
                 }
             }
         }

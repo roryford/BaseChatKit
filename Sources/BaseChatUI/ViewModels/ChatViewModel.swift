@@ -355,6 +355,7 @@ public final class ChatViewModel {
         // Cancel any in-flight post-generation background tasks from the prior session.
         backgroundTask?.cancel()
         backgroundTask = nil
+        backgroundTaskError = nil
 
         // Load session's generation settings (fall back to defaults)
         systemPrompt = session.systemPrompt
