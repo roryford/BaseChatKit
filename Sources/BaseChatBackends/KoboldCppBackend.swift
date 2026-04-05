@@ -22,63 +22,14 @@ import BaseChatCore
 /// let stream = try backend.generate(prompt: "### Instruction:\nHello\n### Response:\n", systemPrompt: nil, config: .init())
 /// for try await token in stream { print(token, terminator: "") }
 /// ```
-public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiver, CloudBackendURLModelConfigurable, @unchecked Sendable {
-
-    // MARK: - Logging
-
-    private static let inferenceLogger = Logger(
-        subsystem: BaseChatConfiguration.shared.logSubsystem,
-        category: "inference"
-    )
-    private static let networkLogger = Logger(
-        subsystem: BaseChatConfiguration.shared.logSubsystem,
-        category: "network"
-    )
-
-    // MARK: - Configuration
-
-    private var baseURL: URL?
-    private var modelName: String = "koboldcpp"
+public final class KoboldCppBackend: SSECloudBackend, CloudBackendURLModelConfigurable, @unchecked Sendable {
 
     /// Optional GBNF grammar constraint sent in the request body.
     /// KoboldCpp-specific — not part of the shared `GenerationConfig`.
     public var grammarConstraint: String?
 
-    // MARK: - State
-
-    public private(set) var isModelLoaded = false
-    public private(set) var isGenerating = false
-
-    /// Full conversation history for multi-turn support.
-    /// Set by InferenceService before each generate call.
-    public var conversationHistory: [(role: String, content: String)]?
-
-    public func setConversationHistory(_ messages: [(role: String, content: String)]) {
-        conversationHistory = messages
-    }
-
     /// Context length reported by the KoboldCpp server, or 4096 as default.
     private var maxContextLength: Int32 = 4096
-
-    public var capabilities: BackendCapabilities {
-        BackendCapabilities(
-            supportedParameters: [.temperature, .topP, .topK, .typicalP, .repeatPenalty],
-            maxContextTokens: maxContextLength,
-            requiresPromptTemplate: true,
-            supportsSystemPrompt: false,
-            supportsToolCalling: false,
-            supportsStructuredOutput: false,
-            cancellationStyle: .cooperative,
-            supportsTokenCounting: false,
-            memoryStrategy: .external,
-            maxOutputTokens: 4096,
-            supportsStreaming: true,
-            isRemote: true
-        )
-    }
-
-    private var currentTask: Task<Void, Never>?
-    private let urlSession: URLSession
 
     /// Shared session with certificate pinning delegate.
     private static let pinnedSession: URLSession = {
@@ -96,26 +47,46 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
     /// - Parameter urlSession: Custom URLSession. Pass `nil` to use the default
     ///   session with certificate pinning enabled.
     public init(urlSession: URLSession? = nil) {
-        self.urlSession = urlSession ?? Self.pinnedSession
+        super.init(
+            defaultModelName: "koboldcpp",
+            urlSession: urlSession ?? Self.pinnedSession
+        )
+    }
+
+    // MARK: - Subclass Hooks
+
+    public override var backendName: String { "KoboldCpp" }
+
+    public override var capabilities: BackendCapabilities {
+        BackendCapabilities(
+            supportedParameters: [.temperature, .topP, .topK, .typicalP, .repeatPenalty],
+            maxContextTokens: maxContextLength,
+            requiresPromptTemplate: true,
+            supportsSystemPrompt: false,
+            supportsToolCalling: false,
+            supportsStructuredOutput: false,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false,
+            memoryStrategy: .external,
+            maxOutputTokens: 4096,
+            supportsStreaming: true,
+            isRemote: true
+        )
     }
 
     // MARK: - Configuration
 
     /// Configures the backend with connection details. Call before ``loadModel(from:contextSize:)``.
     ///
-    /// - Parameters:
-    ///   - baseURL: The base URL of the KoboldCpp server (e.g. `http://localhost:5001`).
-    ///              API paths are appended automatically.
-    ///   - modelName: An optional label for the model. KoboldCpp serves whatever
-    ///                model was loaded at startup, so this is purely informational.
-    public func configure(baseURL: URL, modelName: String = "koboldcpp") {
-        self.baseURL = baseURL
-        self.modelName = modelName
+    /// - Parameter baseURL: The base URL of the KoboldCpp server (e.g. `http://localhost:5001`).
+    ///                      API paths are appended automatically.
+    public func configure(baseURL: URL) {
+        super.configure(baseURL: baseURL, modelName: "koboldcpp")
     }
 
-    // MARK: - InferenceBackend
+    // MARK: - Model Lifecycle
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public override func loadModel(from url: URL, contextSize: Int32) async throws {
         guard let baseURL else {
             throw CloudBackendError.invalidURL(
                 "No base URL configured. Call configure(baseURL:modelName:) first."
@@ -125,8 +96,8 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
         // Query the server's max context length for accurate capabilities reporting.
         await queryMaxContextLength(baseURL: baseURL)
 
-        isModelLoaded = true
-        Self.inferenceLogger.info("KoboldCpp backend configured for \(self.modelName, privacy: .public) at \(baseURL.host() ?? "unknown", privacy: .public) (ctx: \(self.maxContextLength))")
+        setIsModelLoaded(true)
+        Log.inference.info("KoboldCpp backend configured for \(self.modelName, privacy: .public) at \(baseURL.host() ?? "unknown", privacy: .public) (ctx: \(self.maxContextLength))")
     }
 
     /// Queries GET /api/v1/config/max_context_length to learn the server's context size.
@@ -147,101 +118,21 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
             }
             maxContextLength = Int32(value)
         } catch {
-            Self.networkLogger.debug("Could not query KoboldCpp context length: \(error.localizedDescription, privacy: .private)")
+            Log.network.debug("Could not query KoboldCpp context length: \(error.localizedDescription, privacy: .private)")
         }
-    }
-
-    public func generate(
-        prompt: String,
-        systemPrompt: String?,
-        config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
-        guard isModelLoaded, let baseURL else {
-            throw CloudBackendError.invalidURL("Backend not configured. Call loadModel first.")
-        }
-
-        let request = try buildRequest(
-            baseURL: baseURL,
-            prompt: prompt,
-            config: config
-        )
-
-        isGenerating = true
-
-        return AsyncThrowingStream { [weak self] continuation in
-            guard let self else {
-                continuation.finish(throwing: CloudBackendError.streamInterrupted)
-                return
-            }
-
-            let session = self.urlSession
-
-            let task = Task { [weak self] in
-                defer { self?.isGenerating = false }
-
-                do {
-                    try await withExponentialBackoff {
-                        let (bytes, response) = try await session.bytes(for: request)
-
-                        guard let httpResponse = response as? HTTPURLResponse else {
-                            throw CloudBackendError.networkError(
-                                underlying: URLError(.badServerResponse)
-                            )
-                        }
-
-                        try await Self.checkStatusCode(httpResponse, bytes: bytes)
-
-                        // KoboldCpp streaming uses SSE with {"token":"..."} payloads.
-                        let tokenStream = SSEStreamParser.parse(bytes: bytes)
-                        for try await payload in tokenStream {
-                            if Task.isCancelled { break }
-
-                            if let token = Self.extractStreamingToken(from: payload) {
-                                continuation.yield(token)
-                            }
-                        }
-                    }
-
-                    continuation.finish()
-                } catch {
-                    if Task.isCancelled {
-                        continuation.finish()
-                    } else {
-                        Self.networkLogger.error("KoboldCpp stream error: \(error.localizedDescription, privacy: .private)")
-                        continuation.finish(throwing: error)
-                    }
-                }
-            }
-
-            self.currentTask = task
-
-            continuation.onTermination = { _ in
-                task.cancel()
-            }
-        }
-    }
-
-    public func stopGeneration() {
-        currentTask?.cancel()
-        currentTask = nil
-        isGenerating = false
-    }
-
-    public func unloadModel() {
-        stopGeneration()
-        baseURL = nil
-        isModelLoaded = false
-        maxContextLength = 4096
-        Self.inferenceLogger.info("KoboldCpp backend unloaded")
     }
 
     // MARK: - Request Building
 
-    private func buildRequest(
-        baseURL: URL,
+    public override func buildRequest(
         prompt: String,
+        systemPrompt: String?,
         config: GenerationConfig
     ) throws -> URLRequest {
+        guard let baseURL else {
+            throw CloudBackendError.invalidURL("No base URL configured")
+        }
+
         let generateURL = baseURL.appendingPathComponent("api/v1/generate")
 
         var body: [String: Any] = [
@@ -263,36 +154,15 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        Self.networkLogger.debug("KoboldCpp request to \(generateURL.absoluteString, privacy: .public) model=\(self.modelName, privacy: .public)")
+        Log.network.debug("KoboldCpp request to \(generateURL.absoluteString, privacy: .public) model=\(self.modelName, privacy: .public)")
 
         return request
     }
 
-    // MARK: - Response Handling
+    // MARK: - SSE Payload Handling
 
-    /// Checks the HTTP status code and throws an appropriate error for non-2xx responses.
-    private static func checkStatusCode(
-        _ response: HTTPURLResponse,
-        bytes: URLSession.AsyncBytes
-    ) async throws {
-        let statusCode = response.statusCode
-
-        guard !(200...299).contains(statusCode) else { return }
-
-        switch statusCode {
-        case 429:
-            let retryAfter = response.value(forHTTPHeaderField: "Retry-After")
-                .flatMap { TimeInterval($0) }
-            throw CloudBackendError.rateLimited(retryAfter: retryAfter)
-        default:
-            var errorBody = ""
-            for try await byte in bytes {
-                errorBody.append(Character(UnicodeScalar(byte)))
-                if errorBody.count > 2048 { break }
-            }
-            let message = "Unexpected server error (status \(statusCode))"
-            throw CloudBackendError.serverError(statusCode: statusCode, message: message)
-        }
+    public override func extractToken(from payload: String) -> String? {
+        Self.extractStreamingToken(from: payload)
     }
 
     // MARK: - SSE Payload Handler
@@ -343,5 +213,12 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
             return nil
         }
         return text
+    }
+
+    // MARK: - Unload
+
+    public override func unloadModel() {
+        super.unloadModel()
+        maxContextLength = 4096
     }
 }
