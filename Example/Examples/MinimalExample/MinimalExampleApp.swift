@@ -6,7 +6,7 @@ import BaseChatBackends
 
 /// The simplest possible BaseChatKit app — under 40 lines.
 ///
-/// This registers all built-in backends, creates an in-memory SwiftData store,
+/// This registers all built-in backends, creates a persistent SwiftData store,
 /// and presents the standard ChatView. No model curation, no custom UI.
 @main
 struct MinimalExampleApp: App {
@@ -33,7 +33,7 @@ struct MinimalExampleApp: App {
         }
         _chatViewModel = State(initialValue: vm)
 
-        self.modelContainer = try! ModelContainerFactory.makeInMemoryContainer()
+        self.modelContainer = try! ModelContainerFactory.makeContainer()
     }
 
     var body: some Scene {

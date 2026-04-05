@@ -66,6 +66,7 @@ struct MyApp: App {
     @State private var chatViewModel: ChatViewModel
     @State private var sessionManager = SessionManagerViewModel()
     @State private var modelManagement: ModelManagementViewModel
+    private let modelContainer: ModelContainer
 
     init() {
         // 1. Configure the framework
@@ -95,6 +96,8 @@ struct MyApp: App {
             huggingFaceService: hfService,
             downloadManager: downloadManager
         ))
+
+        modelContainer = try! ModelContainerFactory.makeContainer()
     }
 
     var body: some Scene {
@@ -104,7 +107,7 @@ struct MyApp: App {
                 .environment(modelManagement)
                 .environment(sessionManager)
         }
-        .modelContainer(try! ModelContainerFactory.makeInMemoryContainer())
+        .modelContainer(modelContainer)
     }
 }
 ```

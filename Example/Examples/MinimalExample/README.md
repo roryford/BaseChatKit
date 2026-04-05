@@ -5,7 +5,7 @@ The simplest possible BaseChatKit app. Demonstrates the bare minimum setup:
 - Configure `BaseChatConfiguration` at startup
 - Register backends with `DefaultBackends.register(with:)`
 - Create a `ChatViewModel` and `SessionManagerViewModel`
-- Set up SwiftData with `ModelContainerFactory.makeInMemoryContainer()`
+- Set up SwiftData with `ModelContainerFactory.makeContainer()`
 - Present `ChatView` with environment wiring
 
 ## Running
