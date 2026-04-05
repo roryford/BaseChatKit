@@ -78,11 +78,6 @@ struct OllamaBackendTests {
 
     // MARK: - Capabilities
 
-    @Test func capabilities_isRemote() {
-        let backend = OllamaBackend()
-        #expect(backend.capabilities.isRemote)
-    }
-
     @Test func capabilities_supportsExpectedParameters() {
         let caps = OllamaBackend().capabilities
         #expect(caps.supportedParameters.contains(.temperature))
@@ -421,53 +416,6 @@ struct OllamaModelListServiceTests {
     }
 }
 
-// MARK: - BackendCapabilities isRemote Tests
-
-@Suite("BackendCapabilities.isRemote")
-struct BackendCapabilitiesIsRemoteTests {
-
-    @Test func isRemote_defaultsFalse() {
-        let caps = BackendCapabilities(
-            supportedParameters: [],
-            maxContextTokens: 4096,
-            requiresPromptTemplate: false,
-            supportsSystemPrompt: false
-        )
-        #expect(!caps.isRemote)
-    }
-
-    @Test func isRemote_canBeSetTrue() {
-        let caps = BackendCapabilities(
-            supportedParameters: [],
-            maxContextTokens: 128_000,
-            requiresPromptTemplate: false,
-            supportsSystemPrompt: true,
-            supportsToolCalling: false,
-            supportsStructuredOutput: false,
-            cancellationStyle: .cooperative,
-            supportsTokenCounting: false,
-            memoryStrategy: .external,
-            isRemote: true
-        )
-        #expect(caps.isRemote)
-    }
-
-    @Test func openAIBackend_isRemote() {
-        let backend = OpenAIBackend()
-        #expect(backend.capabilities.isRemote)
-    }
-
-    @Test func koboldCppBackend_isRemote() {
-        let backend = KoboldCppBackend()
-        #expect(backend.capabilities.isRemote)
-    }
-
-    @Test func ollamaBackend_isRemote() {
-        let backend = OllamaBackend()
-        #expect(backend.capabilities.isRemote)
-    }
-}
-
 // MARK: - OpenAICompatibleBackend Alias
 
 @Suite("OpenAICompatibleBackend typealias")
@@ -476,11 +424,6 @@ struct OpenAICompatibleBackendTests {
     @Test func isOpenAIBackend() {
         let backend = OpenAICompatibleBackend()
         #expect(backend is OpenAIBackend)
-    }
-
-    @Test func capabilities_isRemote() {
-        let backend = OpenAICompatibleBackend()
-        #expect(backend.capabilities.isRemote)
     }
 }
 

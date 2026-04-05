@@ -45,8 +45,7 @@ public final class ClaudeBackend: InferenceBackend, ConversationHistoryReceiver,
             supportsStructuredOutput: true,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
-            memoryStrategy: .external,
-            isRemote: true
+            memoryStrategy: .external
         )
     }
 

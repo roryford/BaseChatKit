@@ -61,13 +61,6 @@ public struct BackendCapabilities: Sendable {
     /// How the backend loads model weights into memory.
     public let memoryStrategy: MemoryStrategy
 
-    /// Whether this backend communicates with a remote server over the network.
-    ///
-    /// `true` for cloud APIs and self-hosted remote servers (OpenAI, Claude,
-    /// OpenAI-compatible, Ollama, KoboldCpp). `false` for on-device backends
-    /// (MLX, llama.cpp, Apple Foundation Models).
-    public let isRemote: Bool
-
     /// Parameters the UI should present controls for.
     public var visibleParameters: [GenerationParameter] {
         GenerationParameter.allCases.filter { supportedParameters.contains($0) }
@@ -88,7 +81,6 @@ public struct BackendCapabilities: Sendable {
         self.cancellationStyle = .cooperative
         self.supportsTokenCounting = false
         self.memoryStrategy = .resident
-        self.isRemote = false
     }
 
     public init(
@@ -100,8 +92,7 @@ public struct BackendCapabilities: Sendable {
         supportsStructuredOutput: Bool,
         cancellationStyle: CancellationStyle,
         supportsTokenCounting: Bool,
-        memoryStrategy: MemoryStrategy = .resident,
-        isRemote: Bool = false
+        memoryStrategy: MemoryStrategy = .resident
     ) {
         self.supportedParameters = supportedParameters
         self.maxContextTokens = maxContextTokens
@@ -112,6 +103,5 @@ public struct BackendCapabilities: Sendable {
         self.cancellationStyle = cancellationStyle
         self.supportsTokenCounting = supportsTokenCounting
         self.memoryStrategy = memoryStrategy
-        self.isRemote = isRemote
     }
 }
