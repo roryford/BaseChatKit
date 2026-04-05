@@ -70,6 +70,7 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
     private let probeSession: URLSession
     private var continuation: AsyncStream<[DiscoveredServer]>.Continuation?
     private var resolvedServers: [String: DiscoveredServer] = [:]  // key: "host:port"
+    private var endpointToKey: [NWEndpoint: String] = [:]
     private var isRunning = false
 
     // Browsers must be stoppable from nonisolated context — use a lock-protected store.
@@ -147,9 +148,16 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
             }
         }
 
-        browser.browseResultsChangedHandler = { [definition] results, _ in
-            for result in results {
-                Task { await self.resolveEndpoint(result.endpoint, definition: definition) }
+        browser.browseResultsChangedHandler = { [definition] _, changes in
+            for change in changes {
+                switch change {
+                case .added(let result):
+                    Task { await self.resolveEndpoint(result.endpoint, definition: definition) }
+                case .removed(let result):
+                    Task { await self.removeEndpoint(result.endpoint) }
+                default:
+                    break
+                }
             }
         }
 
@@ -166,8 +174,14 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
         guard let (host, port) = resolved else { return }
 
         if let server = await probeServer(host: host, port: port, definition: definition) {
-            publishServer(server)
+            publishServer(server, endpoint: endpoint)
         }
+    }
+
+    private func removeEndpoint(_ endpoint: NWEndpoint) {
+        guard let key = endpointToKey.removeValue(forKey: endpoint) else { return }
+        resolvedServers.removeValue(forKey: key)
+        continuation?.yield(Array(resolvedServers.values))
     }
 
     /// Resolves an NWEndpoint to a (host, port) pair by briefly connecting.
@@ -255,8 +269,9 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
         }
     }
 
-    private func publishServer(_ server: DiscoveredServer) {
+    private func publishServer(_ server: DiscoveredServer, endpoint: NWEndpoint) {
         let key = "\(server.host):\(server.port)"
+        endpointToKey[endpoint] = key
         resolvedServers[key] = server
         continuation?.yield(Array(resolvedServers.values))
     }

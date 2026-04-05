@@ -270,11 +270,12 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
                 .flatMap { TimeInterval($0) }
             throw CloudBackendError.rateLimited(retryAfter: retryAfter)
         default:
-            var errorBody = ""
+            var errorBodyData = Data()
             for try await byte in bytes {
-                errorBody.append(Character(UnicodeScalar(byte)))
-                if errorBody.count > 2048 { break }
+                errorBodyData.append(byte)
+                if errorBodyData.count > 2048 { break }
             }
+            let errorBody = String(decoding: errorBodyData, as: UTF8.self)
             let message = extractErrorMessage(from: errorBody) ?? "Unexpected server error (status \(statusCode))"
             throw CloudBackendError.serverError(statusCode: statusCode, message: message)
         }

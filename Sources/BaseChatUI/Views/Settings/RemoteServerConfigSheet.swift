@@ -182,9 +182,15 @@ public struct RemoteServerConfigSheet: View {
             endpoint.setAPIKey(trimmedKey)
         }
 
-        try? modelContext.save()
-        onSave?(endpoint)
-        dismiss()
+        do {
+            try modelContext.save()
+            onSave?(endpoint)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription.isEmpty
+                ? "Failed to save the server configuration."
+                : error.localizedDescription
+        }
     }
 }
 
