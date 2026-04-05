@@ -70,7 +70,8 @@ public final class KoboldCppBackend: InferenceBackend, ConversationHistoryReceiv
             supportsStructuredOutput: false,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
-            memoryStrategy: .external
+            memoryStrategy: .external,
+            isRemote: true
         )
     }
 

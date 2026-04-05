@@ -1,0 +1,87 @@
+import Foundation
+import os
+import BaseChatCore
+
+/// Fetches the list of locally available models from an Ollama server.
+///
+/// Calls `GET /api/tags` and returns an array of ``RemoteModelInfo`` values
+/// that can be presented in a picker or passed to ``OllamaBackend/configure(baseURL:modelName:)``.
+///
+/// Usage:
+/// ```swift
+/// let service = OllamaModelListService()
+/// let models = try await service.fetchModels(from: URL(string: "http://localhost:11434")!)
+/// ```
+public final class OllamaModelListService: Sendable {
+
+    private static let logger = Logger(
+        subsystem: BaseChatConfiguration.shared.logSubsystem,
+        category: "network"
+    )
+
+    private let urlSession: URLSession
+
+    public init(urlSession: URLSession? = nil) {
+        if let urlSession {
+            self.urlSession = urlSession
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 10
+            self.urlSession = URLSession(configuration: config)
+        }
+    }
+
+    /// Fetches models available on the given Ollama server.
+    ///
+    /// - Parameter baseURL: The server base URL (e.g. `http://localhost:11434`).
+    /// - Returns: An array of available models, sorted alphabetically by name.
+    /// - Throws: ``CloudBackendError`` on HTTP or network failure.
+    public func fetchModels(from baseURL: URL) async throws -> [RemoteModelInfo] {
+        let tagsURL = baseURL.appendingPathComponent("api/tags")
+        var request = URLRequest(url: tagsURL)
+        request.httpMethod = "GET"
+
+        let (data, response) = try await urlSession.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudBackendError.networkError(underlying: URLError(.badServerResponse))
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw CloudBackendError.serverError(
+                statusCode: httpResponse.statusCode,
+                message: "Failed to fetch Ollama model list (status \(httpResponse.statusCode))"
+            )
+        }
+
+        return try parseModels(from: data)
+    }
+
+    // MARK: - Parsing
+
+    private struct OllamaTagsResponse: Decodable {
+        struct Model: Decodable {
+            let name: String
+            let size: Int64?
+            // digest, modified_at etc. ignored
+        }
+        let models: [Model]?
+    }
+
+    private func parseModels(from data: Data) throws -> [RemoteModelInfo] {
+        let response = try JSONDecoder().decode(OllamaTagsResponse.self, from: data)
+        let models = response.models ?? []
+
+        return models
+            .map { model in
+                let parts = model.name.split(separator: ":", maxSplits: 1)
+                let quantization = parts.count > 1 ? String(parts[1]) : nil
+                return RemoteModelInfo(
+                    name: model.name,
+                    sizeBytes: model.size,
+                    quantization: quantization
+                )
+            }
+            .sorted { $0.name < $1.name }
+    }
+}
