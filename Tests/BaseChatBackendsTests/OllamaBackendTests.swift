@@ -107,6 +107,7 @@ struct OllamaBackendTests {
             ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"}"#),
         ]
         MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "Say hello", systemPrompt: nil, config: .init())
         var tokens: [String] = []
@@ -126,6 +127,7 @@ struct OllamaBackendTests {
             ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
         ]
         MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: "You are a test bot.", config: .init())
         for try await _ in stream { }
@@ -150,6 +152,7 @@ struct OllamaBackendTests {
             ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":1234}"#),
         ]
         MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
         var tokens: [String] = []
@@ -168,6 +171,7 @@ struct OllamaBackendTests {
             ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
         ]
         MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         var tokens: [String] = []
@@ -184,6 +188,7 @@ struct OllamaBackendTests {
 
         let body = Data(#"{"error":"model not found"}"#.utf8)
         MockURLProtocol.stub(url: chatURL, response: .immediate(data: body, statusCode: 404))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         do {
@@ -202,6 +207,7 @@ struct OllamaBackendTests {
         try await loadBackend(backend)
 
         MockURLProtocol.stub(url: chatURL, response: .immediate(data: Data(), statusCode: 500))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         do {
@@ -224,6 +230,7 @@ struct OllamaBackendTests {
             statusCode: 429,
             headers: ["Retry-After": "0"]
         ))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         do {
@@ -248,6 +255,7 @@ struct OllamaBackendTests {
             ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
         ]
         MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "Hello there", systemPrompt: nil, config: .init())
         for try await _ in stream { }
@@ -282,6 +290,7 @@ struct OllamaBackendTests {
             ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
         ]
         MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "ignored when history set", systemPrompt: nil, config: .init())
         for try await _ in stream { }
@@ -353,6 +362,7 @@ struct OllamaModelListServiceTests {
         ]}
         """
         MockURLProtocol.stub(url: tagsURL, response: .immediate(data: Data(response.utf8), statusCode: 200))
+        defer { MockURLProtocol.unstub(url: tagsURL) }
 
         let models = try await service.fetchModels(from: baseURL)
 
@@ -369,6 +379,7 @@ struct OllamaModelListServiceTests {
 
         let response = #"{"models":[{"name":"llama3.2:8b-q4_0","size":4294967296}]}"#
         MockURLProtocol.stub(url: tagsURL, response: .immediate(data: Data(response.utf8), statusCode: 200))
+        defer { MockURLProtocol.unstub(url: tagsURL) }
 
         let models = try await service.fetchModels(from: baseURL)
         #expect(models.first?.quantization == "8b-q4_0")
@@ -379,6 +390,7 @@ struct OllamaModelListServiceTests {
         let tagsURL = baseURL.appendingPathComponent("api/tags")
 
         MockURLProtocol.stub(url: tagsURL, response: .immediate(data: Data(#"{"models":[]}"#.utf8), statusCode: 200))
+        defer { MockURLProtocol.unstub(url: tagsURL) }
 
         let models = try await service.fetchModels(from: baseURL)
         #expect(models.isEmpty)
@@ -389,6 +401,7 @@ struct OllamaModelListServiceTests {
         let tagsURL = baseURL.appendingPathComponent("api/tags")
 
         MockURLProtocol.stub(url: tagsURL, response: .immediate(data: Data(), statusCode: 503))
+        defer { MockURLProtocol.unstub(url: tagsURL) }
 
         do {
             _ = try await service.fetchModels(from: baseURL)
@@ -406,6 +419,7 @@ struct OllamaModelListServiceTests {
         let tagsURL = baseURL.appendingPathComponent("api/tags")
 
         MockURLProtocol.stub(url: tagsURL, response: .error(URLError(.notConnectedToInternet)))
+        defer { MockURLProtocol.unstub(url: tagsURL) }
 
         do {
             _ = try await service.fetchModels(from: baseURL)
