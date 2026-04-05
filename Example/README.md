@@ -12,7 +12,7 @@ The full-featured demo showing all BaseChatKit capabilities working together. Th
 
 - Configuring `BaseChatConfiguration` at startup
 - Composing `BaseChatUI` views (ChatView, SessionListView, ModelManagementSheet)
-- Setting up SwiftData with `BaseChatSchema.allModelTypes`
+- Setting up SwiftData with `ModelContainerFactory`
 - Wiring view models via `@Environment`
 - Cloud API endpoint management
 - Multi-session chat with auto-rename

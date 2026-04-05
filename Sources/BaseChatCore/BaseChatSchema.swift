@@ -9,9 +9,9 @@ import SwiftData
 public enum BaseChatSchema {
     @available(*, deprecated, renamed: "ModelContainerFactory.makeInMemoryContainer")
     public static let allModelTypes: [any PersistentModel.Type] = [
-        ChatMessage.self,
-        ChatSession.self,
-        SamplerPreset.self,
-        APIEndpoint.self,
+        BaseChatSchemaV1.ChatMessage.self,
+        BaseChatSchemaV1.ChatSession.self,
+        BaseChatSchemaV1.SamplerPreset.self,
+        BaseChatSchemaV1.APIEndpoint.self,
     ]
 }

@@ -16,10 +16,17 @@ final class SchemaMigrationTests: XCTestCase {
         let models = BaseChatSchemaV1.models
         XCTAssertEqual(models.count, 4)
         let ids = models.map { ObjectIdentifier($0) }
-        XCTAssertTrue(ids.contains(ObjectIdentifier(ChatMessage.self)))
-        XCTAssertTrue(ids.contains(ObjectIdentifier(ChatSession.self)))
-        XCTAssertTrue(ids.contains(ObjectIdentifier(SamplerPreset.self)))
-        XCTAssertTrue(ids.contains(ObjectIdentifier(APIEndpoint.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.ChatMessage.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.ChatSession.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.SamplerPreset.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self)))
+    }
+
+    func test_publicTypealiases_matchSchemaV1ModelTypes() {
+        XCTAssertEqual(ObjectIdentifier(ChatMessage.self), ObjectIdentifier(BaseChatSchemaV1.ChatMessage.self))
+        XCTAssertEqual(ObjectIdentifier(ChatSession.self), ObjectIdentifier(BaseChatSchemaV1.ChatSession.self))
+        XCTAssertEqual(ObjectIdentifier(SamplerPreset.self), ObjectIdentifier(BaseChatSchemaV1.SamplerPreset.self))
+        XCTAssertEqual(ObjectIdentifier(APIEndpoint.self), ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self))
     }
 
     // MARK: - BaseChatMigrationPlan
@@ -56,6 +63,22 @@ final class SchemaMigrationTests: XCTestCase {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainerFactory.makeContainer(configurations: [config])
         XCTAssertNotNil(container)
+    }
+
+    func test_schemaOwnedModelAndPublicAlias_areInterchangeable() throws {
+        let container = try ModelContainerFactory.makeInMemoryContainer()
+        let context = ModelContext(container)
+
+        let nestedMessage = BaseChatSchemaV1.ChatMessage(role: .user, content: "alias check", sessionID: UUID())
+        context.insert(nestedMessage)
+        try context.save()
+        let nestedMessageID = nestedMessage.id
+
+        let fetchedViaAlias = try context.fetch(FetchDescriptor<ChatMessage>(
+            predicate: #Predicate { $0.id == nestedMessageID }
+        ))
+        XCTAssertEqual(fetchedViaAlias.count, 1)
+        XCTAssertEqual(fetchedViaAlias.first?.content, "alias check")
     }
 
     // MARK: - Codable round-trip (ChatMessage)
@@ -131,6 +154,35 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertEqual(fetched0.temperature, 1.2, accuracy: 0.001)
         XCTAssertEqual(fetched0.topP, 0.95, accuracy: 0.001)
         XCTAssertEqual(fetched0.repeatPenalty, 1.05, accuracy: 0.001)
+    }
+
+    // MARK: - Codable round-trip (APIEndpoint)
+
+    func test_apiEndpoint_codableRoundTrip() throws {
+        let container = try ModelContainerFactory.makeInMemoryContainer()
+        let context = ModelContext(container)
+
+        let endpoint = APIEndpoint(
+            name: "Local LM Studio",
+            provider: .lmStudio,
+            baseURL: "http://localhost:1234",
+            modelName: "custom-model"
+        )
+        context.insert(endpoint)
+        try context.save()
+
+        let endpointID = endpoint.id
+        let descriptor = FetchDescriptor<APIEndpoint>(
+            predicate: #Predicate { $0.id == endpointID }
+        )
+        let fetched = try context.fetch(descriptor)
+        XCTAssertEqual(fetched.count, 1)
+        let fetched0 = try XCTUnwrap(fetched.first)
+        XCTAssertEqual(fetched0.name, "Local LM Studio")
+        XCTAssertEqual(fetched0.provider, .lmStudio)
+        XCTAssertEqual(fetched0.baseURL, "http://localhost:1234")
+        XCTAssertEqual(fetched0.modelName, "custom-model")
+        XCTAssertTrue(fetched0.isEnabled)
     }
 
     // MARK: - makeInMemoryContainer helper

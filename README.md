@@ -104,7 +104,7 @@ struct MyApp: App {
                 .environment(modelManagement)
                 .environment(sessionManager)
         }
-        .modelContainer(for: BaseChatSchema.allModelTypes)
+        .modelContainer(try! ModelContainerFactory.makeInMemoryContainer())
     }
 }
 ```

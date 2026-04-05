@@ -33,8 +33,7 @@ struct MinimalExampleApp: App {
         }
         _chatViewModel = State(initialValue: vm)
 
-        let schema = Schema(BaseChatSchema.allModelTypes)
-        self.modelContainer = try! ModelContainer(for: schema)
+        self.modelContainer = try! ModelContainerFactory.makeInMemoryContainer()
     }
 
     var body: some Scene {

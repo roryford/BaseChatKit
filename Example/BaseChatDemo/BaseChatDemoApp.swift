@@ -52,9 +52,8 @@ struct BaseChatDemoApp: App {
             downloadManager: downloadManager
         ))
 
-        let schema = Schema(BaseChatSchema.allModelTypes)
         let config = ModelConfiguration(isStoredInMemoryOnly: testing)
-        self.modelContainer = try! ModelContainer(for: schema, configurations: [config])
+        self.modelContainer = try! ModelContainerFactory.makeContainer(configurations: [config])
     }
 
     // MARK: - Curated Models
