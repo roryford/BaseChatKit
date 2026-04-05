@@ -101,6 +101,10 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
 
     private func setContinuation(_ cont: AsyncStream<[DiscoveredServer]>.Continuation) {
         continuation = cont
+        // Yield current snapshot so late subscribers don't miss already-resolved servers.
+        if !resolvedServers.isEmpty {
+            cont.yield(Array(resolvedServers.values))
+        }
     }
 
     public func startDiscovery() async {
@@ -218,7 +222,7 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
             connection.start(queue: .global(qos: .utility))
 
             Task {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                try? await Task.sleep(for: .seconds(3))
                 connection.cancel()
                 resume(nil)
             }

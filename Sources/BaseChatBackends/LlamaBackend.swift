@@ -45,17 +45,25 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Capabilities
 
-    public let capabilities = BackendCapabilities(
-        supportedParameters: [.temperature, .topP, .repeatPenalty],
-        maxContextTokens: 4096,
-        requiresPromptTemplate: true,
-        supportsSystemPrompt: true,
-        supportsToolCalling: false,
-        supportsStructuredOutput: false,
-        cancellationStyle: .explicit,
-        supportsTokenCounting: true,
-        memoryStrategy: .mappable
-    )
+    private var _effectiveContextSize: Int32 = 4096
+
+    public var capabilities: BackendCapabilities {
+        let ctxSize = withStateLock { _effectiveContextSize }
+        return BackendCapabilities(
+            supportedParameters: [.temperature, .topP, .repeatPenalty],
+            maxContextTokens: ctxSize,
+            requiresPromptTemplate: true,
+            supportsSystemPrompt: true,
+            supportsToolCalling: false,
+            supportsStructuredOutput: false,
+            cancellationStyle: .explicit,
+            supportsTokenCounting: true,
+            memoryStrategy: .mappable,
+            maxOutputTokens: 4096,
+            supportsStreaming: true,
+            isRemote: false
+        )
+    }
 
     // MARK: - Private
 
@@ -132,6 +140,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             self.context = loadedResources.context
             self.vocab = loadedResources.vocab
             self.isModelLoaded = true
+            self._effectiveContextSize = loadedResources.effectiveContextSize
             return true
         }
 

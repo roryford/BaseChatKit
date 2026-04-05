@@ -12,6 +12,28 @@ import Foundation
 /// 7. Return an ``AssembledPrompt`` with ordered slots, trimmed messages, total tokens, and per-slot breakdown.
 public enum PromptAssembler {
 
+    /// Assembles slots and messages using context window size from `BackendCapabilities`.
+    ///
+    /// Convenience overload that reads `contextWindowSize` directly from capabilities,
+    /// so callers don't need to thread the value separately.
+    public static func assemble(
+        slots: [PromptSlot],
+        messages: [ChatMessageRecord],
+        systemPrompt: String?,
+        capabilities: BackendCapabilities,
+        responseBuffer: Int = 512,
+        tokenizer: TokenizerProvider? = nil
+    ) -> AssembledPrompt {
+        assemble(
+            slots: slots,
+            messages: messages,
+            systemPrompt: systemPrompt,
+            contextSize: capabilities.contextWindowSize,
+            responseBuffer: responseBuffer,
+            tokenizer: tokenizer
+        )
+    }
+
     /// Assembles slots and messages into a budgeted prompt.
     ///
     /// - Parameters:

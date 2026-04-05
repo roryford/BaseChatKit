@@ -38,7 +38,10 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         supportsStructuredOutput: false,
         cancellationStyle: .cooperative,
         supportsTokenCounting: true,
-        memoryStrategy: .resident
+        memoryStrategy: .resident,
+        maxOutputTokens: 4096,
+        supportsStreaming: true,
+        isRemote: false
     )
 
     // MARK: - Private

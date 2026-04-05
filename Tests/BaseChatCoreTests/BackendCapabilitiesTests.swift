@@ -191,4 +191,206 @@ final class BackendCapabilitiesTests: XCTestCase {
 
         XCTAssertEqual(caps.visibleParameters, GenerationParameter.allCases)
     }
+
+    // MARK: - contextWindowSize, maxOutputTokens, supportsStreaming, isRemote
+
+    func test_contextWindowSize_derivesFromMaxContextTokens() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 32_768,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true
+        )
+        XCTAssertEqual(caps.contextWindowSize, 32_768)
+    }
+
+    func test_shortInitializer_defaultsNewFields() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 4096,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true
+        )
+        XCTAssertEqual(caps.maxOutputTokens, 4096)
+        XCTAssertTrue(caps.supportsStreaming)
+        XCTAssertFalse(caps.isRemote)
+    }
+
+    func test_fullInitializer_setsNewFields() {
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 200_000,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: true,
+            supportsStructuredOutput: true,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false,
+            memoryStrategy: .external,
+            maxOutputTokens: 8192,
+            supportsStreaming: true,
+            isRemote: true
+        )
+        XCTAssertEqual(caps.contextWindowSize, 200_000)
+        XCTAssertEqual(caps.maxOutputTokens, 8192)
+        XCTAssertTrue(caps.supportsStreaming)
+        XCTAssertTrue(caps.isRemote)
+    }
+
+    func test_fullInitializer_newFieldsDefaultValues() {
+        let caps = BackendCapabilities(
+            supportedParameters: [],
+            maxContextTokens: 4096,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: false,
+            supportsStructuredOutput: false,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false
+        )
+        XCTAssertEqual(caps.maxOutputTokens, 4096)
+        XCTAssertTrue(caps.supportsStreaming)
+        XCTAssertFalse(caps.isRemote)
+    }
+
+    // MARK: - Codable round-trip
+
+    func test_codable_roundTrip() throws {
+        let original = BackendCapabilities(
+            supportedParameters: [.temperature, .topP],
+            maxContextTokens: 128_000,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: true,
+            supportsStructuredOutput: true,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false,
+            memoryStrategy: .external,
+            maxOutputTokens: 16_384,
+            supportsStreaming: true,
+            isRemote: true
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(BackendCapabilities.self, from: data)
+
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.contextWindowSize, 128_000)
+        XCTAssertEqual(decoded.maxOutputTokens, 16_384)
+        XCTAssertTrue(decoded.supportsStreaming)
+        XCTAssertTrue(decoded.isRemote)
+    }
+
+    func test_codable_roundTrip_allMemoryStrategies() throws {
+        for strategy in [MemoryStrategy.resident, .mappable, .external] {
+            let caps = BackendCapabilities(
+                supportedParameters: [],
+                maxContextTokens: 4096,
+                requiresPromptTemplate: false,
+                supportsSystemPrompt: false,
+                supportsToolCalling: false,
+                supportsStructuredOutput: false,
+                cancellationStyle: .cooperative,
+                supportsTokenCounting: false,
+                memoryStrategy: strategy
+            )
+            let data = try JSONEncoder().encode(caps)
+            let decoded = try JSONDecoder().decode(BackendCapabilities.self, from: data)
+            XCTAssertEqual(decoded.memoryStrategy, strategy)
+        }
+    }
+
+    // MARK: - Codable contract (public API shape lock)
+
+    /// Documents the exact JSON field names of BackendCapabilities.
+    /// If this test breaks, you are intentionally changing a public contract — update the fixture.
+    func test_codableContract_roundTrip() throws {
+        let json = """
+        {
+            "supportedParameters": ["temperature", "topP"],
+            "maxContextTokens": 128000,
+            "maxOutputTokens": 8192,
+            "requiresPromptTemplate": false,
+            "supportsSystemPrompt": true,
+            "supportsStreaming": true,
+            "supportsToolCalling": true,
+            "supportsStructuredOutput": true,
+            "cancellationStyle": "cooperative",
+            "supportsTokenCounting": true,
+            "memoryStrategy": "external",
+            "isRemote": false
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(BackendCapabilities.self, from: json)
+        let reencoded = try JSONDecoder().decode(BackendCapabilities.self,
+                            from: JSONEncoder().encode(decoded))
+
+        XCTAssertEqual(decoded, reencoded)
+        XCTAssertEqual(decoded.supportedParameters, [.temperature, .topP])
+        XCTAssertEqual(decoded.maxContextTokens, 128_000)
+        XCTAssertEqual(decoded.maxOutputTokens, 8192)
+        XCTAssertFalse(decoded.requiresPromptTemplate)
+        XCTAssertTrue(decoded.supportsSystemPrompt)
+        XCTAssertTrue(decoded.supportsStreaming)
+        XCTAssertTrue(decoded.supportsToolCalling)
+        XCTAssertTrue(decoded.supportsStructuredOutput)
+        XCTAssertEqual(decoded.cancellationStyle, .cooperative)
+        XCTAssertTrue(decoded.supportsTokenCounting)
+        XCTAssertEqual(decoded.memoryStrategy, .external)
+        XCTAssertFalse(decoded.isRemote)
+    }
+
+    // MARK: - PromptAssembler reads contextWindowSize from capabilities
+
+    func test_promptAssembler_capabilities_overload_usesContextWindowSize() {
+        struct CharTok: TokenizerProvider { func tokenCount(_ t: String) -> Int { t.count } }
+        let caps = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 100,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true
+        )
+        let messages = (0..<5).map { _ in
+            ChatMessageRecord(role: .user, content: String(repeating: "x", count: 10), sessionID: UUID())
+        }
+
+        let result = PromptAssembler.assemble(
+            slots: [],
+            messages: messages,
+            systemPrompt: nil,
+            capabilities: caps,
+            responseBuffer: 0,
+            tokenizer: CharTok()
+        )
+
+        // contextWindowSize == 100, 5 messages x 10 chars = 50 tokens, all fit
+        XCTAssertEqual(result.messages.count, 5)
+        XCTAssertEqual(result.totalTokens, 50)
+    }
+
+    func test_promptAssembler_capabilities_overload_trimsWhenContextSmall() {
+        struct CharTok: TokenizerProvider { func tokenCount(_ t: String) -> Int { t.count } }
+        let caps = BackendCapabilities(
+            supportedParameters: [],
+            maxContextTokens: 30,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: false
+        )
+        let messages = (0..<5).map { _ in
+            ChatMessageRecord(role: .user, content: String(repeating: "x", count: 10), sessionID: UUID())
+        }
+
+        let result = PromptAssembler.assemble(
+            slots: [],
+            messages: messages,
+            systemPrompt: nil,
+            capabilities: caps,
+            responseBuffer: 0,
+            tokenizer: CharTok()
+        )
+
+        // 30 tokens / 10 per message = 3 messages fit
+        XCTAssertEqual(result.messages.count, 3)
+    }
 }
