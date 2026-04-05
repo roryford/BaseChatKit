@@ -398,9 +398,11 @@ final class GenerationExtensionTests: XCTestCase {
         await vm.sendMessage()
 
         XCTAssertNotNil(vm.errorMessage, "errorMessage should be set when generation throws")
+        XCTAssertNotNil(vm.activeError, "activeError should be set when generation throws")
+        XCTAssertEqual(vm.activeError?.kind, .generation, "Error kind should be .generation")
         XCTAssertTrue(
-            vm.errorMessage?.contains("Generation failed") == true,
-            "Error should mention 'Generation failed', got: \(vm.errorMessage ?? "nil")"
+            vm.errorMessage?.contains("backend exploded") == true,
+            "Error should contain the underlying error description, got: \(vm.errorMessage ?? "nil")"
         )
     }
 

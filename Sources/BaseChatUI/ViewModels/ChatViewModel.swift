@@ -117,8 +117,21 @@ public final class ChatViewModel {
     /// Test-only hook invoked whenever `isGenerating` changes.
     public var onGeneratingChanged: ((Bool) -> Void)?
 
-    /// A user-facing error message, shown as a banner. Cleared on next action.
-    public var errorMessage: String?
+    /// Structured error with recovery information for the UI.
+    public var activeError: ChatError?
+
+    /// Backward-compatible string accessor for error display.
+    /// Returns the message from the active error, or nil if no error.
+    public var errorMessage: String? {
+        get { activeError?.message }
+        set {
+            if let message = newValue {
+                activeError = ChatError(kind: .configuration, message: message, recovery: .dismissOnly)
+            } else {
+                activeError = nil
+            }
+        }
+    }
 
     // MARK: - Post-Generation Tasks
 
@@ -524,7 +537,7 @@ public final class ChatViewModel {
         guard !isLoading else { return }
 
         guard let model = selectedModel else {
-            errorMessage = "No model selected."
+            activeError = ChatError(kind: .configuration, message: "No model selected.", recovery: .selectModel)
             return
         }
 
@@ -661,7 +674,7 @@ public final class ChatViewModel {
         }
 
         guard isModelLoaded else {
-            errorMessage = "No model loaded. Select a model from the sidebar first."
+            activeError = ChatError(kind: .configuration, message: "No model loaded. Select a model from the sidebar first.", recovery: .selectModel)
             return
         }
 
@@ -676,7 +689,7 @@ public final class ChatViewModel {
             try saveMessage(userMessage)
         } catch {
             Log.persistence.error("Failed to save user message: \(error)")
-            errorMessage = "Failed to save message: \(error.localizedDescription)"
+            surfaceError(error, kind: .persistence)
             messages.removeAll(where: { $0.id == userMessage.id })
             return
         }
@@ -713,7 +726,7 @@ public final class ChatViewModel {
             try deleteMessage(removed)
         } catch {
             Log.persistence.error("Failed to delete prior assistant message: \(error)")
-            errorMessage = "Failed to regenerate response: \(error.localizedDescription)"
+            surfaceError(error, kind: .persistence)
             messages.insert(removed, at: lastAssistantIndex)
             return
         }
@@ -741,7 +754,7 @@ public final class ChatViewModel {
         } catch {
             messages[index] = originalMessage
             Log.persistence.error("Failed to update edited message: \(error)")
-            errorMessage = "Failed to edit message: \(error.localizedDescription)"
+            surfaceError(error, kind: .persistence)
             return
         }
 
@@ -753,7 +766,7 @@ public final class ChatViewModel {
                 try deleteMessage(msg)
             } catch {
                 Log.persistence.error("Failed to delete message during edit regeneration: \(error)")
-                errorMessage = "Failed to regenerate conversation: \(error.localizedDescription)"
+                surfaceError(error, kind: .persistence)
                 messages = Array(messages.prefix(index + 1)) + toRemove
                 return
             }
@@ -782,7 +795,7 @@ public final class ChatViewModel {
                 try saveMessage(lastAssistant)
             } catch {
                 Log.persistence.error("Failed to persist partial assistant message: \(error)")
-                errorMessage = "Failed to save partial response: \(error.localizedDescription)"
+                surfaceError(error, kind: .persistence)
             }
         }
         Log.ui.debug("Generation stopped by user")
@@ -821,7 +834,7 @@ public final class ChatViewModel {
             loadMessages()
             tokenCountCache.removeAll()
             updateContextEstimate()
-            errorMessage = "Failed to clear chat: \(error.localizedDescription)"
+            surfaceError(error, kind: .persistence)
             return
         }
     }
@@ -850,6 +863,13 @@ public final class ChatViewModel {
         }
     }
 
+    // MARK: - Structured Error Surfacing
+
+    /// Surfaces an error with structured type information.
+    func surfaceError(_ error: any Error, kind: ChatError.Kind, context: String? = nil) {
+        activeError = ChatError.from(error, kind: kind, context: context)
+    }
+
     // MARK: - Memory Pressure Monitoring
 
     public func startMemoryMonitoring() {
@@ -869,12 +889,12 @@ public final class ChatViewModel {
         case .critical:
             stopGeneration()
             unloadModel()
-            errorMessage = "Memory pressure is critical. The model was unloaded to prevent the app from being terminated."
+            activeError = ChatError(kind: .memoryPressure, message: "Memory pressure is critical. The model was unloaded to prevent the app from being terminated.", recovery: .dismissOnly)
         case .warning:
-            errorMessage = "Memory pressure is elevated. Consider closing other apps."
+            activeError = ChatError(kind: .memoryPressure, message: "Memory pressure is elevated. Consider closing other apps.", recovery: .dismissOnly)
         case .nominal:
-            if errorMessage?.contains("Memory pressure") == true {
-                errorMessage = nil
+            if activeError?.kind == .memoryPressure {
+                activeError = nil
             }
         }
     }
@@ -888,7 +908,7 @@ public final class ChatViewModel {
             try saveSettingsToSession()
         } catch {
             Log.persistence.error("Failed to save pinned message settings: \(error)")
-            errorMessage = "Failed to pin message: \(error.localizedDescription)"
+            surfaceError(error, kind: .persistence)
         }
     }
 
@@ -899,7 +919,7 @@ public final class ChatViewModel {
             try saveSettingsToSession()
         } catch {
             Log.persistence.error("Failed to save unpinned message settings: \(error)")
-            errorMessage = "Failed to unpin message: \(error.localizedDescription)"
+            surfaceError(error, kind: .persistence)
         }
     }
 

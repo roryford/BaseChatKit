@@ -167,7 +167,12 @@ final class ViewModelEdgeCaseTests: XCTestCase {
                        "clearChat should reload persisted messages when deletion fails")
         XCTAssertEqual(persistence.messages.map(\.id), expectedMessages.map(\.id),
                        "Persistence should still contain the original messages after a failed clear")
-        XCTAssertEqual(vm.errorMessage, "Failed to clear chat: simulated delete failure")
+        XCTAssertNotNil(vm.activeError, "activeError should be set when clear chat fails")
+        XCTAssertEqual(vm.activeError?.kind, .persistence, "Error kind should be .persistence")
+        XCTAssertTrue(
+            vm.errorMessage?.contains("simulated delete failure") == true,
+            "Error message should contain the underlying error description, got: \(vm.errorMessage ?? "nil")"
+        )
     }
 
     // MARK: - switchToSession model-selection restoration

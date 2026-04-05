@@ -544,9 +544,11 @@ final class ChatViewModelTests: XCTestCase {
         await vm.sendMessage()
 
         XCTAssertNotNil(vm.errorMessage, "errorMessage should be set when generation fails")
+        XCTAssertNotNil(vm.activeError, "activeError should be set when generation fails")
+        XCTAssertEqual(vm.activeError?.kind, .generation, "Error kind should be .generation")
         XCTAssertTrue(
-            vm.errorMessage?.contains("Generation failed") == true,
-            "Error should mention generation failure, got: \(vm.errorMessage ?? "nil")"
+            vm.errorMessage?.contains("Test error") == true,
+            "Error should contain the underlying error description, got: \(vm.errorMessage ?? "nil")"
         )
     }
 

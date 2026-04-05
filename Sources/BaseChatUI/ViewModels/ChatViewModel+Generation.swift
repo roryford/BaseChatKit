@@ -140,7 +140,7 @@ extension ChatViewModel {
                 } catch {
                     if !Task.isCancelled {
                         Log.inference.error("Generation stream error: \(error)")
-                        errorMessage = "Generation failed: \(error.localizedDescription)"
+                        self.surfaceError(error, kind: .generation, context: "Generation failed")
                     }
                 }
 
@@ -156,7 +156,7 @@ extension ChatViewModel {
 
         } catch {
             Log.inference.error("Generation start error: \(error)")
-            errorMessage = "Generation failed: \(error.localizedDescription)"
+            surfaceError(error, kind: .generation, context: "Generation failed")
         }
 
         // Capture token usage from cloud backends.
@@ -176,7 +176,7 @@ extension ChatViewModel {
                 }
             } catch {
                 Log.persistence.error("Failed to persist assistant message: \(error)")
-                errorMessage = "Failed to save assistant response: \(error.localizedDescription)"
+                surfaceError(error, kind: .persistence, context: "Failed to save assistant response")
             }
         }
 

@@ -97,9 +97,11 @@ final class StreamingFailureTests: XCTestCase {
         await vm.sendMessage()
 
         XCTAssertNotNil(vm.errorMessage)
+        XCTAssertNotNil(vm.activeError, "activeError should be set on stream error")
+        XCTAssertEqual(vm.activeError?.kind, .generation, "Error kind should be .generation")
         XCTAssertTrue(
-            vm.errorMessage?.contains("Generation failed") == true,
-            "Error message should contain 'Generation failed', got: \(vm.errorMessage ?? "nil")"
+            vm.errorMessage?.contains("Simulated mid-stream failure") == true,
+            "Error message should contain the underlying error description, got: \(vm.errorMessage ?? "nil")"
         )
     }
 
