@@ -42,8 +42,8 @@ final class DefaultBackendsRoutingTests: XCTestCase {
         XCTAssertEqual(DefaultBackends.backendTypeName(for: .claude), "ClaudeBackend")
     }
 
-    func test_routing_ollama_mapsToOpenAIBackend() {
-        XCTAssertEqual(DefaultBackends.backendTypeName(for: .ollama), "OpenAIBackend")
+    func test_routing_ollama_mapsToOllamaBackend() {
+        XCTAssertEqual(DefaultBackends.backendTypeName(for: .ollama), "OllamaBackend")
     }
 
     func test_routing_lmStudio_mapsToOpenAIBackend() {
