@@ -9,6 +9,39 @@ import BaseChatCore
 /// ```
 public enum DefaultBackends {
 
+    // MARK: - Static Capability Queries
+
+    /// The local model types supported by this build, without requiring
+    /// an `InferenceService` instance.
+    ///
+    /// Useful for static checks before service construction (e.g., in unit tests
+    /// or feature-flag evaluation at app startup).
+    public static var supportedModelTypes: Set<ModelType> {
+        var types: Set<ModelType> = []
+        #if MLX
+        types.insert(.mlx)
+        #endif
+        #if canImport(FoundationModels)
+        if #available(iOS 26, macOS 26, *) {
+            types.insert(.foundation)
+        }
+        #endif
+        #if Llama
+        types.insert(.gguf)
+        #endif
+        return types
+    }
+
+    /// Returns `true` if this build includes a backend for the given local model type.
+    public static func canLoad(modelType: ModelType) -> Bool {
+        supportedModelTypes.contains(modelType)
+    }
+
+    /// Returns `true` if this build includes a backend for the given API provider.
+    ///
+    /// All cloud API providers are always supported in `BaseChatBackends`.
+    public static func canLoad(provider: APIProvider) -> Bool { true }
+
     // MARK: - Pure Routing Helpers
 
     /// Returns the name of the backend class that would handle this model type,
@@ -61,6 +94,21 @@ public enum DefaultBackends {
             default: return nil
             }
         }
+
+        // Declare which local model types this build can handle so the service
+        // can answer capability queries without instantiating any backend.
+        #if MLX
+        service.declareSupport(for: .mlx)
+        #endif
+        #if canImport(FoundationModels)
+        if #available(iOS 26, macOS 26, *) {
+            service.declareSupport(for: .foundation)
+        }
+        #endif
+        #if Llama
+        service.declareSupport(for: .gguf)
+        #endif
+
         service.registerCloudBackendFactory { provider in
             switch provider {
             case .claude: return ClaudeBackend()
@@ -68,6 +116,11 @@ public enum DefaultBackends {
             case .ollama: return OllamaBackend()
             case .openAI, .lmStudio, .custom: return OpenAIBackend()
             }
+        }
+
+        // All cloud providers are always supported — declare them unconditionally.
+        for provider in APIProvider.allCases {
+            service.declareSupport(for: provider)
         }
     }
 }

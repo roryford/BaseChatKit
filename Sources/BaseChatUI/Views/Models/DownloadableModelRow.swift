@@ -5,14 +5,23 @@ import BaseChatCore
 ///
 /// Shows the model name, size, description, and a contextual action: download button,
 /// progress indicator, or "Downloaded" badge depending on the model's current state.
+/// When the model's backend is not available in the current build, an informational
+/// note is shown — the user can still download the file for future use.
 public struct DownloadableModelRow: View {
 
     public let model: DownloadableModel
 
     @Environment(ModelManagementViewModel.self) private var viewModel
+    @Environment(FrameworkCapabilityService.self) private var capabilityService: FrameworkCapabilityService?
 
     public init(model: DownloadableModel) {
         self.model = model
+    }
+
+    /// Compatibility result for this model's type, or `.supported` when no
+    /// capability service is in the environment (backward-compatible fallback).
+    private var backendCompatibility: ModelCompatibilityResult {
+        capabilityService?.compatibility(for: model.modelType) ?? .supported
     }
 
     public var body: some View {
@@ -61,6 +70,17 @@ public struct DownloadableModelRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                }
+
+                // Inform the user when the backend for this model type is unavailable.
+                // Download is still allowed so the file is ready for future use.
+                if let reason = backendCompatibility.unavailableReason {
+                    Label(reason, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                        .padding(.top, 1)
+                        .accessibilityLabel("Backend unavailable: \(reason)")
                 }
             }
 

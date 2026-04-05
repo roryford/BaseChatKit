@@ -1,0 +1,123 @@
+import XCTest
+import BaseChatCore
+@testable import BaseChatBackends
+
+/// Tests for `DefaultBackends` static capability queries and the
+/// `declareSupport` wiring through `InferenceService`.
+///
+/// These run in CI without hardware — no backend is instantiated.
+@MainActor
+final class DefaultBackendsCapabilityTests: XCTestCase {
+
+    // MARK: - Static supportedModelTypes
+
+    func test_supportedModelTypes_isSubsetOfAllModelTypes() {
+        // Every value in supportedModelTypes must be a valid ModelType.
+        // This catches accidental duplicates or phantom values.
+        let supported = DefaultBackends.supportedModelTypes
+        let valid: Set<ModelType> = [.gguf, .mlx, .foundation]
+        XCTAssertTrue(supported.isSubset(of: valid),
+                      "supportedModelTypes contains unexpected values: \(supported.subtracting(valid))")
+    }
+
+    func test_canLoad_modelType_matchesSupportedModelTypes() {
+        // canLoad(modelType:) must agree with supportedModelTypes.
+        for type_ in [ModelType.gguf, .mlx, .foundation] {
+            let expected = DefaultBackends.supportedModelTypes.contains(type_)
+            XCTAssertEqual(DefaultBackends.canLoad(modelType: type_), expected,
+                           "canLoad(modelType: \(type_)) disagrees with supportedModelTypes")
+        }
+    }
+
+    func test_canLoad_provider_alwaysTrue() {
+        // Cloud providers are always available in BaseChatBackends.
+        for provider in APIProvider.allCases {
+            XCTAssertTrue(DefaultBackends.canLoad(provider: provider),
+                          "Expected \(provider) to always be supported")
+        }
+    }
+
+    // MARK: - register(with:) populates declareSupport
+
+    func test_register_declaresCloudProvidersOnService() {
+        let service = InferenceService()
+        DefaultBackends.register(with: service)
+
+        // All cloud providers must be declared after registration.
+        for provider in APIProvider.allCases {
+            XCTAssertTrue(service.canLoad(provider: provider),
+                          "Expected \(provider) to be declared after DefaultBackends.register")
+        }
+    }
+
+    func test_register_declaresLocalModelTypesConsistentlyWithStaticQuery() {
+        let service = InferenceService()
+        DefaultBackends.register(with: service)
+
+        // Every model type in the static list must also be declared on the service.
+        for type_ in DefaultBackends.supportedModelTypes {
+            XCTAssertTrue(service.canLoad(modelType: type_),
+                          "ModelType \(type_) is in supportedModelTypes but not declared on service")
+        }
+    }
+
+    func test_register_doesNotDeclareUnsupportedModelTypes() {
+        let service = InferenceService()
+        DefaultBackends.register(with: service)
+
+        // Model types not in the static list must not be declared on the service.
+        let unsupported = Set<ModelType>([.gguf, .mlx, .foundation])
+            .filter { !DefaultBackends.supportedModelTypes.contains($0) }
+
+        for type_ in unsupported {
+            XCTAssertFalse(service.canLoad(modelType: type_),
+                           "ModelType \(type_) should not be declared but is")
+        }
+    }
+
+    // MARK: - registeredBackendSnapshot after registration
+
+    func test_register_snapshotContainsAllDeclaredProviders() {
+        let service = InferenceService()
+        DefaultBackends.register(with: service)
+        let snapshot = service.registeredBackendSnapshot()
+
+        for provider in APIProvider.allCases {
+            XCTAssertTrue(snapshot.cloudProviders.contains(provider),
+                          "\(provider) missing from snapshot after registration")
+        }
+    }
+
+    func test_register_snapshotLocalTypesMatchStaticQuery() {
+        let service = InferenceService()
+        DefaultBackends.register(with: service)
+        let snapshot = service.registeredBackendSnapshot()
+
+        XCTAssertEqual(snapshot.localModelTypes, DefaultBackends.supportedModelTypes,
+                       "Snapshot localModelTypes should equal DefaultBackends.supportedModelTypes")
+    }
+
+    // MARK: - FrameworkCapabilityService integration
+
+    func test_frameworkCapabilityService_afterRegisterAndRefresh_matchesStaticQuery() {
+        let service = InferenceService()
+        DefaultBackends.register(with: service)
+        let capService = FrameworkCapabilityService(inferenceService: service)
+        capService.refresh()
+
+        XCTAssertEqual(capService.enabledBackends.localModelTypes,
+                       DefaultBackends.supportedModelTypes,
+                       "FrameworkCapabilityService.enabledBackends should match static query after refresh")
+
+        XCTAssertTrue(capService.enabledBackends.supportsCloudInference,
+                      "Cloud inference should be supported after DefaultBackends registration")
+    }
+
+    // Sabotage check: without register(), cloud providers are absent.
+    func test_withoutRegister_cloudProvidersNotDeclared_sabotageCheck() {
+        let service = InferenceService()
+        // Do NOT call register(with:).
+        XCTAssertFalse(service.canLoad(provider: .claude),
+                       "Without registration, no provider should be declared")
+    }
+}

@@ -190,33 +190,55 @@ private struct ModelSelectTab: View {
 /// A single row in the model selection list.
 private struct ModelSelectRow: View {
 
+    @Environment(ChatViewModel.self) private var chatViewModel
+
     let model: ModelInfo
     let isSelected: Bool
     let onTap: () -> Void
 
+    /// Compatibility result for this model's type, checked once on render.
+    private var compatibilityResult: ModelCompatibilityResult {
+        chatViewModel.inferenceService.compatibility(for: model.modelType)
+    }
+
+    private var isCompatible: Bool { compatibilityResult.isSupported }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Radio button indicator
+                // Radio button indicator — grayed out when the backend is unavailable.
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .foregroundStyle(
+                        isCompatible
+                        ? (isSelected ? Color.accentColor : .secondary)
+                        : Color.secondary.opacity(0.4)
+                    )
                     .imageScale(.large)
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.name)
                         .font(.body)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(isCompatible ? .primary : .secondary)
                         .lineLimit(2)
 
                     HStack(spacing: 6) {
-                        typeBadge(for: model.modelType)
+                        typeBadge(for: model.modelType, isCompatible: isCompatible)
 
                         if model.modelType != .foundation {
                             Text(model.fileSizeFormatted)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                    }
+
+                    // Show why this model's backend is unavailable.
+                    if let reason = compatibilityResult.unavailableReason {
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .padding(.top, 1)
                     }
                 }
 
@@ -225,11 +247,13 @@ private struct ModelSelectRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!isCompatible)
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(isSelected ? "Selected" : "")
         .accessibilityAddTraits(.isButton)
+        .accessibilityHint(isCompatible ? "" : (compatibilityResult.unavailableReason ?? "Backend not available"))
     }
 
     private var accessibilityLabel: String {
@@ -246,7 +270,7 @@ private struct ModelSelectRow: View {
     }
 
     @ViewBuilder
-    private func typeBadge(for modelType: ModelType) -> some View {
+    private func typeBadge(for modelType: ModelType, isCompatible: Bool) -> some View {
         let (label, color): (String, Color) = {
             switch modelType {
             case .gguf: return ("GGUF", .orange)
@@ -258,10 +282,13 @@ private struct ModelSelectRow: View {
         Text(label)
             .font(.caption2)
             .fontWeight(.semibold)
-            .foregroundStyle(color)
+            .foregroundStyle(isCompatible ? color : .secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(color.opacity(0.12), in: Capsule())
+            .background(
+                (isCompatible ? color : Color.secondary).opacity(0.12),
+                in: Capsule()
+            )
     }
 }
 
