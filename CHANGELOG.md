@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.5](https://github.com/roryford/BaseChatKit/compare/v0.3.4...v0.3.5) (2026-04-06)
+
+### Features
+
+**Extensible macro system with app-defined providers** — `MacroExpander` previously required modifying BaseChatKit source to add domain-specific macros. Apps like Fireside needed dice rolls and chapter numbers; other apps need character attributes or world state — none of which belong in a general-purpose framework. This release adds a `MacroProvider` protocol and a `register`/`unregister` API so apps can inject their own macro handlers at startup without forking the framework. The built-in macro set gains `{{modelName}}` and `{{messageCount}}`, both auto-populated from the active session. The dice-roll macro (`{{roll:XdY}}`) has been moved out of the core set; apps that need it register it via `MacroProvider`. Resolution order is built-ins first, then registered providers — unrecognised tokens remain unexpanded as before ([#103](https://github.com/roryford/BaseChatKit/issues/103)).
+
+**Model capability tiers and benchmark metadata** — The model picker had no way to communicate capability differences to users; distinguishing a 3B from a 30B model required reading file sizes or quantisation strings and doing mental arithmetic. This release adds `ModelCapabilityTier` (minimal / fast / balanced / capable / frontier), a static file-size estimate on every `ModelInfo`, and a `ModelBenchmarkRunner` protocol for apps that want measured token-throughput data. The model selection row now shows a tier badge so users immediately understand what they are picking. Benchmark results are cached in a new SwiftData entity (`ModelBenchmarkCache`, schema v3) and survive app restart. Cloud model tiers are set statically at registration time ([#104](https://github.com/roryford/BaseChatKit/issues/104)).
+
 ## [0.3.4](https://github.com/roryford/BaseChatKit/compare/v0.3.3...v0.3.4) (2026-04-06)
 
 ### Performance Improvements
