@@ -14,7 +14,7 @@ public final class ChatViewModel {
 
     // MARK: - Services
 
-    let inferenceService: InferenceService
+    public let inferenceService: InferenceService
     let deviceCapability: DeviceCapabilityService
     let modelStorage: ModelStorageService
     let memoryPressure: MemoryPressureHandler
