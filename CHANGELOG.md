@@ -2,10 +2,17 @@
 
 ## [0.3.3](https://github.com/roryford/BaseChatKit/compare/v0.3.2...v0.3.3) (2026-04-06)
 
-
 ### Features
 
-* backend reliability and streaming resilience overhaul ([#193](https://github.com/roryford/BaseChatKit/issues/193)) ([44b1aea](https://github.com/roryford/BaseChatKit/commit/44b1aea0c4f972b56254f2b4c8d8d504fb6f146b))
+**Backend reliability and streaming resilience overhaul** — Cloud backends could silently block for up to 20 minutes when servers stalled, models were evicted, or retries compounded against URLSession's 300-second timeout. This release introduces four structural refactors and addresses seven reliability issues ([#181](https://github.com/roryford/BaseChatKit/issues/181), [#182](https://github.com/roryford/BaseChatKit/issues/182), [#183](https://github.com/roryford/BaseChatKit/issues/183), [#184](https://github.com/roryford/BaseChatKit/issues/184), [#187](https://github.com/roryford/BaseChatKit/issues/187), [#188](https://github.com/roryford/BaseChatKit/issues/188), [#189](https://github.com/roryford/BaseChatKit/issues/189)).
+
+`GenerationStream` separates content events from lifecycle state — consumers iterate `stream.events` for tokens while the UI observes `stream.phase` for connecting, streaming, stalled, retrying, and failed states without adding cases to `GenerationEvent`. The `.done` event case has been removed; stream termination is authoritative. `InferenceBackend.generate()` now returns `GenerationStream` instead of `AsyncThrowingStream<GenerationEvent, Error>`.
+
+Retry is no longer opaque: `RetryStrategy` is a protocol with an injectable `ExponentialBackoffStrategy` default, and exhausted retries throw `RetryExhaustedError` wrapping the last error so callers can distinguish "failed after retries" from a single failure. Retry scope is narrowed to the HTTP connection phase only — mid-stream failures propagate immediately, preserving already-yielded tokens. The stream surfaces `.retrying(attempt:of:)` phase during retry attempts.
+
+`URLSessionProvider` centralises session creation, eliminating four duplicated static session blocks and fixing ClaudeBackend's missing `timeoutIntervalForResource`. A `CircuitBreaker` actor with closed/open/halfOpen states is available for fast-failing repeatedly failing backends.
+
+Idle stall detection fires `.stalled` at the midpoint of a configurable timeout and throws `CloudBackendError.timeout` at the full duration. `SSEStreamParser` no longer swallows I/O errors during cancellation, and now logs invalid UTF-8 byte sequences. `CloudBackendError.streamInterrupted` is split into `.streamInterrupted` (retryable) and `.backendDeallocated` (not retryable). OllamaBackend is migrated to an `SSECloudBackend` subclass and passes `keep_alive` (default 30 minutes) to reduce cold-start latency. ([#193](https://github.com/roryford/BaseChatKit/issues/193))
 
 ## [0.3.2](https://github.com/roryford/BaseChatKit/compare/v0.3.1...v0.3.2) (2026-04-06)
 
