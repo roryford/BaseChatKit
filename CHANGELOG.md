@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.4](https://github.com/roryford/BaseChatKit/compare/v0.3.3...v0.3.4) (2026-04-06)
+
+### Performance Improvements
+
+**Eliminate redundant tokenization across the generation pipeline** — Before this release, BaseChatKit tokenized the same message strings up to five times in a single generation cycle: once to decide whether compression was needed, again inside the compressor, again for the per-message score breakdown, and twice more inside `PromptAssembler`. On a 50-message context this added up to ~100–150 redundant `tokenCount` calls per inference request ([#185](https://github.com/roryford/BaseChatKit/issues/185), [#196](https://github.com/roryford/BaseChatKit/issues/196)).
+
+`CachingTokenizer` is a new `TokenizerProvider` wrapper that memoizes token counts by content string for the lifetime of one generation cycle. `ChatViewModel` constructs one instance at the top of each generation call and threads it through `shouldCompress`, `compress`, and `trimMessages`, so any string already seen by an earlier subsystem is a free lookup for all subsequent ones. `PromptAssembler.trimMessagesToFit` was also restructured to return its accumulated token total alongside the trimmed messages, eliminating the immediate second-pass re-tokenization that followed. No public API signatures change — the optimization is entirely internal.
+
 ## [0.3.3](https://github.com/roryford/BaseChatKit/compare/v0.3.2...v0.3.3) (2026-04-06)
 
 ### Features
