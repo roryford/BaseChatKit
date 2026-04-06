@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/roryford/BaseChatKit/compare/v0.3.2...v0.3.3) (2026-04-06)
+
+
+### Features
+
+* backend reliability and streaming resilience overhaul ([#193](https://github.com/roryford/BaseChatKit/issues/193)) ([44b1aea](https://github.com/roryford/BaseChatKit/commit/44b1aea0c4f972b56254f2b4c8d8d504fb6f146b))
+
 ## [0.3.2](https://github.com/roryford/BaseChatKit/compare/v0.3.1...v0.3.2) (2026-04-06)
 
 
