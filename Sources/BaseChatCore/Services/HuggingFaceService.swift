@@ -161,10 +161,17 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "huggingface.co"
-        components.path = "/\(repoID)/resolve/main/\(filePath)"
-        // Force unwrap is safe here: we control the components and they are always valid.
-        // swiftlint:disable:next force_unwrapping
-        return components.url!
+        // Percent-encode each path segment individually so filenames with spaces,
+        // '#', '?', etc. don't break URL construction or produce a nil url.
+        let segments = ([repoID, "resolve", "main"] + filePath.components(separatedBy: "/"))
+            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
+        components.percentEncodedPath = "/" + segments.joined(separator: "/")
+        guard let url = components.url else {
+            Log.network.error("Failed to build download URL for \(repoID)/\(filePath)")
+            // Fall back to a best-effort URL; should never happen after percent-encoding.
+            return URL(string: "https://huggingface.co")!
+        }
+        return url
     }
 
     // MARK: - Private Helpers
@@ -219,22 +226,32 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
 
     private func isDownloadableRepo(_ model: Model) -> Bool {
         guard let siblings = model.siblings else { return false }
-        return hasGGUFFiles(in: siblings) || isMLXSnapshot(siblings)
+        return hasGGUFFiles(in: siblings) || isMLXSnapshot(model)
     }
 
     private func hasGGUFFiles(in siblings: [Model.SiblingInfo]) -> Bool {
         siblings.contains { $0.relativeFilename.lowercased().hasSuffix(".gguf") }
     }
 
-    private func isMLXSnapshot(_ siblings: [Model.SiblingInfo]) -> Bool {
+    private func isMLXSnapshot(_ model: Model) -> Bool {
+        guard let siblings = model.siblings else { return false }
         let lowercasedNames = siblings.map { $0.relativeFilename.lowercased() }
         let hasConfig = lowercasedNames.contains("config.json")
         let hasSafetensors = lowercasedNames.contains { $0.hasSuffix(".safetensors") }
-        return hasConfig && hasSafetensors
+        // Require an MLX marker in the repo ID to avoid surfacing incompatible
+        // Transformers/PyTorch repos whose safetensors weights cannot be loaded by MLXBackend.
+        return hasConfig && hasSafetensors && hasMLXRepoMarker(model.id.rawValue)
+    }
+
+    private func hasMLXRepoMarker(_ repoID: String) -> Bool {
+        let lower = repoID.lowercased()
+        if lower.hasPrefix("mlx-community/") { return true }
+        let tokens = lower.components(separatedBy: CharacterSet(charactersIn: "/-_ .")).filter { !$0.isEmpty }
+        return tokens.contains("mlx")
     }
 
     private func snapshotFiles(from model: Model) -> [ModelDownloadFile] {
-        guard let siblings = model.siblings, isMLXSnapshot(siblings) else { return [] }
+        guard let siblings = model.siblings, isMLXSnapshot(model) else { return [] }
         return siblings.map { file in
             ModelDownloadFile(
                 relativePath: file.relativeFilename,

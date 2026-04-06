@@ -71,6 +71,9 @@ public final class BackgroundDownloadManager: NSObject {
         var progressByFile: [String: SnapshotProgress]
         var completedFiles: Set<String>
         var taskIDs: Set<Int>
+        /// Set to true when a cancellation is in progress; lets delegate callbacks
+        /// drain without racing into .failed state before all tasks have reported back.
+        var isCancelling: Bool = false
     }
 
     /// Maps `URLSessionTask.taskIdentifier` to task metadata for delegate routing.
@@ -181,12 +184,12 @@ public final class BackgroundDownloadManager: NSObject {
             Task { @MainActor in
                 self.activeDownloads[id]?.markCancelled()
                 self.removePendingDownload(id: id)
-                if let snapshot = self.snapshotDownloads.removeValue(forKey: id) {
-                    do {
-                        try FileManager.default.removeItem(at: snapshot.stagingDirectory)
-                    } catch {
-                        Log.download.error("Failed to remove snapshot staging directory: \(error.localizedDescription)")
-                    }
+                // Mark the snapshot as cancelling rather than removing it immediately.
+                // URLSession delegate callbacks can still arrive after task.cancel() is
+                // called; deferring cleanup here prevents a cancelled download from
+                // transitioning to .failed due to a "missing snapshot context" error.
+                if self.snapshotDownloads[id] != nil {
+                    self.snapshotDownloads[id]?.isCancelling = true
                 }
             }
         }
@@ -353,6 +356,9 @@ public final class BackgroundDownloadManager: NSObject {
             throw HuggingFaceError.invalidDownloadedFile(reason: "Failed to create MLX snapshot context")
         }
 
+        // Create all tasks and register context before persisting and resuming,
+        // so reconnect metadata is written before any task can complete.
+        var tasks: [(URLSessionDownloadTask, TaskContext)] = []
         for file in files {
             let task = backgroundSession.downloadTask(with: file.url)
             let taskContext = TaskContext(
@@ -363,15 +369,19 @@ public final class BackgroundDownloadManager: NSObject {
             task.taskDescription = encodeTaskDescription(taskContext)
             taskContexts[task.taskIdentifier] = taskContext
             context.taskIDs.insert(task.taskIdentifier)
-            task.resume()
+            tasks.append((task, taskContext))
         }
 
         snapshotDownloads[model.id] = context
+        // Persist before resuming so reconnect metadata is always in place.
         try savePendingDownload(
             model: model,
             snapshotFiles: files.map { SnapshotFileMetadata(relativePath: $0.relativePath, sizeBytes: $0.sizeBytes) },
             stagingDirectoryName: stagingDirectory.lastPathComponent
         )
+        for (task, _) in tasks {
+            task.resume()
+        }
     }
 
     private func makeSnapshotStagingDirectory() throws -> URL {
@@ -400,10 +410,21 @@ public final class BackgroundDownloadManager: NSObject {
             return context
         }
         guard let taskDescription else { return nil }
-        if let data = taskDescription.data(using: .utf8),
-           let decoded = try? JSONDecoder().decode(TaskContext.self, from: data) {
-            return decoded
+        let trimmed = taskDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        // JSON-encoded TaskContext (new format) — detect by braces and decode strictly.
+        if trimmed.hasPrefix("{") && trimmed.hasSuffix("}") {
+            guard let data = taskDescription.data(using: .utf8) else {
+                Log.download.error("Failed to UTF-8 encode task description for task \(taskID)")
+                return nil
+            }
+            do {
+                return try JSONDecoder().decode(TaskContext.self, from: data)
+            } catch {
+                Log.download.error("Failed to decode task description for task \(taskID): \(error.localizedDescription)")
+                return nil
+            }
         }
+        // Legacy plain model-ID format (pre-JSON task descriptions).
         return TaskContext(modelID: taskDescription, relativePath: nil, expectedBytes: 0)
     }
 
@@ -412,6 +433,16 @@ public final class BackgroundDownloadManager: NSObject {
         taskContexts.removeValue(forKey: taskID)
         guard var snapshot = snapshotDownloads[modelID] else { return }
         snapshot.taskIDs.remove(taskID)
+        // When all tasks have drained after a cancellation, clean up staging.
+        if snapshot.isCancelling && snapshot.taskIDs.isEmpty {
+            snapshotDownloads.removeValue(forKey: modelID)
+            do {
+                try FileManager.default.removeItem(at: snapshot.stagingDirectory)
+            } catch {
+                Log.download.error("Failed to remove snapshot staging directory: \(error.localizedDescription)")
+            }
+            return
+        }
         snapshotDownloads[modelID] = snapshot
     }
 
@@ -454,17 +485,32 @@ public final class BackgroundDownloadManager: NSObject {
             throw HuggingFaceError.invalidDownloadedFile(reason: "Missing snapshot context for MLX download")
         }
 
+        // The download was cancelled; discard the file without transitioning to .failed.
+        // Staging cleanup happens in removeTaskTracking once all tasks have drained.
+        if snapshot.isCancelling {
+            try? FileManager.default.removeItem(at: tempURL)
+            return
+        }
+
+        // Validate that the resolved destination stays within the staging directory to
+        // prevent path-traversal attacks via crafted relative paths from remote metadata.
         let destination = snapshot.stagingDirectory.appendingPathComponent(relativePath)
+        let resolvedDestination = destination.standardized
+        let resolvedStaging = snapshot.stagingDirectory.standardized
+        guard resolvedDestination.path.hasPrefix(resolvedStaging.path + "/") else {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw HuggingFaceError.invalidDownloadedFile(reason: "Snapshot file path escapes staging directory: \(relativePath)")
+        }
         try FileManager.default.createDirectory(
-            at: destination.deletingLastPathComponent(),
+            at: resolvedDestination.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
+        if FileManager.default.fileExists(atPath: resolvedDestination.path) {
+            try FileManager.default.removeItem(at: resolvedDestination)
         }
-        try FileManager.default.moveItem(at: tempURL, to: destination)
+        try FileManager.default.moveItem(at: tempURL, to: resolvedDestination)
 
-        let fileSize = (try FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value ?? snapshot.progressByFile[relativePath]?.expectedBytes ?? 0
+        let fileSize = (try FileManager.default.attributesOfItem(atPath: resolvedDestination.path)[.size] as? NSNumber)?.int64Value ?? snapshot.progressByFile[relativePath]?.expectedBytes ?? 0
         snapshot.completedFiles.insert(relativePath)
         snapshot.progressByFile[relativePath] = SnapshotProgress(
             bytesDownloaded: fileSize,
@@ -505,10 +551,13 @@ public final class BackgroundDownloadManager: NSObject {
             return
         }
 
+        // When cancellation is in progress, don't overwrite .cancelled with .failed.
+        // Staging cleanup is deferred to removeTaskTracking once all tasks have drained.
+        if snapshot.isCancelling { return }
+
         if cancelRemainingTasks {
-            backgroundSession.getAllTasks { [weak self] tasks in
-                guard let self else { return }
-                let activeTaskIDs = snapshot.taskIDs
+            let activeTaskIDs = snapshot.taskIDs
+            backgroundSession.getAllTasks { tasks in
                 for task in tasks where activeTaskIDs.contains(task.taskIdentifier) {
                     task.cancel()
                 }

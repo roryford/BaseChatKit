@@ -10,7 +10,6 @@ final class HuggingFaceServiceTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
         CuratedModel.all = [
             CuratedModel(
                 id: "test-phi",
@@ -69,7 +68,6 @@ final class HuggingFaceServiceTests: XCTestCase {
             MockURLProtocol.unstub(url: url)
         }
         stubbedURLs = []
-        MockURLProtocol.reset()
         service = nil
         CuratedModel.all = []
         super.tearDown()
