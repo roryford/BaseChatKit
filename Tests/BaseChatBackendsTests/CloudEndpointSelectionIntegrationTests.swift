@@ -1,11 +1,14 @@
 import XCTest
 import SwiftData
 @testable import BaseChatBackends
+// ChatViewModel and SessionManagerViewModel live in BaseChatUI; testable import
+// is needed to exercise the endpoint selection → load → generate pipeline that
+// wires cloud backends through InferenceService.
 @testable import BaseChatUI
 import BaseChatCore
 import BaseChatTestSupport
 
-/// E2E tests for the cloud endpoint selection and generation pipeline.
+/// Integration tests for the cloud endpoint selection and generation pipeline.
 ///
 /// Covers: endpoint selection → load → isModelLoaded, streaming generation via
 /// MockURLProtocol, local ↔ cloud mutual exclusivity, session persistence of
@@ -15,7 +18,7 @@ import BaseChatTestSupport
 /// All tests use MockURLProtocol with UUID-scoped hostnames so they run safely
 /// in CI with no real network and no cross-suite stub collisions.
 @MainActor
-final class CloudEndpointSelectionE2ETests: XCTestCase {
+final class CloudEndpointSelectionIntegrationTests: XCTestCase {
 
     private var container: ModelContainer!
     private var context: ModelContext!
@@ -180,6 +183,25 @@ final class CloudEndpointSelectionE2ETests: XCTestCase {
                 $0.url?.absoluteString.hasPrefix(completionsURL.absoluteString) == true
             }
         )
+
+        // Sabotage: without the SSE stub, sending should not produce an assistant message
+        // with "Hello cloud" content.
+        MockURLProtocol.unstub(url: completionsURL)
+        let freshVM = makeViewModel { [cloudSession] _ in
+            ConfiguringOpenAICloudBackend(urlSession: cloudSession!)
+        }
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        freshVM.configure(persistence: persistence)
+        try makeSession(title: "Sabotage Chat")
+        freshVM.selectedEndpoint = endpoint
+        await freshVM.loadCloudEndpoint(endpoint)
+        freshVM.inputText = "Hi"
+        await freshVM.sendMessage()
+        let sabotageAssistant = freshVM.messages.last
+        XCTAssertNotEqual(
+            sabotageAssistant?.content, "Hello cloud",
+            "Without SSE stub, assistant should not produce the stubbed response"
+        )
     }
 
     // MARK: - Mutual Exclusivity: local ↔ cloud
@@ -294,6 +316,16 @@ final class CloudEndpointSelectionE2ETests: XCTestCase {
         vm.switchToSession(freshSession)
         XCTAssertEqual(vm.selectedEndpoint?.id, endpoint.id)
         XCTAssertNil(vm.selectedModel)
+
+        // Sabotage: switching back to the local model and saving should clear
+        // the cloud endpoint from the session.
+        vm.selectedModel = localModel
+        XCTAssertNil(vm.selectedEndpoint, "Selecting local model should clear cloud endpoint")
+        try vm.saveSettingsToSession()
+        sessionManager.loadSessions()
+        let freshSession2 = try XCTUnwrap(sessionManager.sessions.first { $0.title == "Switch Test" })
+        vm.switchToSession(freshSession2)
+        XCTAssertNil(vm.selectedEndpoint, "After saving with local model, endpoint should not restore")
     }
 
     // MARK: - Error Paths
@@ -316,6 +348,19 @@ final class CloudEndpointSelectionE2ETests: XCTestCase {
             "Error should mention invalid URL, got: \(errorMsg)"
         )
         XCTAssertFalse(vm.isModelLoaded)
+
+        // Sabotage: a valid URL should not produce an invalid-URL error.
+        let validEndpoint = APIEndpoint(
+            name: "Valid URL",
+            provider: .ollama,
+            baseURL: "http://localhost:11434",
+            modelName: "model"
+        )
+        let freshVM = makeViewModel { [cloudSession] _ in
+            ConfiguringOpenAICloudBackend(urlSession: cloudSession!)
+        }
+        await freshVM.loadCloudEndpoint(validEndpoint)
+        XCTAssertNil(freshVM.errorMessage, "Valid URL should not produce an error")
     }
 
     func test_loadCloudEndpoint_missingAPIKey_surfacesError() async throws {
@@ -340,6 +385,20 @@ final class CloudEndpointSelectionE2ETests: XCTestCase {
             "Error should mention missing API key, got: \(errorMsg)"
         )
         XCTAssertFalse(claudeVM.isModelLoaded)
+
+        // Sabotage: an Ollama endpoint (no API key required) should load without
+        // a missing-key error.
+        let ollamaVM = makeViewModel { [cloudSession] _ in
+            ConfiguringOpenAICloudBackend(urlSession: cloudSession!)
+        }
+        let ollamaEndpoint = APIEndpoint(
+            name: "Ollama (no key)",
+            provider: .ollama,
+            baseURL: "http://localhost:11434",
+            modelName: "llama3.2"
+        )
+        await ollamaVM.loadCloudEndpoint(ollamaEndpoint)
+        XCTAssertNil(ollamaVM.errorMessage, "Ollama endpoint should not require an API key")
     }
 
     func test_loadCloudEndpoint_networkError_surfacesError() async throws {
