@@ -38,13 +38,16 @@ public struct MacroContext: Sendable {
     }
 }
 
-/// A type that can provide custom macro expansions.
+/// A provider that can expand custom macro tokens.
 ///
-/// Register instances with ``MacroExpander/register(provider:)`` to extend the macro chain
-/// with domain-specific tokens. Registered providers are consulted after built-in macros;
-/// the first non-nil return wins.
+/// Register providers with ``MacroExpander/register(provider:)`` to add
+/// domain-specific macros without modifying BaseChatKit.
+///
+/// Tokens are normalized to lowercase before being passed to ``expand(_:context:)``.
+/// ``expand(_:context:)`` may be invoked from any thread; implementations must be
+/// thread-safe and must not access UI-only state.
 public protocol MacroProvider: AnyObject {
-    /// Return expanded value for token, or nil to pass through to next provider.
+    /// Return the expanded value for `token`, or `nil` to pass through to the next provider.
     func expand(_ token: String, context: MacroContext) -> String?
 }
 
@@ -135,7 +138,8 @@ public enum MacroExpander {
                     in: fullMatchRange,
                     with: replacement
                 )
-            } else if let replacement = expandWithProviders(token: macroName, context: context) {
+            } else if !passThroughMacros.contains(macroName),
+                      let replacement = expandWithProviders(token: macroName, context: context) {
                 result = result.replacingCharacters(
                     in: fullMatchRange,
                     with: replacement

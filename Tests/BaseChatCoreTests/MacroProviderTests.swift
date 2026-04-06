@@ -1,5 +1,4 @@
 import Testing
-import Foundation
 import BaseChatCore
 
 @Suite("MacroProvider")
