@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/roryford/BaseChatKit/compare/v0.2.22...v0.3.0) (2026-04-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* ChatMessage.content is now a computed property over contentParts: [MessagePart]. Code that writes to content still works (it replaces all parts with a single .text), but direct SwiftData queries on the content column must use contentPartsJSON instead.
+* InferenceBackend.generate() now returns AsyncThrowingStream<GenerationEvent, Error> instead of AsyncThrowingStream<String, Error>. All backend conformers and stream consumers must be updated.
+
+### Features
+
+* add tool calling infrastructure and structured generation ([#170](https://github.com/roryford/BaseChatKit/issues/170)) ([3f21123](https://github.com/roryford/BaseChatKit/commit/3f21123169d8b1ca2cb9055c851230a3e41a774a))
+* replace ChatMessage.content String with structured MessagePart array ([#168](https://github.com/roryford/BaseChatKit/issues/168)) ([1dfc01d](https://github.com/roryford/BaseChatKit/commit/1dfc01d85ffd2569cfa55e3c46d68edf26b4067f))
+* replace raw String token stream with GenerationEvent enum ([#167](https://github.com/roryford/BaseChatKit/issues/167)) ([3958d9c](https://github.com/roryford/BaseChatKit/commit/3958d9c15f826c25db291d9c9de4194d67b2e52f))
+
 ## [0.2.22](https://github.com/roryford/BaseChatKit/compare/v0.2.21...v0.2.22) (2026-04-06)
 
 
