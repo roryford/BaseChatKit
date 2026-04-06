@@ -4,6 +4,21 @@ A modular SwiftUI framework for building chat interfaces powered by local and cl
 
 BaseChatKit provides a complete, production-ready chat UI with pluggable inference backends, model management, and SwiftData persistence. Drop it into your app, register backends, and you have a working chat interface.
 
+## Demo
+
+<!-- TODO: Replace these placeholders with actual screenshots captured from the Example app.
+     Capture instructions:
+       1. Run the Example app in the iOS Simulator
+       2. Use `xcrun simctl io booted screenshot Example/Screenshots/demo.png`
+          or record a GIF with QuickTime + Gifski (~10-15 seconds, ~600px wide)
+       3. Capture: a chat conversation mid-stream, the session list sidebar,
+          and the model management sheet / HuggingFace browser tab
+       4. Optimise the image and commit it to Example/Screenshots/
+       5. Update the image path below and remove this comment block
+     Optionally add both light and dark mode screenshots side by side. -->
+
+![BaseChatKit demo — chat conversation with streaming, session sidebar, and model browser](Example/Screenshots/demo.png)
+
 ## Features
 
 - **Multiple inference backends** — GGUF (llama.cpp), MLX (Apple Silicon), Apple Foundation Models, OpenAI, Claude, Ollama, LM Studio, and custom OpenAI-compatible APIs
