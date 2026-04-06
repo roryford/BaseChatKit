@@ -306,7 +306,10 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                     streamBox.value?.setPhase(.streaming)
 
                     // Stream parsing — outside retry scope.
-                    try await self?.parseResponseStream(bytes: bytes, continuation: continuation)
+                    guard let self else {
+                        throw CloudBackendError.backendDeallocated
+                    }
+                    try await self.parseResponseStream(bytes: bytes, continuation: continuation)
 
                     streamBox.value?.setPhase(.done)
                     continuation.finish()
@@ -323,11 +326,8 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
 
             self.withStateLock { self.currentTask = task }
 
-            continuation.onTermination = { @Sendable [weak self] _ in
+            continuation.onTermination = { @Sendable _ in
                 task.cancel()
-                self?.urlSession.getAllTasks { tasks in
-                    tasks.forEach { $0.cancel() }
-                }
             }
         }
 
@@ -375,16 +375,10 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     // MARK: - Control
 
     public func stopGeneration() {
-        let session = self.urlSession
         withStateLock {
             currentTask?.cancel()
             currentTask = nil
             _isGenerating = false
-        }
-        // Cancel any in-flight HTTP requests immediately, rather than waiting
-        // for the next byte to trigger cooperative cancellation.
-        session.getAllTasks { tasks in
-            tasks.forEach { $0.cancel() }
         }
     }
 

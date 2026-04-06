@@ -191,7 +191,10 @@ private final class ManagedAtomic<Value>: @unchecked Sendable {
         lock.initialize(to: os_unfair_lock())
     }
 
-    deinit { lock.deallocate() }
+    deinit {
+        lock.deinitialize(count: 1)
+        lock.deallocate()
+    }
 
     func load() -> Value {
         os_unfair_lock_lock(lock)
@@ -234,7 +237,10 @@ private final class StalledCallback: @unchecked Sendable {
         lock.initialize(to: os_unfair_lock())
     }
 
-    deinit { lock.deallocate() }
+    deinit {
+        lock.deinitialize(count: 1)
+        lock.deallocate()
+    }
 
     func fire() {
         handler?()

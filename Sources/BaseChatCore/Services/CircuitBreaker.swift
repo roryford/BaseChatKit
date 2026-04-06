@@ -55,6 +55,7 @@ public actor CircuitBreaker {
             if let lastFailure = lastFailureTime,
                ContinuousClock.now - lastFailure >= resetTimeout {
                 state = .halfOpen
+                probeInFlight = true
             } else {
                 throw CircuitBreakerOpenError(
                     failureCount: consecutiveFailures,

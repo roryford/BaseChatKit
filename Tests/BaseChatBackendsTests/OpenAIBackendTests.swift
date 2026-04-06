@@ -167,6 +167,7 @@ extension OpenAIBackendTests {
 
         let chunk = Data("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n".utf8)
         MockURLProtocol.stub(url: url, response: .sse(chunks: [chunk], statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         let stream = try backend.generate(prompt: "And 3+3?", systemPrompt: nil, config: GenerationConfig())
         for try await _ in stream.events { }
@@ -220,6 +221,7 @@ extension OpenAIBackendTests {
         chunks.append(Data("data: [DONE]\n\n".utf8))
 
         MockURLProtocol.stub(url: url, response: .asyncSSE(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: GenerationConfig())
 

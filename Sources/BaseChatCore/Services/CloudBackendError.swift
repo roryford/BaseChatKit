@@ -41,8 +41,11 @@ public enum CloudBackendError: LocalizedError {
         case .backendDeallocated:
             return "Backend was deallocated during generation."
         case .timeout(let duration):
-            let seconds = Int(duration.components.seconds)
-            return "No response received for \(seconds) seconds."
+            let totalMs = duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000
+            if totalMs < 1000 {
+                return "No response received for \(totalMs)ms."
+            }
+            return "No response received for \(duration.components.seconds)s."
         }
     }
 

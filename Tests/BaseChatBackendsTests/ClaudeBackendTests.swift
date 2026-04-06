@@ -155,6 +155,7 @@ extension ClaudeBackendTests {
             data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}\n\ndata: {"type":"message_stop"}\n\n
             """.utf8)
         MockURLProtocol.stub(url: url, response: .sse(chunks: [chunk], statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         let stream = try backend.generate(prompt: "And 3+3?", systemPrompt: nil, config: GenerationConfig())
         for try await _ in stream.events { }
@@ -208,6 +209,7 @@ extension ClaudeBackendTests {
         chunks.append(Data("data: {\"type\":\"message_stop\"}\n\n".utf8))
 
         MockURLProtocol.stub(url: url, response: .asyncSSE(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: GenerationConfig())
 

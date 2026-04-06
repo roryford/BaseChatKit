@@ -110,13 +110,14 @@ public func withRetry<T>(
                 throw CancellationError()
             }
 
+            // Non-retryable and non-backend errors pass through immediately.
+            if let backendError = error as? any BackendError {
+                if !backendError.isRetryable { throw error }
+            } else {
+                throw error
+            }
+
             guard let delay = strategy.delay(for: error, attempt: attempt, totalDelayed: totalDelayed) else {
-                // Non-retryable errors pass through raw — no retries were attempted.
-                // Retryable errors that exhausted attempts or budget get wrapped.
-                let isRetryable = (error as? any BackendError)?.isRetryable ?? false
-                if !isRetryable {
-                    throw error
-                }
                 throw RetryExhaustedError(lastError: error, attempts: attempt + 1)
             }
 
