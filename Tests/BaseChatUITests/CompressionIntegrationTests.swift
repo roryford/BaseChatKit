@@ -274,10 +274,6 @@ final class CompressionIntegrationTests: XCTestCase {
     func test_compressionMode_didSet_syncsToOrchestrator() {
         createSession()
 
-        vm.compressionMode = .quality
-        XCTAssertEqual(vm.compressionOrchestrator.mode, .quality,
-                       "Setting compressionMode to .quality should sync to orchestrator.mode")
-
         vm.compressionMode = .balanced
         XCTAssertEqual(vm.compressionOrchestrator.mode, .balanced,
                        "Setting compressionMode to .balanced should sync to orchestrator.mode")

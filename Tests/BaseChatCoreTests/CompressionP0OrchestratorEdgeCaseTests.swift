@@ -63,11 +63,11 @@ final class CompressionP0OrchestratorEdgeCaseTests: XCTestCase {
         let gate = AsyncGate()
         let generationStarted = expectation(description: "Anchored generation started")
 
-        orchestrator.mode = .quality
+        orchestrator.mode = .balanced
         orchestrator.anchored.generateFn = { _ in
             generationStarted.fulfill()
             await gate.wait()
-            return "CHARACTERS: Ava\nLOCATION: Station"
+            return "TOPIC: Ava\nKEY POINTS: Station"
         }
 
         // Ensure history exceeds budget so anchored summarization is invoked.

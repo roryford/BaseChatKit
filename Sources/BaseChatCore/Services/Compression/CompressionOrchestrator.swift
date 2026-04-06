@@ -12,10 +12,16 @@ public final class CompressionOrchestrator {
     /// The user-selected compression mode. Defaults to automatic.
     public var mode: CompressionMode = .automatic
 
-    public let extractive = ExtractiveCompressor()
-    public let anchored = AnchoredCompressor()
+    public let extractive: ExtractiveCompressor
+    public let anchored: AnchoredCompressor
 
-    public init() {}
+    public init(
+        extractive: ExtractiveCompressor = ExtractiveCompressor(),
+        anchored: AnchoredCompressor = AnchoredCompressor()
+    ) {
+        self.extractive = extractive
+        self.anchored = anchored
+    }
 
     // MARK: - Threshold
 
@@ -87,7 +93,7 @@ public final class CompressionOrchestrator {
             }
             return anchored.generateFn != nil ? anchored : extractive
 
-        case .balanced, .quality:
+        case .balanced:
             return anchored.generateFn != nil ? anchored : extractive
         }
     }

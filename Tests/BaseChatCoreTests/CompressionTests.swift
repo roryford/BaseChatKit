@@ -41,13 +41,8 @@ final class CompressionModeTests: XCTestCase {
         XCTAssertEqual(CompressionMode.balanced.rawValue, "Balanced")
     }
 
-    func test_rawValue_roundtrip_quality() {
-        XCTAssertEqual(CompressionMode(rawValue: "Best Quality"), .quality)
-        XCTAssertEqual(CompressionMode.quality.rawValue, "Best Quality")
-    }
-
     func test_caseIterable_coversAllExpectedCases() {
-        let expected: Set<CompressionMode> = [.automatic, .off, .balanced, .quality]
+        let expected: Set<CompressionMode> = [.automatic, .off, .balanced]
         let all = Set(CompressionMode.allCases)
         XCTAssertEqual(all, expected)
     }
@@ -264,9 +259,8 @@ final class AnchoredCompressorTests: XCTestCase {
     }
 
     func test_summaryTemplate_customValueUsedInPrompt() async {
-        let compressor = AnchoredCompressor()
         let customTemplate = "Summarize this: {old_nodes_text}"
-        compressor.summaryTemplate = customTemplate
+        let compressor = AnchoredCompressor(summaryTemplate: customTemplate)
 
         final class PromptBox: @unchecked Sendable {
             private let lock = NSLock()
@@ -390,10 +384,10 @@ final class CompressionOrchestratorTests: XCTestCase {
                        "Balanced mode routes to ExtractiveCompressor (strategy 'extractive'), not AnchoredCompressor")
     }
 
-    func test_compress_withQualityMode_routesToAnchoredWhenGenerateFnSet() async {
+    func test_compress_withBalancedMode_routesToAnchoredWhenGenerateFnSet() async {
         let orchestrator = CompressionOrchestrator()
-        orchestrator.mode = .quality
-        orchestrator.anchored.generateFn = { _ in "CHARACTERS: X\nLOCATION: Y" }
+        orchestrator.mode = .balanced
+        orchestrator.anchored.generateFn = { _ in "TOPIC: X\nKEY POINTS: Y" }
 
         let messages = makeMessages(count: 10, contentLength: 100)
         let result = await orchestrator.compress(
@@ -404,7 +398,7 @@ final class CompressionOrchestratorTests: XCTestCase {
         )
 
         XCTAssertEqual(result.stats.strategy, "anchored",
-                       "Quality mode with generateFn should route to AnchoredCompressor")
+                       "Balanced mode with generateFn should route to AnchoredCompressor")
     }
 
     func test_compress_withAutomaticMode_smallContext_routesToExtractiveCompressor() async {

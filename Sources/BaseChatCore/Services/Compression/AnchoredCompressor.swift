@@ -7,32 +7,41 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
     public let strategyName = "anchored"
 
     /// Fraction of the history budget reserved for the verbatim recent tail.
-    public var tailBudgetFraction: Double = 0.50
+    public let tailBudgetFraction: Double
 
     /// Injected by the caller; performs a single-turn inference call for summarization.
+    /// Must be set before the first call to `compress()`. Not safe to mutate while
+    /// `compress()` is in flight.
     public var generateFn: (@Sendable (String) async throws -> String)?
 
     private let fallback = ExtractiveCompressor()
 
     // MARK: - Summary Prompt Template
 
-    /// The prompt template used to summarize old messages.
-    /// Callers can replace this with a domain-specific prompt.
-    /// The placeholder `{old_nodes_text}` is replaced with the concatenated message content.
-    public var summaryTemplate: String = """
-        Read the story excerpt and fill in these fields. Be concise. Use only what is in the text.
+    public static let defaultSummaryTemplate: String = """
+        Summarize the conversation so far. Be concise. Use only what is in the text.
 
-        CHARACTERS: [names of characters present or mentioned, comma-separated]
-        LOCATION: [current setting]
-        PLOT THREADS: [up to 3 unresolved threads, semicolon-separated]
-        LAST EVENT: [most recent significant event, one sentence]
-        TONE: [emotional mood, 1-2 words]
+        TOPIC: [main subject of the conversation, brief]
+        KEY POINTS: [up to 3 important points, semicolon-separated]
+        OPEN QUESTIONS: [unresolved items or pending decisions, if any]
+        LAST DISCUSSED: [most recent topic or conclusion, one sentence]
 
-        Story excerpt:
+        Conversation:
         {old_nodes_text}
         """
 
-    public init() {}
+    /// The prompt template used to summarize old messages.
+    /// Pass a domain-specific prompt at init time to override.
+    /// The placeholder `{old_nodes_text}` is replaced with the concatenated message content.
+    public let summaryTemplate: String
+
+    public init(
+        tailBudgetFraction: Double = 0.50,
+        summaryTemplate: String? = nil
+    ) {
+        self.tailBudgetFraction = tailBudgetFraction
+        self.summaryTemplate = summaryTemplate ?? Self.defaultSummaryTemplate
+    }
 
     // MARK: - ContextCompressor
 
@@ -82,7 +91,9 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
 
         // Ensure at least the newest message is in the tail.
         if tailIndices.isEmpty, !messages.isEmpty {
-            tailIndices.insert(messages.count - 1)
+            let newestIndex = messages.count - 1
+            tailIndices.insert(newestIndex)
+            tailTokens += ContextWindowManager.estimateTokenCount(messages[newestIndex].content, tokenizer: tokenizer)
         }
 
         let tailMessages = messages.indices.filter { tailIndices.contains($0) }.map { messages[$0] }
@@ -149,8 +160,32 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
 
         let outputTokens = totalTokens(of: outputMessages, tokenizer: tokenizer)
 
-        // 9. If summary + tail exceeds budget, the summary was too long -- fall back.
+        // 9. If summary + tail exceeds budget, try truncating the summary first.
         if outputTokens > budget {
+            let summaryBudget = budget - tailTokens
+            if summaryBudget > 0 {
+                let truncated = truncateToFit(parsedSummary, budget: summaryBudget, tokenizer: tokenizer)
+                guard !truncated.isEmpty else {
+                    return await fallbackResult(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
+                }
+                var truncatedOutput: [(role: String, content: String)] = [("system", truncated)]
+                truncatedOutput.append(contentsOf: messageTuples(from: tailMessages))
+                let truncatedTokens = totalTokens(of: truncatedOutput, tokenizer: tokenizer)
+                if truncatedTokens <= budget {
+                    return CompressionResult(
+                        messages: truncatedOutput,
+                        stats: CompressionStats(
+                            strategy: strategyName,
+                            originalNodeCount: messages.count,
+                            outputMessageCount: truncatedOutput.count,
+                            estimatedTokens: truncatedTokens,
+                            compressionRatio: Double(originalTokens) / Double(max(truncatedTokens, 1)),
+                            keywordSurvivalRate: nil
+                        )
+                    )
+                }
+            }
+
             return await fallbackResult(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
         }
 
@@ -197,6 +232,9 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
 
     /// Extracts structured fields from the summary response and reassembles them.
     /// Falls back to a trimmed raw response if fewer than 2 fields are found.
+    /// Recognises both the domain-neutral fields (TOPIC, KEY POINTS, OPEN QUESTIONS,
+    /// LAST DISCUSSED) and legacy story fields (CHARACTERS, LOCATION, etc.) so that
+    /// custom templates work transparently.
     private func parseSummaryResponse(_ response: String) -> String {
         let pattern = "^([A-Z][A-Z _]*[A-Z]):\\s*(.+)$"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines, .caseInsensitive]) else {
@@ -226,5 +264,21 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
             return "[Summary unavailable]"
         }
         return String(trimmed.prefix(400))
+    }
+
+    /// Truncates text word-by-word from the end until it fits within the token budget.
+    private func truncateToFit(_ text: String, budget: Int, tokenizer: TokenizerProvider?) -> String {
+        if ContextWindowManager.estimateTokenCount(text, tokenizer: tokenizer) <= budget {
+            return text
+        }
+        var words = text.split(separator: " ", omittingEmptySubsequences: true)
+        while !words.isEmpty {
+            words.removeLast()
+            let candidate = words.joined(separator: " ")
+            if ContextWindowManager.estimateTokenCount(candidate, tokenizer: tokenizer) <= budget {
+                return candidate
+            }
+        }
+        return ""
     }
 }

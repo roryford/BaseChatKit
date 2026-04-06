@@ -67,11 +67,10 @@ final class CompressionSettingsViewModelTests: XCTestCase {
     // MARK: - test_compressionMode_allCasesAreAvailable
 
     func test_compressionMode_allCasesAreAvailable() {
-        XCTAssertEqual(CompressionMode.allCases.count, 4,
-                       "CompressionMode should have exactly 4 cases")
+        XCTAssertEqual(CompressionMode.allCases.count, 3,
+                       "CompressionMode should have exactly 3 cases")
         XCTAssertTrue(CompressionMode.allCases.contains(.automatic))
         XCTAssertTrue(CompressionMode.allCases.contains(.balanced))
-        XCTAssertTrue(CompressionMode.allCases.contains(.quality))
         XCTAssertTrue(CompressionMode.allCases.contains(.off))
     }
 
@@ -80,13 +79,11 @@ final class CompressionSettingsViewModelTests: XCTestCase {
     func test_compressionMode_displayNameRoundTrip() {
         XCTAssertEqual(CompressionMode.automatic.rawValue, "Automatic")
         XCTAssertEqual(CompressionMode.balanced.rawValue, "Balanced")
-        XCTAssertEqual(CompressionMode.quality.rawValue, "Best Quality")
         XCTAssertEqual(CompressionMode.off.rawValue, "Off")
 
         // Verify rawValue round-trips back to the correct case.
         XCTAssertEqual(CompressionMode(rawValue: "Automatic"), .automatic)
         XCTAssertEqual(CompressionMode(rawValue: "Balanced"), .balanced)
-        XCTAssertEqual(CompressionMode(rawValue: "Best Quality"), .quality)
         XCTAssertEqual(CompressionMode(rawValue: "Off"), .off)
     }
 }
