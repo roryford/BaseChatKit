@@ -69,6 +69,8 @@ final class CloudBackendErrorTests: XCTestCase {
             .parseError("unexpected token"),
             .missingAPIKey,
             .streamInterrupted,
+            .backendDeallocated,
+            .timeout(.seconds(120)),
         ]
 
         for error in errors {
@@ -90,6 +92,8 @@ final class CloudBackendErrorTests: XCTestCase {
             .parseError("unexpected token"),
             .missingAPIKey,
             .streamInterrupted,
+            .backendDeallocated,
+            .timeout(.seconds(60)),
         ]
 
         for error in errors {
@@ -98,5 +102,19 @@ final class CloudBackendErrorTests: XCTestCase {
             XCTAssertFalse(error.errorDescription?.isEmpty ?? true,
                            "\(error) should have a non-empty description")
         }
+    }
+
+    // MARK: - Retryability
+
+    func test_backendDeallocated_isNotRetryable() {
+        XCTAssertFalse(CloudBackendError.backendDeallocated.isRetryable)
+    }
+
+    func test_timeout_isRetryable() {
+        XCTAssertTrue(CloudBackendError.timeout(.seconds(120)).isRetryable)
+    }
+
+    func test_streamInterrupted_isRetryable() {
+        XCTAssertTrue(CloudBackendError.streamInterrupted.isRetryable)
     }
 }

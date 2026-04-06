@@ -12,11 +12,4 @@ public enum GenerationEvent: Sendable, Equatable {
 
     /// Token usage reported by the backend (cloud backends only today).
     case usage(prompt: Int, completion: Int)
-
-    /// The generation stream has finished normally.
-    ///
-    /// Reserved for future use. Backends currently signal completion by
-    /// finishing the stream (`continuation.finish()`), so consumers should
-    /// treat stream termination as the authoritative end signal.
-    case done
 }

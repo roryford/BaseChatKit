@@ -490,14 +490,14 @@ private final class ConfiguringOpenAICloudBackend: InferenceBackend,
             systemPrompt: nil,
             config: GenerationConfig(maxOutputTokens: 1)
         )
-        for try await _ in stream { break }
+        for try await _ in stream.events { break }
     }
 
     func generate(
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         try backend.generate(prompt: prompt, systemPrompt: systemPrompt, config: config)
     }
 
@@ -537,7 +537,7 @@ private final class ConfiguringClaudeCloudBackend: InferenceBackend,
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         try backend.generate(prompt: prompt, systemPrompt: systemPrompt, config: config)
     }
 

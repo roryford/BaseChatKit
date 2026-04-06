@@ -9,14 +9,6 @@ import BaseChatCore
 /// and authentication via `x-api-key` header.
 public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBackendKeychainConfigurable, ToolCallingBackend {
 
-    /// Shared session with certificate pinning delegate.
-    private static let pinnedSession: URLSession = {
-        let delegate = PinnedSessionDelegate()
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 300
-        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-    }()
-
     // MARK: - Tool Calling State
 
     private var _toolDefinitions: [ToolDefinition] = []
@@ -45,7 +37,7 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     public init(urlSession: URLSession? = nil) {
         super.init(
             defaultModelName: "claude-sonnet-4-20250514",
-            urlSession: urlSession ?? Self.pinnedSession
+            urlSession: urlSession ?? URLSessionProvider.pinned
         )
     }
 

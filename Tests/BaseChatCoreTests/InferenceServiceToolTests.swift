@@ -122,11 +122,12 @@ private final class MockToolCallingBackend: InferenceBackend, ToolCallingBackend
         isModelLoaded = true
     }
 
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
-        AsyncThrowingStream { continuation in
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in
             continuation.yield(.token("response"))
             continuation.finish()
         }
+        return GenerationStream(stream)
     }
 
     func stopGeneration() {}

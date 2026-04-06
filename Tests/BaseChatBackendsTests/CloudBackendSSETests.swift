@@ -74,7 +74,7 @@ struct ClaudeBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -102,9 +102,10 @@ struct ClaudeBackendSSETests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected authenticationFailed error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .authenticationFailed(let provider):
                 #expect(provider == "Claude")
@@ -134,9 +135,10 @@ struct ClaudeBackendSSETests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .rateLimited:
                 break // expected
@@ -171,7 +173,7 @@ struct ClaudeBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -207,13 +209,14 @@ struct ClaudeBackendSSETests {
 
         var tokens: [String] = []
         do {
-            for try await event in stream {
+            for try await event in stream.events {
                 if case .token(let text) = event {
                     tokens.append(text)
                 }
             }
             Issue.record("Expected an error from the stream error event")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .parseError(let message):
                 #expect(message.contains("overloaded"))
@@ -244,7 +247,7 @@ struct ClaudeBackendSSETests {
         )
 
         do {
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected a network error")
         } catch {
             // Any error is acceptable here -- the important thing is we
@@ -302,7 +305,7 @@ struct OpenAIBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -330,9 +333,10 @@ struct OpenAIBackendSSETests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected authenticationFailed error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .authenticationFailed:
                 break // expected
@@ -368,7 +372,7 @@ struct OpenAIBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -398,9 +402,10 @@ struct OpenAIBackendSSETests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .rateLimited:
                 break // expected

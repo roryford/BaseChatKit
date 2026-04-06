@@ -14,11 +14,11 @@ final class RetryPolicyIntegrationTests: XCTestCase {
 
     private var session: URLSession!
     private var backend: OpenAIBackend!
-    private let baseURL = URL(string: "https://retry-test.example")!
+    private var baseURL: URL!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
+        baseURL = URL(string: "https://retry-\(UUID().uuidString).test")!
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         session = URLSession(configuration: config)
@@ -27,7 +27,6 @@ final class RetryPolicyIntegrationTests: XCTestCase {
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         backend = nil
         session = nil
         super.tearDown()
@@ -59,7 +58,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -68,7 +67,9 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         XCTAssertEqual(tokens, ["hello"], "Should receive token after retrying past 429s")
 
         // Verify three requests were made: 2 retries + 1 success.
-        let requestCount = MockURLProtocol.capturedRequests.count
+        let requestCount = MockURLProtocol.capturedRequests.filter {
+            $0.url?.host == baseURL.host
+        }.count
         XCTAssertEqual(requestCount, 3, "Expected 2 retried requests + 1 successful request")
     }
 
@@ -96,9 +97,10 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         )
 
         do {
-            for try await _ in stream { }
+            for try await _ in stream.events { }
             XCTFail("Should have thrown after exhausting retries")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { XCTFail("Expected CloudBackendError, got \(error)"); return }
             guard case .rateLimited = error else {
                 XCTFail("Expected rateLimited error, got \(error)")
                 return
@@ -106,7 +108,9 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         }
 
         // All 4 attempts should have been made (initial + 3 retries).
-        let requestCount = MockURLProtocol.capturedRequests.count
+        let requestCount = MockURLProtocol.capturedRequests.filter {
+            $0.url?.host == baseURL.host
+        }.count
         XCTAssertEqual(requestCount, 4, "Expected initial attempt + 3 retries = 4 total requests")
     }
 
@@ -129,9 +133,10 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         )
 
         do {
-            for try await _ in stream { }
+            for try await _ in stream.events { }
             XCTFail("Should have thrown authenticationFailed")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { XCTFail("Expected CloudBackendError, got \(error)"); return }
             guard case .authenticationFailed = error else {
                 XCTFail("Expected authenticationFailed, got \(error)")
                 return
@@ -139,8 +144,9 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         }
 
         // Only one request — no retries for auth errors.
-        XCTAssertEqual(MockURLProtocol.capturedRequests.count, 1,
-                       "Non-retryable errors must not trigger retries")
+        XCTAssertEqual(
+            MockURLProtocol.capturedRequests.filter { $0.url?.host == baseURL.host }.count, 1,
+            "Non-retryable errors must not trigger retries")
     }
 
     // MARK: - Retry-After header respected
@@ -166,7 +172,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
 
         let start = ContinuousClock.now
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }

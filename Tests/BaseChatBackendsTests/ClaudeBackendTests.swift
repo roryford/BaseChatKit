@@ -48,7 +48,8 @@ final class ClaudeBackendTests: XCTestCase {
         do {
             try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
             XCTFail("Should throw missingAPIKey when no API key is configured")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { XCTFail("Expected CloudBackendError, got \(error)"); return }
             if case .missingAPIKey = error {
                 // Expected
             } else {
@@ -141,7 +142,7 @@ extension ClaudeBackendTests {
         config.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: config)
         let backend = ClaudeBackend(urlSession: session)
-        let url = URL(string: "https://api.anthropic.com")!
+        let url = URL(string: "https://claude-history-\(UUID().uuidString).test")!
         backend.configure(baseURL: url, apiKey: "sk-ant-test", modelName: "claude-sonnet-4-20250514")
         try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 
@@ -150,16 +151,16 @@ extension ClaudeBackendTests {
             (role: "assistant", content: "4"),
         ])
 
-        MockURLProtocol.reset()
         let chunk = Data("""
             data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}\n\ndata: {"type":"message_stop"}\n\n
             """.utf8)
         MockURLProtocol.stub(url: url, response: .sse(chunks: [chunk], statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         let stream = try backend.generate(prompt: "And 3+3?", systemPrompt: nil, config: GenerationConfig())
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url?.host == url.host })
         // URLSession may convert httpBody → httpBodyStream during transmission.
         let body: Data
         if let direct = captured?.httpBody {
@@ -198,7 +199,7 @@ extension ClaudeBackendTests {
         config.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: config)
         let backend = ClaudeBackend(urlSession: session)
-        let url = URL(string: "https://api.anthropic.com")!
+        let url = URL(string: "https://claude-cancel-\(UUID().uuidString).test")!
         backend.configure(baseURL: url, apiKey: "sk-ant-test", modelName: "claude-sonnet-4-20250514")
         try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 
@@ -207,14 +208,14 @@ extension ClaudeBackendTests {
         }
         chunks.append(Data("data: {\"type\":\"message_stop\"}\n\n".utf8))
 
-        MockURLProtocol.reset()
         MockURLProtocol.stub(url: url, response: .asyncSSE(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: GenerationConfig())
 
         var tokenCount = 0
         do {
-            for try await _ in stream {
+            for try await _ in stream.events {
                 tokenCount += 1
                 if tokenCount == 2 {
                     backend.stopGeneration()

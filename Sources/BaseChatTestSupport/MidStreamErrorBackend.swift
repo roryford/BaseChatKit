@@ -38,11 +38,11 @@ public final class MidStreamErrorBackend: InferenceBackend, @unchecked Sendable 
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         let tokens = tokensBeforeError
         let error = errorToThrow
         isGenerating = true
-        return AsyncThrowingStream { [self] continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { [self] continuation in
             Task {
                 for token in tokens {
                     if Task.isCancelled { break }
@@ -52,6 +52,7 @@ public final class MidStreamErrorBackend: InferenceBackend, @unchecked Sendable 
                 continuation.finish(throwing: error)
             }
         }
+        return GenerationStream(stream)
     }
 
     public func stopGeneration() { isGenerating = false }

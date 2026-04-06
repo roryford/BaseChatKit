@@ -229,7 +229,7 @@ final class FoundationBackendUnitTests: XCTestCase {
 
         // Drain the cancelled stream so the generation task's defer block runs
         // and clears isGenerating before we attempt a second generate().
-        for try await _ in stream {}
+        for try await _ in stream.events {}
 
         XCTAssertTrue(
             backend.isModelLoaded,
@@ -248,7 +248,7 @@ final class FoundationBackendUnitTests: XCTestCase {
             config: GenerationConfig()
         )
         backend.stopGeneration()
-        for try await _ in stream2 {}
+        for try await _ in stream2.events {}
     }
 
     /// State-only version (no Apple Intelligence needed): stopGeneration() is

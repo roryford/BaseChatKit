@@ -156,7 +156,7 @@ extension OpenAIBackendTests {
         config.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: config)
         let backend = OpenAIBackend(urlSession: session)
-        let url = URL(string: "https://openai-history-test.example")!
+        let url = URL(string: "https://openai-history-\(UUID().uuidString).test")!
         backend.configure(baseURL: url, apiKey: "sk-test", modelName: "gpt-4o-mini")
         try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 
@@ -165,14 +165,14 @@ extension OpenAIBackendTests {
             (role: "assistant", content: "4"),
         ])
 
-        MockURLProtocol.reset()
         let chunk = Data("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n".utf8)
         MockURLProtocol.stub(url: url, response: .sse(chunks: [chunk], statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         let stream = try backend.generate(prompt: "And 3+3?", systemPrompt: nil, config: GenerationConfig())
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url?.host == url.host })
         // URLSession may convert httpBody → httpBodyStream during transmission.
         let body: Data
         if let direct = captured?.httpBody {
@@ -211,7 +211,7 @@ extension OpenAIBackendTests {
         config.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: config)
         let backend = OpenAIBackend(urlSession: session)
-        let url = URL(string: "https://openai-cancel-test.example")!
+        let url = URL(string: "https://openai-cancel-\(UUID().uuidString).test")!
         backend.configure(baseURL: url, apiKey: "sk-test", modelName: "gpt-4o-mini")
         try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 
@@ -220,14 +220,14 @@ extension OpenAIBackendTests {
         }
         chunks.append(Data("data: [DONE]\n\n".utf8))
 
-        MockURLProtocol.reset()
         MockURLProtocol.stub(url: url, response: .asyncSSE(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: GenerationConfig())
 
         var tokenCount = 0
         do {
-            for try await _ in stream {
+            for try await _ in stream.events {
                 tokenCount += 1
                 if tokenCount == 2 {
                     backend.stopGeneration()

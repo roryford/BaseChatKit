@@ -60,7 +60,7 @@ public protocol InferenceBackend: AnyObject, Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error>
+    ) throws -> GenerationStream
 
     /// Requests that the current generation stop as soon as possible.
     ///

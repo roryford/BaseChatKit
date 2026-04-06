@@ -128,7 +128,7 @@ struct ServerDiscoveryGenerateE2ETests {
         let stream = try backend.generate(prompt: "Hi", systemPrompt: nil, config: GenerationConfig())
 
         var tokens: [String] = []
-        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
+        for try await event in stream.events { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["Hello", " world"])
     }
@@ -170,7 +170,7 @@ struct ServerDiscoveryGenerateE2ETests {
         let stream = try backend.generate(prompt: "Test", systemPrompt: nil, config: GenerationConfig())
 
         var tokens: [String] = []
-        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
+        for try await event in stream.events { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["Probed", " reply"])
     }
@@ -208,7 +208,7 @@ struct ServerDiscoveryGenerateE2ETests {
 
         do {
             let stream = try backend.generate(prompt: "Hi", systemPrompt: nil, config: GenerationConfig())
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected an error for unreachable server")
         } catch {
             #expect(error is URLError || error is CloudBackendError)
@@ -261,7 +261,7 @@ struct ServerDiscoveryGenerateE2ETests {
         let stream = try backend.generate(prompt: "Test", systemPrompt: nil, config: GenerationConfig())
 
         var tokens: [String] = []
-        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
+        for try await event in stream.events { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["From", " LM", " Studio"])
     }

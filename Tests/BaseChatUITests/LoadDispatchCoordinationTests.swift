@@ -348,13 +348,14 @@ private final class ControlledLoadBackend: InferenceBackend,
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         guard isModelLoaded else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
-        return AsyncThrowingStream { continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in
             continuation.finish()
         }
+        return GenerationStream(stream)
     }
 
     func stopGeneration() {

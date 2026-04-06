@@ -20,7 +20,7 @@ import BaseChatCore
 /// )
 /// try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 /// let stream = try backend.generate(prompt: "### Instruction:\nHello\n### Response:\n", systemPrompt: nil, config: .init())
-/// for try await event in stream { if case .token(let t) = event { print(t, terminator: "") } }
+/// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
 public final class KoboldCppBackend: SSECloudBackend, CloudBackendURLModelConfigurable {
 
@@ -31,15 +31,6 @@ public final class KoboldCppBackend: SSECloudBackend, CloudBackendURLModelConfig
     /// Context length reported by the KoboldCpp server, or 4096 as default.
     private var maxContextLength: Int32 = 4096
 
-    /// Shared session with certificate pinning delegate.
-    private static let pinnedSession: URLSession = {
-        let delegate = PinnedSessionDelegate()
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 300
-        config.timeoutIntervalForResource = 600
-        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-    }()
-
     // MARK: - Init
 
     /// Creates a KoboldCpp backend.
@@ -49,7 +40,7 @@ public final class KoboldCppBackend: SSECloudBackend, CloudBackendURLModelConfig
     public init(urlSession: URLSession? = nil) {
         super.init(
             defaultModelName: "koboldcpp",
-            urlSession: urlSession ?? Self.pinnedSession
+            urlSession: urlSession ?? URLSessionProvider.pinned
         )
     }
 

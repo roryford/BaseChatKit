@@ -112,6 +112,10 @@ extension ChatViewModel {
             )
 
             var tokenCount = 0
+            // GenerationStream.phase tracks backend-level lifecycle (connecting, streaming, stalled, retrying).
+            // ChatViewModel.activityPhase tracks UI-level state (waitingForFirstToken, streaming, idle).
+            // These are intentionally separate: activityPhase drives UI chrome, stream.phase drives
+            // reliability indicators. A future PR may unify them.
             let task = Task {
                 var batcher = StreamingTokenBatcher(
                     interval: streamingUpdateInterval,
@@ -119,9 +123,11 @@ extension ChatViewModel {
                 )
 
                 do {
-                    eventLoop: for try await event in stream {
+                    eventLoop: for try await event in stream.events {
                         if Task.isCancelled { break }
 
+                        // TODO: Migrate to GenerationStreamConsumer.handle() for testability.
+                        // The consumer is extracted and tested but not yet wired in here.
                         switch event {
                         case .token(let token):
                             tokenCount += 1
@@ -146,7 +152,7 @@ extension ChatViewModel {
                                 self.messages[idx].completionTokens = completion
                             }
 
-                        case .toolCall, .done:
+                        case .toolCall:
                             break
                         }
                     }

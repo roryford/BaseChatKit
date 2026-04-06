@@ -36,7 +36,7 @@ public enum StopGenerationContractTests {
         )
 
         // Drain the stream so the backend's internal task completes.
-        for try await _ in stream {}
+        for try await _ in stream.events {}
 
         // 3. A new generate() call must work without errors.
         let secondStream = try backend.generate(
@@ -46,7 +46,7 @@ public enum StopGenerationContractTests {
         )
 
         var tokens: [String] = []
-        for try await event in secondStream {
+        for try await event in secondStream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }

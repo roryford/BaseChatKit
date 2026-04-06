@@ -124,7 +124,7 @@ struct OpenAICompatEndpointTests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -159,7 +159,7 @@ struct OpenAICompatEndpointTests {
             config: GenerationConfig()
         )
 
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         // Verify token usage was extracted
         let usage = backend.lastUsage
@@ -193,7 +193,7 @@ struct OpenAICompatEndpointTests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -227,9 +227,10 @@ struct OpenAICompatEndpointTests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected server error for missing model")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let statusCode, let message):
                 #expect(statusCode == 404)
@@ -264,7 +265,7 @@ struct OpenAICompatEndpointTests {
             systemPrompt: nil,
             config: GenerationConfig()
         )
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         // Verify no Authorization header was sent (apiKey was nil)
         let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
@@ -311,7 +312,7 @@ struct OpenAICompatEndpointTests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -346,7 +347,7 @@ struct OpenAICompatEndpointTests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -384,7 +385,7 @@ struct OpenAICompatEndpointTests {
             config: GenerationConfig()
         )
 
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         // KoboldCpp never sends usage -- verify OpenAIBackend handles this.
         #expect(backend.lastUsage == nil)
@@ -421,9 +422,10 @@ struct OpenAICompatEndpointTests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected server error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let statusCode, let message):
                 #expect(statusCode == 503)
@@ -460,7 +462,7 @@ struct OpenAICompatEndpointTests {
             systemPrompt: nil,
             config: GenerationConfig()
         )
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         #expect(captured != nil)
@@ -492,7 +494,7 @@ struct OpenAICompatEndpointTests {
             systemPrompt: "You are helpful.",
             config: GenerationConfig()
         )
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         let body = try extractBody(from: captured)
@@ -537,7 +539,7 @@ struct OpenAICompatEndpointTests {
             systemPrompt: nil,
             config: GenerationConfig()
         )
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         let body = try extractBody(from: captured)
@@ -577,7 +579,7 @@ struct OpenAICompatEndpointTests {
             systemPrompt: "You are a calculator.",
             config: GenerationConfig()
         )
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
         let body = try extractBody(from: captured)

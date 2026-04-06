@@ -21,6 +21,6 @@ import BaseChatCore
 /// )
 /// try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
-/// for try await event in stream { if case .token(let t) = event { print(t, terminator: "") } }
+/// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
 public typealias OpenAICompatibleBackend = OpenAIBackend

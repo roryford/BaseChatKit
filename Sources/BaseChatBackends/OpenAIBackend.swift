@@ -17,19 +17,9 @@ import BaseChatCore
 /// )
 /// try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
-/// for try await event in stream { if case .token(let t) = event { print(t, terminator: "") } }
+/// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
 public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBackendURLModelConfigurable, CloudBackendKeychainConfigurable, ToolCallingBackend {
-
-    /// Shared session with certificate pinning delegate.
-    private static let pinnedSession: URLSession = {
-        let delegate = PinnedSessionDelegate()
-        let config = URLSessionConfiguration.default
-        // 300s covers inter-packet gaps during slow LLM generation; 600s caps total resource time.
-        config.timeoutIntervalForRequest = 300
-        config.timeoutIntervalForResource = 600
-        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-    }()
 
     // MARK: - Tool Calling State
 
@@ -59,7 +49,7 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     public init(urlSession: URLSession? = nil) {
         super.init(
             defaultModelName: "gpt-4o-mini",
-            urlSession: urlSession ?? Self.pinnedSession
+            urlSession: urlSession ?? URLSessionProvider.pinned
         )
     }
 

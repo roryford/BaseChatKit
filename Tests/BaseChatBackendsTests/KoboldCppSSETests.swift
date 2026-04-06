@@ -70,7 +70,7 @@ struct KoboldCppBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -146,7 +146,7 @@ struct KoboldCppBackendSSETests {
             systemPrompt: nil,
             config: GenerationConfig()
         )
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         // Verify the grammar field was included in the POST body
         let captured = MockURLProtocol.capturedRequests.last(where: {
@@ -176,7 +176,7 @@ struct KoboldCppBackendSSETests {
             systemPrompt: nil,
             config: GenerationConfig()
         )
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.last(where: {
             $0.url?.absoluteString.contains(generateURL.absoluteString) == true
@@ -204,9 +204,10 @@ struct KoboldCppBackendSSETests {
         )
 
         do {
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected a server error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let statusCode, _):
                 #expect(statusCode == 500)
@@ -234,9 +235,10 @@ struct KoboldCppBackendSSETests {
         )
 
         do {
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .rateLimited:
                 break // expected
@@ -268,7 +270,7 @@ struct KoboldCppBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }

@@ -96,7 +96,7 @@ public final class SessionManagerViewModel {
                 repeatPenalty: 1.0
             )
             var result = ""
-            for try await event in stream {
+            for try await event in stream.events {
                 if case .token(let text) = event {
                     result += text
                 }

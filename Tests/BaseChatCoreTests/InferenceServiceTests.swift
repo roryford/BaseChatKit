@@ -39,7 +39,7 @@ final class InferenceServiceTests: XCTestCase {
         let stream = try service.generate(messages: [("user", "Tell me a story")])
 
         var collected: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 collected.append(text)
             }
@@ -403,7 +403,7 @@ final class InferenceServiceTests: XCTestCase {
         let service = InferenceService(backend: mock, name: "Mock")
         let stream = try service.generate(messages: [("user", "hi")])
 
-        for try await _ in stream {}
+        for try await _ in stream.events {}
 
         service.generationDidFinish()
         XCTAssertFalse(service.isGenerating,
@@ -421,7 +421,7 @@ final class InferenceServiceTests: XCTestCase {
 
         var caughtError = false
         do {
-            for try await _ in stream {}
+            for try await _ in stream.events {}
         } catch {
             caughtError = true
         }
@@ -463,7 +463,7 @@ final class InferenceServiceTests: XCTestCase {
 
         let stream = try service.generate(messages: [("user", "ping")])
         // Drain the stream so generation completes.
-        for try await _ in stream {}
+        for try await _ in stream.events {}
 
         let usage = service.lastTokenUsage
         XCTAssertNotNil(usage, "lastTokenUsage should be populated after generation")
@@ -779,8 +779,9 @@ private final class MockConversationHistoryBackend: InferenceBackend,
 
     func loadModel(from url: URL, contextSize: Int32) async throws {}
 
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
-        AsyncThrowingStream { continuation in continuation.finish() }
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
+        return GenerationStream(stream)
     }
 
     func stopGeneration() {}
@@ -805,8 +806,9 @@ private final class MockTokenUsageBackend: InferenceBackend,
 
     func loadModel(from url: URL, contextSize: Int32) async throws {}
 
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
-        AsyncThrowingStream { continuation in continuation.finish() }
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
+        return GenerationStream(stream)
     }
 
     func stopGeneration() {}
@@ -841,8 +843,9 @@ private final class MockCloudURLModelBackend: InferenceBackend,
         didConfigureBeforeLoad = (configuredBaseURL != nil && configuredModelName != nil)
     }
 
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
-        AsyncThrowingStream { continuation in continuation.finish() }
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
+        return GenerationStream(stream)
     }
 
     func stopGeneration() {}
@@ -883,8 +886,9 @@ private final class MockCloudKeychainBackend: InferenceBackend,
         )
     }
 
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
-        AsyncThrowingStream { continuation in continuation.finish() }
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
+        return GenerationStream(stream)
     }
 
     func stopGeneration() {}
@@ -1008,10 +1012,11 @@ private final class ControlledLoadBackend: InferenceBackend,
         }
     }
 
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
-        AsyncThrowingStream { continuation in
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in
             continuation.finish()
         }
+        return GenerationStream(stream)
     }
 
     func stopGeneration() {}
