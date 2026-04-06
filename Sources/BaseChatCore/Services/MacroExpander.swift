@@ -12,6 +12,8 @@ public struct MacroContext: Sendable {
     public var lastCharMessage: String?
     public var date: String?
     public var time: String?
+    public var modelName: String?
+    public var messageCount: Int?
 
     public init(
         userName: String? = nil,
@@ -20,7 +22,9 @@ public struct MacroContext: Sendable {
         lastUserMessage: String? = nil,
         lastCharMessage: String? = nil,
         date: String? = nil,
-        time: String? = nil
+        time: String? = nil,
+        modelName: String? = nil,
+        messageCount: Int? = nil
     ) {
         self.userName = userName
         self.charName = charName
@@ -29,12 +33,27 @@ public struct MacroContext: Sendable {
         self.lastCharMessage = lastCharMessage
         self.date = date
         self.time = time
+        self.modelName = modelName
+        self.messageCount = messageCount
     }
+}
+
+/// A provider that can expand custom macro tokens.
+///
+/// Register providers with ``MacroExpander/register(provider:)`` to add
+/// domain-specific macros without modifying BaseChatKit.
+///
+/// Tokens are normalized to lowercase before being passed to ``expand(_:context:)``.
+/// ``expand(_:context:)`` may be invoked from any thread; implementations must be
+/// thread-safe and must not access UI-only state.
+public protocol MacroProvider: AnyObject {
+    /// Return the expanded value for `token`, or `nil` to pass through to the next provider.
+    func expand(_ token: String, context: MacroContext) -> String?
 }
 
 /// Expands template macros in text strings.
 ///
-/// Supported macros:
+/// Supported built-in macros:
 /// - `{{user}}` -- the user's name
 /// - `{{char}}` -- the character's name
 /// - `{{date}}` -- locale-formatted date (e.g., "March 30, 2026")
@@ -43,15 +62,45 @@ public struct MacroContext: Sendable {
 /// - `{{weekday}}` -- current day of week name
 /// - `{{newline}}` -- literal newline character
 /// - `{{random::a::b::c}}` -- picks one option randomly
-/// - `{{roll:XdY}}` -- rolls X Y-sided dice and returns total
 /// - `{{lastMessage}}` -- most recent message in context
 /// - `{{lastUserMessage}}` -- most recent user message in context
 /// - `{{lastCharMessage}}` -- most recent character message in context
+/// - `{{modelName}}` -- name of the currently loaded model or endpoint
+/// - `{{messageCount}}` -- number of messages in the current conversation
 /// - `{{idle_duration}}` -- placeholder, returns empty string
 /// - `{{system}}`, `{{input}}`, `{{output}}` -- instruct template markers (pass-through)
+///
+/// Apps can extend the macro chain with domain-specific tokens by registering a ``MacroProvider``.
 public enum MacroExpander {
-    private static let maxRollDiceCount = 1000
-    private static let maxRollSides = 1000
+
+    // MARK: - Provider registry
+
+    private static let registryLock = NSLock()
+    // Access to `registry` is serialized through `registryLock`; the nonisolated(unsafe)
+    // suppressor is correct here — Swift's strict concurrency checker cannot see the lock.
+    private nonisolated(unsafe) static var registry: [(id: ObjectIdentifier, provider: any MacroProvider)] = []
+
+    /// Appends a provider to the resolution chain.
+    ///
+    /// Registered providers are consulted in registration order after built-in macros.
+    public static func register(provider: any MacroProvider) {
+        registryLock.withLock {
+            let id = ObjectIdentifier(provider)
+            // Guard against double-registration
+            guard !registry.contains(where: { $0.id == id }) else { return }
+            registry.append((id: id, provider: provider))
+        }
+    }
+
+    /// Removes a previously registered provider from the resolution chain.
+    public static func unregister(provider: any MacroProvider) {
+        registryLock.withLock {
+            let id = ObjectIdentifier(provider)
+            registry.removeAll { $0.id == id }
+        }
+    }
+
+    // MARK: - Expansion
 
     /// Expands all recognized macros in the given text.
     ///
@@ -66,8 +115,6 @@ public enum MacroExpander {
 
         // Handle {{random::a::b::c}} first since it uses :: separators
         result = expandRandom(in: result)
-        // Handle {{roll:XdY}} before single-token macros.
-        result = expandRoll(in: result)
 
         // Pattern matches {{word}} with case-insensitive flag
         let pattern = #"\{\{(\w+)\}\}"#
@@ -91,8 +138,14 @@ public enum MacroExpander {
                     in: fullMatchRange,
                     with: replacement
                 )
+            } else if !passThroughMacros.contains(macroName),
+                      let replacement = expandWithProviders(token: macroName, context: context) {
+                result = result.replacingCharacters(
+                    in: fullMatchRange,
+                    with: replacement
+                )
             }
-            // If replacement is nil, leave the macro as-is
+            // If both return nil, leave the macro as-is
         }
 
         return result
@@ -126,12 +179,28 @@ public enum MacroExpander {
             return "\n"
         case "idle_duration":
             return ""
+        case "modelname":
+            return context.modelName
+        case "messagecount":
+            return context.messageCount.map(String.init)
         default:
             if passThroughMacros.contains(macro) {
                 return nil // leave as-is
             }
-            return nil // unrecognized macro, leave as-is
+            return nil // unrecognized macro, defer to providers
         }
+    }
+
+    /// Walks the registered provider chain and returns the first non-nil expansion.
+    private static func expandWithProviders(token: String, context: MacroContext) -> String? {
+        // Capture the current snapshot of providers under lock so the loop runs without holding it.
+        let snapshot = registryLock.withLock { registry }
+        for entry in snapshot {
+            if let value = entry.provider.expand(token, context: context) {
+                return value
+            }
+        }
+        return nil
     }
 
     /// Expands `{{random::a::b::c}}` macros by picking one option randomly.
@@ -158,42 +227,6 @@ public enum MacroExpander {
         }
 
         return result
-    }
-
-    /// Expands `{{roll:XdY}}` by rolling X dice with Y sides and returning the total.
-    private static func expandRoll(in text: String) -> String {
-        let pattern = #"\{\{roll:(\d+)[dD](\d+)\}\}"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
-            return text
-        }
-
-        let nsText = text as NSString
-        let fullRange = NSRange(location: 0, length: nsText.length)
-        var result = text
-        let matches = regex.matches(in: text, options: [], range: fullRange).reversed()
-
-        for match in matches {
-            guard let diceCountRange = Range(match.range(at: 1), in: text),
-                  let sidesRange = Range(match.range(at: 2), in: text),
-                  let fullMatchRange = Range(match.range, in: text),
-                  let diceCount = Int(text[diceCountRange]),
-                  let sides = Int(text[sidesRange]),
-                  diceCount > 0, sides > 0,
-                  diceCount <= maxRollDiceCount, sides <= maxRollSides else { continue }
-
-            let total = rollDice(count: diceCount, sides: sides)
-            result = result.replacingCharacters(in: fullMatchRange, with: String(total))
-        }
-
-        return result
-    }
-
-    private static func rollDice(count: Int, sides: Int) -> Int {
-        var total = 0
-        for _ in 0..<count {
-            total += Int.random(in: 1...sides)
-        }
-        return total
     }
 
     /// Locale-formatted date (e.g., "March 30, 2026") matching ST behavior.

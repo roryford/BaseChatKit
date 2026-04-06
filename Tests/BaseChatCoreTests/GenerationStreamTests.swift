@@ -155,6 +155,7 @@ final class GenerationStreamTests: XCTestCase {
         } catch {
             // Expected timeout
         }
+        await Task.yield()  // let the @MainActor phase-update task drain
 
         // Sabotage check: removing `setPhase(.stalled)` from the timeout path causes this to fail
         XCTAssertEqual(stream.phase, .stalled)

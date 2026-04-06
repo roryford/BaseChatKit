@@ -266,42 +266,36 @@ struct MacroExpanderTests {
         #expect(result == "{{lastMessage}} / {{lastUserMessage}} / {{lastCharMessage}}")
     }
 
-    // MARK: - {{roll:XdY}}
+    // MARK: - {{modelName}}
 
-    @Test("{{roll:XdY}} returns value within valid range")
-    func rollMacroRange() {
-        let ctx = MacroContext()
-        let result = MacroExpander.expand("{{roll:2d6}}", context: ctx)
-        guard let value = Int(result) else {
-            Issue.record("Expected numeric roll output, got: \(result)")
-            return
-        }
-        #expect((2...12).contains(value))
+    @Test("{{modelName}} expands when context.modelName is set")
+    func modelNameExpansion() {
+        let ctx = MacroContext(modelName: "Llama-3-8B")
+        let result = MacroExpander.expand("Model: {{modelName}}", context: ctx)
+        #expect(result == "Model: Llama-3-8B")
     }
 
-    @Test("{{roll:XdY}} supports upper-case D separator")
-    func rollMacroUppercaseD() {
+    @Test("{{modelName}} remains unexpanded when context.modelName is nil")
+    func modelNameNilUnexpanded() {
         let ctx = MacroContext()
-        let result = MacroExpander.expand("{{roll:3D4}}", context: ctx)
-        guard let value = Int(result) else {
-            Issue.record("Expected numeric roll output, got: \(result)")
-            return
-        }
-        #expect((3...12).contains(value))
+        let result = MacroExpander.expand("Model: {{modelName}}", context: ctx)
+        #expect(result == "Model: {{modelName}}")
     }
 
-    @Test("Malformed {{roll:XdY}} is left unchanged")
-    func malformedRollLeftUnchanged() {
-        let ctx = MacroContext()
-        let result = MacroExpander.expand("{{roll:2d}} {{roll:ad6}} {{roll:0d6}}", context: ctx)
-        #expect(result == "{{roll:2d}} {{roll:ad6}} {{roll:0d6}}")
+    // MARK: - {{messageCount}}
+
+    @Test("{{messageCount}} expands when context.messageCount is set")
+    func messageCountExpansion() {
+        let ctx = MacroContext(messageCount: 42)
+        let result = MacroExpander.expand("Messages: {{messageCount}}", context: ctx)
+        #expect(result == "Messages: 42")
     }
 
-    @Test("Out-of-bounds {{roll:XdY}} is left unchanged")
-    func outOfBoundsRollLeftUnchanged() {
+    @Test("{{messageCount}} remains unexpanded when context.messageCount is nil")
+    func messageCountNilUnexpanded() {
         let ctx = MacroContext()
-        let result = MacroExpander.expand("{{roll:1001d6}} {{roll:2d1001}}", context: ctx)
-        #expect(result == "{{roll:1001d6}} {{roll:2d1001}}")
+        let result = MacroExpander.expand("Messages: {{messageCount}}", context: ctx)
+        #expect(result == "Messages: {{messageCount}}")
     }
 
     // MARK: - Date parity

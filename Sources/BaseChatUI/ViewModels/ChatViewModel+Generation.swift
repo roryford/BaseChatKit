@@ -261,6 +261,12 @@ extension ChatViewModel {
         if ctx.lastCharMessage == nil {
             ctx.lastCharMessage = messages.last(where: { $0.role == .assistant })?.content
         }
+        if ctx.modelName == nil {
+            ctx.modelName = selectedModel?.name ?? selectedEndpoint?.name
+        }
+        if ctx.messageCount == nil {
+            ctx.messageCount = messages.count
+        }
         return ctx
     }
 }
