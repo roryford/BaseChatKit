@@ -11,13 +11,9 @@
 
 **Please do not open public issues for security vulnerabilities.**
 
-### Preferred: GitHub Security Advisories
-
 Report vulnerabilities through [GitHub Security Advisories](https://github.com/roryford/BaseChatKit/security/advisories/new). This keeps the discussion private until a fix is available.
 
-### Alternative: Email
-
-If you cannot use Security Advisories, email **security@basechatkit.dev** with:
+Please include:
 
 - A description of the vulnerability
 - Steps to reproduce
