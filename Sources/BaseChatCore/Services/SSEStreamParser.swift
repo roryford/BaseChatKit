@@ -94,17 +94,16 @@ public struct SSEStreamParser {
         }
     }
 
-    /// Streams tokens from an HTTP response using an SSE payload handler.
+    /// Streams generation events from an HTTP response using an SSE payload handler.
     ///
     /// Combines `parse(bytes:)` with a payload handler to extract tokens,
-    /// track usage, detect stream end, and surface errors. This eliminates
-    /// the duplicated streaming loop in each cloud backend.
+    /// emit usage reports, detect stream end, and surface errors. This
+    /// eliminates the duplicated streaming loop in each cloud backend.
     ///
     /// - Parameters:
     ///   - bytes: The raw byte stream from `URLSession.bytes(for:)`.
     ///   - handler: A payload handler that interprets the provider's JSON format.
-    ///   - onUsage: Called when usage information is extracted from a payload.
-    /// - Returns: An `AsyncThrowingStream` of text tokens.
+    /// - Returns: An `AsyncThrowingStream` of ``GenerationEvent`` values.
     public static func streamEvents<S: AsyncSequence & Sendable>(
         from bytes: S,
         using handler: some SSEPayloadHandler

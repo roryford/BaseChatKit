@@ -3,7 +3,7 @@
 /// Replaces the raw `String` token stream to support tool calling (#55),
 /// usage reporting, and future structured output without breaking the
 /// `InferenceBackend` contract again.
-public enum GenerationEvent: Sendable {
+public enum GenerationEvent: Sendable, Equatable {
     /// A fragment of generated text (typically one token).
     case token(String)
 
@@ -14,5 +14,9 @@ public enum GenerationEvent: Sendable {
     case usage(prompt: Int, completion: Int)
 
     /// The generation stream has finished normally.
+    ///
+    /// Reserved for future use. Backends currently signal completion by
+    /// finishing the stream (`continuation.finish()`), so consumers should
+    /// treat stream termination as the authoritative end signal.
     case done
 }
