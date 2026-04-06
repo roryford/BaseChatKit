@@ -42,10 +42,12 @@ public final class CompressionOrchestrator {
         let responseBuffer = 512
         let tuples = extractive.messageTuples(from: messages)
         let tokens = extractive.totalTokens(of: tuples, tokenizer: tokenizer)
+        let systemTokens = systemPrompt.map { ContextWindowManager.estimateTokenCount($0, tokenizer: tokenizer) } ?? 0
+        let totalTokens = tokens + systemTokens
         let usableContext = contextSize - responseBuffer
         guard usableContext > 0 else { return false }
 
-        let utilization = Double(tokens) / Double(usableContext)
+        let utilization = Double(totalTokens) / Double(usableContext)
         return utilization >= compressionThreshold(for: contextSize)
     }
 

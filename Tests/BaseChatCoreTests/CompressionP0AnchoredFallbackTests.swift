@@ -5,7 +5,7 @@ import BaseChatTestSupport
 final class CompressionP0AnchoredFallbackTests: XCTestCase {
     private let tokenizer = CharTokenizer()
 
-    func test_emptyOrWhitespaceSummary_usesStableSummaryUnavailableBehavior() async {
+    func test_emptyOrWhitespaceSummary_fallsBackToExtractive() async {
         let compressor = AnchoredCompressor()
         compressor.generateFn = { _ in " \n\t  " }
 
@@ -17,14 +17,47 @@ final class CompressionP0AnchoredFallbackTests: XCTestCase {
             tokenizer: tokenizer
         )
 
-        XCTAssertEqual(result.stats.strategy, "anchored",
-                       "Current behavior for empty summary text is anchored with a placeholder summary.")
-        XCTAssertEqual(result.messages.first?.role, "system")
-        XCTAssertEqual(result.messages.first?.content, "[Summary unavailable]")
+        XCTAssertEqual(result.stats.strategy, "anchored-fallback",
+                       "Empty summary should fall back to extractive rather than injecting a placeholder.")
+        XCTAssertEqual(result.messages.first?.role, "user",
+                       "Extractive fallback does not inject a system summary message.")
 
         let budget = compressor.historyBudget(contextSize: 700, systemPrompt: nil, tokenizer: tokenizer)
         XCTAssertLessThanOrEqual(totalTokens(in: result.messages), budget,
-                                 "Anchored output must respect the history budget.")
+                                 "Fallback output must respect the history budget.")
+    }
+
+    func test_customFieldNames_parsedCorrectly() async {
+        let compressor = AnchoredCompressor()
+        // Return summary with underscored and spaced field names (Fireside-style)
+        compressor.generateFn = { _ in """
+            CHARACTERS: Alice, Bob
+            LOCATION: Forest clearing
+            PLOT_THREADS: escape plan; hidden treasure
+            LAST_EVENT: Alice found the map
+            TONE: tense
+            """
+        }
+
+        // 10 messages * 80 chars = 800 total. contextSize=1000, budget=488.
+        // Compression triggers (800 > 488). Summary (~100 chars) + tail (~244 chars) fits in budget.
+        let messages = makeMessages(count: 10, contentLength: 80)
+        let result = await compressor.compress(
+            messages: messages,
+            systemPrompt: nil,
+            contextSize: 1000,
+            tokenizer: tokenizer
+        )
+
+        XCTAssertEqual(result.stats.strategy, "anchored")
+        guard let summary = result.messages.first, summary.role == "system" else {
+            XCTFail("Expected system summary as first message")
+            return
+        }
+        // All 5 fields should be parsed, including underscored variants
+        XCTAssertTrue(summary.content.contains("PLOT_THREADS"), "Underscored field PLOT_THREADS should be preserved")
+        XCTAssertTrue(summary.content.contains("LAST_EVENT"), "Underscored field LAST_EVENT should be preserved")
+        XCTAssertTrue(summary.content.contains("CHARACTERS"), "Standard field should be preserved")
     }
 
     func test_extremelyLongSummary_fallsBackAndRespectsBudget() async {
