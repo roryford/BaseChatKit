@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/roryford/BaseChatKit/compare/v0.2.22...v0.3.0) (2026-04-06)
+
+
+### ⚠ BREAKING CHANGES
+
+This release makes two foundational API changes that would be prohibitively expensive to ship after 1.0. Both are required to support multimodal messages, tool calling, and structured generation.
+
+**Streaming API** — `InferenceBackend.generate()` now returns `AsyncThrowingStream<GenerationEvent, Error>` instead of `AsyncThrowingStream<String, Error>`. The new `GenerationEvent` enum carries `.token(String)`, `.toolCall(name:arguments:)`, `.usage(prompt:completion:)`, and `.done` cases. All backend conformers and stream consumers must update their `for try await` loops to switch on the event type. ([#167](https://github.com/roryford/BaseChatKit/issues/167), closes [#130](https://github.com/roryford/BaseChatKit/issues/130))
+
+**Message content model** — `ChatMessage.content` is now a computed property that concatenates text parts from a new `contentParts: [MessagePart]` array. Writing to `content` still works (it replaces all parts with a single `.text`), so most consumer code is unaffected. However, direct SwiftData queries on the `content` column must use `contentPartsJSON` instead. A `BaseChatSchemaV2` migration automatically wraps existing content strings into `[.text(content)]`. ([#168](https://github.com/roryford/BaseChatKit/issues/168), closes [#131](https://github.com/roryford/BaseChatKit/issues/131))
+
+### Features
+
+**Tool calling and structured generation** — New `ToolProvider` protocol, `ToolCallingBackend` opt-in protocol, and `StructuredGenerationBackend` protocol with `generateStructured<T: Decodable>()`. `ClaudeBackend` handles Anthropic `tool_use` content blocks, `OpenAIBackend` handles OpenAI function-calling format. A `GrammarConstraint` type supports GBNF strings and JSON schema for constrained decoding. Tool call rounds are capped at 10 to prevent runaway loops. `InferenceService` and `ChatViewModel` wire tool providers through to conforming backends. ([#170](https://github.com/roryford/BaseChatKit/issues/170), closes [#55](https://github.com/roryford/BaseChatKit/issues/55))
+
 ## [0.2.22](https://github.com/roryford/BaseChatKit/compare/v0.2.21...v0.2.22) (2026-04-06)
 
 
