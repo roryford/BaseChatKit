@@ -86,6 +86,8 @@ Backends are registered as factories so BaseChatCore stays free of any direct ML
 - ``PromptAssembler``
 - ``PromptSlot``
 - ``CompressionOrchestrator``
+- ``CompressionMode``
+- ``CompressionStats``
 - ``TokenizerProvider``
 
 ### Prompt Formatting

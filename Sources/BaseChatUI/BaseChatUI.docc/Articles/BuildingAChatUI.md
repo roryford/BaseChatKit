@@ -28,13 +28,13 @@ struct MyApp: App {
             appName: "MyApp",
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.example.myapp"
         )
-        DefaultBackends.registerAll(with: inferenceService)
+        DefaultBackends.register(with: inferenceService)
         chatVM = ChatViewModel(inferenceService: inferenceService)
 
         // Connect session title generation to InferenceService
-        chatVM.onFirstMessage = { session, firstMessage in
+        chatVM.onFirstMessage = { _, firstMessage in
             Task { @MainActor in
-                await sessionVM.generateTitle(for: session, from: firstMessage)
+                await sessionVM.generateTitle(from: firstMessage, using: inferenceService)
             }
         }
     }
@@ -68,7 +68,7 @@ struct RootView: View {
             let provider = SwiftDataPersistenceProvider(modelContext: modelContext)
             sessionVM.configure(persistence: provider)
             chatVM.configure(persistence: provider)
-            await chatVM.loadInitialState()
+            chatVM.refreshModels()
         }
     }
 }

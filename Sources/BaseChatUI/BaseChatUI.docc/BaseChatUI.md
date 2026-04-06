@@ -25,7 +25,7 @@ struct MyApp: App {
             appName: "MyApp",
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.example.myapp"
         )
-        DefaultBackends.registerAll(with: inferenceService)
+        DefaultBackends.register(with: inferenceService)
         chatVM = ChatViewModel(inferenceService: inferenceService)
     }
 

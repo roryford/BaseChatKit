@@ -20,7 +20,7 @@
 
 ### Generation
 
-- ``generate(messages:config:)``
+- ``generate(messages:systemPrompt:temperature:topP:repeatPenalty:maxOutputTokens:)``
 - ``stopGeneration()``
 - ``generationDidFinish()``
 

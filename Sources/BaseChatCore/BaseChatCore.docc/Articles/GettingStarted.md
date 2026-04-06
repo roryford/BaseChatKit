@@ -52,7 +52,7 @@ Backends live in `BaseChatBackends` and are registered against `InferenceService
 import BaseChatBackends
 
 // Register all available backends in one call:
-DefaultBackends.registerAll(with: inferenceService)
+DefaultBackends.register(with: inferenceService)
 
 // Or register individually for more control:
 inferenceService.registerBackendFactory { modelType in
@@ -80,15 +80,16 @@ let service = InferenceService()
 // Load a GGUF model from disk
 let modelURL = URL.documentsDirectory
     .appending(path: "Models/llama-3.2-3b-instruct.Q4_K_M.gguf")
-try await service.loadModel(from: modelURL, type: .gguf, contextSize: 4096)
+let model = ModelInfo(ggufURL: modelURL)!
+try await service.loadModel(from: model, contextSize: 4096)
 
 // Generate a response
 let stream = try service.generate(
-    messages: [ChatMessageRecord(role: .user, content: "Hello!")],
-    config: GenerationConfig(temperature: 0.7)
+    messages: [(role: "user", content: "Hello!")],
+    temperature: 0.7
 )
 
-for await event in stream.events {
+for try await event in stream.events {
     if case let .token(text) = event {
         print(text, terminator: "")
     }
@@ -114,7 +115,8 @@ BaseChatKit persists sessions and messages through ``ChatPersistenceProvider``. 
 
 ```swift
 let container = try ModelContainerFactory.makeContainer()
-let persistence = SwiftDataPersistenceProvider(container: container)
+let context = ModelContext(container)
+let persistence = SwiftDataPersistenceProvider(modelContext: context)
 chatViewModel.configure(persistence: persistence)
 ```
 
