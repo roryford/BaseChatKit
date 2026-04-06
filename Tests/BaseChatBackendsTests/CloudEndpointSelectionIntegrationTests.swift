@@ -497,7 +497,7 @@ private final class ConfiguringOpenAICloudBackend: InferenceBackend,
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         try backend.generate(prompt: prompt, systemPrompt: systemPrompt, config: config)
     }
 
@@ -537,7 +537,7 @@ private final class ConfiguringClaudeCloudBackend: InferenceBackend,
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         try backend.generate(prompt: prompt, systemPrompt: systemPrompt, config: config)
     }
 

@@ -122,9 +122,9 @@ private final class MockToolCallingBackend: InferenceBackend, ToolCallingBackend
         isModelLoaded = true
     }
 
-    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         AsyncThrowingStream { continuation in
-            continuation.yield("response")
+            continuation.yield(.token("response"))
             continuation.finish()
         }
     }
