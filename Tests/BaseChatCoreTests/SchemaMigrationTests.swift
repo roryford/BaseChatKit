@@ -36,19 +36,21 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertEqual(ObjectIdentifier(ChatSession.self), ObjectIdentifier(BaseChatSchemaV1.ChatSession.self))
         XCTAssertEqual(ObjectIdentifier(SamplerPreset.self), ObjectIdentifier(BaseChatSchemaV1.SamplerPreset.self))
         XCTAssertEqual(ObjectIdentifier(APIEndpoint.self), ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self))
+        XCTAssertEqual(ObjectIdentifier(ModelBenchmarkCache.self), ObjectIdentifier(BaseChatSchemaV3.ModelBenchmarkCache.self))
     }
 
     // MARK: - BaseChatMigrationPlan
 
-    func test_migrationPlan_schemasContainsV1andV2() {
+    func test_migrationPlan_schemasContainsV1andV2andV3() {
         let names = BaseChatMigrationPlan.schemas.map { String(describing: $0) }
         XCTAssertTrue(names.contains(where: { $0.contains("BaseChatSchemaV1") }))
         XCTAssertTrue(names.contains(where: { $0.contains("BaseChatSchemaV2") }))
-        XCTAssertEqual(BaseChatMigrationPlan.schemas.count, 2)
+        XCTAssertTrue(names.contains(where: { $0.contains("BaseChatSchemaV3") }))
+        XCTAssertEqual(BaseChatMigrationPlan.schemas.count, 3)
     }
 
-    func test_migrationPlan_stagesContainsV1toV2() {
-        XCTAssertEqual(BaseChatMigrationPlan.stages.count, 1)
+    func test_migrationPlan_stagesContainsV1toV2andV2toV3() {
+        XCTAssertEqual(BaseChatMigrationPlan.stages.count, 2)
     }
 
     // MARK: - ModelContainerFactory

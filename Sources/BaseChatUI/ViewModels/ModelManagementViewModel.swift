@@ -56,6 +56,17 @@ public final class ModelManagementViewModel {
     /// Polling task that syncs download state from the manager to this view model.
     private var downloadSyncTask: Task<Void, Never>?
 
+    // MARK: - Benchmark
+
+    /// Optional benchmark runner. Set this at app startup to enable the `runBenchmark` action.
+    public var benchmarkRunner: (any ModelBenchmarkRunner)?
+
+    /// `true` while a benchmark is in progress.
+    public private(set) var isBenchmarking: Bool = false
+
+    /// Benchmark results keyed by model ID, populated after each successful `runBenchmark` call.
+    public private(set) var benchmarkResults: [UUID: ModelBenchmarkResult] = [:]
+
     // MARK: - Private State
 
     private var searchTask: Task<Void, Never>?
@@ -313,6 +324,25 @@ public final class ModelManagementViewModel {
 
         try? FileManager.default.removeItem(at: destination)
         throw ModelImportError.unsupportedFormat
+    }
+
+    // MARK: - Benchmark
+
+    /// Runs a benchmark for the given model and stores the result in ``benchmarkResults``.
+    ///
+    /// The model must already be loaded in the relevant `InferenceService`. This method is
+    /// a no-op when ``benchmarkRunner`` is `nil` or a benchmark is already in progress.
+    public func runBenchmark(for model: ModelInfo) async {
+        guard let runner = benchmarkRunner, !isBenchmarking else { return }
+        isBenchmarking = true
+        defer { isBenchmarking = false }
+        do {
+            let result = try await runner.runBenchmark(for: model)
+            benchmarkResults[model.id] = result
+            Log.inference.info("Benchmark complete for \(model.name): \(result.tier.label)")
+        } catch {
+            Log.inference.error("Benchmark failed for \(model.name): \(error)")
+        }
     }
 
     // MARK: - Device Capability Queries

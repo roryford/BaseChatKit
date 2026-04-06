@@ -152,6 +152,54 @@ final class ModelInfoTests: XCTestCase {
         XCTAssertEqual(model.backendLabel, "MLX")
     }
 
+    // MARK: - effectiveCapabilityTier
+
+    func test_effectiveCapabilityTier_usesBenchmarkResultTierWhenAvailable() {
+        let benchmarkResult = ModelBenchmarkResult(tier: .frontier)
+        let model = ModelInfo(
+            name: "Big Model",
+            fileName: "big.gguf",
+            url: URL(fileURLWithPath: "/tmp/big.gguf"),
+            fileSize: 1_073_741_824,  // 1 GB — would estimate .minimal without benchmark
+            modelType: .gguf,
+            capabilityTier: .fast,
+            benchmarkResult: benchmarkResult
+        )
+
+        // benchmark result tier wins over capabilityTier and static estimate
+        XCTAssertEqual(model.effectiveCapabilityTier, .frontier)
+    }
+
+    func test_effectiveCapabilityTier_fallsBackToCapabilityTierWhenNoBenchmark() {
+        let model = ModelInfo(
+            name: "Test Model",
+            fileName: "test.gguf",
+            url: URL(fileURLWithPath: "/tmp/test.gguf"),
+            fileSize: 1_073_741_824,  // 1 GB — would estimate .minimal
+            modelType: .gguf,
+            capabilityTier: .balanced,
+            benchmarkResult: nil
+        )
+
+        XCTAssertEqual(model.effectiveCapabilityTier, .balanced)
+    }
+
+    func test_effectiveCapabilityTier_fallsBackToStaticEstimateWhenBothNil() {
+        // 3 GB GGUF → .fast according to static estimate
+        let threeGB = UInt64(3 * 1_073_741_824)
+        let model = ModelInfo(
+            name: "Test Model",
+            fileName: "test.gguf",
+            url: URL(fileURLWithPath: "/tmp/test.gguf"),
+            fileSize: threeGB,
+            modelType: .gguf,
+            capabilityTier: nil,
+            benchmarkResult: nil
+        )
+
+        XCTAssertEqual(model.effectiveCapabilityTier, .fast)
+    }
+
     // MARK: - Display Name
 
     func test_displayName_stripsGgufExtension() throws {
