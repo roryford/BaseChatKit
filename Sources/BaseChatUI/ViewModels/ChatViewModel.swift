@@ -15,9 +15,9 @@ public final class ChatViewModel {
     // MARK: - Services
 
     let inferenceService: InferenceService
-    private let deviceCapability: DeviceCapabilityService
-    private let modelStorage: ModelStorageService
-    private let memoryPressure: MemoryPressureHandler
+    let deviceCapability: DeviceCapabilityService
+    let modelStorage: ModelStorageService
+    let memoryPressure: MemoryPressureHandler
     let compressionOrchestrator = CompressionOrchestrator()
 
     // MARK: - Persistence
@@ -55,10 +55,10 @@ public final class ChatViewModel {
     // MARK: - Published State
 
     /// All models discovered on disk plus the built-in Foundation model.
-    public private(set) var availableModels: [ModelInfo] = []
+    public internal(set) var availableModels: [ModelInfo] = []
 
     /// Enabled cloud endpoints available for selection.
-    public private(set) var availableEndpoints: [APIEndpoint] = []
+    public internal(set) var availableEndpoints: [APIEndpoint] = []
 
     /// The model the user has selected in the sidebar.
     public var selectedModel: ModelInfo? {
@@ -154,7 +154,7 @@ public final class ChatViewModel {
     /// Pinned messages are excluded from context compression and always preserved
     /// in the conversation history. Populated from ``ChatSessionRecord/pinnedMessageIDs``
     /// when switching sessions. Persisted back to the session on changes.
-    public private(set) var pinnedMessageIDs: Set<UUID> = []
+    public internal(set) var pinnedMessageIDs: Set<UUID> = []
 
     /// The active compression mode. Synced to the orchestrator and persisted to the session.
     public var compressionMode: CompressionMode = .automatic {
@@ -263,7 +263,7 @@ public final class ChatViewModel {
     // MARK: - Onboarding
 
     /// `true` on the very first launch (before first-run logic runs).
-    public private(set) var isFirstRun: Bool
+    public internal(set) var isFirstRun: Bool
 
     /// Set to `true` after the first Foundation-backed assistant response completes
     /// in a session, suggesting the user download a local model for longer context.
@@ -295,18 +295,18 @@ public final class ChatViewModel {
 
     // MARK: - Private State
 
-    private enum LoadIntent {
+    enum LoadIntent {
         case localModel(ModelInfo)
         case cloudEndpoint(APIEndpoint)
     }
 
     var generationTask: Task<Void, Never>?
     var backgroundTask: Task<Void, Never>?
-    private var coordinatedLoadTask: Task<Void, Never>?
-    private var latestLoadIntentGeneration: UInt64 = 0
-    private var lastPressureLevel: MemoryPressureLevel = .nominal
+    var coordinatedLoadTask: Task<Void, Never>?
+    var latestLoadIntentGeneration: UInt64 = 0
+    var lastPressureLevel: MemoryPressureLevel = .nominal
     private var isSynchronizingSelection = false
-    private var isRestoringSession = false
+    var isRestoringSession = false
 
     /// Cached per-message token counts keyed by message ID, to avoid recalculating all messages.
     var tokenCountCache: [UUID: Int] = [:]
@@ -373,576 +373,10 @@ public final class ChatViewModel {
         configure(persistence: SwiftDataPersistenceProvider(modelContext: modelContext))
     }
 
-    // MARK: - Session Management
-
-    /// Switches to a different chat session, loading its messages and settings.
-    public func switchToSession(_ session: ChatSessionRecord) {
-        isRestoringSession = true
-        defer { isRestoringSession = false }
-
-        activeSession = session
-        inferenceService.resetConversation()
-
-        // Cancel any in-flight post-generation background tasks from the prior session.
-        backgroundTask?.cancel()
-        backgroundTask = nil
-        backgroundTaskError = nil
-
-        // Load session's generation settings (fall back to defaults)
-        systemPrompt = session.systemPrompt
-        temperature = session.temperature ?? 0.7
-        topP = session.topP ?? 0.9
-        repeatPenalty = session.repeatPenalty ?? 1.1
-
-        // Load prompt template if session has one
-        if let template = session.promptTemplate {
-            selectedPromptTemplate = template
-        }
-
-        let resolvedEndpoint = session.selectedEndpointID.flatMap { endpointID in
-            availableEndpoints.first(where: { $0.id == endpointID })
-        }
-        let resolvedModel = session.selectedModelID.flatMap { modelID in
-            availableModels.first(where: { $0.id == modelID })
-        }
-
-        if let resolvedEndpoint {
-            selectedEndpoint = resolvedEndpoint
-        } else if let resolvedModel {
-            selectedModel = resolvedModel
-        } else {
-            selectedModel = nil
-            selectedEndpoint = nil
-        }
-
-        // pinnedMessageIDs must be set before compressionMode: the compressionMode
-        // didSet calls saveSettingsToSession(), which writes pinnedMessageIDs back to
-        // the session. Setting pins first ensures the correct value is persisted.
-        pinnedMessageIDs = session.pinnedMessageIDs
-        compressionMode = session.compressionMode
-
-        showUpgradeHint = false
-        loadMessages()
-        updateContextEstimate()
-        Log.ui.info("Switched to session: \(session.title, privacy: .private)")
-    }
-
-    /// Saves the current generation settings back to the active session.
-    func saveSettingsToSession() throws {
-        guard var session = activeSession else { return }
-        guard let persistence else {
-            Log.persistence.warning("saveSettingsToSession called before persistence was configured")
-            throw ChatPersistenceError.providerNotConfigured
-        }
-        session.temperature = temperature
-        session.topP = topP
-        session.repeatPenalty = repeatPenalty
-        session.systemPrompt = systemPrompt
-        session.selectedModelID = selectedModel?.id
-        session.selectedEndpointID = selectedEndpoint?.id
-        session.compressionMode = compressionMode
-        session.pinnedMessageIDs = pinnedMessageIDs
-        session.updatedAt = Date()
-        try persistence.updateSession(session)
-        activeSession = session
-    }
-
-    // MARK: - Model Discovery
-
-    /// Re-scans the models directory and rebuilds `availableModels`.
-    ///
-    /// Includes the built-in Foundation model when `foundationModelProvider` returns `true`.
-    /// Clears `selectedModel` if the previously selected model is no longer on disk.
-    public func refreshModels() {
-        do {
-            try modelStorage.ensureModelsDirectory()
-        } catch {
-            errorMessage = "Could not create models directory: \(error.localizedDescription)"
-        }
-
-        var models: [ModelInfo] = []
-
-        // Let the app inject Foundation model availability check
-        if let provider = foundationModelProvider, provider() {
-            models.append(.builtInFoundation)
-        }
-
-        models.append(contentsOf: modelStorage.discoverModels())
-        availableModels = models
-
-        if let selected = selectedModel, !availableModels.contains(where: { $0.id == selected.id }) {
-            selectedModel = nil
-        }
-    }
-
-    /// Replaces the in-memory list of selectable cloud endpoints.
-    ///
-    /// Clears `selectedEndpoint` when that endpoint is no longer available.
-    public func setAvailableEndpoints(_ endpoints: [APIEndpoint]) {
-        availableEndpoints = endpoints
-        if let selected = selectedEndpoint,
-           !availableEndpoints.contains(where: { $0.id == selected.id }) {
-            selectedEndpoint = nil
-        }
-    }
-
-    /// On first launch, runs the `onFirstLaunch` closure if set; otherwise falls
-    /// back to auto-selecting the Foundation model and eagerly loading it.
-    ///
-    /// Apps can customise first-run behaviour by setting `onFirstLaunch` before
-    /// calling this method.
-    public func autoSelectFirstRunModel() {
-        let key = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
-        isFirstRun = false
-
-        if let customHandler = onFirstLaunch {
-            customHandler()
-            return
-        }
-
-        // Default behaviour: auto-select Foundation model if available.
-        guard let foundation = availableModels.first(where: { $0.modelType == .foundation }) else {
-            return
-        }
-
-        selectedModel = foundation
-        Log.ui.info("Auto-selected Foundation model for first launch")
-        // Note: do NOT call loadSelectedModel() here — the selection-change
-        // handlers in the view coordinate the load. Calling it here causes a double-load
-        // race where the second load unloads the first mid-flight.
-    }
-
-    // MARK: - Model Loading
-
-    // Two-tier load coordination:
-    // - ChatViewModel (this layer) owns UI task lifecycle via `latestLoadIntentGeneration` —
-    //   superseded async tasks are cancelled before they reach InferenceService.
-    // - InferenceService owns backend state correctness via monotonic LoadRequestToken —
-    //   any stale completion that does reach the service layer is suppressed there.
-    // Together they provide defense-in-depth: this layer avoids redundant load attempts;
-    // InferenceService provides the hard correctness guarantee.
-
-    /// Coordinates loading for the currently selected model/endpoint.
-    ///
-    /// Newest selection always wins; any older in-flight coordinated load intent is
-    /// cancelled and invalidated.
-    public func dispatchSelectedLoad() {
-        let generation = nextLoadIntentGeneration(cancelInFlightTask: true)
-        guard let intent = currentLoadIntent else { return }
-
-        coordinatedLoadTask = Task { [weak self] in
-            await self?.performLoad(intent, generation: generation)
-        }
-    }
-
-    /// Manually unloads the active backend and invalidates any pending coordinated load.
-    public func unloadModel() {
-        invalidatePendingLoadIntent(resetActivityPhase: true)
-        inferenceService.unloadModel()
-    }
-
-    /// Loads the currently selected local model into the inference backend.
-    ///
-    /// Does nothing if a load is already in progress. Sets `isLoading` for the duration
-    /// and writes to `errorMessage` on failure. Auto-detects the GGUF prompt template
-    /// from model metadata before loading.
-    ///
-    /// - Note: Prefer `dispatchSelectedLoad()` for UI-driven loads — it coordinates
-    ///   intent and cancels superseded requests.
-    public func loadSelectedModel() async {
-        guard !isLoading else { return }
-
-        guard let model = selectedModel else {
-            activeError = ChatError(kind: .configuration, message: "No model selected.", recovery: .selectModel)
-            return
-        }
-
-        await loadLocalModel(model, generation: nil)
-    }
-
-    // MARK: - Cloud Endpoint Loading
-
-    /// Loads a cloud API endpoint for the active session.
-    ///
-    /// - Note: Prefer `dispatchSelectedLoad()` for UI-driven loads — it coordinates
-    ///   intent and cancels superseded requests.
-    public func loadCloudEndpoint(_ endpoint: APIEndpoint) async {
-        await loadCloudEndpointInternal(endpoint, generation: nil)
-    }
-
-    private var currentLoadIntent: LoadIntent? {
-        if let endpoint = selectedEndpoint {
-            return .cloudEndpoint(endpoint)
-        }
-        if let model = selectedModel {
-            return .localModel(model)
-        }
-        return nil
-    }
-
-    @discardableResult
-    private func nextLoadIntentGeneration(cancelInFlightTask: Bool) -> UInt64 {
-        latestLoadIntentGeneration &+= 1
-        if cancelInFlightTask {
-            coordinatedLoadTask?.cancel()
-            coordinatedLoadTask = nil
-        }
-        return latestLoadIntentGeneration
-    }
-
-    private func invalidatePendingLoadIntent(resetActivityPhase: Bool = false) {
-        _ = nextLoadIntentGeneration(cancelInFlightTask: true)
-        if resetActivityPhase, isLoading {
-            activityPhase = .idle
-        }
-    }
-
-    private func isCurrentLoadIntentGeneration(_ generation: UInt64?) -> Bool {
-        guard let generation else { return true }
-        return generation == latestLoadIntentGeneration
-    }
-
-    private func beginLoadUIState(generation: UInt64?) -> Bool {
-        guard isCurrentLoadIntentGeneration(generation) else { return false }
-        errorMessage = nil
-        activityPhase = .modelLoading(progress: nil)
-        return true
-    }
-
-    private func endLoadUIState(generation: UInt64?) {
-        guard isCurrentLoadIntentGeneration(generation) else { return }
-        if case .modelLoading = activityPhase {
-            activityPhase = .idle
-        }
-    }
-
-    private func setLoadErrorIfCurrent(_ message: String, generation: UInt64?) {
-        guard isCurrentLoadIntentGeneration(generation) else { return }
-        errorMessage = message
-    }
-
-    private func performLoad(_ intent: LoadIntent, generation: UInt64?) async {
-        switch intent {
-        case .localModel(let model):
-            await loadLocalModel(model, generation: generation)
-        case .cloudEndpoint(let endpoint):
-            await loadCloudEndpointInternal(endpoint, generation: generation)
-        }
-    }
-
-    private func loadLocalModel(_ model: ModelInfo, generation: UInt64?) async {
-        guard isCurrentLoadIntentGeneration(generation) else { return }
-
-        if model.modelType != .foundation {
-            guard deviceCapability.canLoadModel(estimatedMemoryBytes: model.fileSize) else {
-                let ramGB = deviceCapability.physicalMemory / (1024 * 1024 * 1024)
-                setLoadErrorIfCurrent(
-                    "This model (\(model.fileSizeFormatted)) may be too large for this device (\(ramGB) GB RAM). Try a smaller quantisation.",
-                    generation: generation
-                )
-                return
-            }
-        }
-
-        // Auto-detect prompt template from GGUF metadata before loading.
-        if let detected = model.detectedPromptTemplate,
-           isCurrentLoadIntentGeneration(generation) {
-            selectedPromptTemplate = detected
-            Log.inference.info("Auto-detected prompt template: \(detected.rawValue)")
-        }
-
-        guard beginLoadUIState(generation: generation) else { return }
-        defer { endLoadUIState(generation: generation) }
-
-        do {
-            let contextSize: Int32 = Int32(model.detectedContextLength ?? 2048)
-            try await inferenceService.loadModel(from: model, contextSize: contextSize)
-        } catch is CancellationError {
-            return
-        } catch {
-            setLoadErrorIfCurrent("Failed to load model: \(error.localizedDescription)", generation: generation)
-        }
-    }
-
-    private func loadCloudEndpointInternal(_ endpoint: APIEndpoint, generation: UInt64?) async {
-        guard beginLoadUIState(generation: generation) else { return }
-        defer { endLoadUIState(generation: generation) }
-
-        do {
-            try await inferenceService.loadCloudBackend(from: endpoint)
-        } catch is CancellationError {
-            return
-        } catch {
-            setLoadErrorIfCurrent("Failed to connect: \(error.localizedDescription)", generation: generation)
-        }
-    }
-
-    // MARK: - Chat
-
-    /// Sends the current input as a user message and generates an assistant response.
-    public func sendMessage() async {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-
-        guard let activeSessionID else {
-            errorMessage = "No active session. Create or select a session first."
-            return
-        }
-
-        guard isModelLoaded else {
-            activeError = ChatError(kind: .configuration, message: "No model loaded. Select a model from the sidebar first.", recovery: .selectModel)
-            return
-        }
-
-        errorMessage = nil
-        inputText = ""
-        Log.ui.debug("User sent message")
-
-        // Create and persist the user message.
-        let userMessage = ChatMessageRecord(role: .user, content: text, sessionID: activeSessionID)
-        messages.append(userMessage)
-        do {
-            try saveMessage(userMessage)
-        } catch {
-            Log.persistence.error("Failed to save user message: \(error)")
-            surfaceError(error, kind: .persistence)
-            messages.removeAll(where: { $0.id == userMessage.id })
-            return
-        }
-
-        // Update session timestamp.
-        activeSession?.updatedAt = Date()
-
-        // Trigger auto-title on the first user message in this session.
-        if let session = activeSession, messages.filter({ $0.role == .user }).count == 1 {
-            onFirstMessage?(session, text)
-        }
-
-        // Create an empty assistant message that will be streamed into.
-        let assistantMessage = ChatMessageRecord(role: .assistant, content: "", sessionID: activeSessionID)
-        messages.append(assistantMessage)
-
-        await generateIntoMessage(assistantMessage)
-        updateContextEstimate()
-    }
-
-    /// Regenerates the last assistant response.
-    public func regenerateLastResponse() async {
-        guard !isGenerating else { return }
-
-        guard let activeSessionID else { return }
-
-        // Find and remove the last assistant message.
-        guard let lastAssistantIndex = messages.lastIndex(where: { $0.role == .assistant }) else {
-            return
-        }
-
-        let removed = messages.remove(at: lastAssistantIndex)
-        do {
-            try deleteMessage(removed)
-        } catch {
-            Log.persistence.error("Failed to delete prior assistant message: \(error)")
-            surfaceError(error, kind: .persistence)
-            messages.insert(removed, at: lastAssistantIndex)
-            return
-        }
-
-        // Create a fresh assistant message.
-        let assistantMessage = ChatMessageRecord(role: .assistant, content: "", sessionID: activeSessionID)
-        messages.append(assistantMessage)
-
-        Log.ui.debug("Regenerating last response")
-        await generateIntoMessage(assistantMessage)
-    }
-
-    /// Edits a message and regenerates everything after it.
-    public func editMessage(_ messageID: UUID, newContent: String) async {
-        guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
-        guard !isGenerating else { return }
-
-        guard let activeSessionID else { return }
-
-        // Update the edited message.
-        let originalMessage = messages[index]
-        messages[index].content = newContent
-        do {
-            try updateMessage(messages[index])
-        } catch {
-            messages[index] = originalMessage
-            Log.persistence.error("Failed to update edited message: \(error)")
-            surfaceError(error, kind: .persistence)
-            return
-        }
-
-        // Remove all messages after the edited one.
-        let toRemove = Array(messages[(index + 1)...])
-        messages.removeSubrange((index + 1)...)
-        for msg in toRemove {
-            do {
-                try deleteMessage(msg)
-            } catch {
-                Log.persistence.error("Failed to delete message during edit regeneration: \(error)")
-                surfaceError(error, kind: .persistence)
-                messages = Array(messages.prefix(index + 1)) + toRemove
-                return
-            }
-        }
-
-        // If the edited message was from the user, regenerate the assistant response.
-        if messages[index].role == .user {
-            let assistantMessage = ChatMessageRecord(role: .assistant, content: "", sessionID: activeSessionID)
-            messages.append(assistantMessage)
-            Log.ui.debug("Edited user message, regenerating")
-            await generateIntoMessage(assistantMessage)
-        }
-    }
-
-    /// Stops an in-progress generation.
-    public func stopGeneration() {
-        generationTask?.cancel()
-        generationTask = nil
-        inferenceService.stopGeneration()
-        activityPhase = .idle
-
-        // Persist whatever has been generated so far.
-        if let lastAssistant = messages.last(where: { $0.role == .assistant }),
-           !lastAssistant.content.isEmpty {
-            do {
-                try saveMessage(lastAssistant)
-            } catch {
-                Log.persistence.error("Failed to persist partial assistant message: \(error)")
-                surfaceError(error, kind: .persistence)
-            }
-        }
-        Log.ui.debug("Generation stopped by user")
-    }
-
-    /// Clears all messages in the current session.
-    ///
-    /// Cancels any in-flight generation before clearing to avoid inconsistent UI state.
-    public func clearChat() {
-        if isGenerating {
-            stopGeneration()
-        }
-
-        // Cancel any in-flight post-generation background tasks.
-        backgroundTask?.cancel()
-        backgroundTask = nil
-
-        guard let activeSessionID else {
-            messages.removeAll()
-            tokenCountCache.removeAll()
-            hasOlderMessages = false
-            updateContextEstimate()
-            Log.ui.info("Chat cleared")
-            return
-        }
-
-        do {
-            try deleteMessages(for: activeSessionID)
-            messages.removeAll()
-            tokenCountCache.removeAll()
-            hasOlderMessages = false
-            updateContextEstimate()
-            Log.ui.info("Chat cleared")
-        } catch {
-            Log.persistence.error("Failed to delete messages while clearing chat: \(error)")
-            loadMessages()
-            tokenCountCache.removeAll()
-            updateContextEstimate()
-            surfaceError(error, kind: .persistence)
-            return
-        }
-    }
-
-    // MARK: - Export
-
-    /// Exports the current chat in the specified format.
-    public func exportChat(format: ExportFormat) -> String {
-        ChatExportService.export(
-            messages: messages,
-            sessionTitle: activeSession?.title ?? "Chat",
-            format: format
-        )
-    }
-
-    // MARK: - Lifecycle
-
-    /// Saves all pending changes. Called on app background.
-    public func saveState() {
-        do {
-            try saveSettingsToSession()
-            Log.persistence.info("State saved on background")
-        } catch {
-            Log.persistence.error("Failed to save state on background: \(error)")
-            errorMessage = "Failed to save state: \(error.localizedDescription)"
-        }
-    }
-
     // MARK: - Structured Error Surfacing
 
     /// Surfaces an error with structured type information.
     func surfaceError(_ error: any Error, kind: ChatError.Kind, context: String? = nil) {
         activeError = ChatError.from(error, kind: kind, context: context)
-    }
-
-    // MARK: - Memory Pressure Monitoring
-
-    public func startMemoryMonitoring() {
-        memoryPressure.startMonitoring()
-    }
-
-    public func stopMemoryMonitoring() {
-        memoryPressure.stopMonitoring()
-    }
-
-    public func handleMemoryPressure() {
-        let level = memoryPressure.pressureLevel
-        guard level != lastPressureLevel else { return }
-        lastPressureLevel = level
-
-        switch level {
-        case .critical:
-            stopGeneration()
-            unloadModel()
-            activeError = ChatError(kind: .memoryPressure, message: "Memory pressure is critical. The model was unloaded to prevent the app from being terminated.", recovery: .dismissOnly)
-        case .warning:
-            activeError = ChatError(kind: .memoryPressure, message: "Memory pressure is elevated. Consider closing other apps.", recovery: .dismissOnly)
-        case .nominal:
-            if activeError?.kind == .memoryPressure {
-                activeError = nil
-            }
-        }
-    }
-
-    // MARK: - Message Pinning
-
-    /// Marks a message as pinned, preserving it from context compression.
-    public func pinMessage(id messageID: UUID) {
-        pinnedMessageIDs.insert(messageID)
-        do {
-            try saveSettingsToSession()
-        } catch {
-            Log.persistence.error("Failed to save pinned message settings: \(error)")
-            surfaceError(error, kind: .persistence)
-        }
-    }
-
-    /// Removes the pin from a message.
-    public func unpinMessage(id messageID: UUID) {
-        pinnedMessageIDs.remove(messageID)
-        do {
-            try saveSettingsToSession()
-        } catch {
-            Log.persistence.error("Failed to save unpinned message settings: \(error)")
-            surfaceError(error, kind: .persistence)
-        }
-    }
-
-    /// Returns whether the given message is currently pinned.
-    public func isMessagePinned(id messageID: UUID) -> Bool {
-        pinnedMessageIDs.contains(messageID)
     }
 }
