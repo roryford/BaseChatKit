@@ -49,7 +49,7 @@ public enum BaseChatSchemaV3: VersionedSchema {
         public var tokensPerSecond: Double?
 
         /// Peak memory usage in bytes, or `nil` if not available.
-        public var memoryBytes: UInt64?
+        public var memoryBytes: Int64?
 
         /// When the benchmark was performed.
         public var measuredAt: Date

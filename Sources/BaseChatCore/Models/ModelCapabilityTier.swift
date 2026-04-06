@@ -78,7 +78,7 @@ public struct ModelBenchmarkResult: Codable, Sendable, Equatable, Hashable {
     public let tokensPerSecond: Double?
 
     /// Peak process memory at the time of measurement (bytes), or `nil` if not measured.
-    public let memoryBytes: UInt64?
+    public let memoryBytes: Int64?
 
     /// When this benchmark was taken.
     public let measuredAt: Date
@@ -91,7 +91,7 @@ public struct ModelBenchmarkResult: Codable, Sendable, Equatable, Hashable {
     public init(
         tier: ModelCapabilityTier,
         tokensPerSecond: Double? = nil,
-        memoryBytes: UInt64? = nil,
+        memoryBytes: Int64? = nil,
         measuredAt: Date = Date()
     ) {
         self.tier = tier
