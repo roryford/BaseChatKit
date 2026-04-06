@@ -85,6 +85,9 @@ final class GrammarConstraintTests: XCTestCase {
 
         XCTAssertNotNil(gbnf)
         XCTAssertTrue(gbnf!.contains("root"))
+        // The ws rule must be defined even for empty objects, otherwise the
+        // grammar is invalid when the root rule references ws.
+        XCTAssertTrue(gbnf!.contains("ws"))
     }
 
     func test_jsonSchema_unknownType_returnsNil() throws {

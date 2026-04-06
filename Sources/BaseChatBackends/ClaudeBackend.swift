@@ -21,7 +21,12 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
 
     private var _toolDefinitions: [ToolDefinition] = []
     private var _toolProvider: (any ToolProvider)?
-    public var toolCallObserver: (any ToolCallObserver)?
+    private var _toolCallObserver: (any ToolCallObserver)?
+
+    public var toolCallObserver: (any ToolCallObserver)? {
+        get { withStateLock { _toolCallObserver } }
+        set { withStateLock { _toolCallObserver = newValue } }
+    }
 
     public func setTools(_ tools: [ToolDefinition]) {
         withStateLock { _toolDefinitions = tools }
@@ -249,8 +254,8 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
               let name = contentBlock["name"] as? String else {
             return nil
         }
-        // Arguments arrive in subsequent content_block_delta events and are
-        // assembled by the caller. For the initial block, emit with empty args.
+        // The initial content_block_start may include partial or complete input.
+        // Subsequent input_json_delta events supply the rest; callers assemble them.
         let input = contentBlock["input"] as? [String: Any] ?? [:]
         let argsData = (try? JSONSerialization.data(withJSONObject: input)) ?? Data()
         let argsString = String(data: argsData, encoding: .utf8) ?? "{}"

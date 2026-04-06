@@ -94,7 +94,9 @@ public enum GrammarConstraint: Sendable, Equatable {
         switch type {
         case "object":
             guard let properties = schema["properties"] as? [String: [String: Any]] else {
-                return #"root ::= "{" ws "}" ws"#
+                let rootRule = #"root ::= "{" ws "}" ws"#
+                let wsRule = #"ws ::= [ \t\n]*"#
+                return [rootRule, wsRule].joined(separator: "\n")
             }
             let sortedKeys = properties.keys.sorted()
             var rules = [String]()

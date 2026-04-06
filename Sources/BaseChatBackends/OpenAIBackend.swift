@@ -35,7 +35,12 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
 
     private var _toolDefinitions: [ToolDefinition] = []
     private var _toolProvider: (any ToolProvider)?
-    public var toolCallObserver: (any ToolCallObserver)?
+    private var _toolCallObserver: (any ToolCallObserver)?
+
+    public var toolCallObserver: (any ToolCallObserver)? {
+        get { withStateLock { _toolCallObserver } }
+        set { withStateLock { _toolCallObserver = newValue } }
+    }
 
     public func setTools(_ tools: [ToolDefinition]) {
         withStateLock { _toolDefinitions = tools }

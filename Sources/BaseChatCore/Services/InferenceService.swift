@@ -331,22 +331,20 @@ public final class InferenceService {
     /// The active tool provider, if any. Set before generation to enable tool calling
     /// on backends that adopt `ToolCallingBackend`.
     public var toolProvider: (any ToolProvider)? {
-        didSet {
-            // Propagate to the active backend if it supports tool calling
-            if let toolBackend = backend as? ToolCallingBackend {
-                toolBackend.setToolProvider(toolProvider)
-                toolBackend.setTools(toolProvider?.tools ?? [])
-            }
-        }
+        didSet { propagateToolStateToBackend() }
     }
 
     /// Optional observer for tool call activity during generation.
     public var toolCallObserver: (any ToolCallObserver)? {
-        didSet {
-            if let toolBackend = backend as? (any ToolCallingBackend) {
-                toolBackend.toolCallObserver = toolCallObserver
-            }
-        }
+        didSet { propagateToolStateToBackend() }
+    }
+
+    /// Single propagation point so didSet and generate() stay in sync.
+    private func propagateToolStateToBackend() {
+        guard let toolBackend = backend as? ToolCallingBackend else { return }
+        toolBackend.setToolProvider(toolProvider)
+        toolBackend.setTools(toolProvider?.tools ?? [])
+        toolBackend.toolCallObserver = toolCallObserver
     }
 
     // MARK: - Generation
@@ -405,11 +403,9 @@ public final class InferenceService {
             historyReceiver.setConversationHistory(messages)
         }
 
-        // Propagate tool definitions and provider to backends that support tool calling.
-        if let toolBackend = backend as? ToolCallingBackend {
-            toolBackend.setTools(toolProvider?.tools ?? [])
-            toolBackend.setToolProvider(toolProvider)
-        }
+        // Ensure tool state is current before each generation in case the
+        // backend was swapped after the provider/observer was set.
+        propagateToolStateToBackend()
 
         do {
             return try backend.generate(

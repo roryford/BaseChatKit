@@ -52,10 +52,8 @@ final class ToolProviderTests: XCTestCase {
         let json = tool.toJSON()
         let schema = json["input_schema"] as? [String: Any]
 
-        // required key should still be present but as empty array
-        // (API providers expect the key to exist)
-        let required = schema?["required"] as? [String]
-        XCTAssertTrue(required?.isEmpty ?? true)
+        // toJSON() omits the required key when the array is empty
+        XCTAssertNil(schema?["required"])
     }
 
     // MARK: - ToolDefinition Codable
