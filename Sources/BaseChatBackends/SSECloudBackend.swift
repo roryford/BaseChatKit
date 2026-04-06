@@ -225,7 +225,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         guard withStateLock({ _isModelLoaded && _baseURL != nil }) else {
             throw CloudBackendError.invalidURL("Backend not configured. Call loadModel first.")
         }
@@ -269,11 +269,15 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                             if Task.isCancelled { break }
 
                             if let token = self?.extractToken(from: payload) {
-                                continuation.yield(token)
+                                continuation.yield(.token(token))
                             }
 
                             if let usage = self?.extractUsage(from: payload) {
                                 self?.handleUsage(usage)
+                                if let prompt = usage.promptTokens,
+                                   let completion = usage.completionTokens {
+                                    continuation.yield(.usage(prompt: prompt, completion: completion))
+                                }
                             }
 
                             if self?.isStreamEnd(payload) == true {

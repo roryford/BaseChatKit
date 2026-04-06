@@ -46,8 +46,10 @@ public enum StopGenerationContractTests {
         )
 
         var tokens: [String] = []
-        for try await token in secondStream {
-            tokens.append(token)
+        for try await event in secondStream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         XCTAssertFalse(

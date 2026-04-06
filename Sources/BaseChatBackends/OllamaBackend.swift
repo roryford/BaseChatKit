@@ -22,7 +22,7 @@ import BaseChatCore
 /// backend.configure(baseURL: URL(string: "http://localhost:11434")!, modelName: "llama3.2")
 /// try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
-/// for try await token in stream { print(token, terminator: "") }
+/// for try await event in stream { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
 public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver, CloudBackendURLModelConfigurable, @unchecked Sendable {
 
@@ -131,7 +131,7 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         let (loaded, capturedURL) = withStateLock { (isModelLoaded, baseURL) }
         guard loaded, let baseURL = capturedURL else {
             throw CloudBackendError.invalidURL("Backend not configured. Call loadModel first.")
@@ -181,7 +181,7 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
                                 if !lineBuffer.isEmpty {
                                     if let line = String(data: lineBuffer, encoding: .utf8),
                                        let token = Self.extractToken(from: line) {
-                                        continuation.yield(token)
+                                        continuation.yield(.token(token))
                                     }
                                     lineBuffer.removeAll(keepingCapacity: true)
                                 }
@@ -194,7 +194,7 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
                         if !lineBuffer.isEmpty,
                            let line = String(data: lineBuffer, encoding: .utf8),
                            let token = Self.extractToken(from: line) {
-                            continuation.yield(token)
+                            continuation.yield(.token(token))
                         }
                     }
 

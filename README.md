@@ -225,7 +225,7 @@ class MyBackend: InferenceBackend, @unchecked Sendable {
 
     func loadModel(from url: URL, contextSize: Int32) async throws { /* ... */ }
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig)
-        throws -> AsyncThrowingStream<String, Error> { /* ... */ }
+        throws -> AsyncThrowingStream<GenerationEvent, Error> { /* ... */ }
     func stopGeneration() { /* ... */ }
     func unloadModel() { /* ... */ }
 }

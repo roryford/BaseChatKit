@@ -105,11 +105,10 @@ public struct SSEStreamParser {
     ///   - handler: A payload handler that interprets the provider's JSON format.
     ///   - onUsage: Called when usage information is extracted from a payload.
     /// - Returns: An `AsyncThrowingStream` of text tokens.
-    public static func streamTokens<S: AsyncSequence & Sendable>(
+    public static func streamEvents<S: AsyncSequence & Sendable>(
         from bytes: S,
-        using handler: some SSEPayloadHandler,
-        onUsage: (@Sendable (Int?, Int?) -> Void)? = nil
-    ) -> AsyncThrowingStream<String, Error> where S.Element == UInt8 {
+        using handler: some SSEPayloadHandler
+    ) -> AsyncThrowingStream<GenerationEvent, Error> where S.Element == UInt8 {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -118,11 +117,13 @@ public struct SSEStreamParser {
                         if Task.isCancelled { break }
 
                         if let token = handler.extractToken(from: payload) {
-                            continuation.yield(token)
+                            continuation.yield(.token(token))
                         }
 
-                        if let usage = handler.extractUsage(from: payload) {
-                            onUsage?(usage.promptTokens, usage.completionTokens)
+                        if let usage = handler.extractUsage(from: payload),
+                           let prompt = usage.promptTokens,
+                           let completion = usage.completionTokens {
+                            continuation.yield(.usage(prompt: prompt, completion: completion))
                         }
 
                         if handler.isStreamEnd(payload) {

@@ -54,13 +54,13 @@ public protocol InferenceBackend: AnyObject, Sendable {
     ///   `config.json` + `.safetensors` weights.
     func loadModel(from url: URL, contextSize: Int32) async throws
 
-    /// Generates text from a prompt, streaming tokens as they are produced.
+    /// Generates a response from a prompt, streaming events as they are produced.
     /// Errors during generation are thrown into the stream.
     func generate(
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error>
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error>
 
     /// Requests that the current generation stop as soon as possible.
     ///

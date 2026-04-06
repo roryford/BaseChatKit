@@ -128,7 +128,7 @@ struct ServerDiscoveryGenerateE2ETests {
         let stream = try backend.generate(prompt: "Hi", systemPrompt: nil, config: GenerationConfig())
 
         var tokens: [String] = []
-        for try await token in stream { tokens.append(token) }
+        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["Hello", " world"])
     }
@@ -170,7 +170,7 @@ struct ServerDiscoveryGenerateE2ETests {
         let stream = try backend.generate(prompt: "Test", systemPrompt: nil, config: GenerationConfig())
 
         var tokens: [String] = []
-        for try await token in stream { tokens.append(token) }
+        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["Probed", " reply"])
     }
@@ -261,7 +261,7 @@ struct ServerDiscoveryGenerateE2ETests {
         let stream = try backend.generate(prompt: "Test", systemPrompt: nil, config: GenerationConfig())
 
         var tokens: [String] = []
-        for try await token in stream { tokens.append(token) }
+        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["From", " LM", " Studio"])
     }

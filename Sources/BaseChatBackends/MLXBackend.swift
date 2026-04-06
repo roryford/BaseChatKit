@@ -91,7 +91,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         guard isModelLoaded, let modelContainer else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
@@ -138,7 +138,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                     for await generation in stream {
                         if Task.isCancelled { break }
                         if let text = generation.chunk {
-                            continuation.yield(text)
+                            continuation.yield(.token(text))
                             // Each chunk from MLX corresponds to one token.
                             if let limit = outputLimit {
                                 outputTokenCount += 1

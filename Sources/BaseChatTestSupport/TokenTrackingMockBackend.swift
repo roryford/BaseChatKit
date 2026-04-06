@@ -41,7 +41,7 @@ public final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvide
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         isGenerating = true
         let tokens = tokensToYield
 
@@ -59,7 +59,7 @@ public final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvide
             Task {
                 for token in tokens {
                     if Task.isCancelled { break }
-                    continuation.yield(token)
+                    continuation.yield(.token(token))
                 }
                 self.lastUsage = usage
                 self.isGenerating = false

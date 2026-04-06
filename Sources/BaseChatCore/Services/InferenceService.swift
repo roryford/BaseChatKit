@@ -341,7 +341,7 @@ public final class InferenceService {
         topP: Float = 0.9,
         repeatPenalty: Float = 1.1,
         maxOutputTokens: Int? = 2048
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         guard let backend else {
             throw InferenceError.inferenceFailure("No model loaded")
         }

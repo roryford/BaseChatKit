@@ -119,22 +119,35 @@ extension ChatViewModel {
                 )
 
                 do {
-                    for try await token in stream {
+                    eventLoop: for try await event in stream {
                         if Task.isCancelled { break }
-                        tokenCount += 1
-                        if tokenCount == 1 {
-                            self.activityPhase = .streaming
-                        }
-                        if let batch = batcher.append(token, now: ContinuousClock.now),
-                           let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
-                            self.messages[idx].content += batch
-                            if self.loopDetectionEnabled,
-                               self.messages[idx].content.count >= 100,
-                               RepetitionDetector.looksLikeLooping(self.messages[idx].content) {
-                                self.inferenceService.stopGeneration()
-                                self.errorMessage = "Generation stopped: the model appears to be repeating itself."
-                                break
+
+                        switch event {
+                        case .token(let token):
+                            tokenCount += 1
+                            if tokenCount == 1 {
+                                self.activityPhase = .streaming
                             }
+                            if let batch = batcher.append(token, now: ContinuousClock.now),
+                               let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
+                                self.messages[idx].content += batch
+                                if self.loopDetectionEnabled,
+                                   self.messages[idx].content.count >= 100,
+                                   RepetitionDetector.looksLikeLooping(self.messages[idx].content) {
+                                    self.inferenceService.stopGeneration()
+                                    self.errorMessage = "Generation stopped: the model appears to be repeating itself."
+                                    break eventLoop
+                                }
+                            }
+
+                        case .usage(let prompt, let completion):
+                            if let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
+                                self.messages[idx].promptTokens = prompt
+                                self.messages[idx].completionTokens = completion
+                            }
+
+                        case .toolCall, .done:
+                            break
                         }
                     }
                 } catch {
