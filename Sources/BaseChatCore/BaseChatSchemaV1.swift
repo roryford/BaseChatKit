@@ -260,12 +260,12 @@ public enum BaseChatSchemaV1: VersionedSchema {
 public enum BaseChatMigrationPlan: SchemaMigrationPlan {
     /// All schema versions in oldest-to-newest order.
     public static var schemas: [any VersionedSchema.Type] {
-        [BaseChatSchemaV1.self, BaseChatSchemaV2.self]
+        [BaseChatSchemaV1.self, BaseChatSchemaV2.self, BaseChatSchemaV3.self]
     }
 
     /// Migration stages between consecutive schema versions.
     public static var stages: [MigrationStage] {
-        [migrateV1toV2]
+        [migrateV1toV2, migrateV2toV3]
     }
 
     /// V1 -> V2: wraps each legacy `content` string into a `[.text(content)]` JSON array
@@ -287,5 +287,11 @@ public enum BaseChatMigrationPlan: SchemaMigrationPlan {
             }
             try context.save()
         }
+    )
+
+    /// V2 -> V3: adds the `ModelBenchmarkCache` entity. Lightweight — no data to transform.
+    static let migrateV2toV3 = MigrationStage.lightweight(
+        fromVersion: BaseChatSchemaV2.self,
+        toVersion: BaseChatSchemaV3.self
     )
 }

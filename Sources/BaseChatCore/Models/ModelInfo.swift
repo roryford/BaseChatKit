@@ -30,6 +30,21 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
     /// The raw Jinja chat template string from `tokenizer.chat_template`, if present.
     public var chatTemplateRaw: String?
 
+    // MARK: - Capability
+
+    /// Static capability tier for this model, derived from file size at init time.
+    /// When `nil`, ``effectiveCapabilityTier`` falls back to a static estimate.
+    public var capabilityTier: ModelCapabilityTier?
+
+    /// The most recent benchmark result for this model, if one has been run.
+    public var benchmarkResult: ModelBenchmarkResult?
+
+    /// Returns the benchmark-confirmed tier when one is available, otherwise falls back
+    /// to the stored ``capabilityTier``, and finally to a static file-size estimate.
+    public var effectiveCapabilityTier: ModelCapabilityTier {
+        benchmarkResult?.tier ?? capabilityTier ?? ModelCapabilityTier.estimate(from: self)
+    }
+
     /// Human-readable file size (e.g. "2.3 GB").
     public var fileSizeFormatted: String {
         ByteCountFormatter.string(fromByteCount: Int64(fileSize), countStyle: .file)
@@ -77,6 +92,7 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         self.url = url
         self.fileSize = size
         self.modelType = .gguf
+        self.benchmarkResult = nil
 
         // Attempt to read GGUF header metadata for template detection.
         if let metadata = try? GGUFMetadataReader.readMetadata(from: url) {
@@ -85,6 +101,9 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
             self.modelArchitecture = metadata.generalArchitecture
             self.chatTemplateRaw = metadata.chatTemplate
         }
+
+        // Static tier estimate; may be upgraded by a benchmark result later.
+        self.capabilityTier = ModelCapabilityTier.estimate(from: self)
     }
 
     // MARK: - MLX Initializer
@@ -136,6 +155,10 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         self.url = url
         self.fileSize = totalSize
         self.modelType = .mlx
+        self.benchmarkResult = nil
+
+        // Static tier estimate; may be upgraded by a benchmark result later.
+        self.capabilityTier = ModelCapabilityTier.estimate(from: self)
     }
 
     // MARK: - Memberwise
@@ -151,7 +174,9 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         detectedPromptTemplate: PromptTemplate? = nil,
         detectedContextLength: Int? = nil,
         modelArchitecture: String? = nil,
-        chatTemplateRaw: String? = nil
+        chatTemplateRaw: String? = nil,
+        capabilityTier: ModelCapabilityTier? = nil,
+        benchmarkResult: ModelBenchmarkResult? = nil
     ) {
         self.id = id
         self.name = name
@@ -163,6 +188,8 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         self.detectedContextLength = detectedContextLength
         self.modelArchitecture = modelArchitecture
         self.chatTemplateRaw = chatTemplateRaw
+        self.capabilityTier = capabilityTier
+        self.benchmarkResult = benchmarkResult
     }
 
     // MARK: - Private

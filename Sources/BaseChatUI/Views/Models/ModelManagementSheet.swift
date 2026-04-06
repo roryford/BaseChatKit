@@ -230,6 +230,8 @@ private struct ModelSelectRow: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        tierBadge(for: model.effectiveCapabilityTier)
                     }
 
                     // Show why this model's backend is unavailable.
@@ -263,10 +265,11 @@ private struct ModelSelectRow: View {
         case .mlx: type = "MLX"
         case .foundation: type = "Apple Foundation Model"
         }
+        let tier = model.effectiveCapabilityTier.label
         if model.modelType == .foundation {
-            return "\(model.name), \(type)"
+            return "\(model.name), \(type), \(tier)"
         }
-        return "\(model.name), \(type), \(model.fileSizeFormatted)"
+        return "\(model.name), \(type), \(model.fileSizeFormatted), \(tier)"
     }
 
     @ViewBuilder
@@ -289,6 +292,17 @@ private struct ModelSelectRow: View {
                 (isCompatible ? color : Color.secondary).opacity(0.12),
                 in: Capsule()
             )
+    }
+
+    @ViewBuilder
+    private func tierBadge(for tier: ModelCapabilityTier) -> some View {
+        Text(tier.label)
+            .font(.caption2)
+            .fontWeight(.medium)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(.fill.secondary, in: Capsule())
     }
 }
 
