@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/roryford/BaseChatKit/compare/v0.3.1...v0.3.2) (2026-04-06)
+
+
+### Bug Fixes
+
+* correct 6 compression bugs affecting context management ([#179](https://github.com/roryford/BaseChatKit/issues/179)) ([b1e0518](https://github.com/roryford/BaseChatKit/commit/b1e05185be37eaef8c8b7b95df7b701396ea1b7e))
+* replace assertionFailure with logging in MessagePart codec ([#186](https://github.com/roryford/BaseChatKit/issues/186)) ([b6b9c25](https://github.com/roryford/BaseChatKit/commit/b6b9c25a93f75e1bc447173c3960a04aa8daf4d9))
+
 ## [0.3.1](https://github.com/roryford/BaseChatKit/compare/v0.3.0...v0.3.1) (2026-04-06)
 
 ### Bug Fixes
