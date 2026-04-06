@@ -10,18 +10,28 @@ public final class ExtractiveCompressor: ContextCompressor, @unchecked Sendable 
     public let strategyName = "extractive"
 
     /// Fraction of the history budget reserved for the verbatim tail (newest messages).
-    public var tailBudgetFraction: Double = 0.40
+    public let tailBudgetFraction: Double
 
     /// Weight for how recently a message appears in the conversation.
-    public var recencyWeight: Double = 0.5
+    public let recencyWeight: Double
 
     /// Weight for message content length (longer messages carry more narrative).
-    public var lengthWeight: Double = 0.3
+    public let lengthWeight: Double
 
     /// Weight for capitalized-word density (proxy for proper noun / keyword richness).
-    public var keywordDensityWeight: Double = 0.2
+    public let keywordDensityWeight: Double
 
-    public init() {}
+    public init(
+        tailBudgetFraction: Double = 0.40,
+        recencyWeight: Double = 0.5,
+        lengthWeight: Double = 0.3,
+        keywordDensityWeight: Double = 0.2
+    ) {
+        self.tailBudgetFraction = tailBudgetFraction
+        self.recencyWeight = recencyWeight
+        self.lengthWeight = lengthWeight
+        self.keywordDensityWeight = keywordDensityWeight
+    }
 
     // MARK: - ContextCompressor
 

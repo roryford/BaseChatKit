@@ -19,8 +19,7 @@ final class CompressionP1CoreBehaviorTests: XCTestCase {
     }
 
     func test_extractiveCompressor_tailBudgetFractionZero_stillKeepsNewestMessage() async {
-        let compressor = ExtractiveCompressor()
-        compressor.tailBudgetFraction = 0.0
+        let compressor = ExtractiveCompressor(tailBudgetFraction: 0.0)
 
         let messages = makeAlternatingMessages(count: 12, contentLength: 90)
         let result = await compressor.compress(messages: messages, systemPrompt: nil, contextSize: 700, tokenizer: tokenizer)
@@ -30,8 +29,7 @@ final class CompressionP1CoreBehaviorTests: XCTestCase {
     }
 
     func test_extractiveCompressor_tailBudgetFractionOne_prefersRecentTail() async {
-        let compressor = ExtractiveCompressor()
-        compressor.tailBudgetFraction = 1.0
+        let compressor = ExtractiveCompressor(tailBudgetFraction: 1.0)
 
         let messages = makeAlternatingMessages(count: 20, contentLength: 80)
         let result = await compressor.compress(messages: messages, systemPrompt: nil, contextSize: 900, tokenizer: tokenizer)

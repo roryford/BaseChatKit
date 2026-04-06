@@ -60,9 +60,12 @@ final class CompressionP0AnchoredFallbackTests: XCTestCase {
         XCTAssertTrue(summary.content.contains("CHARACTERS"), "Standard field should be preserved")
     }
 
-    func test_extremelyLongSummary_fallsBackAndRespectsBudget() async {
+    func test_extremelyLongSummary_truncatesThenFallsBackIfNeeded() async {
         let compressor = AnchoredCompressor()
-        compressor.generateFn = { _ in String(repeating: "L", count: 5_000) }
+        // Multi-word oversized summary so truncation can partially salvage it.
+        compressor.generateFn = { _ in
+            (0..<500).map { "word\($0)" }.joined(separator: " ")
+        }
 
         let messages = makeMessages(count: 10, contentLength: 100)
         let contextSize = 800
@@ -73,12 +76,39 @@ final class CompressionP0AnchoredFallbackTests: XCTestCase {
             tokenizer: tokenizer
         )
 
-        XCTAssertEqual(result.stats.strategy, "anchored-fallback",
-                       "Oversized summary + tail should trigger anchored fallback.")
+        // Truncation should salvage the summary by trimming words to fit budget.
+        XCTAssertEqual(result.stats.strategy, "anchored",
+                       "Oversized summary should be truncated to fit, not immediately fall back.")
 
         let budget = compressor.historyBudget(contextSize: contextSize, systemPrompt: nil, tokenizer: tokenizer)
         XCTAssertLessThanOrEqual(totalTokens(in: result.messages), budget,
-                                 "Fallback output must remain within history budget.")
+                                 "Truncated output must remain within history budget.")
+    }
+
+    func test_extremelyLongSummary_tailAloneExceedsBudget_fallsBack() async {
+        let compressor = AnchoredCompressor()
+        compressor.generateFn = { _ in String(repeating: "L", count: 5_000) }
+
+        // Tail alone exceeds budget: newest message is 400 chars, budget = 800-512 = 288.
+        // tailTokens (400) > budget (288), so summaryBudget <= 0 and truncation can't help.
+        let messages = makeMessages(count: 10, contentLength: 400)
+        let contextSize = 800
+        let result = await compressor.compress(
+            messages: messages,
+            systemPrompt: nil,
+            contextSize: contextSize,
+            tokenizer: tokenizer
+        )
+
+        // With no room for summary, falls back to extractive.
+        XCTAssertEqual(result.stats.strategy, "anchored-fallback",
+                       "When tail alone leaves no summary budget, should fall back to extractive.")
+
+        // Note: when even the newest message exceeds the history budget, the compressor
+        // still preserves it (never evicts the entire conversation). The budget is a target,
+        // not a hard cap — the newest message invariant takes priority.
+        XCTAssertEqual(result.stats.outputMessageCount, 1,
+                       "Fallback should preserve at minimum the newest message.")
     }
 }
 

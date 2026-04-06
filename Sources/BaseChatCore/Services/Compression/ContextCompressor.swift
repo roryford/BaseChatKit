@@ -5,7 +5,6 @@ public enum CompressionMode: String, CaseIterable, Identifiable {
     case automatic = "Automatic"
     case off = "Off"
     case balanced = "Balanced"    // AnchoredCompressor
-    case quality = "Best Quality" // AnchoredCompressor with richer prompt (future: SceneCompressor)
 
     public var id: String { rawValue }
 }
