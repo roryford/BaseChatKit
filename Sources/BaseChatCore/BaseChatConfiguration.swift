@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Global configuration for BaseChatKit. Set this once at app startup before
 /// using any BaseChatKit types.
@@ -14,20 +15,15 @@ import Foundation
 /// )
 /// ```
 public struct BaseChatConfiguration: Sendable {
-    private static let lock = NSLock()
-    private nonisolated(unsafe) static var _shared = BaseChatConfiguration()
+    // OSAllocatedUnfairLock wraps value and lock together, making it
+    // structurally impossible to access the value without holding the lock.
+    private static let storage = OSAllocatedUnfairLock(
+        initialState: BaseChatConfiguration()
+    )
 
     public static var shared: BaseChatConfiguration {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return _shared
-        }
-        set {
-            lock.lock()
-            _shared = newValue
-            lock.unlock()
-        }
+        get { storage.withLock { $0 } }
+        set { storage.withLock { $0 = newValue } }
     }
 
     /// Display name used in export headers, empty states, etc.

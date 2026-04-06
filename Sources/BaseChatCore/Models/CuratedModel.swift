@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A recommended model from the curated list, with known-good metadata.
 ///
@@ -50,19 +51,12 @@ public struct CuratedModel: Identifiable, Sendable {
     ///
     /// This is empty by default — apps should populate it with their own list
     /// at startup or by subclassing/extending CuratedModel as needed.
-    private static let lock = NSLock()
-    private nonisolated(unsafe) static var _all: [CuratedModel] = []
+    private static let storage = OSAllocatedUnfairLock<[CuratedModel]>(
+        initialState: []
+    )
 
     public static var all: [CuratedModel] {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return _all
-        }
-        set {
-            lock.lock()
-            _all = newValue
-            lock.unlock()
-        }
+        get { storage.withLock { $0 } }
+        set { storage.withLock { $0 = newValue } }
     }
 }
