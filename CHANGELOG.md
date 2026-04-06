@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.2](https://github.com/roryford/BaseChatKit/compare/v0.3.1...v0.3.2) (2026-04-06)
+
+
+### Bug Fixes
+
+**Compression system correctness** — Six bugs fixed in the context compression layer. `shouldCompress` now includes system prompt tokens in its utilization calculation, preventing late-triggering compression when the system prompt is large. The summary parser is now field-name-agnostic, so custom templates with underscored fields (e.g., `PLOT_THREADS`) are parsed correctly instead of silently dropping fields. `ExtractiveCompressor` caps candidate selection to the remaining budget after pinned messages, preventing over-budget output. Empty summaries from the LLM now fall back to extractive compression instead of injecting a useless `[Summary unavailable]` system message. A `Task.checkCancellation()` check before the inference call allows cancelled compressions to bail out early. ([#179](https://github.com/roryford/BaseChatKit/issues/179))
+
+**CI crash from assertionFailure in debug builds** — `BaseChatSchemaV2`'s MessagePart encode/decode helpers used `assertionFailure` for recoverable conditions (malformed JSON, non-UTF-8 strings). These trap in debug builds including `swift test`, crashing the process with SIGTRAP (signal 5) even when all test assertions passed. Replaced with `Log.persistence` warnings so the existing fallback logic executes cleanly. Also fixed `ToolCall.parsedArguments()` where a `guard let` with `try` swallowed `JSONSerialization` errors as `CocoaError` instead of wrapping them in `ToolCallingError.invalidArguments`. ([#186](https://github.com/roryford/BaseChatKit/issues/186))
+
 ## [0.3.1](https://github.com/roryford/BaseChatKit/compare/v0.3.0...v0.3.1) (2026-04-06)
 
 ### Bug Fixes
