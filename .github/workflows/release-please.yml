@@ -5,10 +5,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: release-please
-  cancel-in-progress: true
-
 permissions:
   contents: write
   pull-requests: write
@@ -16,6 +12,10 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Cancelling in-progress runs is safe here — only the latest matters.
+    concurrency:
+      group: release-please
+      cancel-in-progress: true
     outputs:
       release_created: ${{ steps.release-please.outputs.release_created }}
       tag_name: ${{ steps.release-please.outputs.tag_name }}
@@ -33,12 +33,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract changelog entry for ${{ needs.release-please.outputs.tag_name }}
+      - name: Extract changelog entry
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         run: |
           python3 - <<'EOF'
-          import re, sys
+          import os, re, sys
 
-          tag = "${{ needs.release-please.outputs.tag_name }}"
+          tag = os.environ["TAG_NAME"]
           version = tag.lstrip("v")
 
           text = open("CHANGELOG.md").read()
@@ -60,6 +62,6 @@ jobs:
       - name: Update GitHub release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          gh release edit "${{ needs.release-please.outputs.tag_name }}" \
-            --notes-file /tmp/release_notes.md
+          gh release edit "$TAG_NAME" --notes-file /tmp/release_notes.md
