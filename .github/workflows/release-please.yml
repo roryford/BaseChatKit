@@ -16,8 +16,50 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release-please.outputs.release_created }}
+      tag_name: ${{ steps.release-please.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release-please
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  sync-release-notes:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract changelog entry for ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+
+          tag = "${{ needs.release-please.outputs.tag_name }}"
+          version = tag.lstrip("v")
+
+          text = open("CHANGELOG.md").read()
+          # Match from the version header to the next version header (or end of file)
+          pattern = rf"## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
+          m = re.search(pattern, text, re.DOTALL)
+          notes = m.group(1).strip() if m else ""
+
+          if not notes:
+              print(f"WARNING: No changelog entry found for {version}", file=sys.stderr)
+              sys.exit(1)
+
+          with open("/tmp/release_notes.md", "w") as f:
+              f.write(notes)
+
+          print(f"Extracted {len(notes)} chars for {version}")
+          EOF
+
+      - name: Update GitHub release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ needs.release-please.outputs.tag_name }}" \
+            --notes-file /tmp/release_notes.md
