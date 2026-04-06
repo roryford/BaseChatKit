@@ -14,11 +14,11 @@ public final class ChatViewModel {
 
     // MARK: - Services
 
-    public let inferenceService: InferenceService
+    let inferenceService: InferenceService
     private let deviceCapability: DeviceCapabilityService
     private let modelStorage: ModelStorageService
     private let memoryPressure: MemoryPressureHandler
-    public let compressionOrchestrator = CompressionOrchestrator()
+    let compressionOrchestrator = CompressionOrchestrator()
 
     // MARK: - Persistence
 
@@ -115,7 +115,7 @@ public final class ChatViewModel {
     }
 
     /// Test-only hook invoked whenever `isGenerating` changes.
-    public var onGeneratingChanged: ((Bool) -> Void)?
+    var onGeneratingChanged: ((Bool) -> Void)?
 
     /// Structured error with recovery information for the UI.
     public var activeError: ChatError?
@@ -154,7 +154,7 @@ public final class ChatViewModel {
     /// Pinned messages are excluded from context compression and always preserved
     /// in the conversation history. Populated from ``ChatSessionRecord/pinnedMessageIDs``
     /// when switching sessions. Persisted back to the session on changes.
-    public var pinnedMessageIDs: Set<UUID> = []
+    public private(set) var pinnedMessageIDs: Set<UUID> = []
 
     /// The active compression mode. Synced to the orchestrator and persisted to the session.
     public var compressionMode: CompressionMode = .automatic {
@@ -410,7 +410,7 @@ public final class ChatViewModel {
     }
 
     /// Saves the current generation settings back to the active session.
-    public func saveSettingsToSession() throws {
+    func saveSettingsToSession() throws {
         guard var session = activeSession else { return }
         guard let persistence else {
             Log.persistence.warning("saveSettingsToSession called before persistence was configured")
