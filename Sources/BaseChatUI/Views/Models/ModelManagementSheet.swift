@@ -265,10 +265,11 @@ private struct ModelSelectRow: View {
         case .mlx: type = "MLX"
         case .foundation: type = "Apple Foundation Model"
         }
+        let tier = model.effectiveCapabilityTier.label
         if model.modelType == .foundation {
-            return "\(model.name), \(type)"
+            return "\(model.name), \(type), \(tier)"
         }
-        return "\(model.name), \(type), \(model.fileSizeFormatted)"
+        return "\(model.name), \(type), \(model.fileSizeFormatted), \(tier)"
     }
 
     @ViewBuilder

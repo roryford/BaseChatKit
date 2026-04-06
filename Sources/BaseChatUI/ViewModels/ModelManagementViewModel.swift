@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftData
 import BaseChatCore
 
 public enum ModelImportError: LocalizedError, Equatable {
@@ -64,8 +65,17 @@ public final class ModelManagementViewModel {
     /// `true` while a benchmark is in progress.
     public private(set) var isBenchmarking: Bool = false
 
-    /// Benchmark results keyed by model ID, populated after each successful `runBenchmark` call.
-    public private(set) var benchmarkResults: [UUID: ModelBenchmarkResult] = [:]
+    /// Benchmark results keyed by model file name, populated after each successful
+    /// ``runBenchmark(for:)`` call and pre-loaded from ``ModelBenchmarkCache`` on context injection.
+    public private(set) var benchmarkResults: [String: ModelBenchmarkResult] = [:]
+
+    /// SwiftData context for persisting benchmark results. Set by the host view on appear.
+    ///
+    /// Assigning this property immediately loads any previously cached results from
+    /// ``ModelBenchmarkCache``, so UI can show historical data without re-running benchmarks.
+    public var modelContext: ModelContext? {
+        didSet { loadCachedBenchmarkResults() }
+    }
 
     // MARK: - Private State
 
@@ -338,10 +348,28 @@ public final class ModelManagementViewModel {
         defer { isBenchmarking = false }
         do {
             let result = try await runner.runBenchmark(for: model)
-            benchmarkResults[model.id] = result
+            benchmarkResults[model.fileName] = result
             Log.inference.info("Benchmark complete for \(model.name): \(result.tier.label)")
+            if let ctx = modelContext {
+                // Upsert: remove any stale entry for this file name before inserting the fresh result.
+                let fileName = model.fileName
+                let existing = try? ctx.fetch(FetchDescriptor<ModelBenchmarkCache>(
+                    predicate: #Predicate { $0.modelFileName == fileName }
+                ))
+                existing?.forEach { ctx.delete($0) }
+                ctx.insert(ModelBenchmarkCache(modelFileName: fileName, result: result))
+                try? ctx.save()
+            }
         } catch {
             Log.inference.error("Benchmark failed for \(model.name): \(error)")
+        }
+    }
+
+    private func loadCachedBenchmarkResults() {
+        guard let ctx = modelContext else { return }
+        let entries = (try? ctx.fetch(FetchDescriptor<ModelBenchmarkCache>())) ?? []
+        for entry in entries {
+            benchmarkResults[entry.modelFileName] = entry.toResult()
         }
     }
 
