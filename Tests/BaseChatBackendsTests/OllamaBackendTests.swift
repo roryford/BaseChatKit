@@ -111,7 +111,7 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "Say hello", systemPrompt: nil, config: .init())
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -132,7 +132,7 @@ struct OllamaBackendTests {
         defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: "You are a test bot.", config: .init())
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.last(where: {
             $0.url?.absoluteString.contains("api/chat") == true
@@ -158,7 +158,7 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
         var tokens: [String] = []
-        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
+        for try await event in stream.events { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["Hi"])
     }
@@ -177,7 +177,7 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         var tokens: [String] = []
-        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
+        for try await event in stream.events { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["OK"])
     }
@@ -194,7 +194,7 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         do {
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected server error")
         } catch let error as CloudBackendError {
             switch error {
@@ -213,7 +213,7 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         do {
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected server error")
         } catch let error as CloudBackendError {
             switch error {
@@ -236,7 +236,7 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         do {
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
         } catch let error as CloudBackendError {
             switch error {
@@ -260,7 +260,7 @@ struct OllamaBackendTests {
         defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "Hello there", systemPrompt: nil, config: .init())
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.last(where: {
             $0.url?.absoluteString.contains("api/chat") == true
@@ -295,7 +295,7 @@ struct OllamaBackendTests {
         defer { MockURLProtocol.unstub(url: chatURL) }
 
         let stream = try backend.generate(prompt: "ignored when history set", systemPrompt: nil, config: .init())
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.last(where: {
             $0.url?.absoluteString.contains("api/chat") == true

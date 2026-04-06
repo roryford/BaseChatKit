@@ -80,8 +80,19 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     }
 
     private var currentTask: Task<Void, Never>?
+    private var _generationID: UInt64 = 0
 
     public let urlSession: URLSession
+
+    /// The retry strategy used for HTTP connection failures. Defaults to
+    /// ``ExponentialBackoffStrategy`` with standard settings. Inject a
+    /// custom strategy for tests.
+    public var retryStrategy: any RetryStrategy = ExponentialBackoffStrategy()
+
+    /// Idle timeout for the generation stream. If no SSE event arrives within
+    /// this duration, the stream throws ``CloudBackendError/timeout(_:)``.
+    /// `nil` disables idle detection (default).
+    public var streamIdleTimeout: Duration?
 
     // MARK: - Init
 
@@ -225,7 +236,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         guard withStateLock({ _isModelLoaded && _baseURL != nil }) else {
             throw CloudBackendError.invalidURL("Backend not configured. Call loadModel first.")
         }
@@ -236,24 +247,38 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
             config: config
         )
 
-        withStateLock {
+        let genID = withStateLock {
+            _generationID += 1
             _isGenerating = true
             _lastUsage = nil
+            return _generationID
         }
 
-        return AsyncThrowingStream { [weak self] continuation in
+        let capturedStrategy = retryStrategy
+
+        let stream = AsyncThrowingStream { [weak self] continuation in
             guard let self else {
-                continuation.finish(throwing: CloudBackendError.streamInterrupted)
+                continuation.finish(throwing: CloudBackendError.backendDeallocated)
                 return
             }
 
             let session = self.urlSession
 
             let task = Task { [weak self] in
-                defer { self?.withStateLock { self?._isGenerating = false } }
+                defer {
+                    self?.withStateLock {
+                        // Only clear isGenerating if this generation is still current.
+                        if self?._generationID == genID {
+                            self?._isGenerating = false
+                        }
+                    }
+                }
 
                 do {
-                    try await withExponentialBackoff {
+                    // Retry wraps only the HTTP connection phase — not SSE parsing.
+                    // Mid-stream failures propagate immediately, preserving
+                    // already-yielded tokens.
+                    let (bytes, _) = try await withRetry(strategy: capturedStrategy) {
                         let (bytes, response) = try await session.bytes(for: request)
 
                         guard let httpResponse = response as? HTTPURLResponse else {
@@ -263,36 +288,17 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                         }
 
                         try await self?.checkStatusCode(httpResponse, bytes: bytes)
-
-                        let tokenStream = SSEStreamParser.parse(bytes: bytes)
-                        for try await payload in tokenStream {
-                            if Task.isCancelled { break }
-
-                            if let token = self?.extractToken(from: payload) {
-                                continuation.yield(.token(token))
-                            }
-
-                            if let usage = self?.extractUsage(from: payload) {
-                                self?.handleUsage(usage)
-                                if let prompt = usage.promptTokens,
-                                   let completion = usage.completionTokens {
-                                    continuation.yield(.usage(prompt: prompt, completion: completion))
-                                }
-                            }
-
-                            if self?.isStreamEnd(payload) == true {
-                                break
-                            }
-
-                            if let error = self?.extractStreamError(from: payload) {
-                                throw error
-                            }
-                        }
+                        return (bytes, httpResponse)
                     }
+
+                    // Stream parsing — outside retry scope.
+                    // Default uses SSE; subclasses (e.g. OllamaBackend) override
+                    // for NDJSON or other wire formats.
+                    try await self?.parseResponseStream(bytes: bytes, continuation: continuation)
 
                     continuation.finish()
                 } catch {
-                    if Task.isCancelled {
+                    if error is CancellationError || Task.isCancelled {
                         continuation.finish()
                     } else {
                         Log.network.error("\(self?.backendName ?? "SSECloud") stream error: \(error.localizedDescription, privacy: .private)")
@@ -305,6 +311,44 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
 
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
+            }
+        }
+
+        return GenerationStream(stream, idleTimeout: streamIdleTimeout)
+    }
+
+    // MARK: - Stream Parsing
+
+    /// Parses the HTTP response byte stream into generation events.
+    ///
+    /// The default implementation uses SSE format via ``SSEStreamParser``.
+    /// Subclasses override for NDJSON (Ollama) or other wire formats.
+    open func parseResponseStream(
+        bytes: URLSession.AsyncBytes,
+        continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
+    ) async throws {
+        let tokenStream = SSEStreamParser.parse(bytes: bytes)
+        for try await payload in tokenStream {
+            if Task.isCancelled { break }
+
+            if let token = extractToken(from: payload) {
+                continuation.yield(.token(token))
+            }
+
+            if let usage = extractUsage(from: payload) {
+                handleUsage(usage)
+                if let prompt = usage.promptTokens,
+                   let completion = usage.completionTokens {
+                    continuation.yield(.usage(prompt: prompt, completion: completion))
+                }
+            }
+
+            if isStreamEnd(payload) {
+                break
+            }
+
+            if let error = extractStreamError(from: payload) {
+                throw error
             }
         }
     }

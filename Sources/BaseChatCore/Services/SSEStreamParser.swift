@@ -54,6 +54,7 @@ public struct SSEStreamParser {
                                 line = decoded.trimmingCharacters(in: .whitespaces)
                             } else {
                                 // Skip lines with invalid UTF-8 rather than crash.
+                                Log.network.warning("SSEStreamParser: skipped \(byteBuffer.count)-byte line with invalid UTF-8")
                                 byteBuffer.removeAll(keepingCapacity: true)
                                 continue
                             }
@@ -79,10 +80,12 @@ public struct SSEStreamParser {
                         }
                     }
                 } catch {
-                    if !Task.isCancelled {
+                    if error is CancellationError || Task.isCancelled {
+                        continuation.finish()
+                    } else {
                         continuation.finish(throwing: error)
-                        return
                     }
+                    return
                 }
 
                 continuation.finish()
@@ -135,10 +138,10 @@ public struct SSEStreamParser {
                     }
                     continuation.finish()
                 } catch {
-                    if !Task.isCancelled {
-                        continuation.finish(throwing: error)
-                    } else {
+                    if error is CancellationError || Task.isCancelled {
                         continuation.finish()
+                    } else {
+                        continuation.finish(throwing: error)
                     }
                 }
             }

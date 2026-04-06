@@ -216,7 +216,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         guard isModelLoaded, let context, let vocab, model != nil else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
@@ -239,7 +239,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
         let maxTokens = config.maxOutputTokens ?? Int(config.maxTokens)
 
-        return AsyncThrowingStream { [weak self] continuation in
+        let stream = AsyncThrowingStream { [weak self] continuation in
             let task = Task { [weak self] in
                 guard let self else {
                     continuation.finish()
@@ -342,6 +342,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 task.cancel()
             }
         }
+        return GenerationStream(stream)
     }
 
     // MARK: - Control

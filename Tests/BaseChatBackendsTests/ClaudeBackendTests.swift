@@ -157,7 +157,7 @@ extension ClaudeBackendTests {
         MockURLProtocol.stub(url: url, response: .sse(chunks: [chunk], statusCode: 200))
 
         let stream = try backend.generate(prompt: "And 3+3?", systemPrompt: nil, config: GenerationConfig())
-        for try await _ in stream { }
+        for try await _ in stream.events { }
 
         let captured = MockURLProtocol.capturedRequests.first
         // URLSession may convert httpBody → httpBodyStream during transmission.
@@ -214,7 +214,7 @@ extension ClaudeBackendTests {
 
         var tokenCount = 0
         do {
-            for try await _ in stream {
+            for try await _ in stream.events {
                 tokenCount += 1
                 if tokenCount == 2 {
                     backend.stopGeneration()

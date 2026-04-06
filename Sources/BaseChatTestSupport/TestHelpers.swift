@@ -35,9 +35,9 @@ public func cleanupE2ETempDir(_ url: URL) {
 }
 
 /// Collects all token text from a generation event stream into a single string.
-public func collectTokens(_ stream: AsyncThrowingStream<GenerationEvent, Error>) async throws -> String {
+public func collectTokens(_ stream: GenerationStream) async throws -> String {
     var tokens: [String] = []
-    for try await event in stream {
+    for try await event in stream.events {
         if case .token(let text) = event {
             tokens.append(text)
         }

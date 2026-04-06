@@ -31,11 +31,11 @@ public final class MockTokenizerVendorBackend: InferenceBackend,
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         guard isModelLoaded else { throw InferenceError.inferenceFailure("No model loaded") }
         isGenerating = true
         let tokens = tokensToYield
-        return AsyncThrowingStream { [self] continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { [self] continuation in
             Task {
                 for token in tokens {
                     if Task.isCancelled { break }
@@ -45,6 +45,7 @@ public final class MockTokenizerVendorBackend: InferenceBackend,
                 continuation.finish()
             }
         }
+        return GenerationStream(stream)
     }
 
     public func stopGeneration() { isGenerating = false }

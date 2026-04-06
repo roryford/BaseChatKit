@@ -64,13 +64,13 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         let (tokens, delay) = withStateLock {
             _isGenerating = true
             return (_tokensToYield, _delayPerToken)
         }
 
-        return AsyncThrowingStream { [weak self] continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { [weak self] continuation in
             let task = Task { [weak self] in
                 defer {
                     self?.finishGeneration()
@@ -89,6 +89,7 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
             }
             self?.setGenerationTask(task)
         }
+        return GenerationStream(stream)
     }
 
     public func stopGeneration() {

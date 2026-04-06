@@ -74,7 +74,7 @@ struct ClaudeBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -102,7 +102,7 @@ struct ClaudeBackendSSETests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected authenticationFailed error")
         } catch let error as CloudBackendError {
             switch error {
@@ -134,7 +134,7 @@ struct ClaudeBackendSSETests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
         } catch let error as CloudBackendError {
             switch error {
@@ -171,7 +171,7 @@ struct ClaudeBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -207,7 +207,7 @@ struct ClaudeBackendSSETests {
 
         var tokens: [String] = []
         do {
-            for try await event in stream {
+            for try await event in stream.events {
                 if case .token(let text) = event {
                     tokens.append(text)
                 }
@@ -244,7 +244,7 @@ struct ClaudeBackendSSETests {
         )
 
         do {
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected a network error")
         } catch {
             // Any error is acceptable here -- the important thing is we
@@ -302,7 +302,7 @@ struct OpenAIBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -330,7 +330,7 @@ struct OpenAIBackendSSETests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected authenticationFailed error")
         } catch let error as CloudBackendError {
             switch error {
@@ -368,7 +368,7 @@ struct OpenAIBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -398,7 +398,7 @@ struct OpenAIBackendSSETests {
                 systemPrompt: nil,
                 config: GenerationConfig()
             )
-            for try await _ in stream {}
+            for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
         } catch let error as CloudBackendError {
             switch error {

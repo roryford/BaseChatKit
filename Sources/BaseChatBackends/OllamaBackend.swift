@@ -5,7 +5,8 @@ import BaseChatCore
 /// Inference backend for Ollama servers using the native `/api/chat` endpoint.
 ///
 /// Ollama streams responses as newline-delimited JSON (NDJSON) rather than SSE,
-/// so this backend parses each line directly instead of using `SSEStreamParser`.
+/// so this backend overrides ``parseResponseStream(bytes:continuation:)`` to parse
+/// each line directly instead of using `SSEStreamParser`.
 ///
 /// Use ``OllamaModelListService`` to discover available models before configuring
 /// this backend.
@@ -22,49 +23,27 @@ import BaseChatCore
 /// backend.configure(baseURL: URL(string: "http://localhost:11434")!, modelName: "llama3.2")
 /// try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
-/// for try await event in stream { if case .token(let t) = event { print(t, terminator: "") } }
+/// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
-public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver, CloudBackendURLModelConfigurable, @unchecked Sendable {
+public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigurable {
 
-    // MARK: - Logging
+    // MARK: - Init
 
-    private static let inferenceLogger = Logger(
-        subsystem: BaseChatConfiguration.shared.logSubsystem,
-        category: "inference"
-    )
-    private static let networkLogger = Logger(
-        subsystem: BaseChatConfiguration.shared.logSubsystem,
-        category: "network"
-    )
-
-    // MARK: - Lock
-
-    private let stateLock = NSLock()
-
-    @discardableResult
-    private func withStateLock<T>(_ body: () throws -> T) rethrows -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return try body()
+    /// Creates an Ollama backend.
+    ///
+    /// - Parameter urlSession: Custom URLSession for testing. Pass `nil` to use the default.
+    public init(urlSession: URLSession? = nil) {
+        super.init(
+            defaultModelName: "llama3.2",
+            urlSession: urlSession ?? URLSessionProvider.unpinned
+        )
     }
 
-    // MARK: - Configuration
+    // MARK: - Subclass Hooks
 
-    private var baseURL: URL?
-    private var modelName: String = "llama3.2"
+    public override var backendName: String { "Ollama" }
 
-    // MARK: - State
-
-    public private(set) var isModelLoaded = false
-    public private(set) var isGenerating = false
-
-    public var conversationHistory: [(role: String, content: String)]?
-
-    public func setConversationHistory(_ messages: [(role: String, content: String)]) {
-        withStateLock { conversationHistory = messages }
-    }
-
-    public var capabilities: BackendCapabilities {
+    public override var capabilities: BackendCapabilities {
         BackendCapabilities(
             supportedParameters: [.temperature, .topP, .topK, .repeatPenalty],
             maxContextTokens: 128_000,
@@ -81,176 +60,36 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
         )
     }
 
-    private var currentTask: Task<Void, Never>?
-    private let urlSession: URLSession
+    // MARK: - Model Lifecycle
 
-    /// Shared session with certificate pinning disabled for LAN use.
-    private static let defaultSession: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 300
-        config.timeoutIntervalForResource = 600
-        return URLSession(configuration: config)
-    }()
-
-    // MARK: - Init
-
-    /// Creates an Ollama backend.
-    ///
-    /// - Parameter urlSession: Custom URLSession for testing. Pass `nil` to use the default.
-    public init(urlSession: URLSession? = nil) {
-        self.urlSession = urlSession ?? Self.defaultSession
-    }
-
-    // MARK: - CloudBackendURLModelConfigurable
-
-    /// Configures the backend. Call before ``loadModel(from:contextSize:)``.
-    ///
-    /// - Parameters:
-    ///   - baseURL: Ollama server URL (e.g. `http://localhost:11434`).
-    ///   - modelName: Model tag as returned by `/api/tags` (e.g. `"llama3.2:8b"`).
-    public func configure(baseURL: URL, modelName: String = "llama3.2") {
-        withStateLock {
-            self.baseURL = baseURL
-            self.modelName = modelName
-        }
-    }
-
-    // MARK: - InferenceBackend
-
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
-        guard withStateLock({ baseURL }) != nil else {
+    public override func loadModel(from url: URL, contextSize: Int32) async throws {
+        guard baseURL != nil else {
             throw CloudBackendError.invalidURL(
                 "No base URL configured. Call configure(baseURL:modelName:) first."
             )
         }
-        withStateLock { isModelLoaded = true }
-        Self.inferenceLogger.info("OllamaBackend configured for \(self.modelName, privacy: .public) at \(self.baseURL?.host() ?? "unknown", privacy: .public)")
-    }
-
-    public func generate(
-        prompt: String,
-        systemPrompt: String?,
-        config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
-        let (loaded, capturedURL) = withStateLock { (isModelLoaded, baseURL) }
-        guard loaded, let baseURL = capturedURL else {
-            throw CloudBackendError.invalidURL("Backend not configured. Call loadModel first.")
-        }
-
-        let (capturedHistory, capturedModel) = withStateLock { (conversationHistory, modelName) }
-        let request = try buildRequest(
-            baseURL: baseURL,
-            modelName: capturedModel,
-            prompt: prompt,
-            systemPrompt: systemPrompt,
-            config: config,
-            history: capturedHistory
-        )
-
-        withStateLock { isGenerating = true }
-
-        return AsyncThrowingStream { [weak self] continuation in
-            guard let self else {
-                continuation.finish(throwing: CloudBackendError.streamInterrupted)
-                return
-            }
-
-            let session = self.urlSession
-
-            let task = Task { [weak self] in
-                defer { self?.withStateLock { self?.isGenerating = false } }
-
-                do {
-                    try await withExponentialBackoff {
-                        let (bytes, response) = try await session.bytes(for: request)
-
-                        guard let httpResponse = response as? HTTPURLResponse else {
-                            throw CloudBackendError.networkError(
-                                underlying: URLError(.badServerResponse)
-                            )
-                        }
-
-                        try await Self.checkStatusCode(httpResponse, bytes: bytes)
-
-                        // Ollama streams NDJSON — each line is a complete JSON object.
-                        var lineBuffer = Data()
-                        for try await byte in bytes {
-                            if Task.isCancelled { break }
-
-                            if byte == UInt8(ascii: "\n") {
-                                if !lineBuffer.isEmpty {
-                                    if let line = String(data: lineBuffer, encoding: .utf8),
-                                       let token = Self.extractToken(from: line) {
-                                        continuation.yield(.token(token))
-                                    }
-                                    lineBuffer.removeAll(keepingCapacity: true)
-                                }
-                            } else {
-                                lineBuffer.append(byte)
-                            }
-                        }
-
-                        // Flush any final line without a trailing newline.
-                        if !lineBuffer.isEmpty,
-                           let line = String(data: lineBuffer, encoding: .utf8),
-                           let token = Self.extractToken(from: line) {
-                            continuation.yield(.token(token))
-                        }
-                    }
-
-                    continuation.finish()
-                } catch {
-                    if Task.isCancelled {
-                        continuation.finish()
-                    } else {
-                        Self.networkLogger.error("OllamaBackend stream error: \(error.localizedDescription, privacy: .private)")
-                        continuation.finish(throwing: error)
-                    }
-                }
-            }
-
-            withStateLock { currentTask = task }
-
-            continuation.onTermination = { _ in
-                task.cancel()
-            }
-        }
-    }
-
-    public func stopGeneration() {
-        withStateLock {
-            currentTask?.cancel()
-            currentTask = nil
-            isGenerating = false
-        }
-    }
-
-    public func unloadModel() {
-        stopGeneration()
-        withStateLock {
-            baseURL = nil
-            isModelLoaded = false
-        }
-        Self.inferenceLogger.info("OllamaBackend unloaded")
+        setIsModelLoaded(true)
+        Log.inference.info("OllamaBackend configured for \(self.modelName, privacy: .public) at \(self.baseURL?.host() ?? "unknown", privacy: .public)")
     }
 
     // MARK: - Request Building
 
-    private func buildRequest(
-        baseURL: URL,
-        modelName: String,
+    public override func buildRequest(
         prompt: String,
         systemPrompt: String?,
-        config: GenerationConfig,
-        history: [(role: String, content: String)]?
+        config: GenerationConfig
     ) throws -> URLRequest {
+        guard let baseURL else {
+            throw CloudBackendError.invalidURL("No base URL configured")
+        }
+
         let chatURL = baseURL.appendingPathComponent("api/chat")
 
         var messages: [[String: String]] = []
         if let systemPrompt, !systemPrompt.isEmpty {
             messages.append(["role": "system", "content": systemPrompt])
         }
-        if let history {
+        if let history = conversationHistory {
             messages.append(contentsOf: history.map { ["role": $0.role, "content": $0.content] })
         } else {
             messages.append(["role": "user", "content": prompt])
@@ -276,14 +115,46 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        Self.networkLogger.debug("OllamaBackend request to \(chatURL.absoluteString, privacy: .public) model=\(modelName, privacy: .public)")
+        Log.network.debug("OllamaBackend request to \(chatURL.absoluteString, privacy: .public) model=\(self.modelName, privacy: .public)")
 
         return request
     }
 
-    // MARK: - Response Handling
+    // MARK: - NDJSON Stream Parsing
 
-    private static func checkStatusCode(
+    /// Parses Ollama's NDJSON response format instead of SSE.
+    public override func parseResponseStream(
+        bytes: URLSession.AsyncBytes,
+        continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
+    ) async throws {
+        var lineBuffer = Data()
+        for try await byte in bytes {
+            if Task.isCancelled { break }
+
+            if byte == UInt8(ascii: "\n") {
+                if !lineBuffer.isEmpty {
+                    if let line = String(data: lineBuffer, encoding: .utf8),
+                       let token = Self.extractToken(from: line) {
+                        continuation.yield(.token(token))
+                    }
+                    lineBuffer.removeAll(keepingCapacity: true)
+                }
+            } else {
+                lineBuffer.append(byte)
+            }
+        }
+
+        // Flush any final line without a trailing newline.
+        if !lineBuffer.isEmpty,
+           let line = String(data: lineBuffer, encoding: .utf8),
+           let token = Self.extractToken(from: line) {
+            continuation.yield(.token(token))
+        }
+    }
+
+    // MARK: - HTTP Status Validation
+
+    public override func checkStatusCode(
         _ response: HTTPURLResponse,
         bytes: URLSession.AsyncBytes
     ) async throws {
@@ -304,9 +175,15 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
                 if errorBodyData.count > 2048 { break }
             }
             let errorBody = String(decoding: errorBodyData, as: UTF8.self)
-            let message = extractErrorMessage(from: errorBody) ?? "Unexpected server error (status \(statusCode))"
+            let message = Self.extractErrorMessage(from: errorBody) ?? "Unexpected server error (status \(statusCode))"
             throw CloudBackendError.serverError(statusCode: statusCode, message: message)
         }
+    }
+
+    // MARK: - SSE Hooks (unused for NDJSON, but required by base class)
+
+    public override func extractToken(from payload: String) -> String? {
+        Self.extractToken(from: payload)
     }
 
     // MARK: - NDJSON Parsing
@@ -346,5 +223,11 @@ public final class OllamaBackend: InferenceBackend, ConversationHistoryReceiver,
             return nil
         }
         return message
+    }
+
+    // MARK: - Unload
+
+    public override func unloadModel() {
+        super.unloadModel()
     }
 }

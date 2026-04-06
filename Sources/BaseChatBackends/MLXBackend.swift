@@ -91,7 +91,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         guard isModelLoaded, let modelContainer else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
@@ -118,7 +118,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             return msgs
         }()
 
-        return AsyncThrowingStream { [weak self] continuation in
+        let stream = AsyncThrowingStream { [weak self] continuation in
             let task = Task { @MainActor in
                 defer {
                     self?.isGenerating = false
@@ -162,6 +162,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 task.cancel()
             }
         }
+        return GenerationStream(stream)
     }
 
     // MARK: - Control

@@ -119,7 +119,7 @@ extension ChatViewModel {
                 )
 
                 do {
-                    eventLoop: for try await event in stream {
+                    eventLoop: for try await event in stream.events {
                         if Task.isCancelled { break }
 
                         switch event {
@@ -146,7 +146,7 @@ extension ChatViewModel {
                                 self.messages[idx].completionTokens = completion
                             }
 
-                        case .toolCall, .done:
+                        case .toolCall:
                             break
                         }
                     }

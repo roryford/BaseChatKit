@@ -133,7 +133,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         let activeSession: LanguageModelSession = try withStateLock {
             guard _isModelLoaded else {
                 throw InferenceError.inferenceFailure("No model loaded")
@@ -160,7 +160,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
         Self.logger.debug("Foundation generate started")
 
-        return AsyncThrowingStream { [weak self] continuation in
+        let stream = AsyncThrowingStream { [weak self] continuation in
             let task = Task { [backend = self] in
                 guard let backend else {
                     continuation.finish()
@@ -231,6 +231,8 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                 task.cancel()
             }
         }
+
+        return GenerationStream(stream)
     }
 
     // MARK: - Conversation Reset

@@ -367,7 +367,7 @@ public final class ChatViewModel {
                 )
             }
             var result = ""
-            for try await event in stream {
+            for try await event in stream.events {
                 if case .token(let text) = event { result += text }
             }
             return result

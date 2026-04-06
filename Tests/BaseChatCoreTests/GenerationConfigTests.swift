@@ -81,7 +81,7 @@ final class GenerationConfigTests: XCTestCase {
 
         let config = GenerationConfig(maxOutputTokens: 1024)
         let stream = try backend.generate(prompt: "test", systemPrompt: nil, config: config)
-        for try await _ in stream {}
+        for try await _ in stream.events {}
 
         XCTAssertEqual(backend.lastConfig?.maxOutputTokens, 1024)
     }

@@ -58,7 +58,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         isModelLoaded = true
     }
 
-    public func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    public func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
         generateCallCount += 1
         lastPrompt = prompt
         lastSystemPrompt = systemPrompt
@@ -69,7 +69,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         isGenerating = true
         let tokens = tokensToYield
 
-        return AsyncThrowingStream { [self] continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { [self] continuation in
             self.activeContinuation = continuation
             continuation.onTermination = { @Sendable _ in
                 self.activeContinuation = nil
@@ -87,6 +87,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
                 continuation.finish()
             }
         }
+        return GenerationStream(stream)
     }
 
     public func stopGeneration() {

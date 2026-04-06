@@ -41,7 +41,7 @@ public final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvide
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
+    ) throws -> GenerationStream {
         isGenerating = true
         let tokens = tokensToYield
 
@@ -55,7 +55,7 @@ public final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvide
             usage = usageToReport
         }
 
-        return AsyncThrowingStream { [self] continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { [self] continuation in
             Task {
                 for token in tokens {
                     if Task.isCancelled { break }
@@ -66,6 +66,7 @@ public final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvide
                 continuation.finish()
             }
         }
+        return GenerationStream(stream)
     }
 
     public func stopGeneration() { isGenerating = false }

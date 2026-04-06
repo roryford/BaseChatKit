@@ -59,7 +59,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         )
 
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
@@ -96,7 +96,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         )
 
         do {
-            for try await _ in stream { }
+            for try await _ in stream.events { }
             XCTFail("Should have thrown after exhausting retries")
         } catch let error as CloudBackendError {
             guard case .rateLimited = error else {
@@ -129,7 +129,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         )
 
         do {
-            for try await _ in stream { }
+            for try await _ in stream.events { }
             XCTFail("Should have thrown authenticationFailed")
         } catch let error as CloudBackendError {
             guard case .authenticationFailed = error else {
@@ -166,7 +166,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
 
         let start = ContinuousClock.now
         var tokens: [String] = []
-        for try await event in stream {
+        for try await event in stream.events {
             if case .token(let text) = event {
                 tokens.append(text)
             }
