@@ -5,14 +5,15 @@
 
 ### ⚠ BREAKING CHANGES
 
-* ChatMessage.content is now a computed property over contentParts: [MessagePart]. Code that writes to content still works (it replaces all parts with a single .text), but direct SwiftData queries on the content column must use contentPartsJSON instead.
-* InferenceBackend.generate() now returns AsyncThrowingStream<GenerationEvent, Error> instead of AsyncThrowingStream<String, Error>. All backend conformers and stream consumers must be updated.
+This release makes two foundational API changes that would be prohibitively expensive to ship after 1.0. Both are required to support multimodal messages, tool calling, and structured generation.
+
+**Streaming API** — `InferenceBackend.generate()` now returns `AsyncThrowingStream<GenerationEvent, Error>` instead of `AsyncThrowingStream<String, Error>`. The new `GenerationEvent` enum carries `.token(String)`, `.toolCall(name:arguments:)`, `.usage(prompt:completion:)`, and `.done` cases. All backend conformers and stream consumers must update their `for try await` loops to switch on the event type. ([#167](https://github.com/roryford/BaseChatKit/issues/167), closes [#130](https://github.com/roryford/BaseChatKit/issues/130))
+
+**Message content model** — `ChatMessage.content` is now a computed property that concatenates text parts from a new `contentParts: [MessagePart]` array. Writing to `content` still works (it replaces all parts with a single `.text`), so most consumer code is unaffected. However, direct SwiftData queries on the `content` column must use `contentPartsJSON` instead. A `BaseChatSchemaV2` migration automatically wraps existing content strings into `[.text(content)]`. ([#168](https://github.com/roryford/BaseChatKit/issues/168), closes [#131](https://github.com/roryford/BaseChatKit/issues/131))
 
 ### Features
 
-* add tool calling infrastructure and structured generation ([#170](https://github.com/roryford/BaseChatKit/issues/170)) ([3f21123](https://github.com/roryford/BaseChatKit/commit/3f21123169d8b1ca2cb9055c851230a3e41a774a))
-* replace ChatMessage.content String with structured MessagePart array ([#168](https://github.com/roryford/BaseChatKit/issues/168)) ([1dfc01d](https://github.com/roryford/BaseChatKit/commit/1dfc01d85ffd2569cfa55e3c46d68edf26b4067f))
-* replace raw String token stream with GenerationEvent enum ([#167](https://github.com/roryford/BaseChatKit/issues/167)) ([3958d9c](https://github.com/roryford/BaseChatKit/commit/3958d9c15f826c25db291d9c9de4194d67b2e52f))
+**Tool calling and structured generation** — New `ToolProvider` protocol, `ToolCallingBackend` opt-in protocol, and `StructuredGenerationBackend` protocol with `generateStructured<T: Decodable>()`. `ClaudeBackend` handles Anthropic `tool_use` content blocks, `OpenAIBackend` handles OpenAI function-calling format. A `GrammarConstraint` type supports GBNF strings and JSON schema for constrained decoding. Tool call rounds are capped at 10 to prevent runaway loops. `InferenceService` and `ChatViewModel` wire tool providers through to conforming backends. ([#170](https://github.com/roryford/BaseChatKit/issues/170), closes [#55](https://github.com/roryford/BaseChatKit/issues/55))
 
 ## [0.2.22](https://github.com/roryford/BaseChatKit/compare/v0.2.21...v0.2.22) (2026-04-06)
 
