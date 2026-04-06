@@ -35,6 +35,18 @@ When writing hardware-gated tests, add `XCTSkipIf` guards at the top of the test
 - After asserting an expected outcome, add a sabotage check: temporarily break the code path being tested and confirm the test fails. Remove the sabotage before committing.
 - Performance tests use `measure { }` (XCTMeasure). Build all fixtures before the measure block.
 
+## Service sharing
+
+`ChatViewModel.inferenceService` is `internal` by design. Apps that need the same `InferenceService` instance in multiple components (e.g., a story engine, character creator) should create it at the app level and inject it:
+
+```swift
+let inference = InferenceService()
+let chatVM = ChatViewModel(inferenceService: inference)
+let storyStore = StoryStore(inferenceService: inference)
+```
+
+Do not widen `inferenceService` to `public` — it exposes load coordination internals and makes `InferenceService`'s full API part of `ChatViewModel`'s public contract.
+
 ## Coding conventions
 
 - **Concurrency**: async/await throughout. No Combine, no callback pyramids.

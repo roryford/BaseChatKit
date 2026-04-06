@@ -8,6 +8,21 @@ import BaseChatCore
 /// Manages the message history, model lifecycle, generation settings, context
 /// tracking, export, and SwiftData persistence. Views observe this via
 /// `@Environment` and never call services directly.
+///
+/// ## Sharing InferenceService across components
+///
+/// `inferenceService` is intentionally `internal` — downstream apps should
+/// create the service at the app level and inject it into all consumers:
+///
+/// ```swift
+/// let inference = InferenceService()
+/// let chatVM = ChatViewModel(inferenceService: inference)
+/// let storyStore = StoryStore(inferenceService: inference)
+/// ```
+///
+/// This keeps ChatViewModel's load coordination and state machine consistent.
+/// Do not expose `inferenceService` publicly; if new consumers need generation
+/// without lifecycle control, extract a focused protocol instead.
 @Observable
 @MainActor
 public final class ChatViewModel {
