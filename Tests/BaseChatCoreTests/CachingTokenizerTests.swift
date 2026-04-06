@@ -5,10 +5,19 @@ import XCTest
 
 /// Counts every call to tokenCount so tests can verify cache behaviour.
 private final class CountingTokenizer: TokenizerProvider, @unchecked Sendable {
-    private(set) var callCount = 0
+    private let lock = NSLock()
+    private var _callCount = 0
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _callCount
+    }
 
     func tokenCount(_ text: String) -> Int {
-        callCount += 1
+        lock.lock()
+        _callCount += 1
+        lock.unlock()
         return max(1, text.count / 4)
     }
 }
@@ -106,8 +115,8 @@ final class CachingTokenizerTests: XCTestCase {
             }
         }
 
-        group.wait()
-        // No assertion needed — the test passes if it doesn't crash or deadlock.
+        let result = group.wait(timeout: .now() + 5)
+        XCTAssertEqual(result, .success, "Concurrent reads timed out — possible deadlock")
     }
 
     func test_concurrentReadWrite_noDuplicateCalls() {
@@ -124,7 +133,8 @@ final class CachingTokenizerTests: XCTestCase {
             }
         }
 
-        group.wait()
+        let result = group.wait(timeout: .now() + 5)
+        XCTAssertEqual(result, .success, "Concurrent writes timed out — possible deadlock")
         // With a lock, base should be called exactly once.
         XCTAssertEqual(base.callCount, 1)
     }

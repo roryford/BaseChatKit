@@ -115,9 +115,10 @@ public enum PromptAssembler {
     // MARK: - Private Helpers
 
     /// Trims messages to fit within the given token budget.
-    /// Walks backward from the newest message, always keeping at least the last message.
-    /// Returns both the trimmed messages and their total token count, so the caller
-    /// does not need a second pass to compute the budget breakdown.
+    /// Walks backward from the newest message. When `budget <= 0`, it prefers keeping
+    /// the most recent user message, or falls back to the newest message if no user
+    /// message exists. Returns both the trimmed messages and their total token count,
+    /// so the caller does not need a second pass to compute the budget breakdown.
     private static func trimMessagesToFit(
         _ messages: [ChatMessageRecord],
         budget: Int,
