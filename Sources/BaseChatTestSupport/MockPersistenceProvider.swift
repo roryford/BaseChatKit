@@ -5,7 +5,7 @@ import BaseChatCore
 ///
 /// Stores sessions and messages in plain arrays. Thread-safe via `@MainActor`.
 @MainActor
-public final class MockPersistenceProvider: ChatPersistenceProvider, @unchecked Sendable {
+public final class MockPersistenceProvider: ChatPersistenceProvider {
 
     public var sessions: [ChatSessionRecord] = []
     public var messages: [ChatMessageRecord] = []

@@ -230,7 +230,7 @@ private actor ActorBox<T: Sendable> {
     func append(_ element: Int) where T == [Int] { value.append(element) }
 }
 
-private final class OrderCapturingTask: PostGenerationTask, @unchecked Sendable {
+private final class OrderCapturingTask: PostGenerationTask, Sendable {
     let index: Int
     let box: ActorBox<[Int]>
     init(index: Int, box: ActorBox<[Int]>) {

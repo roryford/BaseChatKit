@@ -31,8 +31,7 @@ private func makeMockSession() -> URLSession {
 private final class ConfiguringOpenAICloudBackend: InferenceBackend,
                                                    ConversationHistoryReceiver,
                                                    CloudBackendURLModelConfigurable,
-                                                   CloudBackendKeychainConfigurable,
-                                                   @unchecked Sendable {
+                                                   CloudBackendKeychainConfigurable {
     private let backend: OpenAIBackend
     private let probeOnLoad: Bool
 
@@ -84,8 +83,7 @@ private final class ConfiguringOpenAICloudBackend: InferenceBackend,
 
 private final class ConfiguringClaudeCloudBackend: InferenceBackend,
                                                    ConversationHistoryReceiver,
-                                                   CloudBackendKeychainConfigurable,
-                                                   @unchecked Sendable {
+                                                   CloudBackendKeychainConfigurable {
     private let backend: ClaudeBackend
 
     init(urlSession: URLSession) {

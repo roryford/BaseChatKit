@@ -7,7 +7,7 @@ import BaseChatCore
 /// Streams completions from the Anthropic Messages API (`/v1/messages`).
 /// Handles Claude-specific SSE event types (`content_block_delta`, etc.)
 /// and authentication via `x-api-key` header.
-public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBackendKeychainConfigurable, @unchecked Sendable {
+public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBackendKeychainConfigurable {
 
     /// Shared session with certificate pinning delegate.
     private static let pinnedSession: URLSession = {
