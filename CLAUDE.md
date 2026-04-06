@@ -62,6 +62,28 @@ Do not widen `inferenceService` to `public` — it exposes load coordination int
 - `FoundationBackend` requires iOS 26 / macOS 26. Gate accordingly.
 - Context window is capped at 512 tokens in the simulator to avoid OOM.
 
+## Pre-push checklist
+
+Before pushing any branch, run all three CI test suites locally and confirm zero failures:
+
+```bash
+swift test --filter BaseChatCoreTests && swift test --filter BaseChatUITests && swift test --filter BaseChatBackendsTests
+```
+
+Never push based on a subset passing. After rebasing, always re-run the full suite before pushing — conflicts can silently break tests that compiled fine before.
+
+When changing behavior of any function or type, grep for ALL test references across the entire `Tests/` directory, not just the obvious test file. Behavior changes require updating every test that asserts on the old behavior:
+
+```bash
+grep -r "functionOrTypeName" Tests/
+```
+
+CI runs on macOS (10x billing multiplier). Each failed push wastes ~25 billed minutes. Test locally first.
+
+## Error handling in recoverable paths
+
+Never use `assertionFailure` or `fatalError` for conditions that have fallback logic. These trap in debug builds (including `swift test`), crashing the test process even when tests pass. Use `Log.*` warnings instead. Reserve `assertionFailure` for true programmer errors with no recovery path.
+
 ## Commit style
 
 This repo uses Conventional Commits. Release Please reads these to determine version bumps and generate the changelog.
