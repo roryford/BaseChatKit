@@ -111,9 +111,10 @@ public func withRetry<T>(
             }
 
             guard let delay = strategy.delay(for: error, attempt: attempt, totalDelayed: totalDelayed) else {
-                // Non-retryable errors (attempt 0) pass through raw.
-                // Retryable errors that exhausted attempts get wrapped.
-                if attempt == 0 {
+                // Non-retryable errors pass through raw — no retries were attempted.
+                // Retryable errors that exhausted attempts or budget get wrapped.
+                let isRetryable = (error as? any BackendError)?.isRetryable ?? false
+                if !isRetryable {
                     throw error
                 }
                 throw RetryExhaustedError(lastError: error, attempts: attempt + 1)
