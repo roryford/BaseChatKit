@@ -98,22 +98,22 @@ public enum BaseChatSchemaV2: VersionedSchema {
                 if let json = String(data: data, encoding: .utf8) {
                     return json
                 }
-                assertionFailure("Failed to convert encoded MessagePart data to UTF-8 string")
+                Log.persistence.warning("Failed to convert encoded MessagePart data to UTF-8 string")
             } catch {
-                assertionFailure("Failed to encode MessagePart array: \(error)")
+                Log.persistence.error("Failed to encode MessagePart array: \(error)")
             }
             return "[]"
         }
 
         static func decode(_ json: String) -> [MessagePart] {
             guard let data = json.data(using: .utf8) else {
-                assertionFailure("contentPartsJSON is not valid UTF-8")
+                Log.persistence.warning("contentPartsJSON is not valid UTF-8")
                 return json.isEmpty ? [] : [.text(json)]
             }
             do {
                 return try JSONDecoder().decode([MessagePart].self, from: data)
             } catch {
-                assertionFailure("Failed to decode contentPartsJSON: \(error)")
+                Log.persistence.warning("Failed to decode contentPartsJSON, falling back to text: \(error)")
                 return json.isEmpty ? [] : [.text(json)]
             }
         }

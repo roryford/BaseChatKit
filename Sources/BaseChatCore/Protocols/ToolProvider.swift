@@ -89,8 +89,16 @@ public struct ToolCall: Sendable, Equatable, Codable, Identifiable {
 
     /// Parses the arguments JSON string into a dictionary.
     public func parsedArguments() throws -> [String: Any] {
-        guard let data = arguments.data(using: .utf8),
-              let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let data = arguments.data(using: .utf8) else {
+            throw ToolCallingError.invalidArguments(toolName: name, raw: arguments)
+        }
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw ToolCallingError.invalidArguments(toolName: name, raw: arguments)
+        }
+        guard let dict = object as? [String: Any] else {
             throw ToolCallingError.invalidArguments(toolName: name, raw: arguments)
         }
         return dict
