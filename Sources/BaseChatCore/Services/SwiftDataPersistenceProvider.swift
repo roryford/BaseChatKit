@@ -74,7 +74,7 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
     // MARK: - Messages
 
     public func insertMessage(_ record: ChatMessageRecord) throws {
-        let message = ChatMessage(role: record.role, content: record.content, sessionID: record.sessionID)
+        let message = ChatMessage(role: record.role, contentParts: record.contentParts, sessionID: record.sessionID)
         message.id = record.id
         message.timestamp = record.timestamp
         message.promptTokens = record.promptTokens
@@ -87,7 +87,7 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unche
         guard let message = try fetchSwiftDataMessage(id: record.id) else {
             throw ChatPersistenceError.messageNotFound(record.id)
         }
-        message.content = record.content
+        message.contentParts = record.contentParts
         message.promptTokens = record.promptTokens
         message.completionTokens = record.completionTokens
         try modelContext.save()
@@ -188,7 +188,7 @@ extension ChatMessage {
         ChatMessageRecord(
             id: id,
             role: role,
-            content: content,
+            contentParts: contentParts,
             timestamp: timestamp,
             sessionID: sessionID,
             promptTokens: promptTokens,

@@ -31,8 +31,8 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self)))
     }
 
-    func test_publicTypealiases_matchSchemaV1ModelTypes() {
-        XCTAssertEqual(ObjectIdentifier(ChatMessage.self), ObjectIdentifier(BaseChatSchemaV1.ChatMessage.self))
+    func test_publicTypealiases_matchCurrentSchemaModelTypes() {
+        XCTAssertEqual(ObjectIdentifier(ChatMessage.self), ObjectIdentifier(BaseChatSchemaV2.ChatMessage.self))
         XCTAssertEqual(ObjectIdentifier(ChatSession.self), ObjectIdentifier(BaseChatSchemaV1.ChatSession.self))
         XCTAssertEqual(ObjectIdentifier(SamplerPreset.self), ObjectIdentifier(BaseChatSchemaV1.SamplerPreset.self))
         XCTAssertEqual(ObjectIdentifier(APIEndpoint.self), ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self))
@@ -40,14 +40,15 @@ final class SchemaMigrationTests: XCTestCase {
 
     // MARK: - BaseChatMigrationPlan
 
-    func test_migrationPlan_schemasContainsV1() {
+    func test_migrationPlan_schemasContainsV1andV2() {
         let names = BaseChatMigrationPlan.schemas.map { String(describing: $0) }
         XCTAssertTrue(names.contains(where: { $0.contains("BaseChatSchemaV1") }))
+        XCTAssertTrue(names.contains(where: { $0.contains("BaseChatSchemaV2") }))
+        XCTAssertEqual(BaseChatMigrationPlan.schemas.count, 2)
     }
 
-    func test_migrationPlan_stagesIsEmpty_forBaselineV1() {
-        // V1 is the baseline — no prior version to migrate from.
-        XCTAssertTrue(BaseChatMigrationPlan.stages.isEmpty)
+    func test_migrationPlan_stagesContainsV1toV2() {
+        XCTAssertEqual(BaseChatMigrationPlan.stages.count, 1)
     }
 
     // MARK: - ModelContainerFactory
@@ -115,7 +116,7 @@ final class SchemaMigrationTests: XCTestCase {
         let container = try ModelContainerFactory.makeInMemoryContainer()
         let context = ModelContext(container)
 
-        let nestedMessage = BaseChatSchemaV1.ChatMessage(role: .user, content: "alias check", sessionID: UUID())
+        let nestedMessage = BaseChatSchemaV2.ChatMessage(role: .user, content: "alias check", sessionID: UUID())
         context.insert(nestedMessage)
         try context.save()
         let nestedMessageID = nestedMessage.id

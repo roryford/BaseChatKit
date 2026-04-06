@@ -5,5 +5,5 @@ public enum MessageRole: String, Codable, Sendable {
     case system
 }
 
-/// Public alias for the V1 SwiftData chat message model.
-public typealias ChatMessage = BaseChatSchemaV1.ChatMessage
+/// Public alias for the current SwiftData chat message model.
+public typealias ChatMessage = BaseChatSchemaV2.ChatMessage
