@@ -173,6 +173,22 @@ public final class ChatViewModel {
     /// Statistics from the most recent compression pass, or `nil` if no compression occurred.
     public internal(set) var lastCompressionStats: CompressionStats?
 
+    // MARK: - Tool Calling
+
+    /// The active tool provider. When set, tools are passed to backends that
+    /// adopt `ToolCallingBackend` before each generation call.
+    public var toolProvider: (any ToolProvider)? {
+        get { inferenceService.toolProvider }
+        set { inferenceService.toolProvider = newValue }
+    }
+
+    /// Observer for tool call activity during generation. Set this to display
+    /// tool calls and results in the UI as they happen.
+    public var toolCallObserver: (any ToolCallObserver)? {
+        get { inferenceService.toolCallObserver }
+        set { inferenceService.toolCallObserver = newValue }
+    }
+
     // MARK: - Generation Settings
 
     public var temperature: Float = 0.7

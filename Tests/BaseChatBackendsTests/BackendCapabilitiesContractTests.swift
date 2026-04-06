@@ -2,11 +2,11 @@ import XCTest
 import BaseChatCore
 @testable import BaseChatBackends
 
-/// Contract tests that lock down the `isRemote` field on every concrete backend.
+/// Contract tests that lock down capability fields on every concrete backend.
 ///
 /// These tests exist to catch merge conflicts or accidental regressions where
-/// `isRemote` is removed or flipped. If a test here fails, the backend's
-/// declared network posture has changed — update it deliberately.
+/// capability flags are removed or flipped. If a test here fails, the backend's
+/// declared posture has changed — update it deliberately.
 final class BackendCapabilitiesContractTests: XCTestCase {
 
     // MARK: - Remote backends
@@ -22,6 +22,43 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                       "KoboldCppBackend makes network calls — isRemote must be true")
     }
 
+    // MARK: - Tool Calling
+
+    func test_cloudBackends_toolCallingCapabilities() {
+        // Claude and OpenAI support tool calling
+        XCTAssertTrue(ClaudeBackend().capabilities.supportsToolCalling,
+                      "ClaudeBackend supports tool calling via tool_use content blocks")
+        XCTAssertTrue(OpenAIBackend().capabilities.supportsToolCalling,
+                      "OpenAIBackend supports tool calling via tool_calls in delta")
+
+        // Ollama and KoboldCpp do not currently support tool calling
+        XCTAssertFalse(OllamaBackend().capabilities.supportsToolCalling,
+                       "OllamaBackend does not support tool calling")
+        XCTAssertFalse(KoboldCppBackend().capabilities.supportsToolCalling,
+                       "KoboldCppBackend does not support tool calling")
+    }
+
+    func test_cloudBackends_structuredOutputCapabilities() {
+        XCTAssertTrue(ClaudeBackend().capabilities.supportsStructuredOutput,
+                      "ClaudeBackend supports structured output")
+        XCTAssertTrue(OpenAIBackend().capabilities.supportsStructuredOutput,
+                      "OpenAIBackend supports structured output via json_schema")
+    }
+
+    // MARK: - ToolCallingBackend Conformance
+
+    func test_claudeBackend_conformsToToolCallingBackend() {
+        let backend = ClaudeBackend()
+        XCTAssertTrue(backend is ToolCallingBackend,
+                      "ClaudeBackend must conform to ToolCallingBackend")
+    }
+
+    func test_openAIBackend_conformsToToolCallingBackend() {
+        let backend = OpenAIBackend()
+        XCTAssertTrue(backend is ToolCallingBackend,
+                      "OpenAIBackend must conform to ToolCallingBackend")
+    }
+
     // MARK: - Local backends
 
 #if Llama
@@ -32,6 +69,15 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                           "LlamaBackend requires Apple Silicon")
         XCTAssertFalse(LlamaBackend().capabilities.isRemote,
                        "LlamaBackend runs on-device — isRemote must be false")
+    }
+
+    func test_llamaBackend_doesNotSupportToolCalling() throws {
+        try XCTSkipUnless(HardwareRequirements.isPhysicalDevice,
+                          "LlamaBackend requires Metal (unavailable in simulator)")
+        try XCTSkipUnless(HardwareRequirements.isAppleSilicon,
+                          "LlamaBackend requires Apple Silicon")
+        XCTAssertFalse(LlamaBackend().capabilities.supportsToolCalling,
+                       "LlamaBackend does not support tool calling natively")
     }
 #endif
 
@@ -49,6 +95,12 @@ final class BackendCapabilitiesContractTests: XCTestCase {
     func test_foundationBackend_reportNotRemote() {
         XCTAssertFalse(FoundationBackend().capabilities.isRemote,
                        "FoundationBackend uses OS-managed on-device models — isRemote must be false")
+    }
+
+    @available(iOS 26, macOS 26, *)
+    func test_foundationBackend_doesNotSupportToolCalling() {
+        XCTAssertFalse(FoundationBackend().capabilities.supportsToolCalling,
+                       "FoundationBackend does not expose tool calling in this version")
     }
 #endif
 }
