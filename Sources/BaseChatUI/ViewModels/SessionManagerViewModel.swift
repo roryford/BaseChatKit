@@ -96,8 +96,10 @@ public final class SessionManagerViewModel {
                 repeatPenalty: 1.0
             )
             var result = ""
-            for try await token in stream {
-                result += token
+            for try await event in stream {
+                if case .token(let text) = event {
+                    result += text
+                }
             }
             let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }

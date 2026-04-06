@@ -133,7 +133,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         let activeSession: LanguageModelSession = try withStateLock {
             guard _isModelLoaded else {
                 throw InferenceError.inferenceFailure("No model loaded")
@@ -198,7 +198,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                                     offsetBy: previousText.count
                                 )...]
                             )
-                            continuation.yield(newContent)
+                            continuation.yield(.token(newContent))
                             previousText = currentText
 
                             // Approximate token count using the conservative 3-char heuristic.

@@ -74,8 +74,10 @@ struct ClaudeBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         #expect(tokens == ["Hello", " world"])
@@ -169,8 +171,10 @@ struct ClaudeBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         // Malformed JSON is simply not a token event -- extractToken returns nil.
@@ -203,8 +207,10 @@ struct ClaudeBackendSSETests {
 
         var tokens: [String] = []
         do {
-            for try await token in stream {
-                tokens.append(token)
+            for try await event in stream {
+                if case .token(let text) = event {
+                    tokens.append(text)
+                }
             }
             Issue.record("Expected an error from the stream error event")
         } catch let error as CloudBackendError {
@@ -296,8 +302,10 @@ struct OpenAIBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         #expect(tokens == ["Hello", " there"])
@@ -360,8 +368,10 @@ struct OpenAIBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         // The role-only chunk has no "content", so extractToken returns nil.

@@ -348,7 +348,7 @@ private final class ControlledLoadBackend: InferenceBackend,
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         guard isModelLoaded else {
             throw InferenceError.inferenceFailure("No model loaded")
         }

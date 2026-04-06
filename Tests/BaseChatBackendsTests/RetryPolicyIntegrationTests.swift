@@ -59,8 +59,10 @@ final class RetryPolicyIntegrationTests: XCTestCase {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         XCTAssertEqual(tokens, ["hello"], "Should receive token after retrying past 429s")
@@ -164,8 +166,10 @@ final class RetryPolicyIntegrationTests: XCTestCase {
 
         let start = ContinuousClock.now
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
         let elapsed = ContinuousClock.now - start
 

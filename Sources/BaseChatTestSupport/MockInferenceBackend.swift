@@ -36,7 +36,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     public var lastConfig: GenerationConfig?
 
     /// Stored so stopGeneration() can terminate the in-flight stream.
-    private var activeContinuation: AsyncThrowingStream<String, Error>.Continuation?
+    private var activeContinuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation?
 
     public init(capabilities: BackendCapabilities = BackendCapabilities(
         supportedParameters: [.temperature, .topP, .repeatPenalty],
@@ -58,7 +58,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         isModelLoaded = true
     }
 
-    public func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<String, Error> {
+    public func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         generateCallCount += 1
         lastPrompt = prompt
         lastSystemPrompt = systemPrompt
@@ -77,7 +77,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
             Task {
                 for token in tokens {
                     if Task.isCancelled { break }
-                    continuation.yield(token)
+                    continuation.yield(.token(token))
                 }
                 self.isGenerating = false
                 if let streamError = self.shouldThrowInsideStream, !Task.isCancelled {

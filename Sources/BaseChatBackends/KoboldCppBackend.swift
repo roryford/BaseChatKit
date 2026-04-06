@@ -20,7 +20,7 @@ import BaseChatCore
 /// )
 /// try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
 /// let stream = try backend.generate(prompt: "### Instruction:\nHello\n### Response:\n", systemPrompt: nil, config: .init())
-/// for try await token in stream { print(token, terminator: "") }
+/// for try await event in stream { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
 public final class KoboldCppBackend: SSECloudBackend, CloudBackendURLModelConfigurable {
 

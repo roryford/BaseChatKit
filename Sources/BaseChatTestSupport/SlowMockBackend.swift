@@ -64,7 +64,7 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         let (tokens, delay) = withStateLock {
             _isGenerating = true
             return (_tokensToYield, _delayPerToken)
@@ -81,7 +81,7 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
                     if Task.isCancelled { break }
                     try? await Task.sleep(for: delay)
                     if Task.isCancelled { break }
-                    continuation.yield(token)
+                    continuation.yield(.token(token))
                 }
             }
             continuation.onTermination = { @Sendable _ in

@@ -124,8 +124,10 @@ struct OpenAICompatEndpointTests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         // Empty first chunk (role-only) yields empty string; content chunks follow.
@@ -191,8 +193,10 @@ struct OpenAICompatEndpointTests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         #expect(tokens == ["Hello"])
@@ -307,8 +311,10 @@ struct OpenAICompatEndpointTests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         let meaningful = tokens.filter { !$0.isEmpty }
@@ -340,8 +346,10 @@ struct OpenAICompatEndpointTests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         #expect(tokens == ["truncated output"])

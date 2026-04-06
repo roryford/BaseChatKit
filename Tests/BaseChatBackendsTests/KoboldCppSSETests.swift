@@ -70,8 +70,10 @@ struct KoboldCppBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         #expect(tokens == ["Hello", " world", "!"])
@@ -266,8 +268,10 @@ struct KoboldCppBackendSSETests {
         )
 
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         #expect(tokens == ["OK"])

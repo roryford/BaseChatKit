@@ -34,11 +34,13 @@ public func cleanupE2ETempDir(_ url: URL) {
     try? FileManager.default.removeItem(at: url)
 }
 
-/// Collects all tokens from an async throwing stream into a single string.
-public func collectTokens(_ stream: AsyncThrowingStream<String, Error>) async throws -> String {
+/// Collects all token text from a generation event stream into a single string.
+public func collectTokens(_ stream: AsyncThrowingStream<GenerationEvent, Error>) async throws -> String {
     var tokens: [String] = []
-    for try await token in stream {
-        tokens.append(token)
+    for try await event in stream {
+        if case .token(let text) = event {
+            tokens.append(text)
+        }
     }
     return tokens.joined()
 }

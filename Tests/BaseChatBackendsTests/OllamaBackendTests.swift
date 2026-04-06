@@ -111,8 +111,10 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "Say hello", systemPrompt: nil, config: .init())
         var tokens: [String] = []
-        for try await token in stream {
-            tokens.append(token)
+        for try await event in stream {
+            if case .token(let text) = event {
+                tokens.append(text)
+            }
         }
 
         #expect(tokens == ["Hello", " world", "!"])
@@ -156,7 +158,7 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
         var tokens: [String] = []
-        for try await token in stream { tokens.append(token) }
+        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["Hi"])
     }
@@ -175,7 +177,7 @@ struct OllamaBackendTests {
 
         let stream = try backend.generate(prompt: "hello", systemPrompt: nil, config: .init())
         var tokens: [String] = []
-        for try await token in stream { tokens.append(token) }
+        for try await event in stream { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["OK"])
     }

@@ -216,7 +216,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig
-    ) throws -> AsyncThrowingStream<String, Error> {
+    ) throws -> AsyncThrowingStream<GenerationEvent, Error> {
         guard isModelLoaded, let context, let vocab, model != nil else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
@@ -307,7 +307,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
                     // Decode token to text
                     if let text = self.tokenToString(token, invalidUTF8Buffer: &invalidUTF8) {
-                        continuation.yield(text)
+                        continuation.yield(.token(text))
                     }
 
                     // Prepare next batch

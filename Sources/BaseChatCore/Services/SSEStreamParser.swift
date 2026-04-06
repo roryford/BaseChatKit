@@ -94,22 +94,20 @@ public struct SSEStreamParser {
         }
     }
 
-    /// Streams tokens from an HTTP response using an SSE payload handler.
+    /// Streams generation events from an HTTP response using an SSE payload handler.
     ///
     /// Combines `parse(bytes:)` with a payload handler to extract tokens,
-    /// track usage, detect stream end, and surface errors. This eliminates
-    /// the duplicated streaming loop in each cloud backend.
+    /// emit usage reports, detect stream end, and surface errors. This
+    /// eliminates the duplicated streaming loop in each cloud backend.
     ///
     /// - Parameters:
     ///   - bytes: The raw byte stream from `URLSession.bytes(for:)`.
     ///   - handler: A payload handler that interprets the provider's JSON format.
-    ///   - onUsage: Called when usage information is extracted from a payload.
-    /// - Returns: An `AsyncThrowingStream` of text tokens.
-    public static func streamTokens<S: AsyncSequence & Sendable>(
+    /// - Returns: An `AsyncThrowingStream` of ``GenerationEvent`` values.
+    public static func streamEvents<S: AsyncSequence & Sendable>(
         from bytes: S,
-        using handler: some SSEPayloadHandler,
-        onUsage: (@Sendable (Int?, Int?) -> Void)? = nil
-    ) -> AsyncThrowingStream<String, Error> where S.Element == UInt8 {
+        using handler: some SSEPayloadHandler
+    ) -> AsyncThrowingStream<GenerationEvent, Error> where S.Element == UInt8 {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -118,11 +116,13 @@ public struct SSEStreamParser {
                         if Task.isCancelled { break }
 
                         if let token = handler.extractToken(from: payload) {
-                            continuation.yield(token)
+                            continuation.yield(.token(token))
                         }
 
-                        if let usage = handler.extractUsage(from: payload) {
-                            onUsage?(usage.promptTokens, usage.completionTokens)
+                        if let usage = handler.extractUsage(from: payload),
+                           let prompt = usage.promptTokens,
+                           let completion = usage.completionTokens {
+                            continuation.yield(.usage(prompt: prompt, completion: completion))
                         }
 
                         if handler.isStreamEnd(payload) {
