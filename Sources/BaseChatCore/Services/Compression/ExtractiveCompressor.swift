@@ -153,13 +153,17 @@ public final class ExtractiveCompressor: ContextCompressor, @unchecked Sendable 
         candidates.sort { $0.score > $1.score }
 
         // --- Step 3: Greedy selection within candidate budget ---
+        // Skip candidate selection entirely if pinned/tail messages already exceed budget.
         var selectedIndices = Set<Int>()
         var candidateTokensUsed = 0
 
-        for candidate in candidates {
-            if candidateTokensUsed + candidate.tokens <= candidateBudget {
-                selectedIndices.insert(candidate.index)
-                candidateTokensUsed += candidate.tokens
+        if tailTokensUsed <= budget {
+            let effectiveCandidateBudget = min(candidateBudget, budget - tailTokensUsed)
+            for candidate in candidates {
+                if candidateTokensUsed + candidate.tokens <= effectiveCandidateBudget {
+                    selectedIndices.insert(candidate.index)
+                    candidateTokensUsed += candidate.tokens
+                }
             }
         }
 

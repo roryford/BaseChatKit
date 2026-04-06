@@ -105,19 +105,7 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
 
         // 4. If no generate function is available, fall back.
         guard let generate = generateFn else {
-            var result = await fallback.compress(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
-            result = CompressionResult(
-                messages: result.messages,
-                stats: CompressionStats(
-                    strategy: "anchored-fallback",
-                    originalNodeCount: result.stats.originalNodeCount,
-                    outputMessageCount: result.stats.outputMessageCount,
-                    estimatedTokens: result.stats.estimatedTokens,
-                    compressionRatio: result.stats.compressionRatio,
-                    keywordSurvivalRate: result.stats.keywordSurvivalRate
-                )
-            )
-            return result
+            return await fallbackResult(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
         }
 
         // 5. Build the summary prompt and call inference.
@@ -126,50 +114,47 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
 
         let summaryText: String
         do {
+            try Task.checkCancellation()
             summaryText = try await generate(prompt)
         } catch {
-            var result = await fallback.compress(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
-            result = CompressionResult(
-                messages: result.messages,
-                stats: CompressionStats(
-                    strategy: "anchored-fallback",
-                    originalNodeCount: result.stats.originalNodeCount,
-                    outputMessageCount: result.stats.outputMessageCount,
-                    estimatedTokens: result.stats.estimatedTokens,
-                    compressionRatio: result.stats.compressionRatio,
-                    keywordSurvivalRate: result.stats.keywordSurvivalRate
+            // On cancellation, return a minimal result rather than starting a new
+            // fallback compression pass that will also be cancelled.
+            if error is CancellationError {
+                return CompressionResult(
+                    messages: messageTuples(from: tailMessages),
+                    stats: CompressionStats(
+                        strategy: "anchored-cancelled",
+                        originalNodeCount: messages.count,
+                        outputMessageCount: tailMessages.count,
+                        estimatedTokens: tailTokens,
+                        compressionRatio: Double(originalTokens) / Double(max(tailTokens, 1)),
+                        keywordSurvivalRate: nil
+                    )
                 )
-            )
-            return result
+            }
+            return await fallbackResult(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
         }
 
-        // 6. Parse the structured summary.
+        // 6. If the summary is empty, fall back to extractive instead of injecting a placeholder.
+        guard !summaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return await fallbackResult(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
+        }
+
+        // 7. Parse the structured summary.
         let parsedSummary = parseSummaryResponse(summaryText)
 
-        // 7. Assemble: summary system message + verbatim tail.
+        // 8. Assemble: summary system message + verbatim tail.
         var outputMessages: [(role: String, content: String)] = [("system", parsedSummary)]
         outputMessages.append(contentsOf: messageTuples(from: tailMessages))
 
         let outputTokens = totalTokens(of: outputMessages, tokenizer: tokenizer)
 
-        // 8. If summary + tail exceeds budget, the summary was too long -- fall back.
+        // 9. If summary + tail exceeds budget, the summary was too long -- fall back.
         if outputTokens > budget {
-            var result = await fallback.compress(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
-            result = CompressionResult(
-                messages: result.messages,
-                stats: CompressionStats(
-                    strategy: "anchored-fallback",
-                    originalNodeCount: result.stats.originalNodeCount,
-                    outputMessageCount: result.stats.outputMessageCount,
-                    estimatedTokens: result.stats.estimatedTokens,
-                    compressionRatio: result.stats.compressionRatio,
-                    keywordSurvivalRate: result.stats.keywordSurvivalRate
-                )
-            )
-            return result
+            return await fallbackResult(messages: messages, systemPrompt: systemPrompt, contextSize: contextSize, tokenizer: tokenizer)
         }
 
-        // 9. Return the anchored result.
+        // 10. Return the anchored result.
         return CompressionResult(
             messages: outputMessages,
             stats: CompressionStats(
@@ -183,12 +168,37 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
         )
     }
 
+    // MARK: - Fallback
+
+    private func fallbackResult(
+        messages: [CompressibleMessage],
+        systemPrompt: String?,
+        contextSize: Int,
+        tokenizer: TokenizerProvider?
+    ) async -> CompressionResult {
+        let result = await fallback.compress(
+            messages: messages, systemPrompt: systemPrompt,
+            contextSize: contextSize, tokenizer: tokenizer
+        )
+        return CompressionResult(
+            messages: result.messages,
+            stats: CompressionStats(
+                strategy: "anchored-fallback",
+                originalNodeCount: result.stats.originalNodeCount,
+                outputMessageCount: result.stats.outputMessageCount,
+                estimatedTokens: result.stats.estimatedTokens,
+                compressionRatio: result.stats.compressionRatio,
+                keywordSurvivalRate: result.stats.keywordSurvivalRate
+            )
+        )
+    }
+
     // MARK: - Summary Parsing
 
     /// Extracts structured fields from the summary response and reassembles them.
     /// Falls back to a trimmed raw response if fewer than 2 fields are found.
     private func parseSummaryResponse(_ response: String) -> String {
-        let pattern = "^(CHARACTERS|LOCATION|PLOT THREADS|LAST EVENT|TONE):\\s*(.+)$"
+        let pattern = "^([A-Z][A-Z _]*[A-Z]):\\s*(.+)$"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines, .caseInsensitive]) else {
             let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? "[Summary unavailable]" : String(trimmed.prefix(400))

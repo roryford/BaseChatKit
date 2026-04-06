@@ -89,7 +89,7 @@ final class CompressionP1CoreBehaviorTests: XCTestCase {
         XCTAssertEqual(result.messages.first?.role, "system")
     }
 
-    func test_anchoredCompressor_cancelledGenerateFunction_fallsBackDeterministically() async {
+    func test_anchoredCompressor_cancelledGenerateFunction_returnsMinimalResult() async {
         let compressor = AnchoredCompressor()
         compressor.generateFn = { _ in
             throw CancellationError()
@@ -98,7 +98,8 @@ final class CompressionP1CoreBehaviorTests: XCTestCase {
         let messages = makeAlternatingMessages(count: 40, contentLength: 100)
         let result = await compressor.compress(messages: messages, systemPrompt: nil, contextSize: 900, tokenizer: tokenizer)
 
-        XCTAssertEqual(result.stats.strategy, "anchored-fallback")
+        // Cancellation returns the tail directly instead of starting a new fallback pass.
+        XCTAssertEqual(result.stats.strategy, "anchored-cancelled")
         XCTAssertTrue(result.messages.contains(where: { $0.content == messages.last?.content }))
     }
 
