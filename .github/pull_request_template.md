@@ -6,6 +6,13 @@
 
 <!-- Why is this change needed? Link to any relevant issues with "Closes #123" -->
 
+## Release Note
+
+<!-- For feat: and fix: PRs, write the changelog entry here in prose style.
+     Format: **Bold title** — Problem, what changed, why it matters.
+     This is copied into CHANGELOG.md at release time.
+     For chore/test/docs PRs, write "N/A". -->
+
 ## Testing
 
 <!-- How was this tested? Which test targets cover it? -->

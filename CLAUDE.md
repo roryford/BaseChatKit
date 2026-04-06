@@ -104,6 +104,19 @@ docs: clarify TokenizerProvider fallback behaviour
 
 PR titles must follow the same format (enforced by CI).
 
+## Release workflow
+
+Release Please auto-creates a release PR after `feat:` or `fix:` merges. The auto-generated changelog is a one-liner — **it must be rewritten with prose before merging**. A pre-merge hook blocks the merge until this is done.
+
+1. Release Please opens PR titled `chore(main): release X.Y.Z`
+2. Check out the release branch: `git checkout release-please--branches--main`
+3. Rewrite the CHANGELOG.md entry: **Bold title** — problem, what changed, why it matters. Use the `## Release Note` sections from the included feature PRs as source material.
+4. Amend the commit and force-push: `git commit --amend --no-edit && git push --force`
+5. Merge the release PR
+6. Verify the GitHub release notes match (edit with `gh release edit` if needed)
+
+For `feat:` and `fix:` PRs, write the changelog prose in the `## Release Note` section of the PR body at PR creation time, when context is fresh. This is the source material for step 3.
+
 ## PR workflow
 
 All changes go through PRs — direct pushes to `main` are blocked for everyone.
