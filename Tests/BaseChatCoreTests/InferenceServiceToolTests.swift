@@ -123,7 +123,7 @@ private final class MockToolCallingBackend: InferenceBackend, ToolCallingBackend
     }
 
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
-        let stream = AsyncThrowingStream { continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in
             continuation.yield(.token("response"))
             continuation.finish()
         }

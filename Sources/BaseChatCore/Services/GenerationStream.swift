@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Observation
 
 /// Wraps an async stream of generation events with observable lifecycle state.
@@ -66,34 +67,53 @@ public final class GenerationStream: @unchecked Sendable {
         self.idleTimeout = idleTimeout
 
         if let idleTimeout {
-            // Wrap with idle timeout detection.
+            // Use a sendable callback box so we don't need to capture `self`
+            // before all stored properties are initialized.
+            let stalledCallback = StalledCallback()
             self.events = Self.withIdleTimeout(
                 base: stream,
                 timeout: idleTimeout,
-                onStalled: { [weak self] in self?.setPhase(.stalled) }
+                onStalled: { stalledCallback.fire() }
             )
+            self._stalledCallback = stalledCallback
         } else {
             self.events = stream
+            self._stalledCallback = nil
         }
+
+        // Now that self is fully initialized, wire the stalled callback.
+        _stalledCallback?.handler = { [weak self] in self?.setPhase(.stalled) }
     }
+
+    /// Deferred callback wired up after init completes.
+    @ObservationIgnored
+    private let _stalledCallback: StalledCallback?
 
     // MARK: - Phase Mutation
 
-    private let stateLock = NSLock()
-
     /// Updates the lifecycle phase from any thread.
+    /// Funnels all mutations to MainActor since @Observable synthesizes
+    /// observation registrar access on reads from the main thread.
     public func setPhase(_ newPhase: Phase) {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        phase = newPhase
+        if Thread.isMainThread {
+            phase = newPhase
+        } else {
+            Task { @MainActor in
+                self.phase = newPhase
+            }
+        }
     }
 
     // MARK: - Idle Timeout
 
-    /// Wraps a base stream with idle timeout detection.
+    /// Wraps a base stream with idle-timeout detection using a monitoring task.
     ///
-    /// Races `Task.sleep` against the base stream's `next()`. If no event
-    /// arrives within `timeout`, calls `onStalled` and throws `.timeout`.
+    /// Instead of racing `iterator.next()` against `Task.sleep` in a task group
+    /// (which requires capturing a non-Sendable iterator in a @Sendable closure),
+    /// this iterates the upstream stream normally and uses a separate monitoring
+    /// task that periodically checks elapsed time since the last event.
+    ///
+    /// The monitor fires `.stalled` at the midpoint and throws at the full timeout.
     private static func withIdleTimeout(
         base: AsyncThrowingStream<GenerationEvent, Error>,
         timeout: Duration,
@@ -101,36 +121,55 @@ public final class GenerationStream: @unchecked Sendable {
     ) -> AsyncThrowingStream<GenerationEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                var iterator = base.makeAsyncIterator()
+                let clock = ContinuousClock()
+                let lastEventInstant = AtomicInstant(clock.now)
+                let streamFinished = ManagedAtomic<Bool>(false)
 
-                while !Task.isCancelled {
-                    do {
-                        let event = try await withTimeout(timeout) {
-                            try await iterator.next()
+                let stallThreshold = timeout / 2
+                // Poll at 1/10th of timeout for responsive detection.
+                let pollInterval = timeout / 10
+
+                // Monitor task: periodically checks for idle timeout.
+                let monitor = Task {
+                    var stalledFired = false
+                    while !Task.isCancelled && !streamFinished.load() {
+                        try await Task.sleep(for: pollInterval)
+                        let elapsed = lastEventInstant.load().duration(to: clock.now)
+                        if !stalledFired && elapsed >= stallThreshold {
+                            stalledFired = true
+                            onStalled()
                         }
-
-                        guard let event else {
-                            // Base stream finished normally.
-                            continuation.finish()
+                        if elapsed >= timeout {
+                            continuation.finish(throwing: CloudBackendError.timeout(timeout))
                             return
                         }
-
-                        continuation.yield(event)
-                    } catch is TimeoutError {
-                        onStalled()
-                        continuation.finish(throwing: CloudBackendError.timeout(timeout))
-                        return
-                    } catch {
-                        if error is CancellationError || Task.isCancelled {
-                            continuation.finish()
-                        } else {
-                            continuation.finish(throwing: error)
-                        }
-                        return
                     }
                 }
 
-                continuation.finish()
+                defer { monitor.cancel() }
+
+                // Iterate the upstream stream normally — no Sendable capture needed.
+                var iterator = base.makeAsyncIterator()
+                do {
+                    while !Task.isCancelled {
+                        guard let event = try await iterator.next() else {
+                            streamFinished.store(true)
+                            continuation.finish()
+                            return
+                        }
+                        lastEventInstant.store(clock.now)
+                        continuation.yield(event)
+                    }
+                    streamFinished.store(true)
+                    continuation.finish()
+                } catch {
+                    streamFinished.store(true)
+                    if error is CancellationError || Task.isCancelled {
+                        continuation.finish()
+                    } else {
+                        continuation.finish(throwing: error)
+                    }
+                }
             }
 
             continuation.onTermination = { _ in
@@ -140,29 +179,64 @@ public final class GenerationStream: @unchecked Sendable {
     }
 }
 
-// MARK: - Timeout Helper
+// MARK: - Thread-safe Atomics
 
-/// Internal error used to signal that the timeout race was lost.
-private struct TimeoutError: Error {}
+/// Lock-protected boolean for cross-task signaling.
+private final class ManagedAtomic<Value>: @unchecked Sendable {
+    private let lock = os_unfair_lock_t.allocate(capacity: 1)
+    private var storage: Value
 
-/// Races an async operation against a timeout duration.
-/// Throws `TimeoutError` if the timeout fires first.
-private func withTimeout<T: Sendable>(
-    _ duration: Duration,
-    operation: @escaping @Sendable () async throws -> T
-) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask {
-            try await operation()
+    init(_ initial: Value) {
+        storage = initial
+        lock.initialize(to: os_unfair_lock())
+    }
+
+    deinit { lock.deallocate() }
+
+    func load() -> Value {
+        os_unfair_lock_lock(lock)
+        defer { os_unfair_lock_unlock(lock) }
+        return storage
+    }
+
+    func store(_ value: Value) {
+        os_unfair_lock_lock(lock)
+        defer { os_unfair_lock_unlock(lock) }
+        storage = value
+    }
+}
+
+/// Lock-protected ContinuousClock.Instant for cross-task time tracking.
+private typealias AtomicInstant = ManagedAtomic<ContinuousClock.Instant>
+
+// MARK: - Stalled Callback
+
+/// A Sendable box that can be captured in a closure before a handler is wired.
+/// This breaks the init ordering problem: the closure is created before `self`
+/// is available, and the handler is assigned after init completes.
+private final class StalledCallback: @unchecked Sendable {
+    private let lock = os_unfair_lock_t.allocate(capacity: 1)
+    var handler: (() -> Void)? {
+        get {
+            os_unfair_lock_lock(lock)
+            defer { os_unfair_lock_unlock(lock) }
+            return _handler
         }
-        group.addTask {
-            try await Task.sleep(for: duration)
-            throw TimeoutError()
+        set {
+            os_unfair_lock_lock(lock)
+            defer { os_unfair_lock_unlock(lock) }
+            _handler = newValue
         }
+    }
+    private var _handler: (() -> Void)?
 
-        // The first task to complete wins.
-        let result = try await group.next()!
-        group.cancelAll()
-        return result
+    init() {
+        lock.initialize(to: os_unfair_lock())
+    }
+
+    deinit { lock.deallocate() }
+
+    func fire() {
+        handler?()
     }
 }

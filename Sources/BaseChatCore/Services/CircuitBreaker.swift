@@ -30,6 +30,7 @@ public actor CircuitBreaker {
 
     private var consecutiveFailures: Int = 0
     private var lastFailureTime: ContinuousClock.Instant?
+    private var probeInFlight = false
 
     public init(failureThreshold: Int = 5, resetTimeout: Duration = .seconds(60)) {
         self.failureThreshold = failureThreshold
@@ -62,7 +63,10 @@ public actor CircuitBreaker {
             }
 
         case .halfOpen:
-            break
+            if probeInFlight {
+                throw CircuitBreakerOpenError(failureCount: consecutiveFailures, resetTimeout: resetTimeout)
+            }
+            probeInFlight = true
         }
 
         do {
@@ -77,17 +81,20 @@ public actor CircuitBreaker {
 
     /// Resets the circuit breaker to closed state. Useful for manual recovery.
     public func reset() {
+        probeInFlight = false
         state = .closed
         consecutiveFailures = 0
         lastFailureTime = nil
     }
 
     private func recordSuccess() {
+        probeInFlight = false
         consecutiveFailures = 0
         state = .closed
     }
 
     private func recordFailure() {
+        probeInFlight = false
         consecutiveFailures += 1
         lastFailureTime = ContinuousClock.now
 

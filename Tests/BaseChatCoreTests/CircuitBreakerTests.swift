@@ -27,6 +27,7 @@ final class CircuitBreakerTests: XCTestCase {
         }
 
         let state = await cb.state
+        // Sabotage check: changing failureThreshold to 2 causes this to fail (opens at 2 failures)
         XCTAssertEqual(state, .closed, "Should stay closed below threshold")
     }
 
@@ -38,6 +39,7 @@ final class CircuitBreakerTests: XCTestCase {
         }
 
         let state = await cb.state
+        // Sabotage check: removing the state transition to .open in recordFailure() causes this to fail
         XCTAssertEqual(state, .open)
     }
 
@@ -51,6 +53,7 @@ final class CircuitBreakerTests: XCTestCase {
             _ = try await cb.execute { "should not run" }
             XCTFail("Should have thrown CircuitBreakerOpenError")
         } catch {
+            // Sabotage check: allowing execute() to proceed when state is .open causes this to fail
             XCTAssertTrue(error is CircuitBreakerOpenError)
         }
     }
@@ -68,6 +71,7 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertEqual(result, "recovered")
 
         let state = await cb.state
+        // Sabotage check: not transitioning from .halfOpen to .closed on success causes this to fail
         XCTAssertEqual(state, .closed)
     }
 
@@ -94,6 +98,7 @@ final class CircuitBreakerTests: XCTestCase {
 
         await cb.reset()
         let resetState = await cb.state
+        // Sabotage check: not clearing state in reset() causes this to fail
         XCTAssertEqual(resetState, .closed)
     }
 
@@ -112,6 +117,7 @@ final class CircuitBreakerTests: XCTestCase {
         do { _ = try await cb.execute { throw TestError() } } catch {}
 
         let state = await cb.state
+        // Sabotage check: not resetting consecutiveFailures to 0 on success causes this to fail
         XCTAssertEqual(state, .closed, "Counter should have reset after success")
     }
 }

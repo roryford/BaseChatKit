@@ -196,7 +196,8 @@ struct OllamaBackendTests {
         do {
             for try await _ in stream.events {}
             Issue.record("Expected server error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let code, _): #expect(code == 404)
             default: Issue.record("Expected serverError, got \(error)")
@@ -215,7 +216,8 @@ struct OllamaBackendTests {
         do {
             for try await _ in stream.events {}
             Issue.record("Expected server error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let code, _): #expect(code == 500)
             default: Issue.record("Expected serverError, got \(error)")
@@ -238,7 +240,8 @@ struct OllamaBackendTests {
         do {
             for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .rateLimited: break
             default: Issue.record("Expected rateLimited, got \(error)")
@@ -408,7 +411,8 @@ struct OllamaModelListServiceTests {
         do {
             _ = try await service.fetchModels(from: baseURL)
             Issue.record("Expected error on 503 response")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let code, _): #expect(code == 503)
             default: Issue.record("Expected serverError, got \(error)")

@@ -1,4 +1,5 @@
 import XCTest
+import BaseChatTestSupport
 @testable import BaseChatCore
 
 final class RetryPolicyTests: XCTestCase {
@@ -60,7 +61,7 @@ final class RetryPolicyTests: XCTestCase {
             }
             XCTFail("Should have thrown after max retries")
         } catch {
-            guard case CloudBackendError.rateLimited = error else {
+            guard let exhausted = error as? RetryExhaustedError, extractCloudError(exhausted) != nil else {
                 XCTFail("Expected rateLimited, got: \(error)")
                 return
             }
@@ -80,7 +81,7 @@ final class RetryPolicyTests: XCTestCase {
             }
             XCTFail("Should have thrown when total delay exceeded")
         } catch {
-            guard case CloudBackendError.rateLimited = error else {
+            guard let exhausted = error as? RetryExhaustedError, extractCloudError(exhausted) != nil else {
                 XCTFail("Expected rateLimited, got: \(error)")
                 return
             }

@@ -9,9 +9,6 @@ public struct GenerationStreamConsumer: Sendable {
     /// Whether to check for repetitive looping in appended text.
     public var loopDetectionEnabled: Bool
 
-    /// Running character count of appended text, used for loop detection threshold.
-    private var appendedCharacterCount: Int = 0
-
     public init(loopDetectionEnabled: Bool = true) {
         self.loopDetectionEnabled = loopDetectionEnabled
     }
@@ -20,7 +17,6 @@ public struct GenerationStreamConsumer: Sendable {
     public mutating func handle(_ event: GenerationEvent) -> StreamAction {
         switch event {
         case .token(let text):
-            appendedCharacterCount += text.count
             return .appendText(text)
 
         case .usage(let prompt, let completion):

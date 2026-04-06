@@ -19,6 +19,7 @@ final class GenerationStreamTests: XCTestCase {
                 tokens.append(text)
             }
         }
+        // Sabotage check: replacing `continuation.yield(.token(...))` with no-ops causes this to fail
         XCTAssertEqual(tokens, ["Hello", " world"])
     }
 
@@ -35,6 +36,7 @@ final class GenerationStreamTests: XCTestCase {
                 usages.append((p, c))
             }
         }
+        // Sabotage check: removing the .usage yield from the inner stream causes count to be 0
         XCTAssertEqual(usages.count, 1)
         XCTAssertEqual(usages[0].0, 10)
         XCTAssertEqual(usages[0].1, 5)
@@ -69,6 +71,7 @@ final class GenerationStreamTests: XCTestCase {
     func test_initialPhaseIsConnecting() {
         let inner = AsyncThrowingStream<GenerationEvent, Error> { $0.finish() }
         let stream = GenerationStream(inner)
+        // Sabotage check: changing the initial phase in GenerationStream.init causes this to fail
         XCTAssertEqual(stream.phase, .connecting)
     }
 
@@ -104,6 +107,7 @@ final class GenerationStreamTests: XCTestCase {
     func test_idleTimeoutNilByDefault() {
         let inner = AsyncThrowingStream<GenerationEvent, Error> { $0.finish() }
         let stream = GenerationStream(inner)
+        // Sabotage check: setting a non-nil default for idleTimeout in init causes this to fail
         XCTAssertNil(stream.idleTimeout)
     }
 
@@ -129,6 +133,7 @@ final class GenerationStreamTests: XCTestCase {
             for try await _ in stream.events {}
             XCTFail("Should have thrown timeout error")
         } catch let error as CloudBackendError {
+            // Sabotage check: removing the idle timeout race in events causes the stream to hang instead of throwing
             guard case .timeout = error else {
                 XCTFail("Expected .timeout, got \(error)")
                 return
@@ -151,6 +156,7 @@ final class GenerationStreamTests: XCTestCase {
             // Expected timeout
         }
 
+        // Sabotage check: removing `setPhase(.stalled)` from the timeout path causes this to fail
         XCTAssertEqual(stream.phase, .stalled)
     }
 
@@ -200,7 +206,7 @@ final class GenerationStreamTests: XCTestCase {
             return count
         }
 
-        let count = await task.value
+        let count = try await task.value
         XCTAssertGreaterThanOrEqual(count, 3)
     }
 }

@@ -111,7 +111,12 @@ public func withRetry<T>(
             }
 
             guard let delay = strategy.delay(for: error, attempt: attempt, totalDelayed: totalDelayed) else {
-                throw error
+                // Non-retryable errors (attempt 0) pass through raw.
+                // Retryable errors that exhausted attempts get wrapped.
+                if attempt == 0 {
+                    throw error
+                }
+                throw RetryExhaustedError(lastError: error, attempts: attempt + 1)
             }
 
             Log.network.info("Retryable error (attempt \(attempt + 1), \(error)). Retrying in \(String(format: "%.1f", delay))s")
@@ -126,7 +131,7 @@ public func withRetry<T>(
     }
 
     // Unreachable — the loop is unbounded and exits via return or throw.
-    fatalError("withRetry: unreachable")
+    throw RetryExhaustedError(lastError: CloudBackendError.networkError(underlying: URLError(.unknown)), attempts: 0)
 }
 
 // MARK: - Backward Compatibility

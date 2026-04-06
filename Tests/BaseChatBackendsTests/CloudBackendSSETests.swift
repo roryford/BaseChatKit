@@ -104,7 +104,8 @@ struct ClaudeBackendSSETests {
             )
             for try await _ in stream.events {}
             Issue.record("Expected authenticationFailed error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .authenticationFailed(let provider):
                 #expect(provider == "Claude")
@@ -136,7 +137,8 @@ struct ClaudeBackendSSETests {
             )
             for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .rateLimited:
                 break // expected
@@ -213,7 +215,8 @@ struct ClaudeBackendSSETests {
                 }
             }
             Issue.record("Expected an error from the stream error event")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .parseError(let message):
                 #expect(message.contains("overloaded"))
@@ -332,7 +335,8 @@ struct OpenAIBackendSSETests {
             )
             for try await _ in stream.events {}
             Issue.record("Expected authenticationFailed error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .authenticationFailed:
                 break // expected
@@ -400,7 +404,8 @@ struct OpenAIBackendSSETests {
             )
             for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .rateLimited:
                 break // expected

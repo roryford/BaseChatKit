@@ -255,19 +255,26 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         }
 
         let capturedStrategy = retryStrategy
+        let session = self.urlSession
+        let capturedTimeout = streamIdleTimeout
 
-        let stream = AsyncThrowingStream { [weak self] continuation in
+        // The Task needs to set phases on the GenerationStream, but GenerationStream
+        // wraps the stream (chicken-and-egg). Use a WeakBox that the Task captures;
+        // we assign the real GenerationStream after creation.
+        let streamBox = WeakBox<GenerationStream>(nil)
+        let retryCounter = SendableCounter()
+        let maxRetries = (capturedStrategy as? ExponentialBackoffStrategy)?.maxRetries ?? 3
+        let weakSelf = WeakBox(self)
+
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { [weak self] continuation in
             guard let self else {
                 continuation.finish(throwing: CloudBackendError.backendDeallocated)
                 return
             }
 
-            let session = self.urlSession
-
             let task = Task { [weak self] in
                 defer {
                     self?.withStateLock {
-                        // Only clear isGenerating if this generation is still current.
                         if self?._generationID == genID {
                             self?._isGenerating = false
                         }
@@ -279,6 +286,11 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                     // Mid-stream failures propagate immediately, preserving
                     // already-yielded tokens.
                     let (bytes, _) = try await withRetry(strategy: capturedStrategy) {
+                        let attempt = retryCounter.incrementAndGet()
+                        if attempt > 1 {
+                            streamBox.value?.setPhase(.retrying(attempt: attempt - 1, of: maxRetries))
+                        }
+
                         let (bytes, response) = try await session.bytes(for: request)
 
                         guard let httpResponse = response as? HTTPURLResponse else {
@@ -287,21 +299,23 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                             )
                         }
 
-                        try await self?.checkStatusCode(httpResponse, bytes: bytes)
+                        try await weakSelf.value?.checkStatusCode(httpResponse, bytes: bytes)
                         return (bytes, httpResponse)
                     }
 
+                    streamBox.value?.setPhase(.streaming)
+
                     // Stream parsing — outside retry scope.
-                    // Default uses SSE; subclasses (e.g. OllamaBackend) override
-                    // for NDJSON or other wire formats.
                     try await self?.parseResponseStream(bytes: bytes, continuation: continuation)
 
+                    streamBox.value?.setPhase(.done)
                     continuation.finish()
                 } catch {
                     if error is CancellationError || Task.isCancelled {
                         continuation.finish()
                     } else {
                         Log.network.error("\(self?.backendName ?? "SSECloud") stream error: \(error.localizedDescription, privacy: .private)")
+                        streamBox.value?.setPhase(.failed(error.localizedDescription))
                         continuation.finish(throwing: error)
                     }
                 }
@@ -309,12 +323,17 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
 
             self.withStateLock { self.currentTask = task }
 
-            continuation.onTermination = { @Sendable _ in
+            continuation.onTermination = { @Sendable [weak self] _ in
                 task.cancel()
+                self?.urlSession.getAllTasks { tasks in
+                    tasks.forEach { $0.cancel() }
+                }
             }
         }
 
-        return GenerationStream(stream, idleTimeout: streamIdleTimeout)
+        let generationStream = GenerationStream(stream, idleTimeout: capturedTimeout)
+        streamBox.value = generationStream
+        return generationStream
     }
 
     // MARK: - Stream Parsing
@@ -356,10 +375,16 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     // MARK: - Control
 
     public func stopGeneration() {
+        let session = self.urlSession
         withStateLock {
             currentTask?.cancel()
             currentTask = nil
             _isGenerating = false
+        }
+        // Cancel any in-flight HTTP requests immediately, rather than waiting
+        // for the next byte to trigger cooperative cancellation.
+        session.getAllTasks { tasks in
+            tasks.forEach { $0.cancel() }
         }
     }
 
@@ -431,4 +456,26 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     public func setIsGenerating(_ value: Bool) {
         withStateLock { _isGenerating = value }
     }
+}
+
+// MARK: - Sendable Helpers
+
+/// Thread-safe counter for tracking retry attempts across @Sendable closures.
+private final class SendableCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    /// Increments and returns the new value (1-based).
+    func incrementAndGet() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value
+    }
+}
+
+/// Sendable wrapper for a weak reference to a non-Sendable class.
+private final class WeakBox<T: AnyObject>: @unchecked Sendable {
+    weak var value: T?
+    init(_ value: T?) { self.value = value }
 }

@@ -780,7 +780,7 @@ private final class MockConversationHistoryBackend: InferenceBackend,
     func loadModel(from url: URL, contextSize: Int32) async throws {}
 
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
-        let stream = AsyncThrowingStream { continuation in continuation.finish() }
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
         return GenerationStream(stream)
     }
 
@@ -807,7 +807,7 @@ private final class MockTokenUsageBackend: InferenceBackend,
     func loadModel(from url: URL, contextSize: Int32) async throws {}
 
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
-        let stream = AsyncThrowingStream { continuation in continuation.finish() }
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
         return GenerationStream(stream)
     }
 
@@ -844,7 +844,7 @@ private final class MockCloudURLModelBackend: InferenceBackend,
     }
 
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
-        let stream = AsyncThrowingStream { continuation in continuation.finish() }
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
         return GenerationStream(stream)
     }
 
@@ -887,7 +887,7 @@ private final class MockCloudKeychainBackend: InferenceBackend,
     }
 
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
-        let stream = AsyncThrowingStream { continuation in continuation.finish() }
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
         return GenerationStream(stream)
     }
 
@@ -1013,7 +1013,7 @@ private final class ControlledLoadBackend: InferenceBackend,
     }
 
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
-        let stream = AsyncThrowingStream { continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in
             continuation.finish()
         }
         return GenerationStream(stream)

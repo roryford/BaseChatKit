@@ -27,6 +27,10 @@ import BaseChatCore
 /// ```
 public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigurable {
 
+    /// How long Ollama should keep the model loaded in VRAM after a request.
+    /// Default is "30m" (30 minutes). Ollama's own default is "5m".
+    public var keepAlive: String = "30m"
+
     // MARK: - Init
 
     /// Creates an Ollama backend.
@@ -108,6 +112,7 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             "messages": messages,
             "stream": true,
             "options": options,
+            "keep_alive": keepAlive,
         ]
 
         var request = URLRequest(url: chatURL)
@@ -121,6 +126,12 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     }
 
     // MARK: - NDJSON Stream Parsing
+
+    // TODO: (#189) Detect Ollama model-loading state and set GenerationStream
+    // phase to .loading. Requires the monitoring task pattern from
+    // GenerationStream to detect the pre-first-token stall that indicates
+    // Ollama is loading the model into VRAM. The stall detection at
+    // timeout/2 partially addresses this by showing .stalled.
 
     /// Parses Ollama's NDJSON response format instead of SSE.
     public override func parseResponseStream(

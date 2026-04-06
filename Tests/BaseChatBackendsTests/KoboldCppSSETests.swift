@@ -206,7 +206,8 @@ struct KoboldCppBackendSSETests {
         do {
             for try await _ in stream.events {}
             Issue.record("Expected a server error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let statusCode, _):
                 #expect(statusCode == 500)
@@ -236,7 +237,8 @@ struct KoboldCppBackendSSETests {
         do {
             for try await _ in stream.events {}
             Issue.record("Expected rateLimited error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .rateLimited:
                 break // expected

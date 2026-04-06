@@ -352,7 +352,7 @@ private final class ControlledLoadBackend: InferenceBackend,
         guard isModelLoaded else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
-        let stream = AsyncThrowingStream { continuation in
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in
             continuation.finish()
         }
         return GenerationStream(stream)

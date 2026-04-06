@@ -229,7 +229,8 @@ struct OpenAICompatEndpointTests {
             )
             for try await _ in stream.events {}
             Issue.record("Expected server error for missing model")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let statusCode, let message):
                 #expect(statusCode == 404)
@@ -423,7 +424,8 @@ struct OpenAICompatEndpointTests {
             )
             for try await _ in stream.events {}
             Issue.record("Expected server error")
-        } catch let error as CloudBackendError {
+        } catch {
+            guard let error = extractCloudError(error) else { Issue.record("Expected CloudBackendError, got \(error)"); return }
             switch error {
             case .serverError(let statusCode, let message):
                 #expect(statusCode == 503)
