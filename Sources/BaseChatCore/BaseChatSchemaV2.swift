@@ -5,7 +5,9 @@ import SwiftData
 ///
 /// Adds `contentPartsJSON` to ``ChatMessage`` to support structured multimodal
 /// content (text, images, tool calls, tool results). The legacy `content` column
-/// is retained as a read-only computed property that concatenates text parts.
+/// is retained as a persisted property, kept in sync with `contentPartsJSON`,
+/// so that SwiftData preserves its value through migration and it can serve as
+/// a fast-path accessor for text-only messages.
 ///
 /// ## Migration from V1
 ///
@@ -37,7 +39,12 @@ public enum BaseChatSchemaV2: VersionedSchema {
         public var timestamp: Date
         public var sessionID: UUID
 
-        /// JSON-encoded `[MessagePart]` array. This is the source of truth.
+        /// Retained from V1 so SwiftData preserves the column during migration.
+        /// After migration, kept in sync as a denormalised cache of text content.
+        public var content: String
+
+        /// JSON-encoded `[MessagePart]` array. This is the source of truth for
+        /// structured content. Empty string means "use `content` as a single text part".
         public var contentPartsJSON: String
 
         /// Tokens used in the prompt for this response (cloud API backends only).
@@ -54,6 +61,7 @@ public enum BaseChatSchemaV2: VersionedSchema {
             self.role = role
             self.timestamp = Date()
             self.sessionID = sessionID
+            self.content = content
             self.contentPartsJSON = Self.encode([.text(content)])
         }
 
@@ -68,6 +76,7 @@ public enum BaseChatSchemaV2: VersionedSchema {
             self.timestamp = Date()
             self.sessionID = sessionID
             self.contentPartsJSON = Self.encode(contentParts)
+            self.content = contentParts.compactMap(\.textContent).joined()
         }
 
         // MARK: - Content Parts
@@ -75,32 +84,38 @@ public enum BaseChatSchemaV2: VersionedSchema {
         /// The structured content parts of this message.
         public var contentParts: [MessagePart] {
             get { Self.decode(contentPartsJSON) }
-            set { contentPartsJSON = Self.encode(newValue) }
-        }
-
-        /// Concatenated text parts for backward compatibility.
-        ///
-        /// Setting this property replaces the entire parts array with a single
-        /// `.text` part, which matches the pre-V2 behaviour.
-        public var content: String {
-            get {
-                contentParts.compactMap(\.textContent).joined()
-            }
             set {
-                contentParts = [.text(newValue)]
+                contentPartsJSON = Self.encode(newValue)
+                content = newValue.compactMap(\.textContent).joined()
             }
         }
 
         // MARK: - JSON Helpers
 
         static func encode(_ parts: [MessagePart]) -> String {
-            let data = (try? JSONEncoder().encode(parts)) ?? Data()
-            return String(data: data, encoding: .utf8) ?? "[]"
+            do {
+                let data = try JSONEncoder().encode(parts)
+                if let json = String(data: data, encoding: .utf8) {
+                    return json
+                }
+                assertionFailure("Failed to convert encoded MessagePart data to UTF-8 string")
+            } catch {
+                assertionFailure("Failed to encode MessagePart array: \(error)")
+            }
+            return "[]"
         }
 
         static func decode(_ json: String) -> [MessagePart] {
-            guard let data = json.data(using: .utf8) else { return [] }
-            return (try? JSONDecoder().decode([MessagePart].self, from: data)) ?? []
+            guard let data = json.data(using: .utf8) else {
+                assertionFailure("contentPartsJSON is not valid UTF-8")
+                return json.isEmpty ? [] : [.text(json)]
+            }
+            do {
+                return try JSONDecoder().decode([MessagePart].self, from: data)
+            } catch {
+                assertionFailure("Failed to decode contentPartsJSON: \(error)")
+                return json.isEmpty ? [] : [.text(json)]
+            }
         }
     }
 

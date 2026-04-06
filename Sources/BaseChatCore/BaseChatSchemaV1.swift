@@ -270,6 +270,10 @@ public enum BaseChatMigrationPlan: SchemaMigrationPlan {
 
     /// V1 -> V2: wraps each legacy `content` string into a `[.text(content)]` JSON array
     /// stored in the new `contentPartsJSON` column.
+    ///
+    /// The V2 model retains `content` as a persisted column, so SwiftData preserves
+    /// the original text through the schema update. `didMigrate` reads it to populate
+    /// the new `contentPartsJSON` column.
     static let migrateV1toV2 = MigrationStage.custom(
         fromVersion: BaseChatSchemaV1.self,
         toVersion: BaseChatSchemaV2.self,
@@ -277,8 +281,6 @@ public enum BaseChatMigrationPlan: SchemaMigrationPlan {
         didMigrate: { context in
             let messages = try context.fetch(FetchDescriptor<BaseChatSchemaV2.ChatMessage>())
             for message in messages {
-                // Messages created under V1 have contentPartsJSON as empty string (default).
-                // Populate it from the legacy content column which SwiftData preserves.
                 if message.contentPartsJSON.isEmpty {
                     message.contentPartsJSON = BaseChatSchemaV2.ChatMessage.encode([.text(message.content)])
                 }

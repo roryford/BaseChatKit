@@ -69,17 +69,17 @@ public struct MessageBubbleView: View {
 
     private var assistantBubble: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if message.content.isEmpty && isStreaming {
+            if message.contentParts.isEmpty && isStreaming {
                 streamingPlaceholder
             } else {
                 MessagePartsView(parts: message.contentParts, role: .assistant)
             }
 
-            if isStreaming && !message.content.isEmpty {
+            if isStreaming && !message.contentParts.isEmpty {
                 streamingIndicator
             }
 
-            if !isStreaming || !message.content.isEmpty {
+            if !isStreaming || !message.contentParts.isEmpty {
                 HStack(spacing: 6) {
                     timestampLabel
                         .foregroundStyle(.secondary)
