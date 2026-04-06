@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.22](https://github.com/roryford/BaseChatKit/compare/v0.2.21...v0.2.22) (2026-04-06)
+
+
+### Bug Fixes
+
+* eliminate static race conditions in BaseChatConfiguration and CuratedModel ([#162](https://github.com/roryford/BaseChatKit/issues/162)) ([c371839](https://github.com/roryford/BaseChatKit/commit/c3718393d244d5bd81243b73b96b6e9b3af6ba47)), closes [#156](https://github.com/roryford/BaseChatKit/issues/156)
+* harden MLX snapshot downloads and search filtering ([#159](https://github.com/roryford/BaseChatKit/issues/159)) ([9248404](https://github.com/roryford/BaseChatKit/commit/924840415acafd48748ea0b54e3806ef01ad54db))
+* remove unnecessary [@unchecked](https://github.com/unchecked) Sendable conformances ([#164](https://github.com/roryford/BaseChatKit/issues/164)) ([04d04b2](https://github.com/roryford/BaseChatKit/commit/04d04b20095732a740b162b82b57217270b7d736)), closes [#150](https://github.com/roryford/BaseChatKit/issues/150)
+
 ## [0.2.21](https://github.com/roryford/BaseChatKit/compare/v0.2.20...v0.2.21) (2026-04-05)
 
 
