@@ -7,7 +7,7 @@ import BaseChatCore
 /// Streams completions from the Anthropic Messages API (`/v1/messages`).
 /// Handles Claude-specific SSE event types (`content_block_delta`, etc.)
 /// and authentication via `x-api-key` header.
-public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBackendKeychainConfigurable {
+public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBackendKeychainConfigurable, ToolCallingBackend {
 
     /// Shared session with certificate pinning delegate.
     private static let pinnedSession: URLSession = {
@@ -16,6 +16,20 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         config.timeoutIntervalForRequest = 300
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }()
+
+    // MARK: - Tool Calling State
+
+    private var _toolDefinitions: [ToolDefinition] = []
+    private var _toolProvider: (any ToolProvider)?
+    public var toolCallObserver: (any ToolCallObserver)?
+
+    public func setTools(_ tools: [ToolDefinition]) {
+        withStateLock { _toolDefinitions = tools }
+    }
+
+    public func setToolProvider(_ provider: (any ToolProvider)?) {
+        withStateLock { _toolProvider = provider }
+    }
 
     // MARK: - Init
 
@@ -98,6 +112,12 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
 
         if let systemPrompt, !systemPrompt.isEmpty {
             body["system"] = systemPrompt
+        }
+
+        // Include tool definitions when available
+        let tools = withStateLock { _toolDefinitions }
+        if !tools.isEmpty {
+            body["tools"] = tools.map { $0.toJSON() }
         }
 
         var request = URLRequest(url: messagesURL)
@@ -213,6 +233,42 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             return nil
         }
         return text
+    }
+
+    /// Extracts a tool use block from a `content_block_start` event payload.
+    ///
+    /// Claude emits tool calls as `content_block_start` events with
+    /// `content_block.type == "tool_use"`.
+    static func parseToolUse(from json: String) -> ToolCall? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              parsed["type"] as? String == "content_block_start",
+              let contentBlock = parsed["content_block"] as? [String: Any],
+              contentBlock["type"] as? String == "tool_use",
+              let id = contentBlock["id"] as? String,
+              let name = contentBlock["name"] as? String else {
+            return nil
+        }
+        // Arguments arrive in subsequent content_block_delta events and are
+        // assembled by the caller. For the initial block, emit with empty args.
+        let input = contentBlock["input"] as? [String: Any] ?? [:]
+        let argsData = (try? JSONSerialization.data(withJSONObject: input)) ?? Data()
+        let argsString = String(data: argsData, encoding: .utf8) ?? "{}"
+        return ToolCall(id: id, name: name, arguments: argsString)
+    }
+
+    /// Extracts partial tool input JSON from a `content_block_delta` with
+    /// `delta.type == "input_json_delta"`.
+    static func parseToolInputDelta(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              parsed["type"] as? String == "content_block_delta",
+              let delta = parsed["delta"] as? [String: Any],
+              delta["type"] as? String == "input_json_delta",
+              let partialJSON = delta["partial_json"] as? String else {
+            return nil
+        }
+        return partialJSON
     }
 
     /// Returns `true` if the SSE payload signals end of stream.

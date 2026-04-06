@@ -326,6 +326,29 @@ public final class InferenceService {
         activeBackendName = nil
     }
 
+    // MARK: - Tool Calling
+
+    /// The active tool provider, if any. Set before generation to enable tool calling
+    /// on backends that adopt `ToolCallingBackend`.
+    public var toolProvider: (any ToolProvider)? {
+        didSet {
+            // Propagate to the active backend if it supports tool calling
+            if let toolBackend = backend as? ToolCallingBackend {
+                toolBackend.setToolProvider(toolProvider)
+                toolBackend.setTools(toolProvider?.tools ?? [])
+            }
+        }
+    }
+
+    /// Optional observer for tool call activity during generation.
+    public var toolCallObserver: (any ToolCallObserver)? {
+        didSet {
+            if let toolBackend = backend as? (any ToolCallingBackend) {
+                toolBackend.toolCallObserver = toolCallObserver
+            }
+        }
+    }
+
     // MARK: - Generation
 
     /// Generates text from a message history, streaming tokens via the active backend.
@@ -334,6 +357,9 @@ public final class InferenceService {
     /// into a single prompt string using `selectedPromptTemplate`. For MLX and
     /// Foundation, the last user message is passed directly (they handle chat
     /// formatting internally).
+    ///
+    /// If a `toolProvider` is set and the backend adopts `ToolCallingBackend`,
+    /// tool definitions and provider are propagated before generation begins.
     public func generate(
         messages: [(role: String, content: String)],
         systemPrompt: String? = nil,
@@ -377,6 +403,12 @@ public final class InferenceService {
         // via the ConversationHistoryReceiver protocol if they adopt it.
         if let historyReceiver = backend as? ConversationHistoryReceiver {
             historyReceiver.setConversationHistory(messages)
+        }
+
+        // Propagate tool definitions and provider to backends that support tool calling.
+        if let toolBackend = backend as? ToolCallingBackend {
+            toolBackend.setTools(toolProvider?.tools ?? [])
+            toolBackend.setToolProvider(toolProvider)
         }
 
         do {
