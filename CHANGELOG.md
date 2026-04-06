@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/roryford/BaseChatKit/compare/v0.3.0...v0.3.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* update test mocks to use GenerationEvent stream signature ([eff073a](https://github.com/roryford/BaseChatKit/commit/eff073ac763625982beda2819da54199532c6621))
+
 ## [0.3.0](https://github.com/roryford/BaseChatKit/compare/v0.2.22...v0.3.0) (2026-04-06)
 
 
