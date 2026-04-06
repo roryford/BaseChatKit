@@ -55,10 +55,7 @@ public struct MessageBubbleView: View {
 
     private var userBubble: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            Text(message.content)
-                .font(.body)
-                .foregroundStyle(.white)
-                .textSelection(.enabled)
+            MessagePartsView(parts: message.contentParts, role: .user)
 
             timestampLabel
                 .foregroundStyle(.white.opacity(0.7))
@@ -72,17 +69,17 @@ public struct MessageBubbleView: View {
 
     private var assistantBubble: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if message.content.isEmpty && isStreaming {
+            if message.contentParts.isEmpty && isStreaming {
                 streamingPlaceholder
             } else {
-                AssistantMarkdownView(content: message.content)
+                MessagePartsView(parts: message.contentParts, role: .assistant)
             }
 
-            if isStreaming && !message.content.isEmpty {
+            if isStreaming && !message.contentParts.isEmpty {
                 streamingIndicator
             }
 
-            if !isStreaming || !message.content.isEmpty {
+            if !isStreaming || !message.contentParts.isEmpty {
                 HStack(spacing: 6) {
                     timestampLabel
                         .foregroundStyle(.secondary)

@@ -260,11 +260,32 @@ public enum BaseChatSchemaV1: VersionedSchema {
 public enum BaseChatMigrationPlan: SchemaMigrationPlan {
     /// All schema versions in oldest-to-newest order.
     public static var schemas: [any VersionedSchema.Type] {
-        [BaseChatSchemaV1.self]
+        [BaseChatSchemaV1.self, BaseChatSchemaV2.self]
     }
 
     /// Migration stages between consecutive schema versions.
+    public static var stages: [MigrationStage] {
+        [migrateV1toV2]
+    }
+
+    /// V1 -> V2: wraps each legacy `content` string into a `[.text(content)]` JSON array
+    /// stored in the new `contentPartsJSON` column.
     ///
-    /// Empty for V1 — there is no prior version to migrate from.
-    public static var stages: [MigrationStage] { [] }
+    /// The V2 model retains `content` as a persisted column, so SwiftData preserves
+    /// the original text through the schema update. `didMigrate` reads it to populate
+    /// the new `contentPartsJSON` column.
+    static let migrateV1toV2 = MigrationStage.custom(
+        fromVersion: BaseChatSchemaV1.self,
+        toVersion: BaseChatSchemaV2.self,
+        willMigrate: nil,
+        didMigrate: { context in
+            let messages = try context.fetch(FetchDescriptor<BaseChatSchemaV2.ChatMessage>())
+            for message in messages {
+                if message.contentPartsJSON.isEmpty {
+                    message.contentPartsJSON = BaseChatSchemaV2.ChatMessage.encode([.text(message.content)])
+                }
+            }
+            try context.save()
+        }
+    )
 }

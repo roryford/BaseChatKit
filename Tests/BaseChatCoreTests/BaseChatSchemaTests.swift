@@ -8,7 +8,8 @@ final class BaseChatSchemaTests: XCTestCase {
     func test_allModelTypes_containsExpectedTypes() {
         let ids = BaseChatSchema.allModelTypes.map(ObjectIdentifier.init)
 
-        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.ChatMessage.self)), "Missing ChatMessage")
+        // ChatMessage typealias now points to V2
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV2.ChatMessage.self)), "Missing ChatMessage")
         XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.ChatSession.self)), "Missing ChatSession")
         XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.SamplerPreset.self)), "Missing SamplerPreset")
         XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self)), "Missing APIEndpoint")

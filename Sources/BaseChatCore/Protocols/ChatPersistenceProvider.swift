@@ -99,11 +99,19 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
 public struct ChatMessageRecord: Identifiable, Hashable, Sendable {
     public var id: UUID
     public var role: MessageRole
-    public var content: String
+    public var contentParts: [MessagePart]
     public var timestamp: Date
     public var sessionID: UUID
     public var promptTokens: Int?
     public var completionTokens: Int?
+
+    /// Concatenated text parts for backward compatibility.
+    ///
+    /// Setting this replaces the entire `contentParts` array with a single `.text` part.
+    public var content: String {
+        get { contentParts.compactMap(\.textContent).joined() }
+        set { contentParts = [.text(newValue)] }
+    }
 
     public init(
         id: UUID = UUID(),
@@ -116,7 +124,26 @@ public struct ChatMessageRecord: Identifiable, Hashable, Sendable {
     ) {
         self.id = id
         self.role = role
-        self.content = content
+        self.contentParts = [.text(content)]
+        self.timestamp = timestamp
+        self.sessionID = sessionID
+        self.promptTokens = promptTokens
+        self.completionTokens = completionTokens
+    }
+
+    /// Creates a record from structured content parts.
+    public init(
+        id: UUID = UUID(),
+        role: MessageRole,
+        contentParts: [MessagePart],
+        timestamp: Date = Date(),
+        sessionID: UUID,
+        promptTokens: Int? = nil,
+        completionTokens: Int? = nil
+    ) {
+        self.id = id
+        self.role = role
+        self.contentParts = contentParts
         self.timestamp = timestamp
         self.sessionID = sessionID
         self.promptTokens = promptTokens
