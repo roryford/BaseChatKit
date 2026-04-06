@@ -118,51 +118,61 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             return msgs
         }()
 
-        let stream = AsyncThrowingStream { [weak self] continuation in
-            let task = Task { @MainActor in
-                defer {
-                    self?.isGenerating = false
-                    Self.logger.debug("MLX generate finished")
-                }
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: GenerationEvent.self)
+        let generationStream = GenerationStream(stream)
 
-                do {
-                    let input = try await modelContainer.perform { context in
-                        try await context.processor.prepare(input: .init(messages: messages))
-                    }
-                    let outputLimit = config.maxOutputTokens
-                    var outputTokenCount = 0
-                    let stream = try await modelContainer.generate(
-                        input: input,
-                        parameters: generateConfig
-                    )
-                    for await generation in stream {
-                        if Task.isCancelled { break }
-                        if let text = generation.chunk {
-                            continuation.yield(.token(text))
-                            // Each chunk from MLX corresponds to one token.
-                            if let limit = outputLimit {
-                                outputTokenCount += 1
-                                if outputTokenCount >= limit { break }
-                            }
+        let task = Task { @MainActor [weak self, generationStream] in
+            defer {
+                self?.isGenerating = false
+                Self.logger.debug("MLX generate finished")
+            }
+
+            do {
+                let input = try await modelContainer.perform { context in
+                    try await context.processor.prepare(input: .init(messages: messages))
+                }
+                let outputLimit = config.maxOutputTokens
+                var outputTokenCount = 0
+                var isFirstToken = true
+                let mlxStream = try await modelContainer.generate(
+                    input: input,
+                    parameters: generateConfig
+                )
+                for await generation in mlxStream {
+                    if Task.isCancelled { break }
+                    if let text = generation.chunk {
+                        if isFirstToken {
+                            generationStream.setPhase(.streaming)
+                            isFirstToken = false
+                        }
+                        continuation.yield(.token(text))
+                        // Each chunk from MLX corresponds to one token.
+                        if let limit = outputLimit {
+                            outputTokenCount += 1
+                            if outputTokenCount >= limit { break }
                         }
                     }
-                } catch {
-                    if !Task.isCancelled {
-                        Self.logger.error("MLX generation error: \(error)")
-                        continuation.finish(throwing: error)
-                        return
-                    }
                 }
-                continuation.finish()
+                generationStream.setPhase(.done)
+            } catch {
+                if !Task.isCancelled {
+                    Self.logger.error("MLX generation error: \(error)")
+                    generationStream.setPhase(.failed(error.localizedDescription))
+                    continuation.finish(throwing: error)
+                    return
+                }
+                generationStream.setPhase(.done)
             }
-
-            self?.generationTask = task
-
-            continuation.onTermination = { @Sendable _ in
-                task.cancel()
-            }
+            continuation.finish()
         }
-        return GenerationStream(stream)
+
+        self.generationTask = task
+
+        continuation.onTermination = { @Sendable _ in
+            task.cancel()
+        }
+
+        return generationStream
     }
 
     // MARK: - Control

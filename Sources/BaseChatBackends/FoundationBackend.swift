@@ -160,79 +160,88 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
         Self.logger.debug("Foundation generate started")
 
-        let stream = AsyncThrowingStream { [weak self] continuation in
-            let task = Task { [backend = self] in
-                guard let backend else {
-                    continuation.finish()
-                    return
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: GenerationEvent.self)
+        let generationStream = GenerationStream(stream)
+
+        let task = Task { [weak self, generationStream] in
+            guard let backend = self else {
+                continuation.finish()
+                return
+            }
+
+            defer {
+                backend.withStateLock {
+                    backend._isGenerating = false
+                    backend.generationTask = nil
                 }
+                Self.logger.debug("Foundation generate finished")
+            }
 
-                defer {
-                    backend.withStateLock {
-                        backend._isGenerating = false
-                        backend.generationTask = nil
-                    }
-                    Self.logger.debug("Foundation generate finished")
-                }
+            do {
+                var options = GenerationOptions()
+                options.temperature = Double(config.temperature)
 
-                do {
-                    var options = GenerationOptions()
-                    options.temperature = Double(config.temperature)
+                let responseStream = activeSession.streamResponse(
+                    to: prompt,
+                    options: options
+                )
 
-                    let stream = activeSession.streamResponse(
-                        to: prompt,
-                        options: options
-                    )
+                let outputLimit = config.maxOutputTokens
+                var outputTokenCount = 0
+                var previousText = ""
+                var isFirstToken = true
+                for try await partial in responseStream {
+                    if Task.isCancelled { break }
 
-                    let outputLimit = config.maxOutputTokens
-                    var outputTokenCount = 0
-                    var previousText = ""
-                    for try await partial in stream {
-                        if Task.isCancelled { break }
+                    let currentText = partial.content
+                    if currentText.count > previousText.count {
+                        let newContent = String(
+                            currentText[currentText.index(
+                                currentText.startIndex,
+                                offsetBy: previousText.count
+                            )...]
+                        )
+                        if isFirstToken {
+                            generationStream.setPhase(.streaming)
+                            isFirstToken = false
+                        }
+                        continuation.yield(.token(newContent))
+                        previousText = currentText
 
-                        let currentText = partial.content
-                        if currentText.count > previousText.count {
-                            let newContent = String(
-                                currentText[currentText.index(
-                                    currentText.startIndex,
-                                    offsetBy: previousText.count
-                                )...]
-                            )
-                            continuation.yield(.token(newContent))
-                            previousText = currentText
-
-                            // Approximate token count using the conservative 3-char heuristic.
-                            // Stops runaway generation for open-ended prompts.
-                            if let limit = outputLimit {
-                                outputTokenCount += max(1, newContent.count / 3)
-                                if outputTokenCount >= limit {
-                                    Self.logger.info("Output token limit (\(limit)) reached")
-                                    break
-                                }
+                        // Approximate token count using the conservative 3-char heuristic.
+                        // Stops runaway generation for open-ended prompts.
+                        if let limit = outputLimit {
+                            outputTokenCount += max(1, newContent.count / 3)
+                            if outputTokenCount >= limit {
+                                Self.logger.info("Output token limit (\(limit)) reached")
+                                break
                             }
                         }
                     }
-                } catch {
-                    if !Task.isCancelled {
-                        Self.logger.error("Foundation generation error: \(error)")
-                        continuation.finish(throwing: error)
-                        return
-                    }
                 }
-
-                continuation.finish()
+                generationStream.setPhase(.done)
+            } catch {
+                if !Task.isCancelled {
+                    Self.logger.error("Foundation generation error: \(error)")
+                    generationStream.setPhase(.failed(error.localizedDescription))
+                    continuation.finish(throwing: error)
+                    return
+                }
+                generationStream.setPhase(.done)
             }
 
-            self?.withStateLock {
-                self?.generationTask = task
-            }
-
-            continuation.onTermination = { @Sendable _ in
-                task.cancel()
-            }
+            continuation.finish()
         }
 
-        return GenerationStream(stream)
+        withStateLock {
+            generationTask = task
+        }
+
+        continuation.onTermination = { @Sendable _ in
+            task.cancel()
+        }
+
+        return generationStream
     }
 
     // MARK: - Conversation Reset

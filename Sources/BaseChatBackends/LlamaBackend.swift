@@ -239,110 +239,122 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
         let maxTokens = config.maxOutputTokens ?? Int(config.maxTokens)
 
-        let stream = AsyncThrowingStream { [weak self] continuation in
-            let task = Task { [weak self] in
-                guard let self else {
-                    continuation.finish()
-                    return
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: GenerationEvent.self)
+        let generationStream = GenerationStream(stream)
+
+        let task = Task { [weak self, generationStream] in
+            guard let self else {
+                continuation.finish()
+                return
+            }
+
+            defer {
+                self.withStateLock { self.isGenerating = false }
+                Self.logger.debug("Llama generate finished")
+            }
+
+            // Set up sampler chain
+            let sparams = llama_sampler_chain_default_params()
+            guard let sampler = llama_sampler_chain_init(sparams) else {
+                generationStream.setPhase(.failed("Failed to create sampler"))
+                continuation.finish(throwing: InferenceError.inferenceFailure("Failed to create sampler"))
+                return
+            }
+            defer { llama_sampler_free(sampler) }
+
+            // Sampler chain order matters: penalties → top_k → top_p → temp → dist
+            if config.repeatPenalty > 1.0 {
+                llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+                    64,                    // last_n tokens to penalize
+                    config.repeatPenalty,  // repeat penalty
+                    0.0,                   // frequency penalty
+                    0.0                    // presence penalty
+                ))
+            }
+            llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40))
+            if config.topP < 1.0 {
+                llama_sampler_chain_add(sampler, llama_sampler_init_top_p(config.topP, 1))
+            }
+            llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
+            llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
+            llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 0...UInt32.max)))
+
+            // Create batch and process prompt
+            var batch = llama_batch_init(Int32(tokens.count), 0, 1)
+            defer { llama_batch_free(batch) }
+
+            for (i, token) in tokens.enumerated() {
+                batch.token[i] = token
+                batch.pos[i] = Int32(i)
+                batch.n_seq_id[i] = 1
+                batch.seq_id[i]?[0] = 0
+                batch.logits[i] = (i == tokens.count - 1) ? 1 : 0
+            }
+            batch.n_tokens = Int32(tokens.count)
+
+            if llama_decode(context, batch) != 0 {
+                generationStream.setPhase(.failed("Failed to decode prompt"))
+                continuation.finish(throwing: InferenceError.inferenceFailure("Failed to decode prompt"))
+                return
+            }
+
+            // Generation loop
+            var nCur = Int(batch.n_tokens)
+            var invalidUTF8: [CChar] = []
+            var isFirstToken = true
+
+            for _ in 0..<maxTokens {
+                if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
+
+                let token = llama_sampler_sample(sampler, context, batch.n_tokens - 1)
+
+                if llama_vocab_is_eog(vocab, token) { break }
+
+                // Decode token to text
+                if let text = self.tokenToString(token, invalidUTF8Buffer: &invalidUTF8) {
+                    if isFirstToken {
+                        generationStream.setPhase(.streaming)
+                        isFirstToken = false
+                    }
+                    continuation.yield(.token(text))
                 }
 
-                defer {
-                    self.withStateLock { self.isGenerating = false }
-                    Self.logger.debug("Llama generate finished")
-                }
+                // Prepare next batch
+                batch.n_tokens = 0
+                batch.token[0] = token
+                batch.pos[0] = Int32(nCur)
+                batch.n_seq_id[0] = 1
+                batch.seq_id[0]?[0] = 0
+                batch.logits[0] = 1
+                batch.n_tokens = 1
+                nCur += 1
 
-                // Set up sampler chain
-                let sparams = llama_sampler_chain_default_params()
-                guard let sampler = llama_sampler_chain_init(sparams) else {
-                    continuation.finish(throwing: InferenceError.inferenceFailure("Failed to create sampler"))
-                    return
-                }
-                defer { llama_sampler_free(sampler) }
-
-                // Sampler chain order matters: penalties → top_k → top_p → temp → dist
-                if config.repeatPenalty > 1.0 {
-                    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
-                        64,                    // last_n tokens to penalize
-                        config.repeatPenalty,  // repeat penalty
-                        0.0,                   // frequency penalty
-                        0.0                    // presence penalty
-                    ))
-                }
-                llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40))
-                if config.topP < 1.0 {
-                    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(config.topP, 1))
-                }
-                llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
-                llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
-                llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 0...UInt32.max)))
-
-                // Create batch and process prompt
-                var batch = llama_batch_init(Int32(tokens.count), 0, 1)
-                defer { llama_batch_free(batch) }
-
-                for (i, token) in tokens.enumerated() {
-                    batch.token[i] = token
-                    batch.pos[i] = Int32(i)
-                    batch.n_seq_id[i] = 1
-                    batch.seq_id[i]?[0] = 0
-                    batch.logits[i] = (i == tokens.count - 1) ? 1 : 0
-                }
-                batch.n_tokens = Int32(tokens.count)
+                if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
 
                 if llama_decode(context, batch) != 0 {
-                    continuation.finish(throwing: InferenceError.inferenceFailure("Failed to decode prompt"))
+                    generationStream.setPhase(.failed("Decode failed during generation"))
+                    continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
                     return
                 }
-
-                // Generation loop
-                var nCur = Int(batch.n_tokens)
-                var invalidUTF8: [CChar] = []
-
-                for _ in 0..<maxTokens {
-                    if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
-
-                    let token = llama_sampler_sample(sampler, context, batch.n_tokens - 1)
-
-                    if llama_vocab_is_eog(vocab, token) { break }
-
-                    // Decode token to text
-                    if let text = self.tokenToString(token, invalidUTF8Buffer: &invalidUTF8) {
-                        continuation.yield(.token(text))
-                    }
-
-                    // Prepare next batch
-                    batch.n_tokens = 0
-                    batch.token[0] = token
-                    batch.pos[0] = Int32(nCur)
-                    batch.n_seq_id[0] = 1
-                    batch.seq_id[0]?[0] = 0
-                    batch.logits[0] = 1
-                    batch.n_tokens = 1
-                    nCur += 1
-
-                    if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
-
-                    if llama_decode(context, batch) != 0 {
-                        continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
-                        return
-                    }
-                }
-
-                // Clear KV cache for next generation (skip if cancelled/unloaded)
-                if !self.withStateLock({ self.cancelled }), let memory = llama_get_memory(context) {
-                    llama_memory_clear(memory, false)
-                }
-
-                continuation.finish()
             }
 
-            self?.generationTask = task
+            generationStream.setPhase(.done)
 
-            continuation.onTermination = { @Sendable _ in
-                task.cancel()
+            // Clear KV cache for next generation (skip if cancelled/unloaded)
+            if !self.withStateLock({ self.cancelled }), let memory = llama_get_memory(context) {
+                llama_memory_clear(memory, false)
             }
+
+            continuation.finish()
         }
-        return GenerationStream(stream)
+
+        self.generationTask = task
+
+        continuation.onTermination = { @Sendable _ in
+            task.cancel()
+        }
+
+        return generationStream
     }
 
     // MARK: - Control
