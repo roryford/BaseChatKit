@@ -22,7 +22,7 @@ import BaseChatCore
 /// let stream = try backend.generate(prompt: "### Instruction:\nHello\n### Response:\n", systemPrompt: nil, config: .init())
 /// for try await token in stream { print(token, terminator: "") }
 /// ```
-public final class KoboldCppBackend: SSECloudBackend, CloudBackendURLModelConfigurable, @unchecked Sendable {
+public final class KoboldCppBackend: SSECloudBackend, CloudBackendURLModelConfigurable {
 
     /// Optional GBNF grammar constraint sent in the request body.
     /// KoboldCpp-specific — not part of the shared `GenerationConfig`.

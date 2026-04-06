@@ -7,7 +7,7 @@ import SwiftData
 /// SwiftData `@Model` objects and plain ``ChatSessionRecord`` / ``ChatMessageRecord``
 /// value types at the boundary.
 @MainActor
-public final class SwiftDataPersistenceProvider: ChatPersistenceProvider, @unchecked Sendable {
+public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
 
     private let modelContext: ModelContext
 
