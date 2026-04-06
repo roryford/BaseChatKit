@@ -84,9 +84,9 @@ public enum PromptAssembler {
         let totalSlotTokens = resolvedSlots.reduce(0) { $0 + $1.tokenCount }
         let availableForMessages = max(0, contextSize - totalSlotTokens - responseBuffer)
 
-        // 4. Trim messages to fit remaining budget (newest first, like ContextWindowManager)
-        let trimmedMessages = trimMessagesToFit(messages, budget: availableForMessages, tokenizer: tok)
-        let messageTokens = trimmedMessages.reduce(0) { $0 + tok.tokenCount($1.content) }
+        // 4. Trim messages to fit remaining budget (newest first, like ContextWindowManager).
+        // totalTokens comes free from the trim loop — no second pass needed.
+        let (trimmedMessages, messageTokens) = trimMessagesToFit(messages, budget: availableForMessages, tokenizer: tok)
         budgetBreakdown["history"] = messageTokens
 
         // 5. Sort resolved slots by position for final ordering.
@@ -115,17 +115,23 @@ public enum PromptAssembler {
     // MARK: - Private Helpers
 
     /// Trims messages to fit within the given token budget.
-    /// Walks backward from the newest message, always keeping at least the last message.
+    /// Walks backward from the newest message. When `budget <= 0`, it prefers keeping
+    /// the most recent user message, or falls back to the newest message if no user
+    /// message exists. Returns both the trimmed messages and their total token count,
+    /// so the caller does not need a second pass to compute the budget breakdown.
     private static func trimMessagesToFit(
         _ messages: [ChatMessageRecord],
         budget: Int,
         tokenizer: TokenizerProvider
-    ) -> [ChatMessageRecord] {
-        guard !messages.isEmpty else { return [] }
+    ) -> (messages: [ChatMessageRecord], totalTokens: Int) {
+        guard !messages.isEmpty else { return ([], 0) }
 
         if budget <= 0 {
-            if let lastUser = messages.last(where: { $0.role == .user }) { return [lastUser] }
-            return Array(messages.suffix(1))
+            if let lastUser = messages.last(where: { $0.role == .user }) {
+                return ([lastUser], tokenizer.tokenCount(lastUser.content))
+            }
+            let last = messages.suffix(1)
+            return (Array(last), last.reduce(0) { $0 + tokenizer.tokenCount($1.content) })
         }
 
         var kept: [ChatMessageRecord] = []
@@ -138,7 +144,7 @@ public enum PromptAssembler {
             usedTokens += count
         }
 
-        return kept.reversed()
+        return (kept.reversed(), usedTokens)
     }
 
     /// Inserts slots into the message history based on their position.

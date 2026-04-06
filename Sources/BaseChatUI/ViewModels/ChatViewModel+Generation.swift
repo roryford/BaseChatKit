@@ -65,7 +65,11 @@ extension ChatViewModel {
             } else {
                 effectiveSystemPrompt = rawSystemPrompt
             }
-            let activeTokenizer = inferenceService.tokenizer
+            // Wrap the tokenizer in a per-cycle cache so each message string is tokenized
+            // at most once across shouldCompress, compress, and trimMessages.
+            let cachingTokenizer: TokenizerProvider = CachingTokenizer(
+                wrapping: inferenceService.tokenizer ?? HeuristicTokenizer()
+            )
 
             let compressible = allMessages.map {
                 CompressibleMessage(
@@ -81,13 +85,13 @@ extension ChatViewModel {
                 messages: compressible,
                 systemPrompt: effectiveSystemPrompt,
                 contextSize: contextMaxTokens,
-                tokenizer: activeTokenizer
+                tokenizer: cachingTokenizer
             ) {
                 let result = await compressionOrchestrator.compress(
                     messages: compressible,
                     systemPrompt: effectiveSystemPrompt,
                     contextSize: contextMaxTokens,
-                    tokenizer: activeTokenizer
+                    tokenizer: cachingTokenizer
                 )
                 lastCompressionStats = result.stats
                 history = result.messages
@@ -98,7 +102,7 @@ extension ChatViewModel {
                     systemPrompt: effectiveSystemPrompt,
                     maxTokens: contextMaxTokens,
                     responseBuffer: 512,
-                    tokenizer: activeTokenizer
+                    tokenizer: cachingTokenizer
                 )
                 history = trimmed.map { (role: $0.role.rawValue, content: $0.content) }
             }

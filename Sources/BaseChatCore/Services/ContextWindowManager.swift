@@ -14,7 +14,7 @@ public enum ContextWindowManager {
         if let tokenizer {
             return tokenizer.tokenCount(text)
         }
-        return max(1, text.count / 4)
+        return HeuristicTokenizer().tokenCount(text)
     }
 
     /// Resolves the effective context size from available sources.
