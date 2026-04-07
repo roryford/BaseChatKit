@@ -56,15 +56,19 @@ public final class MockMLXModelContainer: @unchecked Sendable {
 
         let tokens = tokensToYield
         return AsyncStream { continuation in
-            Task {
+            let producerTask = Task {
                 for token in tokens {
                     if Task.isCancelled {
                         continuation.finish()
                         return
                     }
                     continuation.yield(.chunk(token))
+                    await Task.yield()
                 }
                 continuation.finish()
+            }
+            continuation.onTermination = { _ in
+                producerTask.cancel()
             }
         }
     }

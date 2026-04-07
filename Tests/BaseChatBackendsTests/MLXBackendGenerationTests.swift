@@ -13,8 +13,8 @@ extension MockMLXModelContainer: MLXModelContainerProtocol {}
 ///
 /// These tests run in CI without Apple Silicon — the generation path is driven
 /// entirely by the injected mock which never touches the Metal GPU stack.
-/// Only `test_sendableLMInput_wrapsAndUnwraps` requires hardware, because
-/// creating an `MLXArray` triggers the MLX Metal runtime.
+/// `test_sendableLMInput_wrapsAndUnwraps` is limited to compile-time/type-level
+/// wrapping checks and does not perform an MLX/Metal runtime round trip.
 final class MLXBackendGenerationTests: XCTestCase {
 
     // MARK: - Helpers
@@ -191,13 +191,11 @@ final class MLXBackendGenerationTests: XCTestCase {
         func assertSendable<T: Sendable>(_: T.Type) {}
         assertSendable(SendableLMInput.self)
 
-        // Verify the wrapper's public surface: init and .value are accessible.
-        // We can only do a structural check here without a real LMInput.
-        let mirror = Mirror(reflecting: SendableLMInput.self)
-        XCTAssertTrue(
-            "\(mirror.subjectType)".contains("SendableLMInput"),
-            "SendableLMInput must be the subject type"
-        )
+        // Verify the wrapper's public surface at compile time without constructing
+        // an LMInput: both the initializer and `.value` must be accessible.
+        let initializer = SendableLMInput.init
+        let valueKeyPath = \SendableLMInput.value
+        _ = (initializer, valueKeyPath)
     }
 }
 #endif
