@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.6](https://github.com/roryford/BaseChatKit/compare/v0.3.5...v0.3.6) (2026-04-07)
+
+### Bug Fixes
+
+**Swift 6.3 concurrency and SwiftData store collision fixes** — Swift 6.3 (released April 2026) tightened actor-isolation and `Sendable` enforcement in ways that produced compiler warnings across the framework, and CI (running Swift 6.0) rejected one pattern outright. `GenerationStream` is now a true `@MainActor`-isolated type — phase updates were already required on the main thread, so this matches the documented contract rather than changing it. All `setPhase` callsites in the cloud and local backends hop to `@MainActor` via `await MainActor.run { }`. Cloud backend subclasses (Claude, Kobold, Ollama, OpenAI) and `BackgroundDownloadManager` explicitly restate their `@unchecked Sendable` conformance, as Swift 6.3 requires subclasses to restate inherited conformances. `DeviceCapabilityService` replaces `UIDevice.current.model` — now `@MainActor`-isolated in Swift 6.3 — with `sysctl hw.machine` / `hw.model`, which is callable from any context. `StalledCallback.handler` is typed `(@Sendable () -> Void)?` so the Swift 6.0 region-based isolation checker can verify the weak capture of `GenerationStream` is safe. The demo app's SwiftData store is named `"BaseChatDemo"` to prevent it from writing to the generic `default.store` path shared by other apps, which caused an "unknown model version" crash on clean installs ([#203](https://github.com/roryford/BaseChatKit/issues/203)).
+
+**SwiftData schema type alignment** — `memoryBytes` in `ModelBenchmarkCache` and its associated `ModelBenchmarkResult` struct used `UInt64` in one place and `Int64` in another. SwiftData hashes both to the same SQLite INTEGER column type, so no migration was needed, but the mismatch required explicit casting at every use site. Both are now consistently `Int64`.
+
 ## [0.3.5](https://github.com/roryford/BaseChatKit/compare/v0.3.4...v0.3.5) (2026-04-06)
 
 ### Features
