@@ -18,8 +18,9 @@ let package = Package(
         .trait(name: "Llama", description: "Enable the llama.cpp (GGUF) inference backend"),
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.30.0"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "2.30.6"),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.31.3"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "2.31.3"),
+        .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.2.0"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
         .package(url: "https://github.com/mattt/llama.swift", from: "2.8672.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
@@ -54,7 +55,10 @@ let package = Package(
         // Shared test mocks and utilities
         .target(
             name: "BaseChatTestSupport",
-            dependencies: ["BaseChatCore"],
+            dependencies: [
+                "BaseChatCore",
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
+            ],
             path: "Sources/BaseChatTestSupport"
         ),
         .testTarget(
@@ -63,7 +67,13 @@ let package = Package(
         ),
         .testTarget(
             name: "BaseChatBackendsTests",
-            dependencies: ["BaseChatBackends", "BaseChatUI", "BaseChatCore", "BaseChatTestSupport"]
+            dependencies: [
+                "BaseChatBackends",
+                "BaseChatUI",
+                "BaseChatCore",
+                "BaseChatTestSupport",
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
+            ]
         ),
         .testTarget(
             name: "BaseChatUITests",

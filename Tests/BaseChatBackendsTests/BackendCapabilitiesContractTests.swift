@@ -1,5 +1,6 @@
 import XCTest
 import BaseChatCore
+import BaseChatTestSupport
 @testable import BaseChatBackends
 
 /// Contract tests that lock down capability fields on every concrete backend.

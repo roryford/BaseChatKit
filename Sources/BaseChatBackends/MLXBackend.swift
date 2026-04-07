@@ -46,7 +46,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Private
 
-    private var modelContainer: ModelContainer?
+    private var modelContainer: (any MLXModelContainerProtocol)?
     private var generationTask: Task<Void, Never>?
 
     // MARK: - Init
@@ -61,7 +61,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         do {
             // Load from a local directory containing config.json + .safetensors.
             // loadModelContainer is a free function from MLXLMCommon.
-            let container = try await loadModelContainer(
+            let container: ModelContainer = try await loadModelContainer(
                 directory: url
             ) { _ in
                 // Loading progress — useful for large models.
@@ -128,14 +128,11 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             }
 
             do {
-                let input = try await modelContainer.perform { context in
-                    try await context.processor.prepare(input: .init(messages: messages))
-                }
                 let outputLimit = config.maxOutputTokens
                 var outputTokenCount = 0
                 var isFirstToken = true
                 let mlxStream = try await modelContainer.generate(
-                    input: input,
+                    messages: messages,
                     parameters: generateConfig
                 )
                 for await generation in mlxStream {
@@ -173,6 +170,17 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         }
 
         return generationStream
+    }
+
+    // MARK: - Testing
+
+    /// Injects a mock container so unit tests can exercise the generation path
+    /// without loading real model weights. Call this before `generate()`.
+    ///
+    /// Not part of the public API — visible to `BaseChatBackendsTests` via `@testable import`.
+    func _inject(_ container: any MLXModelContainerProtocol) {
+        modelContainer = container
+        isModelLoaded = true
     }
 
     // MARK: - Control
