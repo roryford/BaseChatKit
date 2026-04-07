@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/roryford/BaseChatKit/compare/v0.3.6...v0.3.7) (2026-04-07)
+
+
+### Features
+
+**Testable MLX generation and HuggingFace linker fix** — `MLXBackend.generate()` was completely untested: `ModelContainer` from `mlx-swift-lm` is a concrete class with no protocol, so there was no way to inject a mock without loading real weights on Apple Silicon. A new internal `MLXModelContainerProtocol` abstracts the two methods `MLXBackend` calls — `generate(messages:parameters:)` — and the real `ModelContainer` conforms via a one-line extension. `MLXBackend` now holds `any MLXModelContainerProtocol` and exposes a package-internal `_inject(_:)` method so tests can swap in a mock without touching production call sites. `MockMLXModelContainer` in `BaseChatTestSupport` yields injected token arrays, tracks call counts, and supports mid-stream cancellation with a tracked producer task wired to `continuation.onTermination` — making the cancellation test deterministic rather than racy. Five new tests run in CI without hardware: token streaming, output token limits, cancellation, error propagation from `generate()`, and a compile-time surface check for the `SendableLMInput` wrapper. The release also fixes a linker error (#205) that broke all test targets in downstream projects: `mlx-swift-lm 2.30.6` resolved a `swift-transformers` version whose transitive `HuggingFace.HubCache` symbols conflicted with the direct `swift-huggingface 0.9.0` pin. Updated to `mlx-swift 0.31.3`, `mlx-swift-lm 2.31.3`, and added `swift-transformers 1.2.0` as an explicit dependency ([#206](https://github.com/roryford/BaseChatKit/issues/206), closes [#205](https://github.com/roryford/BaseChatKit/issues/205)).
+
 ## [0.3.6](https://github.com/roryford/BaseChatKit/compare/v0.3.5...v0.3.6) (2026-04-07)
 
 ### Bug Fixes
