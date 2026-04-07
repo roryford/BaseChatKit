@@ -318,6 +318,8 @@ public final class ChatViewModel {
     /// Token for the currently active generation request, if any.
     var activeGenerationToken: InferenceService.GenerationRequestToken?
     var generationTask: Task<Void, Never>?
+    /// Token for the currently active generation request, if any. Added for generation queue (#204)
+    var activeGenerationToken: InferenceService.GenerationRequestToken?
     var backgroundTask: Task<Void, Never>?
     var coordinatedLoadTask: Task<Void, Never>?
     var latestLoadIntentGeneration: UInt64 = 0

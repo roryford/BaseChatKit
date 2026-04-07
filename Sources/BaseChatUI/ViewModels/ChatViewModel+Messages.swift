@@ -127,6 +127,7 @@ extension ChatViewModel {
     public func stopGeneration() {
         generationTask?.cancel()
         generationTask = nil
+        activeGenerationToken = nil
         inferenceService.stopGeneration()
         activityPhase = .idle
 

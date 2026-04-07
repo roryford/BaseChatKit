@@ -136,9 +136,14 @@ final class InterleavingTests: XCTestCase {
         await vm.awaitFirstToken()
 
         // Create and switch to session B mid-stream.
+        // switchToSession now explicitly stops generation and discards stale queue entries.
         let sessionB = try sessionManager.createSession(title: "Session B")
         sessionManager.activeSession = sessionB
         vm.switchToSession(sessionB)
+
+        // Generation should be stopped and queue cleared after switch.
+        XCTAssertFalse(vm.isGenerating, "isGenerating should be false after session switch stops generation")
+        XCTAssertFalse(vm.inferenceService.hasQueuedRequests, "Queue should be empty after session switch")
 
         // Session B should be empty immediately after switching.
         XCTAssertTrue(vm.messages.isEmpty,
