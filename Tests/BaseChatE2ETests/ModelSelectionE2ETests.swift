@@ -95,6 +95,9 @@ final class ModelSelectionE2ETests {
         try FileManager.default.createDirectory(at: mlxDir, withIntermediateDirectories: true)
         try Data("{\"model_type\":\"llama\"}".utf8)
             .write(to: mlxDir.appendingPathComponent("config.json"))
+        // MLX validation requires at least one .safetensors file since #148.
+        try Data(repeating: 0x00, count: 1)
+            .write(to: mlxDir.appendingPathComponent("weights.safetensors"))
 
         vm.refreshModels()
 
