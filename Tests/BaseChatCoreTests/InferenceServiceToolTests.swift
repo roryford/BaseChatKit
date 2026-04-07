@@ -138,7 +138,8 @@ private final class MockToolCallingBackend: InferenceBackend, ToolCallingBackend
 
 // MARK: - Mock Tool Call Observer
 
-private final class MockToolCallObserver: ToolCallObserver, @unchecked Sendable {
+@MainActor
+private final class MockToolCallObserver: ToolCallObserver {
     var receivedToolCalls: [ToolCall] = []
     var receivedResults: [(result: ToolResult, call: ToolCall)] = []
 

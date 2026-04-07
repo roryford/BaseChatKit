@@ -24,21 +24,18 @@ final class InterleavingTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
 
-        let schema = Schema(BaseChatSchema.allModelTypes)
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try ModelContainer(for: schema, configurations: [config])
+        container = try makeInMemoryContainer()
         context = container.mainContext
 
         slowBackend = SlowMockBackend(tokenCount: 20, delayMilliseconds: 50)
 
         let service = InferenceService(backend: slowBackend, name: "SlowMock")
-        vm = ChatViewModel(inferenceService: service)
-        vm.configure(modelContext: context)
-
         persistence = SwiftDataPersistenceProvider(modelContext: context)
+        vm = ChatViewModel(inferenceService: service)
+        vm.configure(persistence: persistence)
 
         sessionManager = SessionManagerViewModel()
-        sessionManager.configure(modelContext: context)
+        sessionManager.configure(persistence: persistence)
     }
 
     override func tearDown() async throws {

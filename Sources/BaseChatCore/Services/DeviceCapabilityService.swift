@@ -1,7 +1,4 @@
 import Foundation
-#if os(iOS)
-import UIKit
-#endif
 
 // MARK: - Model Size Recommendation
 
@@ -106,13 +103,34 @@ public final class DeviceCapabilityService: Sendable {
 
     private var platformDeviceName: String {
         #if os(iOS)
-        return UIDevice.current.model  // e.g., "iPad", "iPhone"
+        return iOSDeviceName
         #elseif os(macOS)
         return macModelName
         #else
         return "Unknown Device"
         #endif
     }
+
+    #if os(iOS)
+    /// Reads the iOS device machine identifier via `sysctl hw.machine` (e.g., "iPhone16,2").
+    /// UIDevice is unavailable in Swift 6 strict concurrency; sysctl works on any thread.
+    private var iOSDeviceName: String {
+        var size: Int = 0
+        sysctlbyname("hw.machine", nil, &size, nil, 0)
+        guard size > 0 else { return "iPhone" }
+
+        var machine = [CChar](repeating: 0, count: size)
+        sysctlbyname("hw.machine", &machine, &size, nil, 0)
+        let identifier = String(decoding: machine.map(UInt8.init(bitPattern:)), as: UTF8.self)
+            .trimmingCharacters(in: .controlCharacters)
+
+        // Map hardware identifier prefix to human-readable family.
+        if identifier.hasPrefix("iPad")    { return "iPad" }
+        if identifier.hasPrefix("iPhone")  { return "iPhone" }
+        if identifier.hasPrefix("AppleTV") { return "Apple TV" }
+        return identifier
+    }
+    #endif
 
     #if os(macOS)
     /// Reads the Mac's marketing model name via `sysctl hw.model`, falling back to a generic label.
@@ -123,7 +141,8 @@ public final class DeviceCapabilityService: Sendable {
 
         var model = [CChar](repeating: 0, count: size)
         sysctlbyname("hw.model", &model, &size, nil, 0)
-        let identifier = String(cString: model)
+        let identifier = String(decoding: model.map(UInt8.init(bitPattern:)), as: UTF8.self)
+            .trimmingCharacters(in: .controlCharacters)
 
         // The sysctl value is a hardware identifier like "Mac14,6".
         // A full marketing-name lookup would require IOKit; keeping it simple for now.

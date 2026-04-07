@@ -49,7 +49,7 @@ public final class ChatViewModel {
 
     /// Called when a session might need its title auto-generated.
     /// Set by the view layer to connect to SessionManagerViewModel.
-    public var onFirstMessage: ((ChatSessionRecord, String) -> Void)?
+    public var onFirstMessage: (@MainActor (ChatSessionRecord, String) -> Void)?
 
     // MARK: - First Run / Onboarding
 
@@ -60,12 +60,12 @@ public final class ChatViewModel {
     /// behaviour auto-selects the Foundation model (if available); the model load itself
     /// is deferred to the view's `onChange(of: selectedModel)` handler to avoid a
     /// double-load race condition.
-    public var onFirstLaunch: (() -> Void)?
+    public var onFirstLaunch: (@MainActor () -> Void)?
 
     /// Returns `true` if the Foundation model backend is available on this device.
     /// Apps should set this to enable Foundation model auto-discovery.
     /// Example: `chatViewModel.foundationModelProvider = { FoundationBackend.isAvailable }`
-    public var foundationModelProvider: (() -> Bool)?
+    public var foundationModelProvider: (@MainActor () -> Bool)?
 
     // MARK: - Published State
 
@@ -287,7 +287,7 @@ public final class ChatViewModel {
 
     /// Called when the upgrade hint is first shown. Override to customise behaviour.
     /// Default is `nil` (no-op — the hint banner is displayed by `ChatView`).
-    public var onUpgradeHintTriggered: (() -> Void)?
+    public var onUpgradeHintTriggered: (@MainActor () -> Void)?
 
     // MARK: - Memory Indicator
 

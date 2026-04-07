@@ -152,6 +152,7 @@ public enum ToolCallingError: Error, Equatable, Sendable {
 ///
 /// Adopt this protocol to display tool calls and results in the UI
 /// as they happen during a generation cycle.
+@MainActor
 public protocol ToolCallObserver: AnyObject, Sendable {
     /// Called when the model requests a tool call.
     func didRequestToolCall(_ toolCall: ToolCall) async

@@ -142,7 +142,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                     if Task.isCancelled { break }
                     if let text = generation.chunk {
                         if isFirstToken {
-                            generationStream.setPhase(.streaming)
+                            await MainActor.run { generationStream.setPhase(.streaming) }
                             isFirstToken = false
                         }
                         continuation.yield(.token(text))
@@ -153,15 +153,15 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                         }
                     }
                 }
-                generationStream.setPhase(.done)
+                await MainActor.run { generationStream.setPhase(.done) }
             } catch {
                 if !Task.isCancelled {
                     Self.logger.error("MLX generation error: \(error)")
-                    generationStream.setPhase(.failed(error.localizedDescription))
+                    await MainActor.run { generationStream.setPhase(.failed(error.localizedDescription)) }
                     continuation.finish(throwing: error)
                     return
                 }
-                generationStream.setPhase(.done)
+                await MainActor.run { generationStream.setPhase(.done) }
             }
             continuation.finish()
         }

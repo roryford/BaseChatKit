@@ -19,9 +19,7 @@ final class PersistenceIntegrationTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
 
-        let schema = Schema(BaseChatSchema.allModelTypes)
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try! ModelContainer(for: schema, configurations: [config])
+        container = try makeInMemoryContainer()
         context = container.mainContext
 
         mock = MockInferenceBackend()
@@ -30,7 +28,7 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         let service = InferenceService(backend: mock, name: "MockPersistence")
         vm = ChatViewModel(inferenceService: service)
-        vm.configure(modelContext: context)
+        vm.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
     }
 
     override func tearDown() async throws {
@@ -78,7 +76,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         // Create a VM without configuring modelContext.
         let service = InferenceService(backend: mock, name: "NoContext")
         let unconfiguredVM = ChatViewModel(inferenceService: service)
-        // Do NOT call configure(modelContext:)
+        // Do NOT call configure(persistence:)
 
         // Create a session and set it directly so loadMessages has a sessionID.
         let session = ChatSession(title: "Test")
@@ -95,7 +93,7 @@ final class PersistenceIntegrationTests: XCTestCase {
     // MARK: - loadMessages with No activeSession
 
     func test_loadMessages_withNoActiveSession_clearsMessages() {
-        vm.configure(modelContext: context)
+        vm.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
 
         // Manually add a message to the in-memory messages array.
         let dummyMessage = ChatMessage(role: .user, content: "stale", sessionID: UUID())
@@ -271,7 +269,7 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         // Use SessionManagerViewModel to delete the session (it handles cascade).
         let sessionManager = SessionManagerViewModel()
-        sessionManager.configure(modelContext: context)
+        sessionManager.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
         sessionManager.deleteSession(session.toRecord())
 
         XCTAssertEqual(
@@ -302,7 +300,7 @@ final class PersistenceIntegrationTests: XCTestCase {
 
         // Delete session B.
         let sessionManager = SessionManagerViewModel()
-        sessionManager.configure(modelContext: context)
+        sessionManager.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
         sessionManager.deleteSession(sessionB.toRecord())
 
         // Session A should be unaffected.

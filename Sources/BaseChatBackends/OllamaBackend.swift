@@ -25,7 +25,7 @@ import BaseChatCore
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
 /// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
-public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigurable {
+public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigurable, @unchecked Sendable {
 
     /// How long Ollama should keep the model loaded in VRAM after a request.
     /// Default is "30m" (30 minutes). Ollama's own default is "5m".

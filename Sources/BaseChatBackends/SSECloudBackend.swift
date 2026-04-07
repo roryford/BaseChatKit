@@ -288,7 +288,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                     let (bytes, _) = try await withRetry(strategy: capturedStrategy) {
                         let attempt = retryCounter.incrementAndGet()
                         if attempt > 1 {
-                            streamBox.value?.setPhase(.retrying(attempt: attempt - 1, of: maxRetries))
+                            await MainActor.run { streamBox.value?.setPhase(.retrying(attempt: attempt - 1, of: maxRetries)) }
                         }
 
                         let (bytes, response) = try await session.bytes(for: request)
@@ -303,7 +303,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                         return (bytes, httpResponse)
                     }
 
-                    streamBox.value?.setPhase(.streaming)
+                    await MainActor.run { streamBox.value?.setPhase(.streaming) }
 
                     // Stream parsing — outside retry scope.
                     guard let self else {
@@ -311,14 +311,14 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                     }
                     try await self.parseResponseStream(bytes: bytes, continuation: continuation)
 
-                    streamBox.value?.setPhase(.done)
+                    await MainActor.run { streamBox.value?.setPhase(.done) }
                     continuation.finish()
                 } catch {
                     if error is CancellationError || Task.isCancelled {
                         continuation.finish()
                     } else {
                         Log.network.error("\(self?.backendName ?? "SSECloud") stream error: \(error.localizedDescription, privacy: .private)")
-                        streamBox.value?.setPhase(.failed(error.localizedDescription))
+                        await MainActor.run { streamBox.value?.setPhase(.failed(error.localizedDescription)) }
                         continuation.finish(throwing: error)
                     }
                 }

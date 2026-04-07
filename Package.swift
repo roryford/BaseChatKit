@@ -21,7 +21,7 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.30.0"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "2.30.6"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
-        .package(url: "https://github.com/mattt/llama.swift", from: "2.8563.0"),
+        .package(url: "https://github.com/mattt/llama.swift", from: "2.8672.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
     ],
     targets: [

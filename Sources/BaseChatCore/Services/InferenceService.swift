@@ -3,11 +3,11 @@ import Observation
 
 /// A factory closure that creates a local inference backend for the given model type.
 /// Return `nil` if this factory does not handle the given type.
-public typealias BackendFactory = (ModelType) -> (any InferenceBackend)?
+public typealias BackendFactory = @MainActor (ModelType) -> (any InferenceBackend)?
 
 /// A factory closure that creates a cloud inference backend for the given API provider.
 /// Return `nil` if this factory does not handle the given provider.
-public typealias CloudBackendFactory = (APIProvider) -> (any InferenceBackend)?
+public typealias CloudBackendFactory = @MainActor (APIProvider) -> (any InferenceBackend)?
 
 /// Orchestrates inference across multiple backends.
 ///

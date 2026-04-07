@@ -256,7 +256,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             // Set up sampler chain
             let sparams = llama_sampler_chain_default_params()
             guard let sampler = llama_sampler_chain_init(sparams) else {
-                generationStream.setPhase(.failed("Failed to create sampler"))
+                await MainActor.run { generationStream.setPhase(.failed("Failed to create sampler")) }
                 continuation.finish(throwing: InferenceError.inferenceFailure("Failed to create sampler"))
                 return
             }
@@ -293,7 +293,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             batch.n_tokens = Int32(tokens.count)
 
             if llama_decode(context, batch) != 0 {
-                generationStream.setPhase(.failed("Failed to decode prompt"))
+                await MainActor.run { generationStream.setPhase(.failed("Failed to decode prompt")) }
                 continuation.finish(throwing: InferenceError.inferenceFailure("Failed to decode prompt"))
                 return
             }
@@ -313,7 +313,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 // Decode token to text
                 if let text = self.tokenToString(token, invalidUTF8Buffer: &invalidUTF8) {
                     if isFirstToken {
-                        generationStream.setPhase(.streaming)
+                        await MainActor.run { generationStream.setPhase(.streaming) }
                         isFirstToken = false
                     }
                     continuation.yield(.token(text))
@@ -332,13 +332,13 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
 
                 if llama_decode(context, batch) != 0 {
-                    generationStream.setPhase(.failed("Decode failed during generation"))
+                    await MainActor.run { generationStream.setPhase(.failed("Decode failed during generation")) }
                     continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
                     return
                 }
             }
 
-            generationStream.setPhase(.done)
+            await MainActor.run { generationStream.setPhase(.done) }
 
             // Clear KV cache for next generation (skip if cancelled/unloaded)
             if !self.withStateLock({ self.cancelled }), let memory = llama_get_memory(context) {
