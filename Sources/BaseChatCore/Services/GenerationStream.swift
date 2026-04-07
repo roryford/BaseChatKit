@@ -13,9 +13,10 @@ import Observation
 /// ``CloudBackendError/timeout(_:)`` if no event arrives within the timeout.
 /// The phase transitions to `.stalled` before the timeout fires.
 ///
-/// Thread-safe: ``setPhase(_:)`` can be called from any thread.
+/// ``setPhase(_:)`` must be called on the `@MainActor`.
 @Observable
-public final class GenerationStream: @unchecked Sendable {
+@MainActor
+public final class GenerationStream: Sendable {
 
     /// The content event stream. Iterate this to receive tokens.
     ///
@@ -24,14 +25,14 @@ public final class GenerationStream: @unchecked Sendable {
     /// the timeout. The ``phase`` transitions to `.stalled` at the midpoint
     /// of the timeout to give the UI a chance to show a warning before the
     /// hard timeout fires.
-    public let events: AsyncThrowingStream<GenerationEvent, Error>
+    public nonisolated let events: AsyncThrowingStream<GenerationEvent, Error>
 
     /// Current lifecycle phase. Observed by the UI via `@Observable`.
     public private(set) var phase: Phase = .connecting
 
     /// Optional idle timeout. When set, ``events`` will throw
     /// ``CloudBackendError/timeout(_:)`` if no event arrives within this duration.
-    public let idleTimeout: Duration?
+    public nonisolated let idleTimeout: Duration?
 
     // MARK: - Phase
 
@@ -60,7 +61,7 @@ public final class GenerationStream: @unchecked Sendable {
     /// - Parameters:
     ///   - stream: The underlying async throwing stream of generation events.
     ///   - idleTimeout: Optional idle timeout duration. `nil` disables idle detection.
-    public init(
+    public nonisolated init(
         _ stream: AsyncThrowingStream<GenerationEvent, Error>,
         idleTimeout: Duration? = nil
     ) {
@@ -82,7 +83,10 @@ public final class GenerationStream: @unchecked Sendable {
         }
 
         // Now that self is fully initialized, wire the stalled callback.
-        _stalledCallback?.handler = { [weak self] in self?.setPhase(.stalled) }
+        // Hop to MainActor because setPhase is MainActor-isolated.
+        _stalledCallback?.handler = { [weak self] in
+            Task { @MainActor in self?.setPhase(.stalled) }
+        }
     }
 
     /// Deferred callback wired up after init completes.
@@ -91,17 +95,9 @@ public final class GenerationStream: @unchecked Sendable {
 
     // MARK: - Phase Mutation
 
-    /// Updates the lifecycle phase from any thread.
-    /// Funnels all mutations to MainActor since @Observable synthesizes
-    /// observation registrar access on reads from the main thread.
+    /// Updates the lifecycle phase. Must be called on `@MainActor`.
     public func setPhase(_ newPhase: Phase) {
-        if Thread.isMainThread {
-            phase = newPhase
-        } else {
-            Task { @MainActor in
-                self.phase = newPhase
-            }
-        }
+        phase = newPhase
     }
 
     // MARK: - Idle Timeout
@@ -114,7 +110,7 @@ public final class GenerationStream: @unchecked Sendable {
     /// task that periodically checks elapsed time since the last event.
     ///
     /// The monitor fires `.stalled` at the midpoint and throws at the full timeout.
-    private static func withIdleTimeout(
+    private nonisolated static func withIdleTimeout(
         base: AsyncThrowingStream<GenerationEvent, Error>,
         timeout: Duration,
         onStalled: @escaping @Sendable () -> Void

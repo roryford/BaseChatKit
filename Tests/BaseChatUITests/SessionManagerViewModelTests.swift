@@ -2,6 +2,7 @@ import XCTest
 import SwiftData
 @testable import BaseChatUI
 import BaseChatCore
+import BaseChatTestSupport
 
 @MainActor
 final class SessionManagerViewModelTests: XCTestCase {
@@ -12,12 +13,10 @@ final class SessionManagerViewModelTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        let schema = Schema([ChatSession.self, ChatMessage.self, SamplerPreset.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try! ModelContainer(for: schema, configurations: [config])
+        container = try makeInMemoryContainer()
         context = container.mainContext
         vm = SessionManagerViewModel()
-        vm.configure(modelContext: context)
+        vm.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
     }
 
     override func tearDown() async throws {

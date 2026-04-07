@@ -181,8 +181,6 @@ final class ServerDiscoveryViewModelTests: XCTestCase {
     }
 
     private func makeInMemoryContainer() throws -> ModelContainer {
-        let schema = Schema(BaseChatSchema.allModelTypes)
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        return try ModelContainer(for: schema, configurations: [config])
+        try ModelContainerFactory.makeInMemoryContainer()
     }
 }

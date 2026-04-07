@@ -1,6 +1,7 @@
 import XCTest
 @testable import BaseChatCore
 
+@MainActor
 final class GenerationStreamTests: XCTestCase {
 
     // MARK: - Event Delivery

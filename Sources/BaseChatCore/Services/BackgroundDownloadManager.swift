@@ -12,7 +12,7 @@ import os
 /// Because `URLSessionDownloadDelegate` callbacks arrive on the session's delegate queue
 /// (not the main thread), state mutations are dispatched to `@MainActor`.
 @Observable
-public final class BackgroundDownloadManager: NSObject {
+public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     // MARK: - Constants
 

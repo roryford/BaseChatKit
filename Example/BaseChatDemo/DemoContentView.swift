@@ -15,6 +15,8 @@ struct DemoContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var isModelManagementPresented = false
 
+    let inferenceService: InferenceService
+
     /// When `true`, the auto-model-load and related onAppear work is skipped
     /// so that UI tests start from a deterministic empty state.
     var skipAutoModelLoad: Bool = false
@@ -31,8 +33,9 @@ struct DemoContentView: View {
                 .environment(managementViewModel)
         }
         .onAppear {
-            viewModel.configure(modelContext: modelContext)
-            sessionManager.configure(modelContext: modelContext)
+            let persistence = SwiftDataPersistenceProvider(modelContext: modelContext)
+            viewModel.configure(persistence: persistence)
+            sessionManager.configure(persistence: persistence)
             viewModel.setAvailableEndpoints(cloudEndpoints)
 
             if !skipAutoModelLoad {
@@ -60,7 +63,7 @@ struct DemoContentView: View {
             }
 
             // Wire AI auto-rename: fires after the first user message in a session.
-            viewModel.onFirstMessage = { [inferenceService = viewModel.inferenceService] session, text in
+            viewModel.onFirstMessage = { [inferenceService] session, text in
                 Task {
                     await sessionManager.autoRenameSession(
                         session,

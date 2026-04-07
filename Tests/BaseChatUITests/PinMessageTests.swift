@@ -15,9 +15,7 @@ final class PinMessageTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
 
-        let schema = Schema(BaseChatSchema.allModelTypes)
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try! ModelContainer(for: schema, configurations: [config])
+        container = try makeInMemoryContainer()
         context = container.mainContext
 
         mock = MockInferenceBackend()
@@ -26,7 +24,7 @@ final class PinMessageTests: XCTestCase {
 
         let service = InferenceService(backend: mock, name: "MockPin")
         vm = ChatViewModel(inferenceService: service)
-        vm.configure(modelContext: context)
+        vm.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
     }
 
     override func tearDown() async throws {

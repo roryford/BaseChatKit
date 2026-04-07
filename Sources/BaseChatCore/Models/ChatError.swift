@@ -9,7 +9,7 @@ public struct ChatError: Identifiable, Sendable {
     public let id: UUID
     public let kind: Kind
     public let message: String
-    public nonisolated(unsafe) let underlyingError: (any Error)?
+    public let underlyingError: (any Error)?
     public let recovery: Recovery?
 
     public init(

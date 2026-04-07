@@ -30,9 +30,7 @@ final class FoundationModelE2ETests: XCTestCase {
         try XCTSkipUnless(HardwareRequirements.hasFoundationModels, "Requires macOS 26+ / iOS 26+")
         try XCTSkipUnless(FoundationBackend.isAvailable, "Apple Intelligence not available on this device")
 
-        let schema = Schema(BaseChatSchema.allModelTypes)
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try ModelContainer(for: schema, configurations: [config])
+        container = try makeInMemoryContainer()
         context = container.mainContext
 
         let inferenceService = InferenceService()

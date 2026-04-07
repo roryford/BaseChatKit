@@ -9,6 +9,7 @@ struct BaseChatDemoApp: App {
     @State private var chatViewModel: ChatViewModel
     @State private var modelManagementViewModel: ModelManagementViewModel
     @State private var sessionManager = SessionManagerViewModel()
+    private let inferenceService: InferenceService
 
     /// When `true`, the app was launched with `--uitesting` and should use
     /// an in-memory store, skip auto-model-load, and disable animations.
@@ -35,6 +36,7 @@ struct BaseChatDemoApp: App {
 
         let inferenceService = InferenceService()
         DefaultBackends.register(with: inferenceService)
+        self.inferenceService = inferenceService
 
         let vm = ChatViewModel(inferenceService: inferenceService)
         vm.foundationModelProvider = {
@@ -52,7 +54,7 @@ struct BaseChatDemoApp: App {
             downloadManager: downloadManager
         ))
 
-        let config = ModelConfiguration(isStoredInMemoryOnly: testing)
+        let config = ModelConfiguration("BaseChatDemo", isStoredInMemoryOnly: testing)
         self.modelContainer = try! ModelContainerFactory.makeContainer(configurations: [config])
     }
 
@@ -126,7 +128,7 @@ struct BaseChatDemoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            DemoContentView(skipAutoModelLoad: isUITesting)
+            DemoContentView(inferenceService: inferenceService, skipAutoModelLoad: isUITesting)
                 .environment(chatViewModel)
                 .environment(modelManagementViewModel)
                 .environment(sessionManager)
