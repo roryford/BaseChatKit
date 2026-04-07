@@ -40,6 +40,10 @@ public struct GenerationConfig: Sendable {
 /// Each backend wraps a different inference engine (MLX, llama.cpp, etc.)
 /// and exposes the same async streaming API. `InferenceService` picks the
 /// right backend based on model format and delegates all work here.
+///
+/// Backends are unaware of the generation queue — they always see one
+/// `generate()` call at a time. Queuing, priority ordering, and session
+/// scoping are service-level concerns handled by `InferenceService`.
 public protocol InferenceBackend: AnyObject, Sendable {
     var isModelLoaded: Bool { get }
     var isGenerating: Bool { get }

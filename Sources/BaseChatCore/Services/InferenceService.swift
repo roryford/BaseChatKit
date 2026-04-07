@@ -33,6 +33,23 @@ public typealias CloudBackendFactory = @MainActor (APIProvider) -> (any Inferenc
 /// These guarantees are service-level coordination semantics. Backend-specific
 /// threading/execution constraints (for example MLX generation's main-thread
 /// requirement) are unchanged.
+///
+/// ## Generation queue guarantees
+///
+/// - **Sequential FIFO**: only one backend `generate()` call is active at a time.
+///   The queue is processed sequentially regardless of backend type.
+/// - **Priority ordering**: `.userInitiated` > `.normal` > `.background`.
+///   Within the same priority, requests execute in FIFO order.
+/// - **Session scoping**: requests carry an optional session ID.
+///   `discardRequests(notMatching:)` cancels all requests not belonging to the
+///   specified session. Requests with `nil` sessionID are session-agnostic.
+/// - **Per-request cancellation**: `cancel(_:)` removes a queued request or stops
+///   the active one, then drains the next item.
+/// - **Max queue depth**: excess `enqueue()` calls throw. Default: 8.
+/// - **Thermal gating**: `.background` requests are dropped when the device is
+///   under `.serious` or `.critical` thermal pressure.
+/// - **`generationDidFinish()` contract**: callers MUST call this after consuming
+///   the stream. Failure to do so stalls the queue permanently.
 @Observable
 @MainActor
 public final class InferenceService {
