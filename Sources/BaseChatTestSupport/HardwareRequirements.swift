@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Metal)
+import Metal
+#endif
 
 /// Static flags for hardware-gated test skipping.
 ///
@@ -24,6 +27,19 @@ public enum HardwareRequirements {
         return false
         #else
         return true
+        #endif
+    }
+
+    /// `true` when a real Metal GPU device is accessible in the current process context.
+    ///
+    /// Apple Silicon may still fail to access Metal when running `swift test` via SSH
+    /// or in a headless CI environment without a GPU context. Tests that create
+    /// `MLXArray` values must gate on this flag, not just `isAppleSilicon`.
+    public static var hasMetalDevice: Bool {
+        #if canImport(Metal)
+        return MTLCreateSystemDefaultDevice() != nil
+        #else
+        return false
         #endif
     }
 
