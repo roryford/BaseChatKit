@@ -18,7 +18,7 @@ final class CancellationTests: XCTestCase {
     // MARK: - Setup / Teardown
 
     override func setUp() async throws {
-        try await try await super.setUp()
+        try await super.setUp()
 
         container = try makeInMemoryContainer()
         context = container.mainContext
@@ -43,7 +43,7 @@ final class CancellationTests: XCTestCase {
         slowBackend = nil
         context = nil
         container = nil
-        try await try await super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Helpers
