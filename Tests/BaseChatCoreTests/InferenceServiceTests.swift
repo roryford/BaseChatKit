@@ -377,7 +377,7 @@ final class InferenceServiceTests: XCTestCase {
 
     // MARK: - isGenerating lifecycle
 
-    func test_generate_backendThrowsSynchronously_resetsIsGenerating() async throws {
+    func test_generate_backendThrowsSynchronously_isGeneratingUnchanged() async throws {
         let mock = MockInferenceBackend()
         mock.isModelLoaded = true
         mock.shouldThrowOnGenerate = InferenceError.inferenceFailure("boom")
@@ -391,8 +391,9 @@ final class InferenceServiceTests: XCTestCase {
             // expected
         }
 
+        // generate() no longer manages isGenerating — the queue does.
         XCTAssertFalse(service.isGenerating,
-                        "isGenerating must be reset when backend.generate() throws synchronously")
+                        "isGenerating should remain false — generate() no longer sets it")
     }
 
     func test_generate_streamCompletesNormally_isGeneratingResetByFinish() async throws {
@@ -410,7 +411,7 @@ final class InferenceServiceTests: XCTestCase {
                         "isGenerating should be false after generationDidFinish()")
     }
 
-    func test_generate_streamErrorMidStream_isGeneratingStillTrue() async throws {
+    func test_generate_streamErrorMidStream_isGeneratingManagedByQueue() async throws {
         let midStreamBackend = MidStreamErrorBackend(
             tokensBeforeError: ["partial"],
             errorToThrow: NSError(domain: "test", code: 1)
@@ -427,11 +428,11 @@ final class InferenceServiceTests: XCTestCase {
         }
 
         XCTAssertTrue(caughtError, "Stream should have thrown mid-stream")
-        // The service's isGenerating stays true because only generationDidFinish() resets it.
-        // The backend's own isGenerating is reset by its stream, but InferenceService.isGenerating
-        // is set at the service level (line 328) and only cleared by generationDidFinish() or stopGeneration().
-        XCTAssertTrue(service.isGenerating,
-                       "isGenerating should remain true until generationDidFinish() is called — mid-stream errors don't auto-reset it")
+        // generate() no longer manages isGenerating — the queue does.
+        // When called directly (not via enqueue), isGenerating is not set.
+        // The caller (queue or legacy code) is responsible for lifecycle state.
+        XCTAssertFalse(service.isGenerating,
+                       "generate() no longer sets isGenerating — the generation queue manages this state")
     }
 
     // MARK: - Cloud backend interop
