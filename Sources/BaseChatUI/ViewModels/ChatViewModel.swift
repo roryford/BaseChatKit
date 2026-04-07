@@ -315,6 +315,8 @@ public final class ChatViewModel {
         case cloudEndpoint(APIEndpoint)
     }
 
+    /// Token for the currently active generation request, if any.
+    var activeGenerationToken: InferenceService.GenerationRequestToken?
     var generationTask: Task<Void, Never>?
     var backgroundTask: Task<Void, Never>?
     var coordinatedLoadTask: Task<Void, Never>?

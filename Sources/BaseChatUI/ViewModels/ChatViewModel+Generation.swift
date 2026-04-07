@@ -51,8 +51,12 @@ extension ChatViewModel {
         activityPhase = .waitingForFirstToken
         let messageID = assistantMessage.id
         defer {
-            activityPhase = .idle
+            activeGenerationToken = nil
             inferenceService.generationDidFinish()
+            // Only go idle if no more queued requests will start.
+            if !inferenceService.hasQueuedRequests {
+                activityPhase = .idle
+            }
         }
 
         do {
@@ -107,13 +111,16 @@ extension ChatViewModel {
                 history = trimmed.map { (role: $0.role.rawValue, content: $0.content) }
             }
 
-            let stream = try inferenceService.generate(
+            let (token, stream) = try inferenceService.enqueue(
                 messages: history,
                 systemPrompt: effectiveSystemPrompt,
                 temperature: temperature,
                 topP: topP,
-                repeatPenalty: repeatPenalty
+                repeatPenalty: repeatPenalty,
+                priority: .userInitiated,
+                sessionID: activeSessionID
             )
+            activeGenerationToken = token
 
             var tokenCount = 0
             // GenerationStream.phase tracks backend-level lifecycle (connecting, streaming, stalled, retrying).
