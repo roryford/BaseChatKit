@@ -84,7 +84,7 @@ public final class GenerationStream: Sendable {
 
         // Now that self is fully initialized, wire the stalled callback.
         // Hop to MainActor because setPhase is MainActor-isolated.
-        _stalledCallback?.handler = { [weak self] in
+        _stalledCallback?.handler = { @Sendable [weak self] in
             Task { @MainActor in self?.setPhase(.stalled) }
         }
     }
@@ -215,7 +215,7 @@ private typealias AtomicInstant = ManagedAtomic<ContinuousClock.Instant>
 /// is available, and the handler is assigned after init completes.
 private final class StalledCallback: @unchecked Sendable {
     private let lock = os_unfair_lock_t.allocate(capacity: 1)
-    var handler: (() -> Void)? {
+    var handler: (@Sendable () -> Void)? {
         get {
             os_unfair_lock_lock(lock)
             defer { os_unfair_lock_unlock(lock) }
@@ -227,7 +227,7 @@ private final class StalledCallback: @unchecked Sendable {
             _handler = newValue
         }
     }
-    private var _handler: (() -> Void)?
+    private var _handler: (@Sendable () -> Void)?
 
     init() {
         lock.initialize(to: os_unfair_lock())
