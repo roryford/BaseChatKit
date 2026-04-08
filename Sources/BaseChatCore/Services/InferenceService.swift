@@ -411,6 +411,14 @@ public final class InferenceService {
 
     /// Generates text from a message history, streaming tokens via the active backend.
     ///
+    /// This is the low-level, non-queued entry point. It does **not** participate
+    /// in the generation queue — use ``enqueue(messages:systemPrompt:temperature:topP:repeatPenalty:maxOutputTokens:priority:sessionID:)``
+    /// for user-facing chat generation that must be serialized.
+    ///
+    /// Direct callers (title generation, compression) are short-lived and
+    /// don't conflict with queued work because backends serialize at their own
+    /// level (LlamaBackend via NSLock, MLXBackend via actor isolation).
+    ///
     /// For backends that require prompt templates (GGUF), messages are formatted
     /// into a single prompt string using `selectedPromptTemplate`. For MLX and
     /// Foundation, the last user message is passed directly (they handle chat
@@ -638,7 +646,7 @@ public final class InferenceService {
         requestQueue.removeAll { req in
             guard let reqSession = req.sessionID, reqSession != sessionID else { return false }
             req.stream.setPhase(.failed("Session changed"))
-            finishAndDiscard(req.token)
+            finishAndDiscard(req.token, error: InferenceError.inferenceFailure("Session changed"))
             return true
         }
         if let active = activeRequest,
@@ -661,14 +669,15 @@ public final class InferenceService {
         activeTask?.cancel()
         activeTask = nil
         if let active = activeRequest {
-            finishAndDiscard(active.token)
+            active.stream.setPhase(.failed("Cancelled"))
+            finishAndDiscard(active.token, error: CancellationError())
         }
         activeRequest = nil
         isGenerating = false
 
         for req in requestQueue {
             req.stream.setPhase(.failed("Cancelled"))
-            finishAndDiscard(req.token)
+            finishAndDiscard(req.token, error: CancellationError())
         }
         requestQueue.removeAll()
     }
