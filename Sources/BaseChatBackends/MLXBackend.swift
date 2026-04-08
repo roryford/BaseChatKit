@@ -24,8 +24,29 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - State
 
-    public private(set) var isModelLoaded = false
-    public private(set) var isGenerating = false
+    private var _isModelLoaded = false
+    private var _isGenerating = false
+
+    public private(set) var isModelLoaded: Bool {
+        get { withStateLock { _isModelLoaded } }
+        set { withStateLock { _isModelLoaded = newValue } }
+    }
+
+    public private(set) var isGenerating: Bool {
+        get { withStateLock { _isGenerating } }
+        set { withStateLock { _isGenerating = newValue } }
+    }
+
+    // MARK: - Locking
+
+    private let stateLock = NSLock()
+
+    @discardableResult
+    private func withStateLock<T>(_ body: () throws -> T) rethrows -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return try body()
+    }
 
     // MARK: - Capabilities
 
@@ -46,8 +67,10 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Private
 
-    private var modelContainer: (any MLXModelContainerProtocol)?
-    private var generationTask: Task<Void, Never>?
+    /// Access only under `stateLock`.
+    private var _modelContainer: (any MLXModelContainerProtocol)?
+    /// Access only under `stateLock`.
+    private var _generationTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -67,7 +90,9 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 // Loading progress — useful for large models.
                 // For local models this completes quickly.
             }
-            modelContainer = container
+            withStateLock {
+                _modelContainer = container
+            }
             Memory.cacheLimit = 20 * 1024 * 1024
             isModelLoaded = true
             Self.logger.info("MLX backend loaded model from \(url.lastPathComponent)")
@@ -92,14 +117,16 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> GenerationStream {
-        guard isModelLoaded, let modelContainer else {
-            throw InferenceError.inferenceFailure("No model loaded")
+        let modelContainer: any MLXModelContainerProtocol = try withStateLock {
+            guard _isModelLoaded, let container = _modelContainer else {
+                throw InferenceError.inferenceFailure("No model loaded")
+            }
+            guard !_isGenerating else {
+                throw InferenceError.alreadyGenerating
+            }
+            _isGenerating = true
+            return container
         }
-        guard !isGenerating else {
-            throw InferenceError.alreadyGenerating
-        }
-
-        isGenerating = true
         Self.logger.debug("MLX generate started")
 
         let generateConfig = GenerateParameters(
@@ -123,7 +150,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
         let task = Task { @MainActor [weak self, generationStream] in
             defer {
-                self?.isGenerating = false
+                self?.withStateLock { self?._isGenerating = false }
                 Self.logger.debug("MLX generate finished")
             }
 
@@ -163,7 +190,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             continuation.finish()
         }
 
-        self.generationTask = task
+        withStateLock { self._generationTask = task }
 
         continuation.onTermination = { @Sendable _ in
             task.cancel()
@@ -179,23 +206,31 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     ///
     /// Not part of the public API — visible to `BaseChatBackendsTests` via `@testable import`.
     func _inject(_ container: any MLXModelContainerProtocol) {
-        modelContainer = container
-        isModelLoaded = true
+        withStateLock {
+            _modelContainer = container
+            _isModelLoaded = true
+        }
     }
 
     // MARK: - Control
 
     public func stopGeneration() {
-        generationTask?.cancel()
-        generationTask = nil
+        withStateLock {
+            _generationTask?.cancel()
+            _generationTask = nil
+        }
     }
 
     public func unloadModel() {
         stopGeneration()
-        modelContainer = nil
+        withStateLock {
+            _modelContainer = nil
+        }
         Memory.clearCache()
-        isModelLoaded = false
-        isGenerating = false
+        withStateLock {
+            _isModelLoaded = false
+            _isGenerating = false
+        }
         Self.logger.info("MLX backend unloaded")
     }
 }
