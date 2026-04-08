@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/roryford/BaseChatKit/compare/v0.3.10...v0.4.0) (2026-04-08)
+
+**Public API surface cleanup for open-source release** — BaseChatKit previously exposed roughly a dozen internal implementation types as `public`, leaking details that external consumers should never depend on. This release narrows the public API to only the types, protocols, and services that framework consumers are meant to use, making the library safe to publish as a public Swift package.
+
+Twelve types that existed solely to support internal cross-module wiring — GGUF metadata parsing (`GGUFMetadata`, `GGUFMetadataReader`, `GGUFReaderError`), prompt template detection (`PromptTemplateDetector`), tokenizer internals (`HeuristicTokenizer`, `CachingTokenizer`), SSE stream parsing (`SSEStreamParser`), compression strategy implementations (`AnchoredCompressor`, `ExtractiveCompressor`, `CompressionOrchestrator`), thermal pressure handling (`MemoryPressureHandler`), and the `withExponentialBackoff` convenience function — are now `package` or `internal` access. Types needed across BaseChatKit's own modules use Swift 5.9's `package` access level; types used only within `BaseChatCore` use `internal`. Consumer-facing types like `ModelContainerFactory` and `SwiftDataPersistenceProvider` remain `public` since the Example app and downstream projects instantiate them directly.
+
+The unused direct dependency on `swift-transformers` (a transitive dependency of `mlx-swift-lm`) was removed, eliminating a build warning. Snapshot test reference files in `BaseChatSnapshotTests` are now excluded from the target, silencing the "25 unhandled files" warning. Six public API members that lacked documentation (`NetworkDiscoveryService.startDiscovery()`, `.stopDiscovery()`, `.probe(host:port:)`, `HuggingFaceService.init(hubClient:)`, `InferenceError.isRetryable`, `BackgroundDownloadManager.hasActiveDownloads`) received `///` doc comments. A stale screenshot placeholder comment was removed from the README. GitHub branch protection was updated to require one PR approval for merges to `main` ([#217](https://github.com/roryford/BaseChatKit/issues/217)).
+
+### ⚠ Breaking changes
+
+Downstream projects that reference any of the twelve internalized types by name will need to update. The affected types were never part of the intended public API, but code that imported them directly will see compile errors. If your project uses `HeuristicTokenizer`, `AnchoredCompressor`, `CompressionOrchestrator`, or `SSEStreamParser`, migrate to the public protocol equivalents (`TokenizerProvider`, `ContextCompressor`) or add `@testable import BaseChatCore` in test targets. `ModelContainerFactory` and `SwiftDataPersistenceProvider` remain public and require no changes.
+
 ## [0.3.10](https://github.com/roryford/BaseChatKit/compare/v0.3.9...v0.3.10) (2026-04-08)
 
 ### Features
