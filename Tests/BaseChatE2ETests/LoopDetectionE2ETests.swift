@@ -1,7 +1,7 @@
 import Testing
 import SwiftData
 @testable import BaseChatUI
-import BaseChatCore
+@testable import BaseChatCore
 import BaseChatTestSupport
 
 /// E2E test for loop detection → auto-stop.

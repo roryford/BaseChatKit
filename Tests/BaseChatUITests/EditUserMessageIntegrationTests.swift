@@ -1,7 +1,7 @@
 import XCTest
 import SwiftData
 @testable import BaseChatUI
-import BaseChatCore
+@testable import BaseChatCore
 import BaseChatTestSupport
 
 /// Integration tests for the edit-user-message feature (`ChatViewModel.editMessage`).

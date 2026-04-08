@@ -162,7 +162,7 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
 
 extension ChatSession {
     /// Converts a SwiftData model to a plain record.
-    public func toRecord() -> ChatSessionRecord {
+    func toRecord() -> ChatSessionRecord {
         ChatSessionRecord(
             id: id,
             title: title,
@@ -184,7 +184,7 @@ extension ChatSession {
 
 extension ChatMessage {
     /// Converts a SwiftData model to a plain record.
-    public func toRecord() -> ChatMessageRecord {
+    func toRecord() -> ChatMessageRecord {
         ChatMessageRecord(
             id: id,
             role: role,

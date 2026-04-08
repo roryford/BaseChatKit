@@ -13,17 +13,17 @@ import Foundation
 /// let tok = CachingTokenizer(wrapping: activeTokenizer ?? HeuristicTokenizer())
 /// // Pass tok wherever a TokenizerProvider is accepted.
 /// ```
-public final class CachingTokenizer: TokenizerProvider, @unchecked Sendable {
+package final class CachingTokenizer: TokenizerProvider, @unchecked Sendable {
 
     private let base: TokenizerProvider
     private var cache: [String: Int] = [:]
     private let lock = NSLock()
 
-    public init(wrapping base: TokenizerProvider) {
+    package init(wrapping base: TokenizerProvider) {
         self.base = base
     }
 
-    public func tokenCount(_ text: String) -> Int {
+    package func tokenCount(_ text: String) -> Int {
         lock.lock()
         defer { lock.unlock() }
         if let cached = cache[text] { return cached }

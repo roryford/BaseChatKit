@@ -5,14 +5,14 @@ import os
 ///
 /// Contains the subset of GGUF metadata fields relevant to inference:
 /// model name, architecture, context length, chat template, and file type (quantization).
-public struct GGUFMetadata: Sendable, Equatable {
-    public let generalName: String?
-    public let generalArchitecture: String?
-    public let contextLength: Int?
-    public let chatTemplate: String?
-    public let fileType: Int?
+struct GGUFMetadata: Sendable, Equatable {
+    let generalName: String?
+    let generalArchitecture: String?
+    let contextLength: Int?
+    let chatTemplate: String?
+    let fileType: Int?
 
-    public init(
+    init(
         generalName: String?,
         generalArchitecture: String?,
         contextLength: Int?,
@@ -28,12 +28,12 @@ public struct GGUFMetadata: Sendable, Equatable {
 }
 
 /// Errors that can occur when reading GGUF metadata.
-public enum GGUFReaderError: LocalizedError {
+enum GGUFReaderError: LocalizedError {
     case invalidMagic
     case unsupportedVersion(Int)
     case readError(String)
 
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .invalidMagic:
             "File is not a valid GGUF file (invalid magic bytes)"
@@ -50,7 +50,7 @@ public enum GGUFReaderError: LocalizedError {
 /// Only reads the metadata key-value section at the start of the file. Tensor data
 /// (which can be many gigabytes) is never touched. Uses `FileHandle` for sequential
 /// reads to avoid loading the file into memory.
-public struct GGUFMetadataReader {
+struct GGUFMetadataReader {
 
     /// The four-byte magic at offset 0 of every GGUF file.
     private static let magicBytes: [UInt8] = [0x47, 0x47, 0x55, 0x46] // "GGUF"
@@ -82,7 +82,7 @@ public struct GGUFMetadataReader {
     /// - Parameter url: Path to a `.gguf` file on disk.
     /// - Returns: Parsed metadata fields.
     /// - Throws: `GGUFReaderError` if the file is invalid or unreadable.
-    public static func readMetadata(from url: URL) throws -> GGUFMetadata {
+    static func readMetadata(from url: URL) throws -> GGUFMetadata {
         let handle: FileHandle
         do {
             handle = try FileHandle(forReadingFrom: url)
@@ -174,7 +174,7 @@ public struct GGUFMetadataReader {
     ///
     /// - Parameter url: Path to check.
     /// - Returns: `true` if the first 4 bytes are the GGUF magic.
-    public static func isValidGGUF(at url: URL) -> Bool {
+    static func isValidGGUF(at url: URL) -> Bool {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { handle.closeFile() }
 

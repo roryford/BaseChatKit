@@ -29,13 +29,13 @@ public protocol SSEPayloadHandler: Sendable {
     func extractStreamError(from payload: String) -> Error?
 }
 
-public struct SSEStreamParser {
+package struct SSEStreamParser {
 
     /// Parses an `AsyncSequence` of bytes into an `AsyncThrowingStream` of SSE data lines.
     ///
     /// Yields the payload of each `data:` line (with the prefix stripped).
     /// Stops when the stream ends or when `[DONE]` is received.
-    public static func parse<S: AsyncSequence & Sendable>(
+    package static func parse<S: AsyncSequence & Sendable>(
         bytes: S
     ) -> AsyncThrowingStream<String, Error> where S.Element == UInt8 {
         AsyncThrowingStream { continuation in
@@ -107,7 +107,7 @@ public struct SSEStreamParser {
     ///   - bytes: The raw byte stream from `URLSession.bytes(for:)`.
     ///   - handler: A payload handler that interprets the provider's JSON format.
     /// - Returns: An `AsyncThrowingStream` of ``GenerationEvent`` values.
-    public static func streamEvents<S: AsyncSequence & Sendable>(
+    package static func streamEvents<S: AsyncSequence & Sendable>(
         from bytes: S,
         using handler: some SSEPayloadHandler
     ) -> AsyncThrowingStream<GenerationEvent, Error> where S.Element == UInt8 {

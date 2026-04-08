@@ -6,16 +6,6 @@ BaseChatKit provides a complete, production-ready chat UI with pluggable inferen
 
 ## Demo
 
-<!-- TODO: Replace these placeholders with actual screenshots captured from the Example app.
-     Capture instructions:
-       1. Run the Example app in the iOS Simulator
-       2. Use `xcrun simctl io booted screenshot Example/Screenshots/demo.png`
-          or record a GIF with QuickTime + Gifski (~10-15 seconds, ~600px wide)
-       3. Capture: a chat conversation mid-stream, the session list sidebar,
-          and the model management sheet / HuggingFace browser tab
-       4. Optimise the image and commit it to Example/Screenshots/
-       5. Update the image path below and remove this comment block
-     Optionally add both light and dark mode screenshots side by side. -->
 
 ![BaseChatKit demo — chat conversation with streaming, session sidebar, and model browser](Example/Screenshots/demo.png)
 

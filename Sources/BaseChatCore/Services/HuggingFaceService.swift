@@ -35,6 +35,10 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
 
     private let hubClient: HubClient
 
+    /// Creates a service backed by the given Hugging Face Hub client.
+    ///
+    /// - Parameter hubClient: The Hub client used for API requests and repo operations.
+    ///   Defaults to `.default`, which uses the shared Hub configuration.
     public init(hubClient: HubClient = .default) {
         self.hubClient = hubClient
     }

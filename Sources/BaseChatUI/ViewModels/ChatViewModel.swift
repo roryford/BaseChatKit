@@ -339,11 +339,24 @@ public final class ChatViewModel {
 
     // MARK: - Initialisation
 
-    public init(
+    public convenience init(
+        inferenceService: InferenceService = InferenceService(),
+        deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
+        modelStorage: ModelStorageService = ModelStorageService()
+    ) {
+        self.init(
+            inferenceService: inferenceService,
+            deviceCapability: deviceCapability,
+            modelStorage: modelStorage,
+            memoryPressure: MemoryPressureHandler()
+        )
+    }
+
+    package init(
         inferenceService: InferenceService = InferenceService(),
         deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
         modelStorage: ModelStorageService = ModelStorageService(),
-        memoryPressure: MemoryPressureHandler = MemoryPressureHandler()
+        memoryPressure: MemoryPressureHandler
     ) {
         self.inferenceService = inferenceService
         self.deviceCapability = deviceCapability

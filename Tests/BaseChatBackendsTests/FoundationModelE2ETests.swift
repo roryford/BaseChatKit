@@ -1,7 +1,7 @@
 #if canImport(FoundationModels)
 import XCTest
 import SwiftData
-import BaseChatCore
+@testable import BaseChatCore
 import BaseChatTestSupport
 @testable import BaseChatBackends
 @testable import BaseChatUI

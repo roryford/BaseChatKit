@@ -3,22 +3,22 @@ import Foundation
 /// Compressor that summarizes old messages via an inference call, then prepends the
 /// summary to a verbatim tail of recent messages. Falls back to ``ExtractiveCompressor``
 /// on any error (missing generate function, failed inference, oversized summary).
-public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
-    public let strategyName = "anchored"
+package final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
+    package let strategyName = "anchored"
 
     /// Fraction of the history budget reserved for the verbatim recent tail.
-    public let tailBudgetFraction: Double
+    package let tailBudgetFraction: Double
 
     /// Injected by the caller; performs a single-turn inference call for summarization.
     /// Must be set before the first call to `compress()`. Not safe to mutate while
     /// `compress()` is in flight.
-    public var generateFn: (@Sendable (String) async throws -> String)?
+    package var generateFn: (@Sendable (String) async throws -> String)?
 
     private let fallback = ExtractiveCompressor()
 
     // MARK: - Summary Prompt Template
 
-    public static let defaultSummaryTemplate: String = """
+    package static let defaultSummaryTemplate: String = """
         Summarize the conversation so far. Be concise. Use only what is in the text.
 
         TOPIC: [main subject of the conversation, brief]
@@ -33,9 +33,9 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
     /// The prompt template used to summarize old messages.
     /// Pass a domain-specific prompt at init time to override.
     /// The placeholder `{old_nodes_text}` is replaced with the concatenated message content.
-    public let summaryTemplate: String
+    package let summaryTemplate: String
 
-    public init(
+    package init(
         tailBudgetFraction: Double = 0.50,
         summaryTemplate: String? = nil
     ) {
@@ -45,7 +45,7 @@ public final class AnchoredCompressor: ContextCompressor, @unchecked Sendable {
 
     // MARK: - ContextCompressor
 
-    public func compress(
+    package func compress(
         messages: [CompressibleMessage],
         systemPrompt: String?,
         contextSize: Int,

@@ -1,7 +1,7 @@
 import XCTest
 import SwiftData
 @testable import BaseChatUI
-import BaseChatCore
+@testable import BaseChatCore
 import BaseChatTestSupport
 
 /// ViewModel integration tests for the data that drives the pin indicator in MessageBubbleView.
