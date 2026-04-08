@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.1](https://github.com/roryford/BaseChatKit/compare/v0.4.0...v0.4.1) (2026-04-08)
+
+**Concurrency hardening and test coverage expansion** — A comprehensive codebase review uncovered three concurrency hazards that could cause data races under load, plus gaps in input validation and test coverage. This patch fixes all three races, adds URL validation to the endpoint editor, documents protocol threading contracts, and ships 117 new tests.
+
+`MLXBackend` stored mutable state (`isModelLoaded`, `isGenerating`, `modelContainer`) without synchronization across `Task` boundaries — concurrent model loads and generation stops could race. The backend now uses `NSLock` matching the existing `LlamaBackend` pattern, with `unloadModel()` consolidated into a single critical section to prevent observable inconsistent state ([#218](https://github.com/roryford/BaseChatKit/pull/218)).
+
+`ChatViewModel` looked up message indices via `firstIndex(where:)` and then mutated at that index, but any `await` between lookup and mutation could leave the index stale. A new `mutateMessage(id:_:)` helper combines lookup and mutation atomically, replacing four bare subscript sites. `InferenceService` also had a continuation leak: `AsyncThrowingStream.Continuation` objects could survive cancellation if an exception was thrown before cleanup ran — a `defer` block now guarantees cleanup in all paths.
+
+The API endpoint editor previously accepted arbitrary URL strings with no validation. It now rejects malformed URLs, non-HTTP schemes, and plain HTTP to non-localhost addresses. The inline stream consumption logic in `ChatViewModel+Generation` has been replaced with `GenerationStreamConsumer.handle()`, removing duplicate code and the associated TODO. `CachingTokenizer` is now reused across generation cycles instead of being recreated each time, with identity-based invalidation that correctly handles both reference-type and value-type tokenizers.
+
+Three protocols — `InferenceBackend`, `ToolProvider`, and `ServerDiscoveryService` — now document their threading contracts for downstream conformers. New tests cover `NetworkDiscoveryService` JSON parsing for all four server types (26 tests), UI view logic for `ChatInputBar`, `MessageBubbleView`, `APIConfiguration`, and `ModelManagementSheet` (91 tests), and backend contract enforcement for the three backends that were missing it.
+
 ## [0.4.0](https://github.com/roryford/BaseChatKit/compare/v0.3.10...v0.4.0) (2026-04-08)
 
 **Public API surface cleanup for open-source release** — BaseChatKit previously exposed roughly a dozen internal implementation types as `public`, leaking details that external consumers should never depend on. This release narrows the public API to only the types, protocols, and services that framework consumers are meant to use, making the library safe to publish as a public Swift package.
