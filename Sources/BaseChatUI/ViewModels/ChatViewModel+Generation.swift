@@ -42,6 +42,15 @@ struct StreamingTokenBatcher {
 
 extension ChatViewModel {
 
+    /// Looks up a message by ID and applies a mutation in a single step,
+    /// ensuring the index is never stale. Returns `true` if the message was found.
+    @discardableResult
+    func mutateMessage(id: UUID, _ body: (inout ChatMessageRecord) -> Void) -> Bool {
+        guard let idx = messages.firstIndex(where: { $0.id == id }) else { return false }
+        body(&messages[idx])
+        return true
+    }
+
     /// Streams tokens from the inference service into an assistant message.
     ///
     /// Handles context trimming, token usage capture, empty response cleanup,
@@ -156,12 +165,17 @@ extension ChatViewModel {
                             if tokenCount == 1 {
                                 self.activityPhase = .streaming
                             }
-                            if let batch = batcher.append(token, now: ContinuousClock.now),
-                               let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
-                                self.messages[idx].content += batch
-                                if self.loopDetectionEnabled,
-                                   self.messages[idx].content.count >= 100,
-                                   RepetitionDetector.looksLikeLooping(self.messages[idx].content) {
+                            if let batch = batcher.append(token, now: ContinuousClock.now) {
+                                var looping = false
+                                self.mutateMessage(id: messageID) { msg in
+                                    msg.content += batch
+                                    if self.loopDetectionEnabled,
+                                       msg.content.count >= 100,
+                                       RepetitionDetector.looksLikeLooping(msg.content) {
+                                        looping = true
+                                    }
+                                }
+                                if looping {
                                     self.inferenceService.stopGeneration()
                                     self.errorMessage = "Generation stopped: the model appears to be repeating itself."
                                     break eventLoop
@@ -169,9 +183,9 @@ extension ChatViewModel {
                             }
 
                         case .usage(let prompt, let completion):
-                            if let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
-                                self.messages[idx].promptTokens = prompt
-                                self.messages[idx].completionTokens = completion
+                            self.mutateMessage(id: messageID) { msg in
+                                msg.promptTokens = prompt
+                                msg.completionTokens = completion
                             }
 
                         case .toolCall:
@@ -186,9 +200,8 @@ extension ChatViewModel {
                 }
 
                 // Flush remaining buffered tokens after stream ends (normal, error, or cancellation).
-                if let batch = batcher.flush(now: ContinuousClock.now),
-                   let idx = self.messages.firstIndex(where: { $0.id == messageID }) {
-                    self.messages[idx].content += batch
+                if let batch = batcher.flush(now: ContinuousClock.now) {
+                    self.mutateMessage(id: messageID) { $0.content += batch }
                 }
             }
 
@@ -201,10 +214,11 @@ extension ChatViewModel {
         }
 
         // Capture token usage from cloud backends.
-        if let usage = inferenceService.lastTokenUsage,
-           let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            messages[idx].promptTokens = usage.promptTokens
-            messages[idx].completionTokens = usage.completionTokens
+        if let usage = inferenceService.lastTokenUsage {
+            mutateMessage(id: messageID) { msg in
+                msg.promptTokens = usage.promptTokens
+                msg.completionTokens = usage.completionTokens
+            }
         }
 
         // Persist the completed assistant message.
