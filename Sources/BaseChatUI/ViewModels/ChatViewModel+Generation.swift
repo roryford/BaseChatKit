@@ -80,11 +80,9 @@ extension ChatViewModel {
             } else {
                 effectiveSystemPrompt = rawSystemPrompt
             }
-            // Wrap the tokenizer in a per-cycle cache so each message string is tokenized
-            // at most once across shouldCompress, compress, and trimMessages.
-            let cachingTokenizer: TokenizerProvider = CachingTokenizer(
-                wrapping: inferenceService.tokenizer ?? HeuristicTokenizer()
-            )
+            // Reuse the persistent caching tokenizer — token counts for unchanged
+            // messages carry over between generation cycles.
+            let cachingTokenizer: TokenizerProvider = reusableCachingTokenizer
 
             let compressible = allMessages.map {
                 CompressibleMessage(

@@ -328,6 +328,30 @@ public final class ChatViewModel {
     /// Cached per-message token counts keyed by message ID, to avoid recalculating all messages.
     var tokenCountCache: [UUID: Int] = [:]
 
+    /// Reusable caching tokenizer that persists across generation cycles.
+    /// Invalidated when the underlying backend tokenizer changes (i.e. model swap).
+    private var _cachingTokenizer: CachingTokenizer?
+    /// Identity of the backend tokenizer the cached instance wraps, or `nil` when
+    /// using the heuristic fallback. Used to detect model swaps.
+    private var _cachingTokenizerBaseID: ObjectIdentifier?
+
+    /// Returns a `CachingTokenizer` that persists across generation cycles,
+    /// recreating it only when the underlying backend tokenizer changes.
+    var reusableCachingTokenizer: CachingTokenizer {
+        let backendTokenizer = inferenceService.tokenizer
+        // Backend tokenizers are always reference types (TokenizerVendor is class-bound),
+        // so ObjectIdentifier is stable. When nil, we use the heuristic fallback.
+        let newBaseID = backendTokenizer.map { ObjectIdentifier($0 as AnyObject) }
+        if let existing = _cachingTokenizer, _cachingTokenizerBaseID == newBaseID {
+            return existing
+        }
+        let base: any TokenizerProvider = backendTokenizer ?? HeuristicTokenizer()
+        let fresh = CachingTokenizer(wrapping: base)
+        _cachingTokenizer = fresh
+        _cachingTokenizerBaseID = newBaseID
+        return fresh
+    }
+
     /// Number of messages to load per page when paginating history.
     static let messagePageSize = 50
 
