@@ -73,3 +73,8 @@ public struct SessionListView: View {
         }
     }
 }
+
+#Preview("Empty State") {
+    SessionListView()
+        .environment(SessionManagerViewModel())
+}

@@ -27,3 +27,11 @@ public struct ModelLoadingIndicatorView: View {
         .accessibilityLabel("Loading model, please wait")
     }
 }
+
+#Preview("Indeterminate") {
+    ModelLoadingIndicatorView()
+}
+
+#Preview("With Progress") {
+    ModelLoadingIndicatorView(progress: 0.65)
+}

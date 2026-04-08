@@ -178,6 +178,112 @@ final class ViewSnapshotTests: XCTestCase {
         )
     }
 
+    // MARK: - AssistantMarkdownView (3 snapshots)
+
+    func test_assistantMarkdown_plainText() {
+        assertDumpSnapshot(
+            AssistantMarkdownView(content: "Once upon a time in a land far away..."),
+            named: "plain_text"
+        )
+    }
+
+    func test_assistantMarkdown_withCodeBlock() {
+        assertDumpSnapshot(
+            AssistantMarkdownView(content: "Here's an example:\n\n```swift\nlet x = 42\nprint(x)\n```\n\nThat's how it works."),
+            named: "with_code_block"
+        )
+    }
+
+    func test_assistantMarkdown_withFormatting() {
+        assertDumpSnapshot(
+            AssistantMarkdownView(content: "This is **bold** and *italic* and a [link](https://example.com)."),
+            named: "with_formatting"
+        )
+    }
+
+    // MARK: - MessagePartsView (3 snapshots)
+
+    func test_messageParts_textOnly() {
+        assertDumpSnapshot(
+            MessagePartsView(parts: [.text("Hello world")], role: .assistant),
+            named: "text_only"
+        )
+    }
+
+    func test_messageParts_toolCall() {
+        assertDumpSnapshot(
+            MessagePartsView(parts: [.toolCall(id: "1", name: "get_weather", arguments: "{\"city\": \"London\"}")], role: .assistant),
+            named: "tool_call"
+        )
+    }
+
+    func test_messageParts_mixedParts() {
+        assertDumpSnapshot(
+            MessagePartsView(parts: [.text("Check this:"), .toolResult(id: "1", content: "Temperature: 18°C")], role: .user),
+            named: "mixed_parts"
+        )
+    }
+
+    // MARK: - StreamingCursorView (1 snapshot)
+
+    func test_streamingCursor() {
+        assertDumpSnapshot(
+            StreamingCursorView(),
+            named: "default"
+        )
+    }
+
+    // MARK: - TypingIndicatorView (1 snapshot)
+
+    func test_typingIndicator() {
+        assertDumpSnapshot(
+            TypingIndicatorView(),
+            named: "default"
+        )
+    }
+
+    // MARK: - ModelLoadingIndicatorView (2 snapshots)
+
+    func test_modelLoadingIndicator_indeterminate() {
+        assertDumpSnapshot(
+            ModelLoadingIndicatorView(),
+            named: "indeterminate"
+        )
+    }
+
+    func test_modelLoadingIndicator_withProgress() {
+        assertDumpSnapshot(
+            ModelLoadingIndicatorView(progress: 0.65),
+            named: "with_progress"
+        )
+    }
+
+    // MARK: - SessionRowView (2 snapshots)
+
+    func test_sessionRow_recent() {
+        assertDumpSnapshot(
+            SessionRowView(session: ChatSessionRecord(
+                id: fixedID,
+                title: "Travel Planning",
+                createdAt: fixedDate,
+                updatedAt: fixedDate
+            )),
+            named: "recent"
+        )
+    }
+
+    func test_sessionRow_longTitle() {
+        assertDumpSnapshot(
+            SessionRowView(session: ChatSessionRecord(
+                id: fixedID,
+                title: "This is a really long chat title that should be truncated in the row view",
+                createdAt: fixedDate,
+                updatedAt: fixedDate
+            )),
+            named: "long_title"
+        )
+    }
+
     // MARK: - WhyDownloadView (1 preview)
 
     func test_whyDownloadView() {

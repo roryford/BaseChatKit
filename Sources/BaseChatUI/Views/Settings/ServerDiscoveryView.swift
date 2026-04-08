@@ -165,6 +165,24 @@ public struct ServerDiscoveryView: View {
 
 // MARK: - Manual Entry (extracted for @Bindable isolation)
 
+#Preview("Server Discovery") {
+    @Previewable @State var vm = ServerDiscoveryViewModel(
+        discoveryService: _PreviewDiscoveryService()
+    )
+    ServerDiscoveryView()
+        .environment(vm)
+        .modelContainer(for: APIEndpoint.self, inMemory: true)
+}
+
+private final class _PreviewDiscoveryService: ServerDiscoveryService, @unchecked Sendable {
+    func startDiscovery() async {}
+    func stopDiscovery() {}
+    var discoveredServers: AsyncStream<[DiscoveredServer]> {
+        AsyncStream { $0.finish() }
+    }
+    func probe(host: String, port: Int) async -> DiscoveredServer? { nil }
+}
+
 private struct ManualEntrySection: View {
     @Bindable var viewModel: ServerDiscoveryViewModel
 

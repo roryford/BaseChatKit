@@ -119,3 +119,11 @@ public struct SamplerPresetPickerView: View {
         }
     }
 }
+
+#Preview("Sampler Presets") {
+    Form {
+        SamplerPresetPickerView()
+    }
+    .environment(ChatViewModel())
+    .modelContainer(for: SamplerPreset.self, inMemory: true)
+}

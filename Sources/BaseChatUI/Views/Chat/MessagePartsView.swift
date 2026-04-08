@@ -94,3 +94,15 @@ struct MessagePartsView: View {
         .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
+
+#Preview("Text Only") {
+    MessagePartsView(parts: [.text("Hello world")], role: .assistant)
+}
+
+#Preview("Tool Call") {
+    MessagePartsView(parts: [.toolCall(id: "1", name: "get_weather", arguments: "{\"city\": \"London\"}")], role: .assistant)
+}
+
+#Preview("Mixed Parts") {
+    MessagePartsView(parts: [.text("Check this:"), .toolResult(id: "1", content: "Temperature: 18°C")], role: .user)
+}

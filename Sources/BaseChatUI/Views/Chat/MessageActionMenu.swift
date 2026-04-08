@@ -139,3 +139,17 @@ extension View {
         modifier(MessageActionMenuModifier(message: message, viewModel: viewModel))
     }
 }
+
+#Preview("Message Action Menu") {
+    Text("Long press me for actions")
+        .padding()
+        .messageActionMenu(
+            message: ChatMessageRecord(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                role: .user,
+                content: "Hello, world!",
+                sessionID: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+            ),
+            viewModel: ChatViewModel()
+        )
+}

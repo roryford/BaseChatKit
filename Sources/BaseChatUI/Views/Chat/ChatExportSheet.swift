@@ -65,3 +65,8 @@ public struct ChatExportSheet: View {
         exportedText = viewModel.exportChat(format: selectedFormat)
     }
 }
+
+#Preview("Export Sheet") {
+    ChatExportSheet()
+        .environment(ChatViewModel())
+}

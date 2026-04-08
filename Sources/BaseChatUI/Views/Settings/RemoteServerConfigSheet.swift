@@ -191,3 +191,8 @@ public struct RemoteServerConfigSheet: View {
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
+
+#Preview("Remote Server Config") {
+    RemoteServerConfigSheet()
+        .modelContainer(for: APIEndpoint.self, inMemory: true)
+}

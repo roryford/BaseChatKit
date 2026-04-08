@@ -188,3 +188,15 @@ private struct AssistantCodeBlockView: View {
         #endif
     }
 }
+
+#Preview("Plain Text") {
+    AssistantMarkdownView(content: "Once upon a time in a land far away...")
+}
+
+#Preview("With Code Block") {
+    AssistantMarkdownView(content: "Here's an example:\n\n```swift\nlet x = 42\nprint(x)\n```\n\nThat's how it works.")
+}
+
+#Preview("With Formatting") {
+    AssistantMarkdownView(content: "This is **bold** and *italic* and a [link](https://example.com).")
+}
