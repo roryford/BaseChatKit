@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.10](https://github.com/roryford/BaseChatKit/compare/v0.3.9...v0.3.10) (2026-04-08)
+
+### Features
+
+**Full SwiftUI preview coverage and generation queue hardening** — Downstream consumers previously had to build and run the demo app to see how many BaseChatUI views rendered, since 12 of 28 views lacked Xcode canvas previews. Every view in the `BaseChatUI` module now ships with `#Preview` blocks covering key states (empty, populated, streaming, error), giving framework consumers instant visual feedback when integrating components. Self-contained views (SessionRowView, AssistantMarkdownView, MessagePartsView, ModelLoadingIndicatorView, StreamingCursorView, TypingIndicatorView) also have matching `.dump`-based snapshot tests for CI-friendly structural regression detection on both iOS and macOS. Environment-dependent views (ChatExportSheet, MessageActionMenu, SamplerPresetPickerView, ServerDiscoveryView, RemoteServerConfigSheet, SessionListView) get previews with minimal stub environments. The generation queue introduced in v0.3.8 received three correctness fixes from code review: `stopGeneration()` now sets the stream phase to `.failed("Cancelled")` before finishing continuations (previously left observers in a non-terminal state), `discardRequests(notMatching:)` passes a specific `InferenceError` instead of a generic `CancellationError` so thrown errors match the failure reason, and `generate()` is documented as the non-queued entry point for short-lived operations like title generation and compression. Snapshot test count increased from 13 to 25 ([#214](https://github.com/roryford/BaseChatKit/issues/214)).
+
 ## [0.3.9](https://github.com/roryford/BaseChatKit/compare/v0.3.8...v0.3.9) (2026-04-08)
 
 ### Features
