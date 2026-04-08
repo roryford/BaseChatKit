@@ -125,6 +125,15 @@ public struct ToolResult: Sendable, Equatable, Codable {
 /// Conformers declare which tools are available and handle execution when
 /// the model requests a tool call. The framework handles the plumbing
 /// between model output and tool execution.
+///
+/// ## Thread Safety
+///
+/// `ToolProvider` requires `Sendable` conformance. The ``tools`` property
+/// is read from the `@MainActor`-isolated `InferenceService` when
+/// propagating tool state to backends. ``execute(_:)`` is called from the
+/// generation task, which may run on any thread (backends use `Task.detached`
+/// for generation work). Conformers that access mutable state in
+/// `execute(_:)` must synchronize appropriately.
 public protocol ToolProvider: Sendable {
     /// The tools available for the model to call.
     var tools: [ToolDefinition] { get }
