@@ -63,10 +63,12 @@ public enum HardwareRequirements {
         fetchOllamaModels() != nil
     }
 
-    /// Returns the first Ollama model name in the 7-8B parameter range, or `nil`.
+    /// Returns an Ollama model name, preferring one in the given parameter size range.
     ///
     /// Queries `/api/tags` synchronously. Prefers models whose `parameter_size`
-    /// contains "7" or "8" (e.g. "7.2B", "8.0B").
+    /// falls in `preferredSizeRange` (e.g. "7.2B" → 7.2). Falls back to the
+    /// first available model if none match the range. Returns `nil` only if the
+    /// server is unreachable or has no models.
     public static func findOllamaModel(preferredSizeRange: ClosedRange<Double> = 6.5...9.0) -> String? {
         guard let models = fetchOllamaModels() else { return nil }
         return selectOllamaModel(from: models, preferredSizeRange: preferredSizeRange)
@@ -110,8 +112,10 @@ public enum HardwareRequirements {
                   let models = json["models"] as? [[String: Any]] else { return }
             box.value = models
         }.resume()
-        semaphore.wait()
-        return box.value
+        // Timeout slightly above the request timeout to avoid hanging if the
+        // URLSession completion handler is never invoked.
+        let result = semaphore.wait(timeout: .now() + 5)
+        return result == .success ? box.value : nil
     }
 
     // MARK: - MLX Models

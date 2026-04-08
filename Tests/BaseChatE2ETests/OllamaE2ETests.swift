@@ -111,7 +111,7 @@ final class OllamaE2ETests: XCTestCase {
         var tokenCount = 0
         let collectTask = Task {
             for try await event in stream.events {
-                if case .token = event {
+                if case .token(_) = event {
                     tokenCount += 1
                     if tokenCount >= 5 { break }
                 }
