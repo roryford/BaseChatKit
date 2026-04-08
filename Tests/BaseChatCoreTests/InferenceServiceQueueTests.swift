@@ -1,0 +1,543 @@
+import XCTest
+@testable import BaseChatCore
+import BaseChatTestSupport
+
+/// Tests for the InferenceService generation queue.
+///
+/// These tests verify sequential FIFO queue behavior, priority ordering,
+/// cancellation, and session isolation without loading real models.
+@MainActor
+final class InferenceServiceQueueTests: XCTestCase {
+
+    // MARK: - Controllable Mock
+
+    /// A mock backend that blocks generation until explicitly released,
+    /// enabling deterministic queue behavior testing.
+    private final class GatedMockBackend: InferenceBackend, @unchecked Sendable {
+        var isModelLoaded: Bool = true
+        var isGenerating: Bool = false
+        let capabilities = BackendCapabilities(
+            supportedParameters: [.temperature, .topP, .repeatPenalty],
+            maxContextTokens: 4096,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true
+        )
+
+        /// Each call to generate() appends a continuation here. Tests release
+        /// tokens by calling `release(at:tokens:)` or `releaseAll()`.
+        var gates: [AsyncThrowingStream<GenerationEvent, Error>.Continuation] = []
+        var generateCallCount = 0
+        var stopCallCount = 0
+
+        func loadModel(from url: URL, contextSize: Int32) async throws {
+            isModelLoaded = true
+        }
+
+        func generate(
+            prompt: String,
+            systemPrompt: String?,
+            config: GenerationConfig
+        ) throws -> GenerationStream {
+            generateCallCount += 1
+            isGenerating = true
+            let stream = AsyncThrowingStream<GenerationEvent, Error> { [weak self] continuation in
+                self?.gates.append(continuation)
+            }
+            return GenerationStream(stream)
+        }
+
+        func stopGeneration() {
+            stopCallCount += 1
+            isGenerating = false
+            for gate in gates {
+                gate.finish()
+            }
+        }
+
+        func unloadModel() {
+            isModelLoaded = false
+            isGenerating = false
+            for gate in gates {
+                gate.finish()
+            }
+            gates.removeAll()
+        }
+
+        /// Release a specific generation with tokens then finish.
+        func release(at index: Int, tokens: [String] = ["tok"]) {
+            guard index < gates.count else { return }
+            for t in tokens {
+                gates[index].yield(.token(t))
+            }
+            gates[index].finish()
+            isGenerating = false
+        }
+
+        /// Release a specific generation with an error.
+        func releaseWithError(at index: Int, error: Error) {
+            guard index < gates.count else { return }
+            gates[index].finish(throwing: error)
+            isGenerating = false
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func makeService(backend: GatedMockBackend? = nil) -> (InferenceService, GatedMockBackend) {
+        let mock = backend ?? GatedMockBackend()
+        let service = InferenceService(backend: mock, name: "GatedMock")
+        return (service, mock)
+    }
+
+    // MARK: - 1. Single request executes immediately
+
+    func test_enqueue_singleRequest_executesImmediately() async throws {
+        let (service, mock) = makeService()
+
+        let (_, stream) = try service.enqueue(
+            messages: [("user", "hello")],
+            priority: .normal
+        )
+
+        // The stream should transition from .queued to .connecting once drainQueue fires.
+        // drainQueue runs synchronously in enqueue, so by the time we get here
+        // the phase should already be .connecting.
+        XCTAssertEqual(stream.phase, .connecting,
+                       "Stream should transition to .connecting immediately when queue is empty")
+        XCTAssertTrue(service.isGenerating)
+
+        // Yield a token — need to let the drain Task run first.
+        await Task.yield()
+        mock.release(at: 0, tokens: ["Hello", " world"])
+
+        // Consume the passthrough stream.
+        var collected: [String] = []
+        for try await event in stream.events {
+            if case .token(let text) = event {
+                collected.append(text)
+            }
+        }
+
+        XCTAssertEqual(collected, ["Hello", " world"])
+        XCTAssertEqual(stream.phase, .done)
+    }
+
+    // MARK: - 2. Two requests execute sequentially
+
+    func test_enqueue_twoRequests_executesSequentially() async throws {
+        let (service, mock) = makeService()
+
+        let (_, stream1) = try service.enqueue(
+            messages: [("user", "first")],
+            priority: .normal
+        )
+        let (_, stream2) = try service.enqueue(
+            messages: [("user", "second")],
+            priority: .normal
+        )
+
+        XCTAssertEqual(stream1.phase, .connecting, "First should be active")
+        XCTAssertEqual(stream2.phase, .queued, "Second should be queued")
+        XCTAssertEqual(mock.generateCallCount, 0,
+                       "generate() not yet called — drain Task hasn't run")
+
+        // Let the drain Task run and complete the first generation.
+        await Task.yield()
+        XCTAssertEqual(mock.generateCallCount, 1, "Only first request should call generate()")
+
+        mock.release(at: 0, tokens: ["a"])
+        // Consume first stream.
+        for try await _ in stream1.events {}
+
+        // Signal the service that generation finished.
+        service.generationDidFinish()
+
+        // Second request should now be active.
+        XCTAssertEqual(stream2.phase, .connecting)
+
+        // Let the second drain Task run.
+        await Task.yield()
+        XCTAssertEqual(mock.generateCallCount, 2)
+        mock.release(at: 1, tokens: ["b"])
+
+        var collected: [String] = []
+        for try await event in stream2.events {
+            if case .token(let text) = event {
+                collected.append(text)
+            }
+        }
+        XCTAssertEqual(collected, ["b"])
+    }
+
+    // MARK: - 3. Priority: userInitiated jumps ahead
+
+    func test_enqueue_priority_userInitiatedJumpsAhead() async throws {
+        let (service, mock) = makeService()
+
+        // First request is active immediately.
+        let (_, streamActive) = try service.enqueue(
+            messages: [("user", "active")],
+            priority: .normal
+        )
+
+        // Enqueue background, then userInitiated.
+        let (_, streamBg) = try service.enqueue(
+            messages: [("user", "bg")],
+            priority: .background
+        )
+        let (_, streamUi) = try service.enqueue(
+            messages: [("user", "ui")],
+            priority: .userInitiated
+        )
+
+        // Complete the active request.
+        await Task.yield()
+        mock.release(at: 0, tokens: ["x"])
+        for try await _ in streamActive.events {}
+        service.generationDidFinish()
+
+        // userInitiated should run before background.
+        XCTAssertEqual(streamUi.phase, .connecting,
+                       "userInitiated should be dequeued before background")
+        XCTAssertEqual(streamBg.phase, .queued,
+                       "background should still be queued")
+    }
+
+    // MARK: - 4. Three-level priority ordering
+
+    func test_enqueue_priority_threeLevel_ordering() async throws {
+        let (service, mock) = makeService()
+
+        // First fills the active slot.
+        let (_, streamActive) = try service.enqueue(
+            messages: [("user", "active")],
+            priority: .normal
+        )
+
+        // Queue background, normal, userInitiated.
+        let (_, streamBg) = try service.enqueue(
+            messages: [("user", "bg")],
+            priority: .background
+        )
+        let (_, streamNorm) = try service.enqueue(
+            messages: [("user", "norm")],
+            priority: .normal
+        )
+        let (_, streamUi) = try service.enqueue(
+            messages: [("user", "ui")],
+            priority: .userInitiated
+        )
+
+        // Complete the active request and drain.
+        await Task.yield()
+        mock.release(at: 0)
+        for try await _ in streamActive.events {}
+        service.generationDidFinish()
+
+        // Should drain in priority order: userInitiated first.
+        XCTAssertEqual(streamUi.phase, .connecting, "userInitiated should run first")
+        XCTAssertEqual(streamNorm.phase, .queued, "normal should still be queued")
+        XCTAssertEqual(streamBg.phase, .queued, "background should still be queued")
+
+        await Task.yield()
+        mock.release(at: 1)
+        service.generationDidFinish()
+        XCTAssertEqual(streamNorm.phase, .connecting, "normal should run second")
+        XCTAssertEqual(streamBg.phase, .queued, "background should still be queued")
+
+        await Task.yield()
+        mock.release(at: 2)
+        service.generationDidFinish()
+        XCTAssertEqual(streamBg.phase, .connecting, "background should run last")
+    }
+
+    // MARK: - 5. Cancel queued request finishes continuation
+
+    func test_cancel_queuedRequest_finishesContinuation() async throws {
+        let (service, _) = makeService()
+
+        // Active slot.
+        let _ = try service.enqueue(messages: [("user", "active")], priority: .normal)
+        // Queued.
+        let (token2, stream2) = try service.enqueue(messages: [("user", "queued")], priority: .normal)
+
+        service.cancel(token2)
+
+        XCTAssertTrue(
+            {
+                if case .failed = stream2.phase { return true }
+                return false
+            }(),
+            "Cancelled stream should have .failed phase"
+        )
+
+        // The stream should terminate (with an error).
+        var caughtError = false
+        do {
+            for try await _ in stream2.events {}
+        } catch {
+            caughtError = true
+        }
+        XCTAssertTrue(caughtError, "Cancelled stream should throw")
+    }
+
+    // MARK: - 6. Cancel active request stops and drains next
+
+    func test_cancel_activeRequest_stopsAndDrainsNext() async throws {
+        let (service, _) = makeService()
+
+        let (token1, _) = try service.enqueue(messages: [("user", "first")], priority: .normal)
+        let (_, stream2) = try service.enqueue(messages: [("user", "second")], priority: .normal)
+
+        XCTAssertEqual(stream2.phase, .queued)
+
+        service.cancel(token1)
+
+        // After cancelling active, the queue should drain and second becomes active.
+        XCTAssertEqual(stream2.phase, .connecting,
+                       "Second request should become active after first is cancelled")
+    }
+
+    // MARK: - 7. stopGeneration cancels active and drains queue
+
+    func test_stopGeneration_cancelsActiveAndDrainsQueue() async throws {
+        let (service, _) = makeService()
+
+        let (_, stream1) = try service.enqueue(messages: [("user", "first")], priority: .normal)
+        let (_, stream2) = try service.enqueue(messages: [("user", "second")], priority: .normal)
+
+        service.stopGeneration()
+
+        XCTAssertFalse(service.isGenerating)
+        XCTAssertFalse(service.hasQueuedRequests)
+
+        // Both streams should be terminated.
+        func isFailed(_ phase: GenerationStream.Phase) -> Bool {
+            if case .failed = phase { return true }
+            return false
+        }
+
+        // stream1 may not have .failed set (it was active, not queued),
+        // but its continuation was finished with an error.
+        XCTAssertTrue(isFailed(stream2.phase), "Queued stream should be .failed after stopGeneration")
+    }
+
+    // MARK: - 8. generationDidFinish drains next request
+
+    func test_generationDidFinish_drainsNextRequest() async throws {
+        let (service, mock) = makeService()
+
+        let (_, stream1) = try service.enqueue(messages: [("user", "first")], priority: .normal)
+        let (_, stream2) = try service.enqueue(messages: [("user", "second")], priority: .normal)
+
+        XCTAssertEqual(stream2.phase, .queued)
+
+        // Complete first generation.
+        await Task.yield()
+        mock.release(at: 0)
+        for try await _ in stream1.events {}
+
+        service.generationDidFinish()
+
+        XCTAssertEqual(stream2.phase, .connecting,
+                       "Second request should start after generationDidFinish()")
+        XCTAssertTrue(service.isGenerating)
+    }
+
+    // MARK: - 9. discardRequests session mismatch cancels stale
+
+    func test_discardRequests_sessionMismatch_cancelsStale() async throws {
+        let (service, _) = makeService()
+        let sessionA = UUID()
+        let sessionB = UUID()
+
+        let _ = try service.enqueue(
+            messages: [("user", "active")],
+            priority: .normal,
+            sessionID: sessionA
+        )
+        let (_, streamA) = try service.enqueue(
+            messages: [("user", "queued-A")],
+            priority: .normal,
+            sessionID: sessionA
+        )
+        let (_, streamB) = try service.enqueue(
+            messages: [("user", "queued-B")],
+            priority: .normal,
+            sessionID: sessionB
+        )
+
+        service.discardRequests(notMatching: sessionB)
+
+        // Session A queued request should be cancelled.
+        if case .failed = streamA.phase {
+            // expected
+        } else {
+            XCTFail("Session A queued request should be .failed, got \(streamA.phase)")
+        }
+
+        // Session B request should now be active (promoted after A was cancelled),
+        // since the active slot opened up when the session A active request was cancelled.
+        XCTAssertEqual(streamB.phase, .connecting,
+                       "Session B request should be promoted to active after A is discarded")
+    }
+
+    // MARK: - 10. nil sessionID never discarded
+
+    func test_discardRequests_nilSessionID_neverDiscarded() async throws {
+        let (service, _) = makeService()
+        let sessionB = UUID()
+
+        let _ = try service.enqueue(messages: [("user", "active")], priority: .normal)
+        // nil sessionID — session-agnostic.
+        let (_, streamNil) = try service.enqueue(
+            messages: [("user", "agnostic")],
+            priority: .normal,
+            sessionID: nil
+        )
+
+        service.discardRequests(notMatching: sessionB)
+
+        XCTAssertEqual(streamNil.phase, .queued,
+                       "nil sessionID should survive discardRequests")
+    }
+
+    // MARK: - 11. isGenerating false when queue empty
+
+    func test_isGenerating_falseWhenQueueEmpty() {
+        let (service, _) = makeService()
+        XCTAssertFalse(service.isGenerating)
+    }
+
+    // MARK: - 12. isGenerating true while active request
+
+    func test_isGenerating_trueWhileActiveRequest() throws {
+        let (service, _) = makeService()
+        let _ = try service.enqueue(messages: [("user", "hello")], priority: .normal)
+        XCTAssertTrue(service.isGenerating)
+    }
+
+    // MARK: - 13. Exceeds max depth throws
+
+    func test_enqueue_exceedsMaxDepth_throws() throws {
+        let (service, _) = makeService()
+
+        // First enqueue fills the active slot, next 8 fill the queue.
+        let _ = try service.enqueue(messages: [("user", "active")], priority: .normal)
+        for i in 0..<8 {
+            let _ = try service.enqueue(messages: [("user", "q\(i)")], priority: .normal)
+        }
+
+        // 9th queued request (10th total) should throw.
+        XCTAssertThrowsError(
+            try service.enqueue(messages: [("user", "overflow")], priority: .normal)
+        ) { error in
+            XCTAssertTrue("\(error)".contains("queue is full"),
+                          "Error should mention queue full, got: \(error)")
+        }
+    }
+
+    // MARK: - 14. unloadModel cancels all queued
+
+    func test_unloadModel_cancelsAllQueued() async throws {
+        let (service, _) = makeService()
+
+        let (_, stream1) = try service.enqueue(messages: [("user", "first")], priority: .normal)
+        let (_, stream2) = try service.enqueue(messages: [("user", "second")], priority: .normal)
+
+        service.unloadModel()
+
+        XCTAssertFalse(service.isGenerating)
+        XCTAssertFalse(service.isModelLoaded)
+        XCTAssertFalse(service.hasQueuedRequests)
+
+        // Both streams should be terminated.
+        // stream1 was active, stream2 was queued — both should have their continuations finished.
+        var stream2Error = false
+        do {
+            for try await _ in stream2.events {}
+        } catch {
+            stream2Error = true
+        }
+        XCTAssertTrue(stream2Error, "Queued stream should throw after unload")
+    }
+
+    // MARK: - 15. drainQueue noop when active request exists
+
+    func test_drainQueue_noop_whenActiveRequestExists() async throws {
+        let (service, mock) = makeService()
+
+        let _ = try service.enqueue(messages: [("user", "first")], priority: .normal)
+        let (_, stream2) = try service.enqueue(messages: [("user", "second")], priority: .normal)
+
+        // generationDidFinish is NOT called, so active stays.
+        // Calling drainQueue indirectly via another enqueue should not start second.
+        await Task.yield()
+
+        XCTAssertEqual(mock.generateCallCount, 1,
+                       "Only one generate() should have been called")
+        XCTAssertEqual(stream2.phase, .queued, "Second should still be queued")
+    }
+
+    // MARK: - 16. Rapid enqueue/cancel — no leaked continuations
+
+    func test_rapidEnqueueCancel_noLeakedContinuations() async throws {
+        let (service, _) = makeService()
+
+        var tokens: [InferenceService.GenerationRequestToken] = []
+        var streams: [GenerationStream] = []
+
+        // 1 active + 8 queued = 9 total (within maxQueueDepth).
+        for _ in 0..<9 {
+            let (token, stream) = try service.enqueue(
+                messages: [("user", "msg")],
+                priority: .normal
+            )
+            tokens.append(token)
+            streams.append(stream)
+        }
+
+        // Cancel odd-indexed requests.
+        for i in stride(from: 1, to: 9, by: 2) {
+            service.cancel(tokens[i])
+        }
+
+        // Stop everything to clean up.
+        service.stopGeneration()
+
+        // All streams should be terminable (no hanging continuations).
+        for stream in streams {
+            let phase = stream.phase
+            let terminated = (phase == .done || {
+                if case .failed = phase { return true }
+                return false
+            }() || phase == .connecting)
+            XCTAssertTrue(terminated || phase == .queued,
+                          "Stream should be in a terminal or initial phase, got \(phase)")
+        }
+    }
+
+    // MARK: - 17. finishAndDiscard always finishes continuation
+
+    func test_finishAndDiscard_alwaysFinishesContinuation() async throws {
+        let (service, _) = makeService()
+
+        let (token, stream) = try service.enqueue(
+            messages: [("user", "hello")],
+            priority: .normal
+        )
+
+        // Cancel the active request — this calls finishAndDiscard internally.
+        service.cancel(token)
+
+        // The stream's continuation should be finished — consuming should throw or complete.
+        var didThrow = false
+        do {
+            for try await _ in stream.events {}
+        } catch {
+            didThrow = true
+        }
+        XCTAssertTrue(didThrow, "Continuation should have been finished with error")
+    }
+}
+

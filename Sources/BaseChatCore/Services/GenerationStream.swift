@@ -28,6 +28,9 @@ public final class GenerationStream: Sendable {
     public nonisolated let events: AsyncThrowingStream<GenerationEvent, Error>
 
     /// Current lifecycle phase. Observed by the UI via `@Observable`.
+    ///
+    /// Defaults to `.connecting`; queue-originated streams start at `.queued`
+    /// (set by the caller after construction).
     public private(set) var phase: Phase = .connecting
 
     /// Optional idle timeout. When set, ``events`` will throw
@@ -38,6 +41,8 @@ public final class GenerationStream: Sendable {
 
     /// Lifecycle phases for a generation stream.
     public enum Phase: Sendable, Equatable {
+        /// Request is waiting in the queue for its turn.
+        case queued
         /// HTTP request in flight, waiting for first byte.
         case connecting
         /// Backend is loading/pulling a model (e.g. Ollama cold start).

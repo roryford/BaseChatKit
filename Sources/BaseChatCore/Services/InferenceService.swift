@@ -33,6 +33,23 @@ public typealias CloudBackendFactory = @MainActor (APIProvider) -> (any Inferenc
 /// These guarantees are service-level coordination semantics. Backend-specific
 /// threading/execution constraints (for example MLX generation's main-thread
 /// requirement) are unchanged.
+///
+/// ## Generation queue guarantees
+///
+/// - **Sequential FIFO**: only one backend `generate()` call is active at a time.
+///   The queue is processed sequentially regardless of backend type.
+/// - **Priority ordering**: `.userInitiated` > `.normal` > `.background`.
+///   Within the same priority, requests execute in FIFO order.
+/// - **Session scoping**: requests carry an optional session ID.
+///   `discardRequests(notMatching:)` cancels all requests not belonging to the
+///   specified session. Requests with `nil` sessionID are session-agnostic.
+/// - **Per-request cancellation**: `cancel(_:)` removes a queued request or stops
+///   the active one, then drains the next item.
+/// - **Max queue depth**: excess `enqueue()` calls throw. Default: 8.
+/// - **Thermal gating**: `.background` requests are dropped when the device is
+///   under `.serious` or `.critical` thermal pressure.
+/// - **`generationDidFinish()` contract**: callers MUST call this after consuming
+///   the stream. Failure to do so stalls the queue permanently.
 @Observable
 @MainActor
 public final class InferenceService {
@@ -126,6 +143,49 @@ public final class InferenceService {
             lhs.rawValue < rhs.rawValue
         }
     }
+
+    // MARK: - Generation Queue Types
+
+    /// Monotonic identity for each generation request.
+    public struct GenerationRequestToken: Hashable, Comparable, Sendable, CustomStringConvertible {
+        public let rawValue: UInt64
+        static let zero = Self(rawValue: 0)
+        public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+        public var description: String { "gen-\(rawValue)" }
+    }
+
+    /// Priority for queued generation requests.
+    /// Higher priority runs first; FIFO within the same level.
+    public enum GenerationPriority: Int, Comparable, Sendable {
+        case background = 0
+        case normal = 1
+        case userInitiated = 2
+        public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+    }
+
+    private struct QueuedRequest {
+        let token: GenerationRequestToken
+        let priority: GenerationPriority
+        let sessionID: UUID?
+        let messages: [(role: String, content: String)]
+        let systemPrompt: String?
+        let config: GenerationConfig
+        let stream: GenerationStream
+    }
+
+    // MARK: - Generation Queue State
+
+    private var nextGenerationToken: GenerationRequestToken = .zero
+    private var requestQueue: [QueuedRequest] = []
+    private var activeRequest: QueuedRequest?
+    private var activeTask: Task<Void, Never>?
+    private var continuations: [GenerationRequestToken: AsyncThrowingStream<GenerationEvent, Error>.Continuation] = [:]
+
+    /// Maximum queued requests. Excess enqueues fail immediately.
+    private let maxQueueDepth = 8
+
+    /// Whether there are pending requests behind the active one.
+    public var hasQueuedRequests: Bool { !requestQueue.isEmpty }
 
     /// Tracks model-load lifecycle state.
     ///
@@ -319,10 +379,10 @@ public final class InferenceService {
     /// Any late completion from an invalidated request is discarded.
     public func unloadModel() {
         invalidateOutstandingLoads()
+        stopGeneration()
         backend?.unloadModel()
         backend = nil
         isModelLoaded = false
-        isGenerating = false
         activeBackendName = nil
     }
 
@@ -377,8 +437,6 @@ public final class InferenceService {
             maxOutputTokens: maxOutputTokens
         )
 
-        isGenerating = true
-
         let prompt: String
         let effectiveSystemPrompt: String?
 
@@ -407,15 +465,186 @@ public final class InferenceService {
         // backend was swapped after the provider/observer was set.
         propagateToolStateToBackend()
 
-        do {
-            return try backend.generate(
-                prompt: prompt,
-                systemPrompt: effectiveSystemPrompt,
-                config: config
-            )
-        } catch {
+        return try backend.generate(
+            prompt: prompt,
+            systemPrompt: effectiveSystemPrompt,
+            config: config
+        )
+    }
+
+    // MARK: - Generation Queue
+
+    /// Enqueues a generation request and returns a token + stream pair.
+    ///
+    /// The stream starts in `.queued` phase and transitions to `.connecting`
+    /// when the request reaches the front of the queue.
+    public func enqueue(
+        messages: [(role: String, content: String)],
+        systemPrompt: String? = nil,
+        temperature: Float = 0.7,
+        topP: Float = 0.9,
+        repeatPenalty: Float = 1.1,
+        maxOutputTokens: Int? = 2048,
+        priority: GenerationPriority = .normal,
+        sessionID: UUID? = nil
+    ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
+        guard backend != nil, isModelLoaded else {
+            throw InferenceError.inferenceFailure("No model loaded")
+        }
+        guard requestQueue.count < maxQueueDepth else {
+            throw InferenceError.inferenceFailure("Generation queue is full")
+        }
+
+        let token = GenerationRequestToken(rawValue: nextGenerationToken.rawValue + 1)
+        nextGenerationToken = token
+
+        var continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation!
+        let rawStream = AsyncThrowingStream<GenerationEvent, Error> { continuation = $0 }
+        let stream = GenerationStream(rawStream)
+        stream.setPhase(.queued)
+        continuations[token] = continuation
+
+        let config = GenerationConfig(
+            temperature: temperature,
+            topP: topP,
+            repeatPenalty: repeatPenalty,
+            maxOutputTokens: maxOutputTokens
+        )
+
+        let request = QueuedRequest(
+            token: token,
+            priority: priority,
+            sessionID: sessionID,
+            messages: messages,
+            systemPrompt: systemPrompt,
+            config: config,
+            stream: stream
+        )
+
+        // Priority-sorted insertion: higher priority before lower, FIFO within same level.
+        if let insertIdx = requestQueue.firstIndex(where: { $0.priority < priority }) {
+            requestQueue.insert(request, at: insertIdx)
+        } else {
+            requestQueue.append(request)
+        }
+
+        drainQueue()
+        return (token: token, stream: stream)
+    }
+
+    /// Processes the next queued request if no generation is active.
+    ///
+    /// Synchronous — launches a Task for the active generation, never awaits inline.
+    /// This prevents actor reentrancy corruption.
+    private func drainQueue() {
+        guard activeRequest == nil, !requestQueue.isEmpty else { return }
+
+        let next = requestQueue.removeFirst()
+
+        // Thermal gate: drop background requests under thermal pressure.
+        if next.priority == .background {
+            let thermal = ProcessInfo.processInfo.thermalState
+            if thermal == .serious || thermal == .critical {
+                let throttleError = InferenceError.inferenceFailure("Thermal throttle")
+                Log.inference.warning("Dropping background generation \(next.token): thermal state \(thermal.rawValue)")
+                next.stream.setPhase(.failed(throttleError.localizedDescription))
+                finishAndDiscard(next.token, error: throttleError)
+                drainQueue()
+                return
+            }
+        }
+
+        activeRequest = next
+        isGenerating = true
+        next.stream.setPhase(.connecting)
+
+        activeTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let backendStream = try self.generate(
+                    messages: next.messages,
+                    systemPrompt: next.systemPrompt,
+                    temperature: next.config.temperature,
+                    topP: next.config.topP,
+                    repeatPenalty: next.config.repeatPenalty,
+                    maxOutputTokens: next.config.maxOutputTokens
+                )
+
+                for try await event in backendStream.events {
+                    guard !Task.isCancelled else { break }
+                    if case .token = event, next.stream.phase != .streaming {
+                        next.stream.setPhase(.streaming)
+                    }
+                    self.continuations[next.token]?.yield(event)
+                }
+
+                if Task.isCancelled {
+                    next.stream.setPhase(.failed("Cancelled"))
+                } else {
+                    next.stream.setPhase(.done)
+                }
+                self.continuations[next.token]?.finish()
+                self.continuations.removeValue(forKey: next.token)
+            } catch {
+                if Task.isCancelled {
+                    next.stream.setPhase(.failed("Cancelled"))
+                } else {
+                    next.stream.setPhase(.failed(error.localizedDescription))
+                }
+                self.continuations[next.token]?.finish(throwing: error)
+                self.continuations.removeValue(forKey: next.token)
+            }
+            // The consumer's defer block calls generationDidFinish(),
+            // which clears activeRequest and triggers the next drain.
+        }
+    }
+
+    /// Finishes the continuation for a token and removes it from the map.
+    /// Every removal path must use this to prevent leaked continuations.
+    private func finishAndDiscard(_ token: GenerationRequestToken, error: Error? = nil) {
+        if let error {
+            continuations[token]?.finish(throwing: error)
+        } else {
+            continuations[token]?.finish(throwing: CancellationError())
+        }
+        continuations.removeValue(forKey: token)
+    }
+
+    /// Cancels a specific generation request by token.
+    ///
+    /// If the token matches the active request, it is stopped and the next
+    /// queued item begins. If queued, the request is removed without executing.
+    public func cancel(_ token: GenerationRequestToken) {
+        if activeRequest?.token == token {
+            backend?.stopGeneration()
+            activeTask?.cancel()
+            activeTask = nil
+            activeRequest?.stream.setPhase(.failed("Cancelled"))
+            finishAndDiscard(token)
+            activeRequest = nil
             isGenerating = false
-            throw error
+            drainQueue()
+        } else if let idx = requestQueue.firstIndex(where: { $0.token == token }) {
+            let req = requestQueue.remove(at: idx)
+            req.stream.setPhase(.failed("Cancelled"))
+            finishAndDiscard(token)
+        }
+    }
+
+    /// Discards all queued and active requests that don't match the given session.
+    ///
+    /// Requests with `nil` sessionID are session-agnostic and are never discarded.
+    public func discardRequests(notMatching sessionID: UUID) {
+        requestQueue.removeAll { req in
+            guard let reqSession = req.sessionID, reqSession != sessionID else { return false }
+            req.stream.setPhase(.failed("Session changed"))
+            finishAndDiscard(req.token)
+            return true
+        }
+        if let active = activeRequest,
+           let activeSession = active.sessionID,
+           activeSession != sessionID {
+            cancel(active.token)
         }
     }
 
@@ -426,15 +655,31 @@ public final class InferenceService {
         (backend as? TokenUsageProvider)?.lastUsage
     }
 
-    /// Requests that the current generation stop.
+    /// Requests that the current generation stop and cancels all queued requests.
     public func stopGeneration() {
         backend?.stopGeneration()
+        activeTask?.cancel()
+        activeTask = nil
+        if let active = activeRequest {
+            finishAndDiscard(active.token)
+        }
+        activeRequest = nil
+        isGenerating = false
+
+        for req in requestQueue {
+            req.stream.setPhase(.failed("Cancelled"))
+            finishAndDiscard(req.token)
+        }
+        requestQueue.removeAll()
     }
 
     /// Notifies the service that generation has finished (called by view model
-    /// after consuming the stream).
+    /// after consuming the stream). Drains the next queued request if any.
     public func generationDidFinish() {
+        activeRequest = nil
+        activeTask = nil
         isGenerating = false
+        drainQueue()
     }
 
     /// Resets conversation state in the active backend without unloading the model.

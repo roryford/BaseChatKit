@@ -8,11 +8,19 @@ extension ChatViewModel {
 
     /// Switches to a different chat session, loading its messages and settings.
     public func switchToSession(_ session: ChatSessionRecord) {
+        // Stop any active generation for the old session.
+        if isGenerating {
+            stopGeneration()
+        }
+
         isRestoringSession = true
         defer { isRestoringSession = false }
 
         activeSession = session
         inferenceService.resetConversation()
+
+        // Discard any queued requests that belong to a different session.
+        inferenceService.discardRequests(notMatching: session.id)
 
         // Cancel any in-flight post-generation background tasks from the prior session.
         backgroundTask?.cancel()

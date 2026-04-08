@@ -51,8 +51,23 @@ extension ChatViewModel {
         activityPhase = .waitingForFirstToken
         let messageID = assistantMessage.id
         defer {
-            activityPhase = .idle
-            inferenceService.generationDidFinish()
+            // Only call generationDidFinish (which drains the queue) if we
+            // actually started a generation. If enqueue() threw (e.g. queue
+            // full), calling it would incorrectly clear someone else's active
+            // request.
+            if activeGenerationToken != nil {
+                let willDrainNext = inferenceService.hasQueuedRequests
+                activeGenerationToken = nil
+                inferenceService.generationDidFinish()
+                // Only go idle if no queued request was waiting to start.
+                // Check before drain, since drain may empty the queue while
+                // starting a new generation.
+                if !willDrainNext {
+                    activityPhase = .idle
+                }
+            } else {
+                activityPhase = .idle
+            }
         }
 
         do {
@@ -107,13 +122,16 @@ extension ChatViewModel {
                 history = trimmed.map { (role: $0.role.rawValue, content: $0.content) }
             }
 
-            let stream = try inferenceService.generate(
+            let (token, stream) = try inferenceService.enqueue(
                 messages: history,
                 systemPrompt: effectiveSystemPrompt,
                 temperature: temperature,
                 topP: topP,
-                repeatPenalty: repeatPenalty
+                repeatPenalty: repeatPenalty,
+                priority: .userInitiated,
+                sessionID: activeSessionID
             )
+            activeGenerationToken = token
 
             var tokenCount = 0
             // GenerationStream.phase tracks backend-level lifecycle (connecting, streaming, stalled, retrying).

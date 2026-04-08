@@ -91,6 +91,7 @@ final class CancellationTests: XCTestCase {
 
 
         XCTAssertFalse(vm.isGenerating, "isGenerating should be false after stopping")
+        XCTAssertFalse(vm.inferenceService.hasQueuedRequests, "Queue should be empty after stopGeneration")
 
         // We should have user + assistant (partial)
         XCTAssertEqual(vm.messages.count, 2, "Should have user message and partial assistant message")
