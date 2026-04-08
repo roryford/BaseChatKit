@@ -28,6 +28,11 @@ public enum InferenceError: LocalizedError {
         }
     }
 
+    /// Whether this error represents a transient condition that may succeed on retry.
+    ///
+    /// Currently only ``alreadyGenerating`` is retryable -- the caller can wait for the
+    /// in-flight generation to finish and try again. All other cases indicate permanent
+    /// failures (missing model, OOM, etc.).
     public var isRetryable: Bool {
         switch self {
         case .alreadyGenerating:

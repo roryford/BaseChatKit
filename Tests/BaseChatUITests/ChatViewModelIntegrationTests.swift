@@ -1,7 +1,7 @@
 import XCTest
 import SwiftData
 @testable import BaseChatUI
-import BaseChatCore
+@testable import BaseChatCore
 import BaseChatTestSupport
 
 /// Integration tests for ChatViewModel with a real in-memory SwiftData store and mock inference backend.

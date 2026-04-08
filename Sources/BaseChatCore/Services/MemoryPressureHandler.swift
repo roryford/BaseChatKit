@@ -19,12 +19,12 @@ public enum MemoryPressureLevel: String, Sendable {
 ///
 /// Uses `DispatchSource.makeMemoryPressureSource`, which works identically on iOS and macOS.
 @Observable
-public final class MemoryPressureHandler: @unchecked Sendable {
+package final class MemoryPressureHandler: @unchecked Sendable {
 
     // MARK: - Published State
 
     /// The current memory pressure level reported by the OS.
-    public internal(set) var pressureLevel: MemoryPressureLevel = .nominal
+    package internal(set) var pressureLevel: MemoryPressureLevel = .nominal
 
     // MARK: - Private State
 
@@ -39,7 +39,7 @@ public final class MemoryPressureHandler: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    public init() {}
+    package init() {}
 
     deinit {
         stopMonitoring()
@@ -50,7 +50,7 @@ public final class MemoryPressureHandler: @unchecked Sendable {
     /// Begins listening for memory pressure notifications from the OS.
     ///
     /// Safe to call multiple times -- subsequent calls are no-ops while monitoring is active.
-    public func startMonitoring() {
+    package func startMonitoring() {
         guard source == nil else { return }
 
         let newSource = DispatchSource.makeMemoryPressureSource(
@@ -94,7 +94,7 @@ public final class MemoryPressureHandler: @unchecked Sendable {
     /// Stops listening for memory pressure notifications.
     ///
     /// Safe to call multiple times -- subsequent calls are no-ops if not monitoring.
-    public func stopMonitoring() {
+    package func stopMonitoring() {
         source?.cancel()
         source = nil
     }

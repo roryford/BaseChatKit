@@ -2,7 +2,7 @@ import Testing
 import Foundation
 import SwiftData
 @testable import BaseChatUI
-import BaseChatCore
+@testable import BaseChatCore
 import BaseChatTestSupport
 
 /// E2E round-trip: send -> stream -> persist -> reload across session switch.

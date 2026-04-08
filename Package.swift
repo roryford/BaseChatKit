@@ -21,7 +21,6 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.31.3"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "2.31.3"),
-        .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.2.0"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
         .package(url: "https://github.com/mattt/llama.swift", from: "2.8672.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
@@ -90,7 +89,8 @@ let package = Package(
                 "BaseChatUI",
                 "BaseChatCore",
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
-            ]
+            ],
+            exclude: ["__Snapshots__"]
         ),
         // Xcode-only: real MLX model inference requiring Metal shader library.
         // Cannot run via `swift test` — MLX's metallib is only compiled by Xcode.

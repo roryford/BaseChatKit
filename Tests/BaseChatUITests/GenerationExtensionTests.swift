@@ -1,6 +1,6 @@
 import XCTest
 @testable import BaseChatUI
-import BaseChatCore
+@testable import BaseChatCore
 import BaseChatTestSupport
 
 // MARK: - Tests

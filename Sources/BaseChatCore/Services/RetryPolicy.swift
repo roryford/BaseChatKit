@@ -142,7 +142,7 @@ public func withRetry<T>(
 ///
 /// Convenience wrapper around ``withRetry(strategy:operation:)`` using
 /// ``ExponentialBackoffStrategy``.
-public func withExponentialBackoff<T>(
+func withExponentialBackoff<T>(
     maxRetries: Int = 3,
     baseDelay: TimeInterval = 1.0,
     maxTotalDelay: TimeInterval = 60.0,

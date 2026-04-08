@@ -2,7 +2,7 @@ import XCTest
 import SwiftData
 import Observation
 @testable import BaseChatUI
-import BaseChatCore
+@testable import BaseChatCore
 import BaseChatTestSupport
 
 @MainActor

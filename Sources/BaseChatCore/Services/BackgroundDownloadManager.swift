@@ -34,7 +34,11 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// Setter is `internal` (not `private`) so tests can inject state via `@testable import`.
     public internal(set) var activeDownloads: [String: DownloadState] = [:]
 
-    /// Whether any download is currently in progress.
+    /// Whether any download is currently queued or actively transferring data.
+    ///
+    /// Returns `true` if at least one entry in ``activeDownloads`` has a status of
+    /// `.queued` or `.downloading`. Completed, failed, and cancelled downloads are
+    /// not counted.
     public var hasActiveDownloads: Bool {
         activeDownloads.values.contains { state in
             switch state.status {

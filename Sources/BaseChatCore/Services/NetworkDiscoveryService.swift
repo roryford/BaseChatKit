@@ -54,6 +54,11 @@ public actor NetworkDiscoveryService: ServerDiscoveryService {
         }
     }
 
+    /// Scans known local ports for running inference servers and yields any discovered endpoints.
+    ///
+    /// Probes Ollama (11434), KoboldCpp (5001), and LM Studio (1234) in sequence.
+    /// Results are delivered through ``discoveredServers``. Safe to call while a scan
+    /// is already running -- subsequent calls are no-ops until the first completes.
     public func startDiscovery() async {
         let alreadyScanning = scanningLock.withLock { state -> Bool in
             if state { return true }
@@ -77,10 +82,19 @@ public actor NetworkDiscoveryService: ServerDiscoveryService {
         scanningLock.withLock { $0 = false }
     }
 
+    /// Cancels any in-progress discovery scan.
+    ///
+    /// Does not invalidate the ``discoveredServers`` stream -- previously yielded
+    /// results remain available. Safe to call when no scan is active.
     public nonisolated func stopDiscovery() {
         scanningLock.withLock { $0 = false }
     }
 
+    /// Probes a single host/port combination for an inference server.
+    ///
+    /// If the port matches a known server (Ollama, KoboldCpp, LM Studio), uses the
+    /// server-specific health endpoint. Otherwise falls back to the OpenAI-compatible
+    /// `/v1/models` endpoint. Returns `nil` if no server responds.
     public func probe(host: String, port: Int) async -> DiscoveredServer? {
         // Check if this matches a known server port
         if let known = Self.knownServers.first(where: { $0.port == port }) {
