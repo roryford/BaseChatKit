@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "BaseChatUI", targets: ["BaseChatUI"]),
     ],
     traits: [
+        .default(enabledTraits: ["MLX"]),
         .trait(name: "MLX", description: "Enable the MLX inference backend (requires Apple Silicon)"),
         .trait(name: "Llama", description: "Enable the llama.cpp (GGUF) inference backend"),
     ],
@@ -89,6 +90,17 @@ let package = Package(
                 "BaseChatUI",
                 "BaseChatCore",
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+            ]
+        ),
+        // Xcode-only: real MLX model inference requiring Metal shader library.
+        // Cannot run via `swift test` — MLX's metallib is only compiled by Xcode.
+        // Run with: xcodebuild test -scheme BaseChatKit-Package -only-testing BaseChatMLXIntegrationTests
+        .testTarget(
+            name: "BaseChatMLXIntegrationTests",
+            dependencies: [
+                "BaseChatBackends",
+                "BaseChatCore",
+                "BaseChatTestSupport",
             ]
         ),
     ],
