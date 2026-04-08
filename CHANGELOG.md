@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.8](https://github.com/roryford/BaseChatKit/compare/v0.3.7...v0.3.8) (2026-04-08)
+
+### Features
+
+**Generation queue for multi-consumer inference** — `InferenceService` previously coordinated generation through a single `isGenerating` boolean, forcing secondary consumers (entity extraction, summarization, classification) to poll with `Task.sleep` before starting. It now manages a proper FIFO queue: `enqueue()` returns a `(GenerationRequestToken, GenerationStream)` immediately and the request executes when it reaches the front. Three priority levels (`.userInitiated`, `.normal`, `.background`) with FIFO within each level; max queue depth of 8. Background-priority requests are automatically dropped under serious or critical thermal pressure. `ChatViewModel` uses `.userInitiated` priority and suppresses the idle flash between queued generations via `hasQueuedRequests`. Session switches cancel stale requests via `discardRequests(notMatching:)`, and `stopGeneration()` drains the entire queue. Backends are untouched — all local backends (MLX, llama.cpp, Foundation) are single-generation by nature, so sequential queuing is the correct concurrency pattern. Closes [#204](https://github.com/roryford/BaseChatKit/issues/204) ([#209](https://github.com/roryford/BaseChatKit/issues/209)).
+
 ## [0.3.7](https://github.com/roryford/BaseChatKit/compare/v0.3.6...v0.3.7) (2026-04-07)
 
 
