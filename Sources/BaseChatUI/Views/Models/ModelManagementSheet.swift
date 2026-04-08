@@ -64,6 +64,7 @@ public struct ModelManagementSheet: View {
             VStack(spacing: 0) {
                 tabPickerBar
                 tabContent
+                    .frame(maxHeight: .infinity)
             }
             .navigationTitle(selectedTab.rawValue)
             .toolbar {
@@ -157,12 +158,33 @@ private struct ModelSelectTab: View {
     var body: some View {
         List {
             if chatViewModel.availableModels.isEmpty {
+                #if os(macOS)
+                // ContentUnavailableView renders near-zero height inside a List row on macOS.
+                HStack {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "cpu")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("No Models Available")
+                            .font(.headline)
+                        Text("Download a model from the Download tab to get started.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+                #else
                 ContentUnavailableView(
                     "No Models Available",
                     systemImage: "cpu",
                     description: Text("Download a model from the Download tab to get started.")
                 )
                 .listRowBackground(Color.clear)
+                #endif
             } else {
                 Section {
                     ForEach(chatViewModel.availableModels) { model in
@@ -182,6 +204,8 @@ private struct ModelSelectTab: View {
         }
         #if os(iOS)
         .listStyle(.insetGrouped)
+        #else
+        .listStyle(.plain)
         #endif
         .accessibilityLabel("Available models")
     }
