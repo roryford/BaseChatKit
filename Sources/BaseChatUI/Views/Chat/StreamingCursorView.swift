@@ -15,3 +15,7 @@ public struct StreamingCursorView: View {
             .onAppear { isVisible = false }
     }
 }
+
+#Preview("Streaming Cursor") {
+    StreamingCursorView()
+}

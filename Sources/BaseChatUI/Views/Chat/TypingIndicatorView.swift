@@ -26,3 +26,7 @@ public struct TypingIndicatorView: View {
         .accessibilityLabel("Generating response")
     }
 }
+
+#Preview("Typing Indicator") {
+    TypingIndicatorView()
+}
