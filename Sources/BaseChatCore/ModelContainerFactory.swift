@@ -12,9 +12,9 @@ import SwiftData
 /// // In-memory store (tests, previews, ephemeral sessions)
 /// let container = try ModelContainerFactory.makeInMemoryContainer()
 /// ```
-package enum ModelContainerFactory {
+public enum ModelContainerFactory {
     /// The newest schema version that should be opened for application stores.
-    package static var currentSchema: any VersionedSchema.Type {
+    public static var currentSchema: any VersionedSchema.Type {
         BaseChatMigrationPlan.schemas.last ?? BaseChatSchemaV1.self
     }
 
@@ -24,7 +24,7 @@ package enum ModelContainerFactory {
     ///   pass to `ModelContainer`. Defaults to a single default (on-disk) config.
     /// - Returns: A `ModelContainer` whose store will be automatically migrated.
     /// - Throws: If `ModelContainer` initialisation fails.
-    package static func makeContainer(
+    public static func makeContainer(
         configurations: [ModelConfiguration] = [ModelConfiguration()]
     ) throws -> ModelContainer {
         try ModelContainer(
@@ -42,7 +42,7 @@ package enum ModelContainerFactory {
     ///
     /// - Returns: An in-memory `ModelContainer`.
     /// - Throws: If `ModelContainer` initialisation fails.
-    package static func makeInMemoryContainer() throws -> ModelContainer {
+    public static func makeInMemoryContainer() throws -> ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         return try makeContainer(configurations: [config])
     }
