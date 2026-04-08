@@ -568,6 +568,21 @@ public final class InferenceService {
 
         activeTask = Task { [weak self] in
             guard let self else { return }
+
+            // Ensure the continuation is always cleaned up, even if a new
+            // cancellation or error path is added later. The nil-check is
+            // intentional: cancel() may have already called finishAndDiscard().
+            var thrownError: Error?
+            defer {
+                if let continuation = self.continuations.removeValue(forKey: next.token) {
+                    if let thrownError {
+                        continuation.finish(throwing: thrownError)
+                    } else {
+                        continuation.finish()
+                    }
+                }
+            }
+
             do {
                 let backendStream = try self.generate(
                     messages: next.messages,
@@ -591,16 +606,13 @@ public final class InferenceService {
                 } else {
                     next.stream.setPhase(.done)
                 }
-                self.continuations[next.token]?.finish()
-                self.continuations.removeValue(forKey: next.token)
             } catch {
+                thrownError = error
                 if Task.isCancelled {
                     next.stream.setPhase(.failed("Cancelled"))
                 } else {
                     next.stream.setPhase(.failed(error.localizedDescription))
                 }
-                self.continuations[next.token]?.finish(throwing: error)
-                self.continuations.removeValue(forKey: next.token)
             }
             // The consumer's defer block calls generationDidFinish(),
             // which clears activeRequest and triggers the next drain.

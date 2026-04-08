@@ -44,6 +44,24 @@ public struct GenerationConfig: Sendable {
 /// Backends are unaware of the generation queue — they always see one
 /// `generate()` call at a time. Queuing, priority ordering, and session
 /// scoping are service-level concerns handled by `InferenceService`.
+///
+/// ## Thread Safety
+///
+/// `InferenceService` is `@MainActor`-isolated and calls backend methods
+/// from that context, but `loadModel(from:contextSize:)` is dispatched via
+/// `Task.detached` to avoid blocking the main thread during heavy I/O.
+/// This means backend methods can be called from **any** thread.
+///
+/// The generation queue guarantees only one `generate()` call is active at
+/// a time, but `stopGeneration()` and `unloadModel()` may arrive
+/// concurrently from the main actor while generation runs on a detached
+/// task. Conformers with mutable state **must** provide their own
+/// synchronization (e.g. `NSLock`, actor isolation).
+///
+/// All concrete backends in `BaseChatBackends` conform as `@unchecked
+/// Sendable` and use either `NSLock` (`LlamaBackend`, `SSECloudBackend`)
+/// or actor isolation (`MLXModelContainer`) to protect mutable state.
+/// Custom conformers should follow the same pattern.
 public protocol InferenceBackend: AnyObject, Sendable {
     var isModelLoaded: Bool { get }
     var isGenerating: Bool { get }

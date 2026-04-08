@@ -284,5 +284,11 @@ final class FoundationBackendUnitTests: XCTestCase {
         )
         XCTAssertFalse(backend.isGenerating)
     }
+
+    // MARK: - Backend Contract
+
+    func test_contract_allInvariants() {
+        BackendContractChecks.assertAllInvariants { FoundationBackend() }
+    }
 }
 #endif

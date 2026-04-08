@@ -18,6 +18,7 @@ public struct APIEndpointEditorView: View {
     @State private var baseURL: String = ""
     @State private var modelName: String = ""
     @State private var apiKey: String = ""
+    @State private var validationError: String?
 
     private var isEditing: Bool { endpoint != nil }
 
@@ -82,6 +83,13 @@ public struct APIEndpointEditorView: View {
                         .accessibilityElement(children: .combine)
                     }
                 }
+
+                if let error = validationError {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
+                }
             }
             .navigationTitle(isEditing ? "Edit Endpoint" : "Add Endpoint")
             #if os(iOS)
@@ -129,11 +137,20 @@ public struct APIEndpointEditorView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return }
 
+        let trimmedURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let error = validateURL(trimmedURL) {
+            validationError = error
+            return
+        }
+
+        validationError = nil
+
         if let endpoint {
             // Update existing
             endpoint.name = trimmedName
             endpoint.provider = provider
-            endpoint.baseURL = baseURL
+            endpoint.baseURL = trimmedURL.isEmpty ? provider.defaultBaseURL : trimmedURL
             endpoint.modelName = modelName
 
             if !apiKey.isEmpty {
@@ -144,7 +161,7 @@ public struct APIEndpointEditorView: View {
             let newEndpoint = APIEndpoint(
                 name: trimmedName,
                 provider: provider,
-                baseURL: baseURL.isEmpty ? nil : baseURL,
+                baseURL: trimmedURL.isEmpty ? nil : trimmedURL,
                 modelName: modelName.isEmpty ? nil : modelName
             )
             modelContext.insert(newEndpoint)
@@ -156,6 +173,36 @@ public struct APIEndpointEditorView: View {
 
         try? modelContext.save()
         dismiss()
+    }
+
+    /// Returns an error message if the URL is invalid, or `nil` if it passes validation.
+    private func validateURL(_ urlString: String) -> String? {
+        // Empty URL is allowed — the provider default will be used
+        guard !urlString.isEmpty else { return nil }
+
+        guard let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              url.host != nil else {
+            return "Enter a valid URL (e.g. https://api.example.com)."
+        }
+
+        guard scheme == "http" || scheme == "https" else {
+            return "URL must use http:// or https://."
+        }
+
+        // Allow plain HTTP only for localhost / loopback addresses
+        if scheme == "http" {
+            let host = url.host?.lowercased() ?? ""
+            let isLocal = host == "localhost"
+                || host == "127.0.0.1"
+                || host == "::1"
+                || host.hasSuffix(".local")
+            if !isLocal {
+                return "Remote servers must use HTTPS. Plain HTTP is only allowed for localhost."
+            }
+        }
+
+        return nil
     }
 }
 
