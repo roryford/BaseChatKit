@@ -225,5 +225,12 @@ final class LlamaBackendTests: XCTestCase {
         let long  = backend.tokenCount(String(repeating: "abcd", count: 100))  // 400/4 = 100
         XCTAssertLessThan(short, long, "Longer text should produce a higher token count")
     }
+
+
+    // MARK: - Backend Contract
+
+    func test_contract_allInvariants() {
+        BackendContractChecks.assertAllInvariants { LlamaBackend() }
+    }
 }
 #endif

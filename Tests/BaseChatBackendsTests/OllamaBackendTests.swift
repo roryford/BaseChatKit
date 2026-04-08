@@ -1,4 +1,5 @@
 import Testing
+import XCTest
 import Foundation
 @testable import BaseChatBackends
 @testable import BaseChatCore
@@ -444,6 +445,15 @@ struct OpenAICompatibleBackendTests {
     @Test func isOpenAIBackend() {
         let backend = OpenAICompatibleBackend()
         #expect(backend is OpenAIBackend)
+    }
+}
+
+// MARK: - Backend Contract
+
+/// XCTestCase subclass for BackendContractChecks (which uses XCTest assertions).
+final class OllamaBackendContractTests: XCTestCase {
+    func test_contract_allInvariants() {
+        BackendContractChecks.assertAllInvariants { OllamaBackend() }
     }
 }
 
