@@ -545,8 +545,10 @@ public final class InferenceService {
         if next.priority == .background {
             let thermal = ProcessInfo.processInfo.thermalState
             if thermal == .serious || thermal == .critical {
+                let throttleError = InferenceError.inferenceFailure("Thermal throttle")
                 Log.inference.warning("Dropping background generation \(next.token): thermal state \(thermal.rawValue)")
-                finishAndDiscard(next.token, error: InferenceError.inferenceFailure("Thermal throttle"))
+                next.stream.setPhase(.failed(throttleError.localizedDescription))
+                finishAndDiscard(next.token, error: throttleError)
                 drainQueue()
                 return
             }
@@ -576,11 +578,17 @@ public final class InferenceService {
                     self.continuations[next.token]?.yield(event)
                 }
 
-                next.stream.setPhase(.done)
+                if Task.isCancelled {
+                    next.stream.setPhase(.failed("Cancelled"))
+                } else {
+                    next.stream.setPhase(.done)
+                }
                 self.continuations[next.token]?.finish()
                 self.continuations.removeValue(forKey: next.token)
             } catch {
-                if !Task.isCancelled {
+                if Task.isCancelled {
+                    next.stream.setPhase(.failed("Cancelled"))
+                } else {
                     next.stream.setPhase(.failed(error.localizedDescription))
                 }
                 self.continuations[next.token]?.finish(throwing: error)
@@ -608,8 +616,10 @@ public final class InferenceService {
     /// queued item begins. If queued, the request is removed without executing.
     public func cancel(_ token: GenerationRequestToken) {
         if activeRequest?.token == token {
+            backend?.stopGeneration()
             activeTask?.cancel()
             activeTask = nil
+            activeRequest?.stream.setPhase(.failed("Cancelled"))
             finishAndDiscard(token)
             activeRequest = nil
             isGenerating = false
