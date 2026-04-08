@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.9](https://github.com/roryford/BaseChatKit/compare/v0.3.8...v0.3.9) (2026-04-08)
+
+### Features
+
+**Real-device E2E test infrastructure** — The test suite previously relied entirely on mocks for backend validation: `MockInferenceBackend` faked token streams, and MLX tests injected a `MockMLXModelContainer` rather than loading real weights. This meant regressions in actual model loading, GPU inference, and HTTP streaming could pass the test suite undetected. Two new E2E test suites now exercise real backends on developer hardware. `OllamaE2ETests` hits a live local Ollama server, auto-discovers a model in the 7–8B parameter range via `/api/tags`, and runs six inference tests including streaming, system prompts, multi-turn generation, cancellation, and output token limits. `MLXModelE2ETests` loads real MLX model weights from disk, performs GPU-accelerated inference via Metal, and runs seven tests covering the same surface plus model reload. Both suites gate on hardware availability via `HardwareRequirements` — Ollama tests skip when no server is reachable, MLX tests skip without Apple Silicon or a Metal device. MLX E2E tests live in a dedicated `BaseChatMLXIntegrationTests` target because MLX's Metal shader library (metallib) is only compiled by Xcode's build system, not by `swift test`. The MLX trait is now default-enabled so Xcode resolves dependencies correctly; CI passes `--disable-default-traits` to avoid the metallib crash on headless runners. Unit tests for the new `HardwareRequirements` helpers (MLX directory validation, Ollama model selection) run in CI without hardware ([#213](https://github.com/roryford/BaseChatKit/issues/213)).
+
+### Bug Fixes
+
+**macOS model selection sheet rendered blank** — `ModelSelectTab` inside `ModelManagementSheet` displayed an empty view on macOS because the SwiftUI `Form` two-column layout pushed content outside the visible area. Fixed by applying the correct frame constraints for the macOS sheet presentation ([e483df9](https://github.com/roryford/BaseChatKit/commit/e483df9ec443163c5d0c48b8a62e166f712c009c)).
+
 ## [0.3.8](https://github.com/roryford/BaseChatKit/compare/v0.3.7...v0.3.8) (2026-04-08)
 
 ### Features
