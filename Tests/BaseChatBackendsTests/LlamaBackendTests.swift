@@ -226,7 +226,6 @@ final class LlamaBackendTests: XCTestCase {
         XCTAssertLessThan(short, long, "Longer text should produce a higher token count")
     }
 
-
     // MARK: - Backend Contract
 
     func test_contract_allInvariants() {

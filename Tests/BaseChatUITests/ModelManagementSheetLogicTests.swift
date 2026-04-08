@@ -23,7 +23,7 @@ final class ModelManagementSheetLogicTests: XCTestCase {
         let vm = ChatViewModel(
             inferenceService: service,
             deviceCapability: DeviceCapabilityService(physicalMemory: 16 * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: ModelStorageService(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
             memoryPressure: MemoryPressureHandler()
         )
         vm.activeSession = ChatSessionRecord(title: "Test Session")
@@ -93,7 +93,7 @@ final class ModelManagementSheetLogicTests: XCTestCase {
         let vm = ChatViewModel(
             inferenceService: InferenceService(),
             deviceCapability: DeviceCapabilityService(physicalMemory: 16 * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: ModelStorageService(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
             memoryPressure: MemoryPressureHandler()
         )
         XCTAssertTrue(vm.availableModels.isEmpty, "Available models should be empty on init")

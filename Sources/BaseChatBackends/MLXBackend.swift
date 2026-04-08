@@ -225,12 +225,10 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         stopGeneration()
         withStateLock {
             _modelContainer = nil
-        }
-        Memory.clearCache()
-        withStateLock {
             _isModelLoaded = false
             _isGenerating = false
         }
+        Memory.clearCache()
         Self.logger.info("MLX backend unloaded")
     }
 }

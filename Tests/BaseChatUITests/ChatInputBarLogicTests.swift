@@ -17,7 +17,7 @@ final class ChatInputBarLogicTests: XCTestCase {
         ChatViewModel(
             inferenceService: InferenceService(),
             deviceCapability: DeviceCapabilityService(physicalMemory: 16 * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: ModelStorageService(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
             memoryPressure: MemoryPressureHandler()
         )
     }
@@ -30,7 +30,7 @@ final class ChatInputBarLogicTests: XCTestCase {
         let vm = ChatViewModel(
             inferenceService: service,
             deviceCapability: DeviceCapabilityService(physicalMemory: 16 * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: ModelStorageService(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
             memoryPressure: MemoryPressureHandler()
         )
         vm.activeSession = ChatSessionRecord(title: "Test Session")

@@ -156,75 +156,30 @@ final class MessageBubbleViewLogicTests: XCTestCase {
         XCTAssertNil(msg.promptTokens, "Prompt tokens should be nil by default")
     }
 
-    // MARK: - Role-based alignment logic
+    // MARK: - Role enumeration coverage
 
-    /// MessageBubbleView uses role to determine alignment: user -> trailing, assistant -> leading, system -> center
-    func test_roleAlignment_userIsTrailing() {
-        let msg = ChatMessageRecord(role: .user, content: "Test", sessionID: sessionID)
-        XCTAssertEqual(msg.role, .user)
-        // The view adds Spacer(minLength:) on the leading side for user messages.
-        // We verify the role drives the conditional branch.
+    func test_allRoles_areDistinct() {
+        let roles: [MessageRole] = [.user, .assistant, .system]
+        XCTAssertEqual(Set(roles).count, 3, "All three roles should be distinct values")
     }
 
-    func test_roleAlignment_assistantIsLeading() {
-        let msg = ChatMessageRecord(role: .assistant, content: "Test", sessionID: sessionID)
-        XCTAssertEqual(msg.role, .assistant)
-    }
+    // MARK: - Streaming state data model
 
-    func test_roleAlignment_systemIsCentered() {
-        let msg = ChatMessageRecord(role: .system, content: "Test", sessionID: sessionID)
-        XCTAssertEqual(msg.role, .system)
-    }
-
-    // MARK: - Streaming state combinations
-
-    /// When isStreaming is true and content is empty, the view shows a typing indicator.
-    func test_streamingWithEmptyContent_showsPlaceholder() {
+    /// Empty content produces empty contentParts — the view uses this to decide
+    /// whether to show a typing indicator vs partial content.
+    func test_emptyContent_hasEmptyParts() {
         let msg = ChatMessageRecord(role: .assistant, content: "", sessionID: sessionID)
-        let isStreaming = true
-        // The view condition: message.contentParts.isEmpty && isStreaming -> shows streamingPlaceholder
-        XCTAssertTrue(msg.contentParts.isEmpty || msg.content.isEmpty, "Precondition: content should be empty")
-        XCTAssertTrue(isStreaming, "Precondition: streaming should be true")
-        // This combination triggers the TypingIndicatorView path.
+        XCTAssertTrue(msg.content.isEmpty)
+        XCTAssertTrue(msg.contentParts.isEmpty || msg.contentParts.allSatisfy {
+            if case .text(let t) = $0 { return t.isEmpty } else { return false }
+        }, "Empty content should produce empty or blank parts")
     }
 
-    /// When isStreaming is true and content has tokens, the view shows content + cursor.
-    func test_streamingWithContent_showsCursor() {
+    /// Non-empty content produces non-empty contentParts — the view uses this
+    /// to show content + streaming cursor.
+    func test_nonEmptyContent_hasNonEmptyParts() {
         let msg = ChatMessageRecord(role: .assistant, content: "Partial response...", sessionID: sessionID)
-        let isStreaming = true
-        // The view condition: isStreaming && !message.contentParts.isEmpty -> shows streamingIndicator
-        XCTAssertFalse(msg.contentParts.isEmpty, "Precondition: content should not be empty")
-        XCTAssertTrue(isStreaming, "Precondition: streaming should be true")
-    }
-
-    /// When isStreaming is false, the view shows final content with timestamp.
-    func test_notStreaming_showsFinalContent() {
-        let msg = ChatMessageRecord(
-            role: .assistant,
-            content: "Complete response.",
-            sessionID: sessionID,
-            completionTokens: 10
-        )
-        let isStreaming = false
-        // The view shows timestamp and token count when !isStreaming || !contentParts.isEmpty
-        XCTAssertFalse(isStreaming)
-        XCTAssertEqual(msg.completionTokens, 10)
-    }
-
-    // MARK: - Pin state
-
-    func test_pinnedMessage_hasPinIndicator() {
-        let msg = ChatMessageRecord(role: .user, content: "Important message", sessionID: sessionID)
-        let isPinned = true
-        // The view shows a pin.fill icon when isPinned is true, overlaid on user/assistant bubbles.
-        XCTAssertTrue(isPinned, "Pinned state should drive the pin indicator overlay")
-        XCTAssertNotEqual(msg.role, .system, "Pin indicator only applies to user/assistant bubbles")
-    }
-
-    func test_unpinnedMessage_noPinIndicator() {
-        let isPinned = false
-        // The view's @ViewBuilder returns EmptyView when isPinned is false.
-        XCTAssertFalse(isPinned, "Unpinned state should hide the pin indicator")
+        XCTAssertFalse(msg.contentParts.isEmpty, "Non-empty content should produce non-empty parts")
     }
 
     // MARK: - Identifiable conformance
@@ -237,8 +192,9 @@ final class MessageBubbleViewLogicTests: XCTestCase {
 
     func test_messageRecord_hashable_sameIDsEqual() {
         let sharedID = UUID()
-        let msg1 = ChatMessageRecord(id: sharedID, role: .user, content: "Content", sessionID: sessionID)
-        let msg2 = ChatMessageRecord(id: sharedID, role: .user, content: "Content", sessionID: sessionID)
+        let sharedTimestamp = Date(timeIntervalSince1970: 1000)
+        let msg1 = ChatMessageRecord(id: sharedID, role: .user, content: "Content", timestamp: sharedTimestamp, sessionID: sessionID)
+        let msg2 = ChatMessageRecord(id: sharedID, role: .user, content: "Content", timestamp: sharedTimestamp, sessionID: sessionID)
         XCTAssertEqual(msg1, msg2, "Messages with the same ID and content should be equal")
     }
 

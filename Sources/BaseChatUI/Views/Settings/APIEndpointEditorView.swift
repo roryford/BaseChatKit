@@ -150,7 +150,7 @@ public struct APIEndpointEditorView: View {
             // Update existing
             endpoint.name = trimmedName
             endpoint.provider = provider
-            endpoint.baseURL = trimmedURL
+            endpoint.baseURL = trimmedURL.isEmpty ? provider.defaultBaseURL : trimmedURL
             endpoint.modelName = modelName
 
             if !apiKey.isEmpty {

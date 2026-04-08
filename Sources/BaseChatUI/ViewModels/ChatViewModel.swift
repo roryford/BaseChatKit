@@ -339,9 +339,12 @@ public final class ChatViewModel {
     /// recreating it only when the underlying backend tokenizer changes.
     var reusableCachingTokenizer: CachingTokenizer {
         let backendTokenizer = inferenceService.tokenizer
-        // Backend tokenizers are always reference types (TokenizerVendor is class-bound),
-        // so ObjectIdentifier is stable. When nil, we use the heuristic fallback.
-        let newBaseID = backendTokenizer.map { ObjectIdentifier($0 as AnyObject) }
+        // Use ObjectIdentifier for reference-type tokenizers (e.g. LlamaBackend vends self),
+        // fall back to type identity for value-type tokenizers (e.g. FoundationTokenizer).
+        let newBaseID: ObjectIdentifier? = backendTokenizer.map {
+            if let ref = $0 as? AnyObject { return ObjectIdentifier(ref) }
+            return ObjectIdentifier(type(of: $0))
+        }
         if let existing = _cachingTokenizer, _cachingTokenizerBaseID == newBaseID {
             return existing
         }
