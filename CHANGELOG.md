@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.1](https://github.com/roryford/BaseChatKit/compare/v0.5.0...v0.5.1) (2026-04-09)
+
+**Stable model identity** — Model selection no longer silently resets after app restart, session switch, or model list refresh. `ModelInfo(ggufURL:)` and `ModelInfo(mlxDirectory:)` generated a random UUID on every call, so each `refreshModels()` rescan assigned new IDs to the same files on disk. Sessions persist `selectedModelID`, but the saved UUID never matched after a rescan — leaving users with "No model selected" despite having previously chosen one. IDs are now derived deterministically from the file path using UUID v5 (SHA-1, RFC 4122), so the same model file always produces the same identifier ([#224](https://github.com/roryford/BaseChatKit/pull/224)).
+
+This release also adds 61 macOS control-visibility snapshot tests across ChatView, ModelManagementSheet, GenerationSettingsView, SessionListView, ChatExportSheet, and APIConfigurationView, and enables the Llama (GGUF) backend trait by default alongside MLX ([#223](https://github.com/roryford/BaseChatKit/pull/223), [#225](https://github.com/roryford/BaseChatKit/pull/225)).
+
 ## [0.5.0](https://github.com/roryford/BaseChatKit/compare/v0.4.1...v0.5.0) (2026-04-09)
 
 **Breaking API improvements bundled with mlx-swift-lm migration** — An upstream change in mlx-swift-lm forced a breaking update to MLXBackend's model loading API. We used this as the trigger to ship six additional breaking improvements that fix real bugs, improve correctness, and reduce future maintenance cost.
