@@ -6,22 +6,22 @@ import Foundation
 ///
 /// The newest messages are always kept verbatim (the "tail"), and pinned messages are
 /// never evicted. Remaining messages compete for the leftover budget by score.
-package final class ExtractiveCompressor: ContextCompressor, @unchecked Sendable {
-    package let strategyName = "extractive"
+public final class ExtractiveCompressor: ContextCompressor, @unchecked Sendable {
+    public let strategyName = "extractive"
 
     /// Fraction of the history budget reserved for the verbatim tail (newest messages).
-    package let tailBudgetFraction: Double
+    public let tailBudgetFraction: Double
 
     /// Weight for how recently a message appears in the conversation.
-    package let recencyWeight: Double
+    public let recencyWeight: Double
 
     /// Weight for message content length (longer messages carry more narrative).
-    package let lengthWeight: Double
+    public let lengthWeight: Double
 
     /// Weight for capitalized-word density (proxy for proper noun / keyword richness).
-    package let keywordDensityWeight: Double
+    public let keywordDensityWeight: Double
 
-    package init(
+    public init(
         tailBudgetFraction: Double = 0.40,
         recencyWeight: Double = 0.5,
         lengthWeight: Double = 0.3,
@@ -35,7 +35,7 @@ package final class ExtractiveCompressor: ContextCompressor, @unchecked Sendable
 
     // MARK: - ContextCompressor
 
-    package nonisolated func compress(
+    public nonisolated func compress(
         messages: [CompressibleMessage],
         systemPrompt: String?,
         contextSize: Int,

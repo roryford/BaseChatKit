@@ -7,15 +7,15 @@ import Foundation
 /// (higher quality, requires a generate function) based on the active mode and
 /// available capabilities.
 @MainActor
-package final class CompressionOrchestrator {
+public final class CompressionOrchestrator {
 
     /// The user-selected compression mode. Defaults to automatic.
-    package var mode: CompressionMode = .automatic
+    public var mode: CompressionMode = .automatic
 
-    package let extractive: ExtractiveCompressor
-    package let anchored: AnchoredCompressor
+    public let extractive: ExtractiveCompressor
+    public let anchored: AnchoredCompressor
 
-    package init(
+    public init(
         extractive: ExtractiveCompressor = ExtractiveCompressor(),
         anchored: AnchoredCompressor = AnchoredCompressor()
     ) {
@@ -29,7 +29,7 @@ package final class CompressionOrchestrator {
     ///
     /// Larger context windows can afford to wait longer before compressing,
     /// so the threshold is higher for models with more than 16k tokens.
-    package func compressionThreshold(for contextSize: Int) -> Double {
+    public func compressionThreshold(for contextSize: Int) -> Double {
         contextSize > 16_000 ? 0.85 : 0.75
     }
 
@@ -37,7 +37,7 @@ package final class CompressionOrchestrator {
 
     /// Determines whether the current conversation history is large enough to
     /// warrant compression given the active mode and context window.
-    package func shouldCompress(
+    public func shouldCompress(
         messages: [CompressibleMessage],
         systemPrompt: String?,
         contextSize: Int,
@@ -63,7 +63,7 @@ package final class CompressionOrchestrator {
     ///
     /// Strategy routing depends on the current ``mode``, the model's context size,
     /// and whether `AnchoredCompressor` has a generate function configured.
-    package func compress(
+    public func compress(
         messages: [CompressibleMessage],
         systemPrompt: String?,
         contextSize: Int,
