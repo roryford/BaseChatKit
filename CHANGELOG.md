@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.2](https://github.com/roryford/BaseChatKit/compare/v0.5.1...v0.5.2) (2026-04-09)
+
+**Demo app hardening** — A code review of the demo app uncovered a build failure, broken recovery UX, layout issues on large displays, and an overly strict memory gate that rejected models that would have loaded fine.
+
+LlamaBackend failed to compile under Xcode 26 / Swift 6.3 due to three strict concurrency violations: a non-isolated global static, `NSLock.lock()` calls inside `Task.detached` async contexts, and a circular reference in `unloadModel()`. These are fixed with `nonisolated(unsafe)`, a synchronous lock wrapper, and direct lock/unlock calls respectively ([#228](https://github.com/roryford/BaseChatKit/pull/228)).
+
+The error banner's Retry and Check API Key buttons previously just dismissed the error without performing any recovery. Retry now calls `regenerateLastResponse()`, and Check API Key opens the API configuration sheet. The model loading indicator also gains a Cancel button so users aren't forced to wait or force-quit during long loads ([#228](https://github.com/roryford/BaseChatKit/pull/228)).
+
+Message bubbles are now capped at 700pt width so text stays readable on ultrawide and 5K displays, where the previous spacer-only constraint let bubbles stretch across the full window. The macOS demo window defaults to 900×700 with a 600×400 minimum to prevent unusable resize states ([#228](https://github.com/roryford/BaseChatKit/pull/228)).
+
+The endpoint editor's Save button now requires a non-empty model name and trims whitespace. Endpoint deletion logs errors instead of silently swallowing them. The sidebar model section shows a loading spinner during model load and an error indicator on failure, eliminating the dead-end state new users hit when no model is available ([#228](https://github.com/roryford/BaseChatKit/pull/228)).
+
+The `MemoryGate` resident strategy was multiplying the model file size by 1.20× to account for KV cache, but KV cache is allocated during inference, not at load time. This caused the gate to reject ~4.6 GB models on 16 GB devices when the process had already used 1–2 GB. The check now uses the raw file size ([#228](https://github.com/roryford/BaseChatKit/pull/228)).
+
 ## [0.5.1](https://github.com/roryford/BaseChatKit/compare/v0.5.0...v0.5.1) (2026-04-09)
 
 **Stable model identity** — Model selection no longer silently resets after app restart, session switch, or model list refresh. `ModelInfo(ggufURL:)` and `ModelInfo(mlxDirectory:)` generated a random UUID on every call, so each `refreshModels()` rescan assigned new IDs to the same files on disk. Sessions persist `selectedModelID`, but the saved UUID never matched after a rescan — leaving users with "No model selected" despite having previously chosen one. IDs are now derived deterministically from the file path using UUID v5 (SHA-1, RFC 4122), so the same model file always produces the same identifier ([#224](https://github.com/roryford/BaseChatKit/pull/224)).
