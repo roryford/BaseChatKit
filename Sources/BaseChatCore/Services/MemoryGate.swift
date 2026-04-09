@@ -69,9 +69,9 @@ public struct MemoryGate: Sendable {
             return evaluate(estimatedBytes: estimated)
 
         case .resident:
-            // Full model + ~20% KV cache overhead must fit.
-            let estimated = UInt64(Double(modelFileSize) * 1.20)
-            return evaluate(estimatedBytes: estimated)
+            // Full model weights must fit at load time.
+            // KV cache is allocated separately during inference.
+            return evaluate(estimatedBytes: modelFileSize)
         }
     }
 

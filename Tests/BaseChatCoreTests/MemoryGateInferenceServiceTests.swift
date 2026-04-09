@@ -35,7 +35,7 @@ final class MemoryGateInferenceServiceTests: XCTestCase {
             name: "test-model",
             fileName: "fake.gguf",
             url: URL(fileURLWithPath: "/tmp/fake.gguf"),
-            fileSize: 4_000_000_000,  // 4 GB -> 4.8 GB estimated, way over 500 MB
+            fileSize: 4_000_000_000,  // 4 GB raw size, way over 500 MB
             modelType: .gguf
         )
 
@@ -44,7 +44,7 @@ final class MemoryGateInferenceServiceTests: XCTestCase {
             XCTFail("Expected memoryInsufficient error")
         } catch let error as InferenceError {
             if case .memoryInsufficient(let required, let available) = error {
-                XCTAssertEqual(required, 4_800_000_000)
+                XCTAssertEqual(required, 4_000_000_000)
                 XCTAssertEqual(available, 500_000_000)
             } else {
                 XCTFail("Expected memoryInsufficient, got \(error)")
@@ -164,7 +164,7 @@ final class MemoryGateInferenceServiceTests: XCTestCase {
             name: "small-model",
             fileName: "fake.gguf",
             url: URL(fileURLWithPath: "/tmp/fake.gguf"),
-            fileSize: 1_000_000_000,  // 1 GB -> 1.2 GB estimated, fits in 16 GB
+            fileSize: 1_000_000_000,  // 1 GB raw size, fits in 16 GB
             modelType: .gguf
         )
 
