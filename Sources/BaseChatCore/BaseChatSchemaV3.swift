@@ -37,7 +37,7 @@ public enum BaseChatSchemaV3: VersionedSchema {
         public var content: String
 
         /// JSON-encoded `[MessagePart]` array. This is the source of truth for
-        /// structured content. Empty string means "use `content` as a single text part".
+        /// structured content.
         public var contentPartsJSON: String
 
         /// Tokens used in the prompt for this response (cloud API backends only).

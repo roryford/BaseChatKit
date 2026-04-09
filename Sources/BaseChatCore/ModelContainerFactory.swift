@@ -27,7 +27,7 @@ public enum ModelContainerFactory {
         configurations: [ModelConfiguration] = [ModelConfiguration()]
     ) throws -> ModelContainer {
         try ModelContainer(
-            for: Schema(versionedSchema: BaseChatSchemaV3.self),
+            for: Schema(versionedSchema: currentSchema),
             configurations: configurations
         )
     }
