@@ -369,6 +369,23 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(result.totalTokens, 50)
     }
 
+    func test_backendCapabilities_allDefaultsInit() {
+        let caps = BackendCapabilities()
+
+        XCTAssertEqual(caps.supportedParameters, [.temperature])
+        XCTAssertEqual(caps.maxContextTokens, 4096)
+        XCTAssertFalse(caps.requiresPromptTemplate)
+        XCTAssertTrue(caps.supportsSystemPrompt)
+        XCTAssertFalse(caps.supportsToolCalling)
+        XCTAssertFalse(caps.supportsStructuredOutput)
+        XCTAssertEqual(caps.cancellationStyle, .cooperative)
+        XCTAssertFalse(caps.supportsTokenCounting)
+        XCTAssertEqual(caps.memoryStrategy, .resident)
+        XCTAssertEqual(caps.maxOutputTokens, 4096)
+        XCTAssertTrue(caps.supportsStreaming)
+        XCTAssertFalse(caps.isRemote)
+    }
+
     func test_promptAssembler_capabilities_overload_trimsWhenContextSmall() {
         struct CharTok: TokenizerProvider { func tokenCount(_ t: String) -> Int { t.count } }
         let caps = BackendCapabilities(
