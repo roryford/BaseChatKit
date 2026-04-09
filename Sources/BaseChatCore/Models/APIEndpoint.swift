@@ -42,5 +42,5 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Public alias for the V1 SwiftData API endpoint model.
-public typealias APIEndpoint = BaseChatSchemaV1.APIEndpoint
+/// Public alias for the current SwiftData API endpoint model.
+public typealias APIEndpoint = BaseChatSchemaV3.APIEndpoint

@@ -123,8 +123,6 @@ Backends are registered as factories so BaseChatCore stays free of any direct ML
 - ``ModelTypeCompatibilityProvider``
 - ``FrameworkCapabilityService``
 
-### Schema & Migration
+### Schema
 
-- ``BaseChatSchemaV1``
-- ``BaseChatSchemaV2``
-- ``BaseChatMigrationPlan``
+- ``BaseChatSchemaV3``

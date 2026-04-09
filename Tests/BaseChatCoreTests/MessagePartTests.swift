@@ -115,7 +115,7 @@ final class MessagePartTests: XCTestCase {
     }
 
     func test_chatMessage_decode_emptyString_returnsEmptyArray() {
-        let parts = BaseChatSchemaV2.ChatMessage.decode("")
+        let parts = BaseChatSchemaV3.ChatMessage.decode("")
         XCTAssertEqual(parts, [])
     }
 

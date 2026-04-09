@@ -1,16 +1,11 @@
 import Foundation
 import SwiftData
 
-/// Version 3 of the BaseChatKit SwiftData schema.
+/// The current BaseChatKit SwiftData schema.
 ///
-/// Adds ``ModelBenchmarkCache`` for persisting benchmark results keyed by model
-/// file name. No existing model types are modified — this is a lightweight
-/// additive migration.
-///
-/// ## Migration from V2
-///
-/// A lightweight migration stage adds the new `ModelBenchmarkCache` entity.
-/// No data transformation is required.
+/// All model definitions live here. Previous schema versions (V1, V2) were
+/// removed while the repo was still private — no users carry legacy data that
+/// needs migration.
 public enum BaseChatSchemaV3: VersionedSchema {
     public static let versionIdentifier = Schema.Version(3, 0, 0)
 
@@ -24,12 +19,288 @@ public enum BaseChatSchemaV3: VersionedSchema {
         ]
     }
 
-    // Existing types are unchanged from V2/V1 — redeclare as typealiases so the
-    // schema enumerates all model types.
-    typealias ChatMessage = BaseChatSchemaV2.ChatMessage
-    typealias ChatSession = BaseChatSchemaV1.ChatSession
-    typealias SamplerPreset = BaseChatSchemaV1.SamplerPreset
-    typealias APIEndpoint = BaseChatSchemaV1.APIEndpoint
+    // MARK: - ChatMessage
+
+    /// A single message in a chat conversation, persisted via SwiftData.
+    ///
+    /// Content is stored as a JSON-encoded `[MessagePart]` array in
+    /// `contentPartsJSON`. The `content` property concatenates text parts
+    /// for backward compatibility.
+    @Model
+    public final class ChatMessage {
+        public var id: UUID
+        public var role: MessageRole
+        public var timestamp: Date
+        public var sessionID: UUID
+
+        /// Plain-text cache of the message content.
+        public var content: String
+
+        /// JSON-encoded `[MessagePart]` array. This is the source of truth for
+        /// structured content. Empty string means "use `content` as a single text part".
+        public var contentPartsJSON: String
+
+        /// Tokens used in the prompt for this response (cloud API backends only).
+        public var promptTokens: Int?
+        /// Tokens generated in this response (cloud API backends only).
+        public var completionTokens: Int?
+
+        public init(
+            role: MessageRole,
+            content: String,
+            sessionID: UUID
+        ) {
+            self.id = UUID()
+            self.role = role
+            self.timestamp = Date()
+            self.sessionID = sessionID
+            self.content = content
+            self.contentPartsJSON = Self.encode([.text(content)])
+        }
+
+        /// Creates a message from structured content parts.
+        public init(
+            role: MessageRole,
+            contentParts: [MessagePart],
+            sessionID: UUID
+        ) {
+            self.id = UUID()
+            self.role = role
+            self.timestamp = Date()
+            self.sessionID = sessionID
+            self.contentPartsJSON = Self.encode(contentParts)
+            self.content = contentParts.compactMap(\.textContent).joined()
+        }
+
+        // MARK: - Content Parts
+
+        /// The structured content parts of this message.
+        public var contentParts: [MessagePart] {
+            get { Self.decode(contentPartsJSON) }
+            set {
+                contentPartsJSON = Self.encode(newValue)
+                content = newValue.compactMap(\.textContent).joined()
+            }
+        }
+
+        // MARK: - JSON Helpers
+
+        static func encode(_ parts: [MessagePart]) -> String {
+            do {
+                let data = try JSONEncoder().encode(parts)
+                if let json = String(data: data, encoding: .utf8) {
+                    return json
+                }
+                Log.persistence.warning("Failed to convert encoded MessagePart data to UTF-8 string")
+            } catch {
+                Log.persistence.error("Failed to encode MessagePart array: \(error)")
+            }
+            return "[]"
+        }
+
+        static func decode(_ json: String) -> [MessagePart] {
+            guard let data = json.data(using: .utf8) else {
+                Log.persistence.warning("contentPartsJSON is not valid UTF-8")
+                return json.isEmpty ? [] : [.text(json)]
+            }
+            do {
+                return try JSONDecoder().decode([MessagePart].self, from: data)
+            } catch {
+                Log.persistence.warning("Failed to decode contentPartsJSON, falling back to text: \(error)")
+                return json.isEmpty ? [] : [.text(json)]
+            }
+        }
+    }
+
+    // MARK: - ChatSession
+
+    /// A chat session containing a sequence of messages with its own settings.
+    ///
+    /// Sessions hold per-session overrides for generation parameters. When an
+    /// override is `nil`, the app falls back to global defaults from `SettingsService`.
+    @Model
+    public final class ChatSession {
+        public var id: UUID
+        public var title: String
+        public var createdAt: Date
+        public var updatedAt: Date
+
+        /// Per-session system prompt.
+        public var systemPrompt: String
+
+        /// The UUID of the selected ModelInfo for this session.
+        public var selectedModelID: UUID?
+
+        /// The UUID of the selected APIEndpoint for this session.
+        public var selectedEndpointID: UUID?
+
+        // Per-session generation overrides (nil = use global default)
+        public var temperature: Float?
+        public var topP: Float?
+        public var repeatPenalty: Float?
+
+        /// Stored as PromptTemplate.rawValue; nil means auto-detect or global default.
+        public var promptTemplateRawValue: String?
+
+        /// User override for context window size; nil uses model default.
+        public var contextSizeOverride: Int?
+
+        /// Raw storage for CompressionMode. nil means .automatic.
+        public var compressionModeRaw: String?
+
+        /// Comma-separated UUID strings of pinned messages in this session.
+        /// nil means no messages are pinned.
+        public var pinnedMessageIDsRaw: String?
+
+        public init(title: String = "New Chat") {
+            self.id = UUID()
+            self.title = title
+            self.createdAt = Date()
+            self.updatedAt = Date()
+            self.systemPrompt = ""
+        }
+
+        /// The set of pinned message IDs for this session.
+        ///
+        /// Pinned messages are preserved during context compression regardless of age.
+        /// Serialized as comma-separated UUID strings in ``pinnedMessageIDsRaw``.
+        public var pinnedMessageIDs: Set<UUID> {
+            get {
+                guard let raw = pinnedMessageIDsRaw else { return [] }
+                return Set(raw.split(separator: ",").compactMap { UUID(uuidString: String($0)) })
+            }
+            set {
+                pinnedMessageIDsRaw = newValue.isEmpty ? nil : newValue.map(\.uuidString).joined(separator: ",")
+            }
+        }
+
+        /// The compression mode for this session.
+        ///
+        /// Defaults to `.automatic` when no value is stored.
+        public var compressionMode: CompressionMode {
+            get { compressionModeRaw.flatMap(CompressionMode.init(rawValue:)) ?? .automatic }
+            set { compressionModeRaw = newValue.rawValue }
+        }
+
+        /// Convenience to get/set the prompt template as a `PromptTemplate` enum.
+        public var promptTemplate: PromptTemplate? {
+            get {
+                guard let raw = promptTemplateRawValue else { return nil }
+                return PromptTemplate(rawValue: raw)
+            }
+            set {
+                promptTemplateRawValue = newValue?.rawValue
+            }
+        }
+    }
+
+    // MARK: - SamplerPreset
+
+    /// A saved set of generation parameters that can be applied to any session.
+    @Model
+    public final class SamplerPreset {
+        public var id: UUID
+        public var name: String
+        public var temperature: Float
+        public var topP: Float
+        public var repeatPenalty: Float
+        public var createdAt: Date
+
+        public init(name: String, temperature: Float = 0.7, topP: Float = 0.9, repeatPenalty: Float = 1.1) {
+            self.id = UUID()
+            self.name = name
+            self.temperature = temperature
+            self.topP = topP
+            self.repeatPenalty = repeatPenalty
+            self.createdAt = Date()
+        }
+    }
+
+    // MARK: - APIEndpoint
+
+    /// A configured cloud API endpoint persisted via SwiftData.
+    ///
+    /// The API key is NOT stored here — it lives in the Keychain, referenced
+    /// by this endpoint's `id` as the Keychain account identifier.
+    @Model
+    public final class APIEndpoint {
+        public var id: UUID
+        public var name: String
+        public var providerRawValue: String
+        public var baseURL: String
+        public var modelName: String
+        public var createdAt: Date
+        public var isEnabled: Bool
+
+        public init(
+            name: String,
+            provider: APIProvider,
+            baseURL: String? = nil,
+            modelName: String? = nil
+        ) {
+            self.id = UUID()
+            self.name = name
+            self.providerRawValue = provider.rawValue
+            self.baseURL = baseURL ?? provider.defaultBaseURL
+            self.modelName = modelName ?? provider.defaultModelName
+            self.createdAt = Date()
+            self.isEnabled = true
+        }
+
+        /// The provider type as an enum.
+        public var provider: APIProvider {
+            get { APIProvider(rawValue: providerRawValue) ?? .custom }
+            set { providerRawValue = newValue.rawValue }
+        }
+
+        /// The Keychain account identifier for this endpoint's API key.
+        public var keychainAccount: String {
+            id.uuidString
+        }
+
+        /// Retrieves the API key from the Keychain.
+        public var apiKey: String? {
+            KeychainService.retrieve(account: keychainAccount)
+        }
+
+        /// Stores an API key in the Keychain for this endpoint.
+        @discardableResult
+        public func setAPIKey(_ key: String) -> Bool {
+            KeychainService.store(key: key, account: keychainAccount)
+        }
+
+        /// Deletes the API key from the Keychain.
+        public func deleteAPIKey() {
+            KeychainService.delete(account: keychainAccount)
+        }
+
+        /// Validates the endpoint configuration.
+        public var isValid: Bool {
+            guard let url = URL(string: baseURL), url.scheme != nil, url.host != nil else {
+                return false
+            }
+
+            // HTTPS required for remote endpoints
+            if !isLocalhost(url) && url.scheme != "https" {
+                return false
+            }
+
+            // API key required for providers that need one
+            if provider.requiresAPIKey && (apiKey?.isEmpty ?? true) {
+                return false
+            }
+
+            return true
+        }
+
+        /// Checks if the URL points to a local server.
+        private func isLocalhost(_ url: URL) -> Bool {
+            guard let host = url.host() else { return false }
+            return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
+        }
+    }
+
+    // MARK: - ModelBenchmarkCache
 
     /// Persists a ``ModelBenchmarkResult`` keyed by the model's file name.
     ///
