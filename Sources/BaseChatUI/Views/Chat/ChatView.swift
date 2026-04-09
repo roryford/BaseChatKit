@@ -19,6 +19,7 @@ public struct ChatView: View {
     @State private var isSettingsPresented: Bool = false
     @State private var isExportPresented: Bool = false
     @State private var showClearConfirmation: Bool = false
+    @State private var showAPIConfiguration: Bool = false
 
     public init(showModelManagement: Binding<Bool>) {
         self._showModelManagement = showModelManagement
@@ -97,6 +98,9 @@ public struct ChatView: View {
         .sheet(isPresented: $isExportPresented) {
             ChatExportSheet()
         }
+        .sheet(isPresented: $showAPIConfiguration) {
+            APIConfigurationView()
+        }
     }
 
     // MARK: - Error Banner
@@ -136,12 +140,16 @@ public struct ChatView: View {
         case .retry:
             Button("Retry") {
                 viewModel.activeError = nil
+                Task {
+                    await viewModel.regenerateLastResponse()
+                }
             }
             .buttonStyle(.borderless)
             .font(.callout.bold())
         case .configureAPIKey:
             Button("Check API Key") {
                 viewModel.activeError = nil
+                showAPIConfiguration = true
             }
             .buttonStyle(.borderless)
             .font(.callout.bold())
@@ -191,7 +199,9 @@ public struct ChatView: View {
     private var loadingView: some View {
         Group {
             if case .modelLoading(let progress) = viewModel.activityPhase {
-                ModelLoadingIndicatorView(progress: progress)
+                ModelLoadingIndicatorView(progress: progress) {
+                    viewModel.unloadModel()
+                }
             }
         }
     }
