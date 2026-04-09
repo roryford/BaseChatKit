@@ -29,6 +29,7 @@ public struct MessageBubbleView: View {
             if message.role == .user { Spacer(minLength: spacerMinLength) }
 
             bubbleContent
+                .frame(maxWidth: 700, alignment: alignment)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(message.role.rawValue): \(message.content)")
 
