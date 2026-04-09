@@ -63,7 +63,8 @@ public struct APIEndpointEditorView: View {
                             .textInputAutocapitalization(.never)
                             #endif
 
-                        if isEditing, let existing = endpoint?.apiKey, !existing.isEmpty {
+                        if isEditing, let account = endpoint?.keychainAccount,
+                           let existing = KeychainService.retrieve(account: account), !existing.isEmpty {
                             Text("Current key: \(KeychainService.masked(existing))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
