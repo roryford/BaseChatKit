@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.5.0](https://github.com/roryford/BaseChatKit/compare/v0.4.1...v0.5.0) (2026-04-09)
+
+**Breaking API improvements bundled with mlx-swift-lm migration** — An upstream change in mlx-swift-lm forced a breaking update to MLXBackend's model loading API. We used this as the trigger to ship six additional breaking improvements that fix real bugs, improve correctness, and reduce future maintenance cost.
+
+mlx-swift-lm 2.31.3 declared `Hub` as a transitive dependency that Swift 6.3 / Xcode 26 now rejects. Commit `d1b14783` on mlx-swift-lm's main branch moves hub code to a new `MLXHuggingFace` target, but also changes the `loadModelContainer` signature. `MLXBackend` now uses the new `loadModelContainer(from:using:)` API with `TokenizerLoader` ([#221](https://github.com/roryford/BaseChatKit/pull/221)).
+
+`SettingsService.globalTemperature`, `globalTopP`, and `globalRepeatPenalty` were `Float` properties that used `UserDefaults.float(forKey:)`, which returns 0 for missing keys — making it impossible to distinguish "user set temperature to 0.0" from "never configured." These are now `Float?`, with resolution helpers falling back to hardcoded defaults (0.7, 0.9, 1.1) when both session override and global are nil.
+
+`ChatSessionRecord` stored compression mode, prompt template, and pinned message IDs as raw strings (`compressionModeRaw`, `promptTemplateRawValue`, `pinnedMessageIDsRaw`), accepting invalid values silently. These are now typed stored properties (`compressionMode: CompressionMode`, `promptTemplate: PromptTemplate?`, `pinnedMessageIDs: Set<UUID>`), with raw-to-typed conversion handled by `SwiftDataPersistenceProvider` at the persistence boundary.
+
+`APIEndpoint.apiKey` was a computed property that performed Keychain I/O directly from a SwiftData `@Model`, breaking testability. The property is removed; callers now use `KeychainService.retrieve(account: endpoint.keychainAccount)` directly. `isValid` is now a pure structural check (URL scheme, host, HTTPS for non-localhost) and no longer queries the Keychain. Check `APIProvider.requiresAPIKey` separately for credential readiness.
+
+`SessionManagerViewModel.deleteSession` and `renameSession` silently swallowed persistence errors. Both now throw, with a `guard let persistence` check matching `createSession`'s existing pattern. `SessionListView` surfaces errors via alert. The deprecated `configure(modelContext:)` convenience on both `ChatViewModel` and `SessionManagerViewModel` is removed — use `configure(persistence:)` with an explicit provider.
+
+`BackendCapabilities` had two initializers: a 4-param convenience and a 12-param full init. The convenience is removed and all parameters on the single remaining init now have sensible defaults, so adding new capabilities in the future never forces changes to every backend or test mock.
+
+### Migration guide
+
+| Change | Migration |
+|--------|-----------|
+| `MLXBackend` loading API | Update custom MLX loading code to new `loadModelContainer(from:using:)` |
+| `BackendCapabilities` 4-param init removed | Labeled-arg call sites compile unchanged; positional callers switch to labels |
+| `ChatSessionRecord` raw string fields removed | Use `.compressionMode`, `.promptTemplate`, `.pinnedMessageIDs` |
+| `APIEndpoint.apiKey` removed | Use `KeychainService.retrieve(account: endpoint.keychainAccount)` |
+| `APIEndpoint.isValid` no longer checks API key | Check `APIProvider.requiresAPIKey` separately |
+| `configure(modelContext:)` removed | Use `configure(persistence: SwiftDataPersistenceProvider(modelContext:))` |
+| `deleteSession` / `renameSession` now throw | Wrap in `do/catch` |
+| `globalTemperature` / `globalTopP` / `globalRepeatPenalty` are `Float?` | Handle optional; use `?? 0.7` etc. for display |
+
 ## [0.4.1](https://github.com/roryford/BaseChatKit/compare/v0.4.0...v0.4.1) (2026-04-08)
 
 **Concurrency hardening and test coverage expansion** — A comprehensive codebase review uncovered three concurrency hazards that could cause data races under load, plus gaps in input validation and test coverage. This patch fixes all three races, adds URL validation to the endpoint editor, documents protocol threading contracts, and ships 117 new tests.
