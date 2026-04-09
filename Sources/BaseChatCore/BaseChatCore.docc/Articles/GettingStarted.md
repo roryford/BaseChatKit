@@ -67,7 +67,7 @@ inferenceService.registerCloudBackendFactory { provider in
     switch provider {
     case .claude: return ClaudeBackend()
     case .openAI: return OpenAIBackend()
-    default:      return OpenAICompatibleBackend(provider: provider)
+    default:      return OpenAIBackend(provider: provider)
     }
 }
 ```

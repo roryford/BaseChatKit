@@ -20,9 +20,7 @@ struct ChatTurnRoundTripE2ETests {
     private let sessionManager: SessionManagerViewModel
 
     init() throws {
-        let schema = Schema(BaseChatSchema.allModelTypes)
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try ModelContainer(for: schema, configurations: [config])
+        container = try ModelContainerFactory.makeInMemoryContainer()
         context = container.mainContext
 
         mock = MockInferenceBackend()

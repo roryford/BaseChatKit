@@ -437,17 +437,6 @@ struct OllamaModelListServiceTests {
     }
 }
 
-// MARK: - OpenAICompatibleBackend Alias
-
-@Suite("OpenAICompatibleBackend typealias")
-struct OpenAICompatibleBackendTests {
-
-    @Test func isOpenAIBackend() {
-        let backend = OpenAICompatibleBackend()
-        #expect(backend is OpenAIBackend)
-    }
-}
-
 // MARK: - Backend Contract
 
 /// XCTestCase subclass for BackendContractChecks (which uses XCTest assertions).

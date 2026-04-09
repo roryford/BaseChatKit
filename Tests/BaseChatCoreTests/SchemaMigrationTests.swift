@@ -82,8 +82,7 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertEqual(ObjectIdentifier(ModelContainerFactory.currentSchema), ObjectIdentifier(newestSchema))
     }
 
-    @available(*, deprecated)
-    func test_containerFactory_reopensStoreWrittenThroughDeprecatedSchemaEntryPoint() throws {
+    func test_containerFactory_reopensStoreWrittenThroughPlainSchemaEntryPoint() throws {
         let storeDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("BaseChatSchemaCompatibility-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
@@ -93,8 +92,7 @@ final class SchemaMigrationTests: XCTestCase {
 
         do {
             let legacyConfig = ModelConfiguration(url: storeURL)
-            let legacySchema = Schema(BaseChatSchema.allModelTypes)
-            let legacyContainer = try ModelContainer(for: legacySchema, configurations: legacyConfig)
+            let legacyContainer = try ModelContainerFactory.makeContainer(configurations: [legacyConfig])
             let legacyContext = ModelContext(legacyContainer)
 
             let legacySession = ChatSession(title: "Legacy session")
