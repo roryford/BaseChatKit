@@ -17,21 +17,6 @@ final class ChatViewControlTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func viewHierarchy<V: View>(_ view: V, width: CGFloat = 800, height: CGFloat = 600) -> String {
-        #if canImport(AppKit)
-        let vc = NSHostingController(rootView: view)
-        vc.view.frame = NSRect(x: 0, y: 0, width: width, height: height)
-        vc.view.layoutSubtreeIfNeeded()
-        #elseif canImport(UIKit)
-        let vc = UIHostingController(rootView: view)
-        vc.view.frame = CGRect(x: 0, y: 0, width: width, height: height)
-        vc.view.layoutIfNeeded()
-        #endif
-        var dump = ""
-        Swift.dump(vc, to: &dump)
-        return dump
-    }
-
     private func makeChatViewModel() -> ChatViewModel {
         let oneGB: UInt64 = 1_024 * 1_024 * 1_024
         return ChatViewModel(
@@ -65,7 +50,7 @@ final class ChatViewControlTests: XCTestCase {
 
     private func chatViewDump(viewModel: ChatViewModel? = nil) -> String {
         let vm = viewModel ?? makeChatViewModel()
-        return viewHierarchy(
+        return ViewHierarchyDumper.dump(
             NavigationStack {
                 ChatView(showModelManagement: .constant(false))
             }
@@ -121,7 +106,7 @@ final class ChatViewControlTests: XCTestCase {
 
     private func inputBarDump(viewModel: ChatViewModel? = nil) -> String {
         let vm = viewModel ?? makeChatViewModel()
-        return viewHierarchy(
+        return ViewHierarchyDumper.dump(
             ChatInputBar()
                 .environment(vm)
         )

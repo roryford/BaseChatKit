@@ -20,22 +20,6 @@ final class SidebarAndSheetControlTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func dumpHierarchy<V: View>(_ view: V) -> String {
-        #if canImport(AppKit)
-        let vc = NSHostingController(rootView: view)
-        vc.view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
-        vc.view.layoutSubtreeIfNeeded()
-        #elseif canImport(UIKit)
-        let vc = UIHostingController(rootView: view)
-        vc.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
-        vc.view.layoutIfNeeded()
-        #endif
-
-        var output = ""
-        Swift.dump(vc, to: &output)
-        return output
-    }
-
     private func makeChatViewModel() -> ChatViewModel {
         ChatViewModel(
             inferenceService: InferenceService(),
@@ -54,7 +38,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     // MARK: - SessionListView: Empty State
 
     func test_sessionListView_emptyState_showsNoChatsLabel() {
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             SessionListView()
                 .environment(SessionManagerViewModel())
         )
@@ -66,7 +50,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     }
 
     func test_sessionListView_emptyState_showsTapPlusHint() {
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             SessionListView()
                 .environment(SessionManagerViewModel())
         )
@@ -78,7 +62,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     }
 
     func test_sessionListView_emptyState_doesNotShowList() {
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             SessionListView()
                 .environment(SessionManagerViewModel())
         )
@@ -100,7 +84,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
         sessionManager.configure(persistence: persistence)
         try sessionManager.createSession(title: "Test Chat Session")
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             SessionListView()
                 .environment(sessionManager)
         )
@@ -119,7 +103,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
         try sessionManager.createSession(title: "Session Alpha")
         try sessionManager.createSession(title: "Session Beta")
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             SessionListView()
                 .environment(sessionManager)
         )
@@ -141,7 +125,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
         sessionManager.configure(persistence: persistence)
         try sessionManager.createSession(title: "Any Session")
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             SessionListView()
                 .environment(sessionManager)
         )
@@ -157,7 +141,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_chatExportSheet_showsFormatSection() {
         let vm = makeChatViewModel()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             ChatExportSheet()
                 .environment(vm)
         )
@@ -171,7 +155,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_chatExportSheet_showsMarkdownOption() {
         let vm = makeChatViewModel()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             ChatExportSheet()
                 .environment(vm)
         )
@@ -185,7 +169,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_chatExportSheet_showsPlainTextOption() {
         let vm = makeChatViewModel()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             ChatExportSheet()
                 .environment(vm)
         )
@@ -199,7 +183,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_chatExportSheet_showsPreviewSection() {
         let vm = makeChatViewModel()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             ChatExportSheet()
                 .environment(vm)
         )
@@ -213,7 +197,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_chatExportSheet_usesSegmentedPicker() {
         let vm = makeChatViewModel()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             ChatExportSheet()
                 .environment(vm)
         )
@@ -227,7 +211,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_chatExportSheet_containsShareLink() {
         let vm = makeChatViewModel()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             ChatExportSheet()
                 .environment(vm)
         )
@@ -242,7 +226,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_chatExportSheet_containsToolbarItems() {
         let vm = makeChatViewModel()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             ChatExportSheet()
                 .environment(vm)
         )
@@ -257,7 +241,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_chatExportSheet_containsNavigationTitle() {
         let vm = makeChatViewModel()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             ChatExportSheet()
                 .environment(vm)
         )
@@ -273,7 +257,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_apiConfigurationView_emptyState_showsNoneConfiguredMessage() throws {
         let container = try makeInMemoryContainer()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             APIConfigurationView()
                 .modelContainer(container)
         )
@@ -287,7 +271,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_apiConfigurationView_showsAddEndpointButton() throws {
         let container = try makeInMemoryContainer()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             APIConfigurationView()
                 .modelContainer(container)
         )
@@ -301,7 +285,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_apiConfigurationView_showsEndpointsSection() throws {
         let container = try makeInMemoryContainer()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             APIConfigurationView()
                 .modelContainer(container)
         )
@@ -315,7 +299,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_apiConfigurationView_showsPrivacyWarningText() throws {
         let container = try makeInMemoryContainer()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             APIConfigurationView()
                 .modelContainer(container)
         )
@@ -329,7 +313,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_apiConfigurationView_containsToolbarItem() throws {
         let container = try makeInMemoryContainer()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             APIConfigurationView()
                 .modelContainer(container)
         )
@@ -344,7 +328,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_apiConfigurationView_containsNavigationTitle() throws {
         let container = try makeInMemoryContainer()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             APIConfigurationView()
                 .modelContainer(container)
         )
@@ -358,7 +342,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
     func test_apiConfigurationView_usesNavigationStack() throws {
         let container = try makeInMemoryContainer()
 
-        let dump = dumpHierarchy(
+        let dump = ViewHierarchyDumper.dump(
             APIConfigurationView()
                 .modelContainer(container)
         )

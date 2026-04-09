@@ -20,21 +20,6 @@ final class ModelAndSettingsControlTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func viewHierarchy<V: View>(_ view: V, width: CGFloat = 800, height: CGFloat = 600) -> String {
-        #if canImport(AppKit)
-        let vc = NSHostingController(rootView: view)
-        vc.view.frame = NSRect(x: 0, y: 0, width: width, height: height)
-        vc.view.layoutSubtreeIfNeeded()
-        #elseif canImport(UIKit)
-        let vc = UIHostingController(rootView: view)
-        vc.view.frame = CGRect(x: 0, y: 0, width: width, height: height)
-        vc.view.layoutIfNeeded()
-        #endif
-        var dump = ""
-        Swift.dump(vc, to: &dump)
-        return dump
-    }
-
     private func makeChatViewModel() -> ChatViewModel {
         let oneGB: UInt64 = 1_024 * 1_024 * 1_024
         return ChatViewModel(
@@ -50,7 +35,7 @@ final class ModelAndSettingsControlTests: XCTestCase {
     // MARK: - ModelManagementSheet — Tab Structure
 
     private func modelManagementDump(tab: ModelManagementSheet.Tab = .select) -> String {
-        viewHierarchy(
+        ViewHierarchyDumper.dump(
             ModelManagementSheet(initialTab: tab)
                 .environment(makeChatViewModel())
                 .environment(ModelManagementViewModel())
@@ -147,7 +132,7 @@ final class ModelAndSettingsControlTests: XCTestCase {
 
     /// Shared dump for settings tests to avoid repeated view construction.
     private func generationSettingsDump() -> String {
-        viewHierarchy(
+        ViewHierarchyDumper.dump(
             GenerationSettingsView()
                 .environment(makeChatViewModel())
         )
