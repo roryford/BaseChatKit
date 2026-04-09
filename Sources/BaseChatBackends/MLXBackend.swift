@@ -3,6 +3,8 @@ import Foundation
 import MLX
 import MLXLLM
 import MLXLMCommon
+import MLXHuggingFace
+import Tokenizers
 import os
 import BaseChatCore
 
@@ -83,13 +85,13 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
         do {
             // Load from a local directory containing config.json + .safetensors.
-            // loadModelContainer is a free function from MLXLMCommon.
+            // loadModelContainer(from:using:) is a free function from MLXLMCommon.
+            // #huggingFaceTokenizerLoader() (from MLXHuggingFace) adapts swift-transformers'
+            // AutoTokenizer to the TokenizerLoader protocol required by the new API.
             let container: ModelContainer = try await loadModelContainer(
-                directory: url
-            ) { _ in
-                // Loading progress — useful for large models.
-                // For local models this completes quickly.
-            }
+                from: url,
+                using: #huggingFaceTokenizerLoader()
+            )
             withStateLock {
                 _modelContainer = container
             }

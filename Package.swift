@@ -20,8 +20,15 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.31.3"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "2.31.3"),
+        // Pinned to main-branch commit — mlx-swift-lm 2.31.3 uses HuggingFace.HubCache in
+        // MLXLMCommon without declaring swift-huggingface as an explicit SPM dependency.
+        // Swift 6.3 / Xcode 26 enforces this strictly. The fix (decoupled MLXHuggingFace
+        // target) landed in main but has no tag yet. Revisit when ≥2.32.0 is tagged.
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", revision: "d1b14783c93902b74c1211f480ece8f776f4c29c"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
+        // Explicit dep required: mlx-swift-lm no longer pulls swift-transformers transitively.
+        // The MLXHuggingFace macro generates `AutoTokenizer.from(modelFolder:)` which lives here.
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "0.9.0"),
         .package(url: "https://github.com/mattt/llama.swift", from: "2.8672.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
     ],
@@ -42,6 +49,8 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift", condition: .when(traits: ["MLX"])),
                 .product(name: "MLXLLM", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
+                .product(name: "MLXHuggingFace", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
+                .product(name: "Tokenizers", package: "swift-transformers", condition: .when(traits: ["MLX"])),
                 .product(name: "LlamaSwift", package: "llama.swift", condition: .when(traits: ["Llama"])),
             ],
             path: "Sources/BaseChatBackends"
