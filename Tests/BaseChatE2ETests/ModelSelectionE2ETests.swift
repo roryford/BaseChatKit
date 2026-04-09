@@ -289,4 +289,30 @@ final class ModelSelectionE2ETests {
         vm.switchToSession(freshA2)
         #expect(vm.selectedModel == nil, "Model not restored when not in availableModels")
     }
+
+    @Test("Selected model survives refreshModels rescan (regression: random UUID bug)")
+    func selectedModel_survivesRefreshModels() throws {
+        // This is the exact scenario that broke with random UUIDs:
+        // select → save → refreshModels() rebuilds the list → selection must persist.
+        try writeGGUF(named: "stable-id-test.gguf")
+        vm.refreshModels()
+
+        let model = try #require(vm.availableModels.first)
+        let originalID = model.id
+        try makeSession(title: "Stable ID Session")
+        vm.selectedModel = model
+        try vm.saveSettingsToSession()
+
+        // refreshModels() re-discovers from disk — IDs must be stable.
+        vm.refreshModels()
+
+        #expect(vm.selectedModel != nil, "selectedModel must survive refreshModels()")
+        #expect(vm.selectedModel?.id == originalID, "Model ID must be identical after rescan")
+
+        // Also verify the session restore path after a rescan.
+        sessionManager.loadSessions()
+        let freshSession = try #require(sessionManager.sessions.first { $0.title == "Stable ID Session" })
+        vm.switchToSession(freshSession)
+        #expect(vm.selectedModel?.id == originalID, "Session restore must find the model after rescan")
+    }
 }
