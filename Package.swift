@@ -28,7 +28,7 @@ let package = Package(
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
         // Explicit dep required: mlx-swift-lm no longer pulls swift-transformers transitively.
         // The MLXHuggingFace macro generates `AutoTokenizer.from(modelFolder:)` which lives here.
-        .package(url: "https://github.com/huggingface/swift-transformers", from: "0.9.0"),
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.2.0"),
         .package(url: "https://github.com/mattt/llama.swift", from: "2.8672.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
     ],
