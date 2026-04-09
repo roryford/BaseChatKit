@@ -102,7 +102,10 @@ public struct APIEndpointEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(
+                            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
                 }
             }
             .onAppear { populateFields() }
@@ -152,7 +155,7 @@ public struct APIEndpointEditorView: View {
             endpoint.name = trimmedName
             endpoint.provider = provider
             endpoint.baseURL = trimmedURL.isEmpty ? provider.defaultBaseURL : trimmedURL
-            endpoint.modelName = modelName
+            endpoint.modelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !apiKey.isEmpty {
                 endpoint.setAPIKey(apiKey)

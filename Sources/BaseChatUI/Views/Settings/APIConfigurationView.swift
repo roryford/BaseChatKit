@@ -116,7 +116,11 @@ public struct APIConfigurationView: View {
     private func deleteEndpoint(_ endpoint: APIEndpoint) {
         endpoint.deleteAPIKey()
         modelContext.delete(endpoint)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            Log.persistence.error("Failed to delete endpoint: \(error)")
+        }
     }
 }
 
