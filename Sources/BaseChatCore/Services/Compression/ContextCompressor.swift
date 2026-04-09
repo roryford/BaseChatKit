@@ -1,7 +1,7 @@
 import Foundation
 
 /// User-facing compression mode labels. No algorithm names are exposed to the UI.
-public enum CompressionMode: String, CaseIterable, Identifiable {
+public enum CompressionMode: String, CaseIterable, Identifiable, Sendable {
     case automatic = "Automatic"
     case off = "Off"
     case balanced = "Balanced"    // AnchoredCompressor

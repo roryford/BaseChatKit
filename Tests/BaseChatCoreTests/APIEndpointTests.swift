@@ -63,8 +63,7 @@ final class APIEndpointTests: XCTestCase {
 
     func test_isValid_validHTTPS() {
         let endpoint = makeEndpoint(provider: .openAI, baseURL: "https://api.openai.com")
-        endpoint.setAPIKey("sk-valid-key")
-        XCTAssertTrue(endpoint.isValid)
+        XCTAssertTrue(endpoint.isValid, "Valid HTTPS URL should pass structural validation")
     }
 
     func test_isValid_httpLocalhost_valid() {
@@ -80,11 +79,28 @@ final class APIEndpointTests: XCTestCase {
                        "HTTP non-localhost should be invalid")
     }
 
-    func test_isValid_missingAPIKey_invalid() {
+    func test_isValid_structuralOnly_ignoresAPIKey() {
         let endpoint = makeEndpoint(provider: .openAI, baseURL: "https://api.openai.com")
-        // No API key set — provider requires one
-        XCTAssertFalse(endpoint.isValid,
-                       "OpenAI endpoint without API key should be invalid")
+        // isValid is now structural-only — no API key check
+        XCTAssertTrue(endpoint.isValid,
+                      "isValid should pass for valid URL regardless of API key presence")
+    }
+
+    func test_keychainService_replacesApiKeyProperty() {
+        let endpoint = makeEndpoint(provider: .openAI, baseURL: "https://api.openai.com")
+        XCTAssertNil(KeychainService.retrieve(account: endpoint.keychainAccount),
+                     "No key stored yet")
+
+        endpoint.setAPIKey("sk-test-key")
+        XCTAssertEqual(KeychainService.retrieve(account: endpoint.keychainAccount), "sk-test-key",
+                       "KeychainService.retrieve should replace the old .apiKey property")
+    }
+
+    func test_requiresAPIKey_availableOnProvider() {
+        XCTAssertTrue(APIProvider.openAI.requiresAPIKey,
+                      "OpenAI provider should declare it requires an API key")
+        XCTAssertFalse(APIProvider.ollama.requiresAPIKey,
+                       "Ollama provider should not require an API key")
     }
 
     func test_isValid_ollamaNoKey_valid() {

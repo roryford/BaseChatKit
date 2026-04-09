@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import SwiftData
 import BaseChatCore
 
 /// Manages chat session CRUD operations and the session list.
@@ -26,13 +25,6 @@ public final class SessionManagerViewModel {
         Log.persistence.info("SessionManagerViewModel configured")
     }
 
-    /// Convenience: wraps a SwiftData `ModelContext` in a ``SwiftDataPersistenceProvider``.
-    @available(*, deprecated, message: "Use configure(persistence:) with an explicit provider")
-    @MainActor
-    public func configure(modelContext: ModelContext) {
-        configure(persistence: SwiftDataPersistenceProvider(modelContext: modelContext))
-    }
-
     /// Creates a new session, inserts it, and returns it.
     @discardableResult
     public func createSession(title: String = "New Chat") throws -> ChatSessionRecord {
@@ -47,12 +39,12 @@ public final class SessionManagerViewModel {
     }
 
     /// Deletes a session and all its messages.
-    public func deleteSession(_ session: ChatSessionRecord) {
-        do {
-            try persistence?.deleteSession(session.id)
-        } catch {
-            Log.persistence.error("Failed to delete session: \(error)")
+    public func deleteSession(_ session: ChatSessionRecord) throws {
+        guard let persistence else {
+            Log.persistence.warning("deleteSession called before persistence was configured")
+            throw ChatPersistenceError.providerNotConfigured
         }
+        try persistence.deleteSession(session.id)
 
         if activeSession?.id == session.id {
             activeSession = nil
@@ -62,15 +54,15 @@ public final class SessionManagerViewModel {
     }
 
     /// Renames a session.
-    public func renameSession(_ session: ChatSessionRecord, title: String) {
+    public func renameSession(_ session: ChatSessionRecord, title: String) throws {
+        guard let persistence else {
+            Log.persistence.warning("renameSession called before persistence was configured")
+            throw ChatPersistenceError.providerNotConfigured
+        }
         var updated = session
         updated.title = title
         updated.updatedAt = Date()
-        do {
-            try persistence?.updateSession(updated)
-        } catch {
-            Log.persistence.error("Failed to rename session: \(error)")
-        }
+        try persistence.updateSession(updated)
         loadSessions()
     }
 

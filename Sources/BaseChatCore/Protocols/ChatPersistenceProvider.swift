@@ -32,10 +32,10 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
     public var temperature: Float?
     public var topP: Float?
     public var repeatPenalty: Float?
-    public var promptTemplateRawValue: String?
+    public var promptTemplate: PromptTemplate?
     public var contextSizeOverride: Int?
-    public var compressionModeRaw: String?
-    public var pinnedMessageIDsRaw: String?
+    public var compressionMode: CompressionMode
+    public var pinnedMessageIDs: Set<UUID>
 
     public init(
         id: UUID = UUID(),
@@ -48,10 +48,10 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
         temperature: Float? = nil,
         topP: Float? = nil,
         repeatPenalty: Float? = nil,
-        promptTemplateRawValue: String? = nil,
+        promptTemplate: PromptTemplate? = nil,
         contextSizeOverride: Int? = nil,
-        compressionModeRaw: String? = nil,
-        pinnedMessageIDsRaw: String? = nil
+        compressionMode: CompressionMode = .automatic,
+        pinnedMessageIDs: Set<UUID> = []
     ) {
         self.id = id
         self.title = title
@@ -63,35 +63,10 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
         self.temperature = temperature
         self.topP = topP
         self.repeatPenalty = repeatPenalty
-        self.promptTemplateRawValue = promptTemplateRawValue
+        self.promptTemplate = promptTemplate
         self.contextSizeOverride = contextSizeOverride
-        self.compressionModeRaw = compressionModeRaw
-        self.pinnedMessageIDsRaw = pinnedMessageIDsRaw
-    }
-
-    public var pinnedMessageIDs: Set<UUID> {
-        get {
-            guard let raw = pinnedMessageIDsRaw else { return [] }
-            return Set(raw.split(separator: ",").compactMap { UUID(uuidString: String($0)) })
-        }
-        set {
-            pinnedMessageIDsRaw = newValue.isEmpty ? nil : newValue.map(\.uuidString).joined(separator: ",")
-        }
-    }
-
-    public var compressionMode: CompressionMode {
-        get { compressionModeRaw.flatMap(CompressionMode.init(rawValue:)) ?? .automatic }
-        set { compressionModeRaw = newValue.rawValue }
-    }
-
-    public var promptTemplate: PromptTemplate? {
-        get {
-            guard let raw = promptTemplateRawValue else { return nil }
-            return PromptTemplate(rawValue: raw)
-        }
-        set {
-            promptTemplateRawValue = newValue?.rawValue
-        }
+        self.compressionMode = compressionMode
+        self.pinnedMessageIDs = pinnedMessageIDs
     }
 }
 

@@ -19,28 +19,28 @@ public final class SettingsService: @unchecked Sendable {
 
     // MARK: - Generation Defaults
 
-    public var globalTemperature: Float {
-        get {
-            let value = defaults.float(forKey: "globalTemperature")
-            return value == 0 ? 0.7 : value
+    public var globalTemperature: Float? {
+        get { defaults.object(forKey: "globalTemperature") as? Float }
+        set {
+            if let newValue { defaults.set(newValue, forKey: "globalTemperature") }
+            else { defaults.removeObject(forKey: "globalTemperature") }
         }
-        set { defaults.set(newValue, forKey: "globalTemperature") }
     }
 
-    public var globalTopP: Float {
-        get {
-            let value = defaults.float(forKey: "globalTopP")
-            return value == 0 ? 0.9 : value
+    public var globalTopP: Float? {
+        get { defaults.object(forKey: "globalTopP") as? Float }
+        set {
+            if let newValue { defaults.set(newValue, forKey: "globalTopP") }
+            else { defaults.removeObject(forKey: "globalTopP") }
         }
-        set { defaults.set(newValue, forKey: "globalTopP") }
     }
 
-    public var globalRepeatPenalty: Float {
-        get {
-            let value = defaults.float(forKey: "globalRepeatPenalty")
-            return value == 0 ? 1.1 : value
+    public var globalRepeatPenalty: Float? {
+        get { defaults.object(forKey: "globalRepeatPenalty") as? Float }
+        set {
+            if let newValue { defaults.set(newValue, forKey: "globalRepeatPenalty") }
+            else { defaults.removeObject(forKey: "globalRepeatPenalty") }
         }
-        set { defaults.set(newValue, forKey: "globalRepeatPenalty") }
     }
 
     public var globalPromptTemplate: PromptTemplate? {
@@ -65,15 +65,15 @@ public final class SettingsService: @unchecked Sendable {
 
     /// Returns the effective temperature, using session override if available.
     public func effectiveTemperature(session: ChatSession?) -> Float {
-        session?.temperature ?? globalTemperature
+        session?.temperature ?? globalTemperature ?? 0.7
     }
 
     public func effectiveTopP(session: ChatSession?) -> Float {
-        session?.topP ?? globalTopP
+        session?.topP ?? globalTopP ?? 0.9
     }
 
     public func effectiveRepeatPenalty(session: ChatSession?) -> Float {
-        session?.repeatPenalty ?? globalRepeatPenalty
+        session?.repeatPenalty ?? globalRepeatPenalty ?? 1.1
     }
 }
 

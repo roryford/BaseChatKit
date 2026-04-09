@@ -12,6 +12,7 @@ public struct SessionListView: View {
     @State private var sessionToDelete: ChatSessionRecord?
     @State private var sessionToRename: ChatSessionRecord?
     @State private var renameText: String = ""
+    @State private var errorMessage: String?
 
     public init() {}
 
@@ -53,7 +54,11 @@ public struct SessionListView: View {
                 Button("Cancel", role: .cancel) { sessionToRename = nil }
                 Button("Rename") {
                     if let session = sessionToRename {
-                        sessionManager.renameSession(session, title: renameText)
+                        do {
+                            try sessionManager.renameSession(session, title: renameText)
+                        } catch {
+                            errorMessage = "Failed to rename session: \(error.localizedDescription)"
+                        }
                     }
                     sessionToRename = nil
                 }
@@ -63,12 +68,24 @@ public struct SessionListView: View {
                 set: { if !$0 { sessionToDelete = nil } }
             ), presenting: sessionToDelete) { session in
                 Button("Delete", role: .destructive) {
-                    sessionManager.deleteSession(session)
+                    do {
+                        try sessionManager.deleteSession(session)
+                    } catch {
+                        errorMessage = "Failed to delete session: \(error.localizedDescription)"
+                    }
                     sessionToDelete = nil
                 }
                 Button("Cancel", role: .cancel) { sessionToDelete = nil }
             } message: { session in
                 Text("This will permanently delete \"\(session.title)\" and all its messages.")
+            }
+            .alert("Error", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("OK") { errorMessage = nil }
+            } message: {
+                if let errorMessage { Text(errorMessage) }
             }
         }
     }

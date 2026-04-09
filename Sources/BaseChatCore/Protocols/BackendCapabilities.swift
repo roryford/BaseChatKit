@@ -83,34 +83,14 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
     }
 
     public init(
-        supportedParameters: Set<GenerationParameter>,
-        maxContextTokens: Int32,
-        requiresPromptTemplate: Bool,
-        supportsSystemPrompt: Bool
-    ) {
-        self.supportedParameters = supportedParameters
-        self.maxContextTokens = maxContextTokens
-        self.requiresPromptTemplate = requiresPromptTemplate
-        self.supportsSystemPrompt = supportsSystemPrompt
-        self.supportsToolCalling = false
-        self.supportsStructuredOutput = false
-        self.cancellationStyle = .cooperative
-        self.supportsTokenCounting = false
-        self.memoryStrategy = .resident
-        self.maxOutputTokens = 4096
-        self.supportsStreaming = true
-        self.isRemote = false
-    }
-
-    public init(
-        supportedParameters: Set<GenerationParameter>,
-        maxContextTokens: Int32,
-        requiresPromptTemplate: Bool,
-        supportsSystemPrompt: Bool,
-        supportsToolCalling: Bool,
-        supportsStructuredOutput: Bool,
-        cancellationStyle: CancellationStyle,
-        supportsTokenCounting: Bool,
+        supportedParameters: Set<GenerationParameter> = [.temperature],
+        maxContextTokens: Int32 = 4096,
+        requiresPromptTemplate: Bool = false,
+        supportsSystemPrompt: Bool = true,
+        supportsToolCalling: Bool = false,
+        supportsStructuredOutput: Bool = false,
+        cancellationStyle: CancellationStyle = .cooperative,
+        supportsTokenCounting: Bool = false,
         memoryStrategy: MemoryStrategy = .resident,
         maxOutputTokens: Int = 4096,
         supportsStreaming: Bool = true,

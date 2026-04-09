@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import SwiftData
 import BaseChatCore
 
 /// Central view model for the chat interface.
@@ -422,12 +421,6 @@ public final class ChatViewModel {
         guard self.persistence == nil else { return }
         self.persistence = persistence
         Log.persistence.info("ChatViewModel configured with persistence provider")
-    }
-
-    /// Convenience: wraps a SwiftData `ModelContext` in a ``SwiftDataPersistenceProvider``.
-    @available(*, deprecated, message: "Use configure(persistence:) with an explicit provider")
-    public func configure(modelContext: ModelContext) {
-        configure(persistence: SwiftDataPersistenceProvider(modelContext: modelContext))
     }
 
     // MARK: - Structured Error Surfacing

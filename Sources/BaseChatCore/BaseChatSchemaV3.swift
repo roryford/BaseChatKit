@@ -258,11 +258,6 @@ public enum BaseChatSchemaV3: VersionedSchema {
             id.uuidString
         }
 
-        /// Retrieves the API key from the Keychain.
-        public var apiKey: String? {
-            KeychainService.retrieve(account: keychainAccount)
-        }
-
         /// Stores an API key in the Keychain for this endpoint.
         @discardableResult
         public func setAPIKey(_ key: String) -> Bool {
@@ -274,7 +269,12 @@ public enum BaseChatSchemaV3: VersionedSchema {
             KeychainService.delete(account: keychainAccount)
         }
 
-        /// Validates the endpoint configuration.
+        /// Validates the endpoint's URL structure.
+        ///
+        /// This is a pure structural check — it does NOT verify whether an API key
+        /// exists in the Keychain. Use `APIProvider.requiresAPIKey` and
+        /// `KeychainService.retrieve(account: endpoint.keychainAccount)` separately
+        /// to check credential readiness.
         public var isValid: Bool {
             guard let url = URL(string: baseURL), url.scheme != nil, url.host != nil else {
                 return false
@@ -282,11 +282,6 @@ public enum BaseChatSchemaV3: VersionedSchema {
 
             // HTTPS required for remote endpoints
             if !isLocalhost(url) && url.scheme != "https" {
-                return false
-            }
-
-            // API key required for providers that need one
-            if provider.requiresAPIKey && (apiKey?.isEmpty ?? true) {
                 return false
             }
 

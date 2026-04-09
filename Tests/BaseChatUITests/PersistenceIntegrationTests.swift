@@ -256,7 +256,7 @@ final class PersistenceIntegrationTests: XCTestCase {
 
     // MARK: - Cascade: Deleting a Session Handles Its Messages
 
-    func test_deleteSession_removesAssociatedMessages() async {
+    func test_deleteSession_removesAssociatedMessages() async throws {
         let session = createSession(title: "Doomed Session")
         mock.tokensToYield = ["Doomed", " reply"]
         vm.inputText = "Message in doomed session"
@@ -270,7 +270,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         // Use SessionManagerViewModel to delete the session (it handles cascade).
         let sessionManager = SessionManagerViewModel()
         sessionManager.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
-        sessionManager.deleteSession(session.toRecord())
+        try sessionManager.deleteSession(session.toRecord())
 
         XCTAssertEqual(
             fetchMessages(for: sessionID).count, 0,
@@ -282,7 +282,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         )
     }
 
-    func test_deleteSession_doesNotAffectOtherSessions() async {
+    func test_deleteSession_doesNotAffectOtherSessions() async throws {
         // Create session A with messages.
         let sessionA = createSession(title: "Survivor")
         mock.tokensToYield = ["Survivor", " reply"]
@@ -301,7 +301,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         // Delete session B.
         let sessionManager = SessionManagerViewModel()
         sessionManager.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
-        sessionManager.deleteSession(sessionB.toRecord())
+        try sessionManager.deleteSession(sessionB.toRecord())
 
         // Session A should be unaffected.
         XCTAssertEqual(
@@ -312,5 +312,50 @@ final class PersistenceIntegrationTests: XCTestCase {
             fetchMessages(for: sessionB.id).count, 0,
             "Session B's messages should be deleted"
         )
+    }
+
+    // MARK: - Typed Record Field Round-Trips
+
+    func test_sessionRecord_compressionMode_roundTrips() throws {
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        var record = ChatSessionRecord(title: "Compression Test")
+        record.compressionMode = .balanced
+        try persistence.insertSession(record)
+
+        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
+        XCTAssertEqual(fetched?.compressionMode, .balanced)
+    }
+
+    func test_sessionRecord_promptTemplate_roundTrips() throws {
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        var record = ChatSessionRecord(title: "Template Test")
+        record.promptTemplate = .llama3
+        try persistence.insertSession(record)
+
+        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
+        XCTAssertEqual(fetched?.promptTemplate, .llama3)
+    }
+
+    func test_sessionRecord_pinnedMessageIDs_roundTrips() throws {
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        let pinA = UUID()
+        let pinB = UUID()
+        var record = ChatSessionRecord(title: "Pin Test")
+        record.pinnedMessageIDs = [pinA, pinB]
+        try persistence.insertSession(record)
+
+        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
+        XCTAssertEqual(fetched?.pinnedMessageIDs, [pinA, pinB])
+    }
+
+    func test_sessionRecord_defaults_roundTrip() throws {
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        let record = ChatSessionRecord(title: "Defaults Test")
+        try persistence.insertSession(record)
+
+        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
+        XCTAssertEqual(fetched?.compressionMode, .automatic)
+        XCTAssertNil(fetched?.promptTemplate)
+        XCTAssertEqual(fetched?.pinnedMessageIDs, [])
     }
 }
