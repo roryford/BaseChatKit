@@ -14,7 +14,7 @@ let package = Package(
         .library(name: "BaseChatUI", targets: ["BaseChatUI"]),
     ],
     traits: [
-        .default(enabledTraits: ["MLX"]),
+        .default(enabledTraits: ["MLX", "Llama"]),
         .trait(name: "MLX", description: "Enable the MLX inference backend (requires Apple Silicon)"),
         .trait(name: "Llama", description: "Enable the llama.cpp (GGUF) inference backend"),
     ],
@@ -97,6 +97,7 @@ let package = Package(
             dependencies: [
                 "BaseChatUI",
                 "BaseChatCore",
+                "BaseChatTestSupport",
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
             exclude: ["__Snapshots__"]
