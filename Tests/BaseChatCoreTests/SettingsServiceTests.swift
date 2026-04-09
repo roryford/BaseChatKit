@@ -22,10 +22,10 @@ final class SettingsServiceTests: XCTestCase {
 
     // MARK: - Global Defaults
 
-    func test_globalDefaults_returnsExpectedValues() {
-        XCTAssertEqual(service.globalTemperature, 0.7, accuracy: 0.01)
-        XCTAssertEqual(service.globalTopP, 0.9, accuracy: 0.01)
-        XCTAssertEqual(service.globalRepeatPenalty, 1.1, accuracy: 0.01)
+    func test_globalDefaults_nilWhenUnset() {
+        XCTAssertNil(service.globalTemperature)
+        XCTAssertNil(service.globalTopP)
+        XCTAssertNil(service.globalRepeatPenalty)
     }
 
     func test_globalDefaults_persistAcrossInstances() {
@@ -36,9 +36,9 @@ final class SettingsServiceTests: XCTestCase {
         // Create a new instance pointing to the same defaults
         let service2 = SettingsService(defaults: testDefaults)
 
-        XCTAssertEqual(service2.globalTemperature, 1.5, accuracy: 0.01)
-        XCTAssertEqual(service2.globalTopP, 0.5, accuracy: 0.01)
-        XCTAssertEqual(service2.globalRepeatPenalty, 1.8, accuracy: 0.01)
+        XCTAssertEqual(service2.globalTemperature!, 1.5, accuracy: 0.01)
+        XCTAssertEqual(service2.globalTopP!, 0.5, accuracy: 0.01)
+        XCTAssertEqual(service2.globalRepeatPenalty!, 1.8, accuracy: 0.01)
     }
 
     // MARK: - Effective Values (Session Override)
@@ -125,5 +125,34 @@ final class SettingsServiceTests: XCTestCase {
 
         let service2 = SettingsService(defaults: testDefaults)
         XCTAssertNil(service2.globalPromptTemplate)
+    }
+
+    // MARK: - Nil vs Zero Distinction
+
+    func test_globalTemperature_zeroIsDistinctFromNil() {
+        service.globalTemperature = 0.0
+
+        XCTAssertEqual(service.globalTemperature, 0.0,
+                       "Setting to 0.0 should persist as 0.0, not be treated as unset")
+    }
+
+    func test_globalTemperature_settingNilRemovesKey() {
+        service.globalTemperature = 0.5
+        XCTAssertNotNil(service.globalTemperature)
+
+        service.globalTemperature = nil
+        XCTAssertNil(service.globalTemperature)
+    }
+
+    func test_effectiveTemperature_nilGlobalFallsToHardcodedDefault() {
+        // Neither session nor global is set
+        XCTAssertEqual(service.effectiveTemperature(session: nil), 0.7, accuracy: 0.01)
+    }
+
+    func test_effectiveTemperature_zeroGlobalDoesNotFallToDefault() {
+        service.globalTemperature = 0.0
+
+        XCTAssertEqual(service.effectiveTemperature(session: nil), 0.0, accuracy: 0.01,
+                       "Global 0.0 should be used, not the hardcoded 0.7 default")
     }
 }

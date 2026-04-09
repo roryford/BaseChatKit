@@ -93,9 +93,9 @@ public struct GenerationSettingsView: View {
                 Section {
                     Button("Reset to Defaults", role: .destructive) {
                         let settings = SettingsService.shared
-                        viewModel.temperature = settings.globalTemperature
-                        viewModel.topP = settings.globalTopP
-                        viewModel.repeatPenalty = settings.globalRepeatPenalty
+                        viewModel.temperature = settings.globalTemperature ?? 0.7
+                        viewModel.topP = settings.globalTopP ?? 0.9
+                        viewModel.repeatPenalty = settings.globalRepeatPenalty ?? 1.1
                     }
                 }
 
