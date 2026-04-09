@@ -313,4 +313,49 @@ final class PersistenceIntegrationTests: XCTestCase {
             "Session B's messages should be deleted"
         )
     }
+
+    // MARK: - Typed Record Field Round-Trips
+
+    func test_sessionRecord_compressionMode_roundTrips() throws {
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        var record = ChatSessionRecord(title: "Compression Test")
+        record.compressionMode = .balanced
+        try persistence.insertSession(record)
+
+        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
+        XCTAssertEqual(fetched?.compressionMode, .balanced)
+    }
+
+    func test_sessionRecord_promptTemplate_roundTrips() throws {
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        var record = ChatSessionRecord(title: "Template Test")
+        record.promptTemplate = .llama3
+        try persistence.insertSession(record)
+
+        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
+        XCTAssertEqual(fetched?.promptTemplate, .llama3)
+    }
+
+    func test_sessionRecord_pinnedMessageIDs_roundTrips() throws {
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        let pinA = UUID()
+        let pinB = UUID()
+        var record = ChatSessionRecord(title: "Pin Test")
+        record.pinnedMessageIDs = [pinA, pinB]
+        try persistence.insertSession(record)
+
+        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
+        XCTAssertEqual(fetched?.pinnedMessageIDs, [pinA, pinB])
+    }
+
+    func test_sessionRecord_defaults_roundTrip() throws {
+        let persistence = SwiftDataPersistenceProvider(modelContext: context)
+        let record = ChatSessionRecord(title: "Defaults Test")
+        try persistence.insertSession(record)
+
+        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
+        XCTAssertEqual(fetched?.compressionMode, .automatic)
+        XCTAssertNil(fetched?.promptTemplate)
+        XCTAssertEqual(fetched?.pinnedMessageIDs, [])
+    }
 }

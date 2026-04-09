@@ -73,8 +73,6 @@ final class CompressionIntegrationTests: XCTestCase {
 
         XCTAssertEqual(session.toRecord().compressionMode, .balanced,
                        "Session should have .balanced after setting compressionMode")
-        XCTAssertEqual(session.toRecord().compressionModeRaw, "Balanced",
-                       "Raw storage should be 'Balanced'")
     }
 
     func test_compressionMode_switchToSession_restoresBalanced() {
