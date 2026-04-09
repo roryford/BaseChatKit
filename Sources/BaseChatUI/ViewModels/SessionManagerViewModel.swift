@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import SwiftData
 import BaseChatCore
 
 /// Manages chat session CRUD operations and the session list.
@@ -24,13 +23,6 @@ public final class SessionManagerViewModel {
         self.persistence = persistence
         loadSessions()
         Log.persistence.info("SessionManagerViewModel configured")
-    }
-
-    /// Convenience: wraps a SwiftData `ModelContext` in a ``SwiftDataPersistenceProvider``.
-    @available(*, deprecated, message: "Use configure(persistence:) with an explicit provider")
-    @MainActor
-    public func configure(modelContext: ModelContext) {
-        configure(persistence: SwiftDataPersistenceProvider(modelContext: modelContext))
     }
 
     /// Creates a new session, inserts it, and returns it.
