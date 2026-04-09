@@ -3,9 +3,11 @@ import SwiftUI
 /// Loading indicator shown during model loading, with optional progress.
 public struct ModelLoadingIndicatorView: View {
     public let progress: Double?
+    public let onCancel: () -> Void
 
-    public init(progress: Double? = nil) {
+    public init(progress: Double? = nil, onCancel: @escaping () -> Void = {}) {
         self.progress = progress
+        self.onCancel = onCancel
     }
 
     public var body: some View {
@@ -20,6 +22,12 @@ public struct ModelLoadingIndicatorView: View {
             Text("Loading model…")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Button("Cancel") {
+                onCancel()
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)

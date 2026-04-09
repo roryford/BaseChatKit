@@ -17,7 +17,7 @@ final class MemoryGateTests: XCTestCase {
     // MARK: - Resident Strategy
 
     func test_residentStrategy_allowsWhenPlentyOfMemory() {
-        // 4 GB model, 1.2x = 4.8 GB estimated. 8 GB available. 4.8 < 8*0.85=6.8 -> allow
+        // 4 GB model, raw size used (no KV overhead at load time). 8 GB available. 4 < 8*0.85=6.8 -> allow
         let gate = MemoryGate(
             availableMemoryBytes: { 8_000_000_000 },
             physicalMemoryBytes: 16_000_000_000
@@ -27,29 +27,29 @@ final class MemoryGateTests: XCTestCase {
     }
 
     func test_residentStrategy_warnsWhenTight() {
-        // 4 GB model, 1.2x = 4.8 GB estimated. 5 GB available. 4.8 > 5*0.85=4.25 but 4.8 < 5 -> warn
+        // 4 GB model, raw size. 4.5 GB available. 4 > 4.5*0.85=3.825 but 4 < 4.5 -> warn
         let gate = MemoryGate(
-            availableMemoryBytes: { 5_000_000_000 },
+            availableMemoryBytes: { 4_500_000_000 },
             physicalMemoryBytes: 16_000_000_000
         )
         let verdict = gate.check(modelFileSize: 4_000_000_000, strategy: .resident)
         if case .warn(let est, let avail) = verdict {
-            XCTAssertEqual(est, 4_800_000_000)
-            XCTAssertEqual(avail, 5_000_000_000)
+            XCTAssertEqual(est, 4_000_000_000)
+            XCTAssertEqual(avail, 4_500_000_000)
         } else {
             XCTFail("Expected .warn, got \(verdict)")
         }
     }
 
     func test_residentStrategy_deniesWhenInsufficient() {
-        // 4 GB model, 1.2x = 4.8 GB estimated. 3 GB available. 4.8 > 3 -> deny
+        // 4 GB model, raw size. 3 GB available. 4 > 3 -> deny
         let gate = MemoryGate(
             availableMemoryBytes: { 3_000_000_000 },
             physicalMemoryBytes: 8_000_000_000
         )
         let verdict = gate.check(modelFileSize: 4_000_000_000, strategy: .resident)
         if case .deny(let est, let avail) = verdict {
-            XCTAssertEqual(est, 4_800_000_000)
+            XCTAssertEqual(est, 4_000_000_000)
             XCTAssertEqual(avail, 3_000_000_000)
         } else {
             XCTFail("Expected .deny, got \(verdict)")
@@ -131,13 +131,13 @@ final class MemoryGateTests: XCTestCase {
     // MARK: - Boundary: Exact Fit
 
     func test_residentStrategy_exactFitIsWarn() {
-        // 1 GB model, 1.2x = 1.2 GB estimated. 1.2 GB available. 1.2 == 1.2 -> warn (not allow, since 1.2 > 1.2*0.85)
-        let estimated: UInt64 = 1_200_000_000
+        // 1 GB model, raw size. 1 GB available. 1 == 1 -> warn (not allow, since 1 > 1*0.85)
+        let modelSize: UInt64 = 1_000_000_000
         let gate = MemoryGate(
-            availableMemoryBytes: { estimated },
+            availableMemoryBytes: { modelSize },
             physicalMemoryBytes: 4_000_000_000
         )
-        let verdict = gate.check(modelFileSize: 1_000_000_000, strategy: .resident)
+        let verdict = gate.check(modelFileSize: modelSize, strategy: .resident)
         if case .warn = verdict {
             // pass -- exact fit is a warning because there's no headroom
         } else {

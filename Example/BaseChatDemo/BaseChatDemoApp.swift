@@ -132,7 +132,11 @@ struct BaseChatDemoApp: App {
                 .environment(chatViewModel)
                 .environment(modelManagementViewModel)
                 .environment(sessionManager)
+                .frame(minWidth: 600, minHeight: 400)
         }
         .modelContainer(modelContainer)
+        #if os(macOS)
+        .defaultSize(width: 900, height: 700)
+        #endif
     }
 }

@@ -82,7 +82,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// called once, not per-instance.
     /// NSLock is intentional here: init/deinit are synchronous, so actor
     /// isolation would require fire-and-forget Tasks with no ordering guarantee.
-    private static var backendRefCount = 0
+    nonisolated(unsafe) private static var backendRefCount = 0
     private static let backendLock = NSLock()
 
     private static func retainBackend() {
@@ -127,9 +127,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
 
         let loadedResources = try await Task.detached(priority: .userInitiated) { [self] in
-            self.loadSerializationLock.lock()
-            defer { self.loadSerializationLock.unlock() }
-            return try Self.initializeModel(at: url, requestedContextSize: contextSize)
+            return try self.serializedModelLoad(at: url, contextSize: contextSize)
         }.value
 
         let didCommit = withStateLock {
@@ -153,7 +151,16 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         Self.logger.info("Llama backend loaded \(url.lastPathComponent) with context \(loadedResources.effectiveContextSize)")
     }
 
-    private struct LoadedResources {
+    /// Synchronous wrapper that holds `loadSerializationLock` while calling the
+    /// C-level model init. Called from a detached task so the lock/unlock stays
+    /// in a synchronous context (required by Swift 6.3 strict concurrency).
+    private func serializedModelLoad(at url: URL, contextSize: Int32) throws -> LoadedResources {
+        loadSerializationLock.lock()
+        defer { loadSerializationLock.unlock() }
+        return try Self.initializeModel(at: url, requestedContextSize: contextSize)
+    }
+
+    private struct LoadedResources: @unchecked Sendable {
         let model: OpaquePointer
         let context: OpaquePointer
         let vocab: OpaquePointer?
@@ -366,39 +373,34 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     }
 
     public func unloadModel() {
-        let state = withStateLock {
-            cancelled = true
-            nextLoadToken &+= 1
-            activeLoadToken = nextLoadToken
+        stateLock.lock()
+        cancelled = true
+        nextLoadToken &+= 1
+        activeLoadToken = nextLoadToken
 
-            let previousCleanup = cleanupTask
-            cleanupTask = nil
-            let capturedTask = generationTask
-            let capturedContext = context
-            let capturedModel = model
+        let previousCleanup = cleanupTask
+        cleanupTask = nil
+        let capturedTask = generationTask
+        let capturedContext = context
+        let capturedModel = model
 
-            // Clear state immediately so callers see the backend as unloaded
-            // without waiting for C memory deallocation.
-            generationTask = nil
-            context = nil
-            model = nil
-            vocab = nil
-            isModelLoaded = false
-            isGenerating = false
-            return (
-                previousCleanup: previousCleanup,
-                capturedTask: capturedTask,
-                capturedContext: capturedContext,
-                capturedModel: capturedModel
-            )
-        }
-        state.capturedTask?.cancel()
+        // Clear state immediately so callers see the backend as unloaded
+        // without waiting for C memory deallocation.
+        generationTask = nil
+        context = nil
+        model = nil
+        vocab = nil
+        isModelLoaded = false
+        isGenerating = false
+        stateLock.unlock()
+
+        capturedTask?.cancel()
 
         Self.logger.info("Llama backend unloaded")
 
-        guard state.capturedTask != nil || state.capturedContext != nil || state.capturedModel != nil else {
+        guard capturedTask != nil || capturedContext != nil || capturedModel != nil else {
             withStateLock {
-                cleanupTask = state.previousCleanup
+                cleanupTask = previousCleanup
             }
             return
         }
@@ -409,15 +411,15 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         // so blocking here would freeze the UI for the duration of the spin-wait.
         // We await the generation task to ensure the C loop has stopped before
         // touching the pointers, preventing a use-after-free crash.
-        let cleanupTask = Task.detached(priority: .utility) {
-            await state.previousCleanup?.value
-            await state.capturedTask?.value
-            if let ctx = state.capturedContext { llama_free(ctx) }
-            if let mdl = state.capturedModel { llama_model_free(mdl) }
+        let newCleanupTask = Task.detached(priority: .utility) {
+            await previousCleanup?.value
+            await capturedTask?.value
+            if let ctx = capturedContext { llama_free(ctx) }
+            if let mdl = capturedModel { llama_model_free(mdl) }
             Self.releaseBackend()
         }
         withStateLock {
-            self.cleanupTask = cleanupTask
+            self.cleanupTask = newCleanupTask
         }
     }
 
