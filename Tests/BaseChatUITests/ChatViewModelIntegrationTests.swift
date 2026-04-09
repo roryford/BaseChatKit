@@ -375,20 +375,20 @@ final class ChatViewModelIntegrationTests: XCTestCase {
 
     // MARK: - Session Creation Through Manager
 
-    func test_sessionManager_createAndDelete_persistsCorrectly() {
+    func test_sessionManager_createAndDelete_persistsCorrectly() throws {
         XCTAssertTrue(fetchSessions().isEmpty, "Should start with no sessions")
 
         let session = try! sessionManager.createSession(title: "My Chat")
         XCTAssertEqual(fetchSessions().count, 1)
         XCTAssertEqual(fetchSessions().first?.title, "My Chat")
 
-        sessionManager.deleteSession(session)
+        try sessionManager.deleteSession(session)
         XCTAssertTrue(fetchSessions().isEmpty, "Session should be deleted from database")
     }
 
     // MARK: - Delete Session Cascades to Messages
 
-    func test_deleteSession_removesAllSessionMessages() async {
+    func test_deleteSession_removesAllSessionMessages() async throws {
         let session = createAndActivateSession()
 
         mock.tokensToYield = ["Reply"]
@@ -399,7 +399,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
 
         XCTAssertEqual(fetchMessages(for: session.id).count, 4)
 
-        sessionManager.deleteSession(session)
+        try sessionManager.deleteSession(session)
 
         XCTAssertEqual(fetchMessages(for: session.id).count, 0,
                        "All messages should be deleted when session is deleted")

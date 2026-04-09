@@ -256,7 +256,7 @@ final class PersistenceIntegrationTests: XCTestCase {
 
     // MARK: - Cascade: Deleting a Session Handles Its Messages
 
-    func test_deleteSession_removesAssociatedMessages() async {
+    func test_deleteSession_removesAssociatedMessages() async throws {
         let session = createSession(title: "Doomed Session")
         mock.tokensToYield = ["Doomed", " reply"]
         vm.inputText = "Message in doomed session"
@@ -270,7 +270,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         // Use SessionManagerViewModel to delete the session (it handles cascade).
         let sessionManager = SessionManagerViewModel()
         sessionManager.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
-        sessionManager.deleteSession(session.toRecord())
+        try sessionManager.deleteSession(session.toRecord())
 
         XCTAssertEqual(
             fetchMessages(for: sessionID).count, 0,
@@ -282,7 +282,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         )
     }
 
-    func test_deleteSession_doesNotAffectOtherSessions() async {
+    func test_deleteSession_doesNotAffectOtherSessions() async throws {
         // Create session A with messages.
         let sessionA = createSession(title: "Survivor")
         mock.tokensToYield = ["Survivor", " reply"]
@@ -301,7 +301,7 @@ final class PersistenceIntegrationTests: XCTestCase {
         // Delete session B.
         let sessionManager = SessionManagerViewModel()
         sessionManager.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
-        sessionManager.deleteSession(sessionB.toRecord())
+        try sessionManager.deleteSession(sessionB.toRecord())
 
         // Session A should be unaffected.
         XCTAssertEqual(

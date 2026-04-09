@@ -39,12 +39,8 @@ public final class SessionManagerViewModel {
     }
 
     /// Deletes a session and all its messages.
-    public func deleteSession(_ session: ChatSessionRecord) {
-        do {
-            try persistence?.deleteSession(session.id)
-        } catch {
-            Log.persistence.error("Failed to delete session: \(error)")
-        }
+    public func deleteSession(_ session: ChatSessionRecord) throws {
+        try persistence?.deleteSession(session.id)
 
         if activeSession?.id == session.id {
             activeSession = nil
@@ -54,15 +50,11 @@ public final class SessionManagerViewModel {
     }
 
     /// Renames a session.
-    public func renameSession(_ session: ChatSessionRecord, title: String) {
+    public func renameSession(_ session: ChatSessionRecord, title: String) throws {
         var updated = session
         updated.title = title
         updated.updatedAt = Date()
-        do {
-            try persistence?.updateSession(updated)
-        } catch {
-            Log.persistence.error("Failed to rename session: \(error)")
-        }
+        try persistence?.updateSession(updated)
         loadSessions()
     }
 
