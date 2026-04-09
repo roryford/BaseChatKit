@@ -200,6 +200,55 @@ final class ModelInfoTests: XCTestCase {
         XCTAssertEqual(model.effectiveCapabilityTier, .fast)
     }
 
+    // MARK: - Stable ID
+
+    func test_ggufInit_sameFile_producesStableID() throws {
+        let fileURL = tempDirectory.appendingPathComponent("stable-id-test.gguf")
+        try Data(repeating: 0, count: 64).write(to: fileURL)
+
+        let first = try XCTUnwrap(ModelInfo(ggufURL: fileURL))
+        let second = try XCTUnwrap(ModelInfo(ggufURL: fileURL))
+
+        XCTAssertEqual(first.id, second.id, "Same GGUF file must produce the same ID across calls")
+    }
+
+    func test_mlxInit_sameDirectory_producesStableID() throws {
+        let mlxDir = tempDirectory.appendingPathComponent("stable-mlx")
+        try FileManager.default.createDirectory(at: mlxDir, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: mlxDir.appendingPathComponent("config.json"))
+        try Data(repeating: 0, count: 1).write(to: mlxDir.appendingPathComponent("model.safetensors"))
+
+        let first = try XCTUnwrap(ModelInfo(mlxDirectory: mlxDir))
+        let second = try XCTUnwrap(ModelInfo(mlxDirectory: mlxDir))
+
+        XCTAssertEqual(first.id, second.id, "Same MLX directory must produce the same ID across calls")
+    }
+
+    func test_differentFiles_produceDifferentIDs() throws {
+        let fileA = tempDirectory.appendingPathComponent("model-a.gguf")
+        let fileB = tempDirectory.appendingPathComponent("model-b.gguf")
+        try Data(repeating: 0, count: 64).write(to: fileA)
+        try Data(repeating: 0, count: 64).write(to: fileB)
+
+        let a = try XCTUnwrap(ModelInfo(ggufURL: fileA))
+        let b = try XCTUnwrap(ModelInfo(ggufURL: fileB))
+
+        XCTAssertNotEqual(a.id, b.id, "Different files must produce different IDs")
+    }
+
+    func test_stableID_isVersion5UUID() throws {
+        let fileURL = tempDirectory.appendingPathComponent("v5-check.gguf")
+        try Data(repeating: 0, count: 64).write(to: fileURL)
+
+        let model = try XCTUnwrap(ModelInfo(ggufURL: fileURL))
+        let uuidString = model.id.uuidString
+
+        // UUID v5 has version nibble = 5 at position 14 (0-indexed in the hex string without dashes)
+        // Format: xxxxxxxx-xxxx-5xxx-yxxx-xxxxxxxxxxxx
+        let parts = uuidString.split(separator: "-")
+        XCTAssertTrue(parts[2].hasPrefix("5"), "Stable ID should be a version-5 UUID, got \(uuidString)")
+    }
+
     // MARK: - Display Name
 
     func test_displayName_stripsGgufExtension() throws {

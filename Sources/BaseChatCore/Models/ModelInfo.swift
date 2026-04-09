@@ -86,7 +86,7 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
             return nil
         }
 
-        self.id = UUID()
+        self.id = Self.stableID(for: url)
         self.fileName = url.lastPathComponent
         self.name = Self.displayName(from: url.lastPathComponent, strippingExtension: ".gguf")
         self.url = url
@@ -149,7 +149,7 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         let hasSafetensors = allFiles.contains { $0.pathExtension.lowercased() == "safetensors" }
         guard hasSafetensors else { return nil }
 
-        self.id = UUID()
+        self.id = Self.stableID(for: url)
         self.fileName = url.lastPathComponent
         self.name = Self.displayName(from: url.lastPathComponent, strippingExtension: nil)
         self.url = url
@@ -193,6 +193,21 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
     }
 
     // MARK: - Private
+
+    /// Produces a stable UUID from a file URL so the same model file always gets the same ID.
+    ///
+    /// Uses UUID v5 (SHA-1 name-based) with the URL namespace to guarantee that
+    /// `ModelInfo(ggufURL:)` and `ModelInfo(mlxDirectory:)` return the same `id`
+    /// across multiple calls for the same path. This is critical for model selection
+    /// persistence — sessions save `selectedModelID`, and `refreshModels()` must
+    /// produce matching IDs so the selection survives a rescan.
+    static func stableID(for url: URL) -> UUID {
+        // UUID v5: SHA-1 hash of namespace UUID + name bytes, per RFC 4122 §4.3.
+        // Using the URL namespace UUID (6ba7b811-9dad-11d1-80b4-00c04fd430c8).
+        let namespace = UUID(uuidString: "6ba7b811-9dad-11d1-80b4-00c04fd430c8")!
+        let name = url.standardizedFileURL.path
+        return UUID.v5(namespace: namespace, name: name)
+    }
 
     /// Derives a human-readable display name from a filename.
     private static func displayName(from fileName: String, strippingExtension ext: String?) -> String {
