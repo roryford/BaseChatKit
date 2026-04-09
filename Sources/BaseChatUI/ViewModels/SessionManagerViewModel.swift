@@ -40,7 +40,11 @@ public final class SessionManagerViewModel {
 
     /// Deletes a session and all its messages.
     public func deleteSession(_ session: ChatSessionRecord) throws {
-        try persistence?.deleteSession(session.id)
+        guard let persistence else {
+            Log.persistence.warning("deleteSession called before persistence was configured")
+            throw ChatPersistenceError.providerNotConfigured
+        }
+        try persistence.deleteSession(session.id)
 
         if activeSession?.id == session.id {
             activeSession = nil
@@ -51,10 +55,14 @@ public final class SessionManagerViewModel {
 
     /// Renames a session.
     public func renameSession(_ session: ChatSessionRecord, title: String) throws {
+        guard let persistence else {
+            Log.persistence.warning("renameSession called before persistence was configured")
+            throw ChatPersistenceError.providerNotConfigured
+        }
         var updated = session
         updated.title = title
         updated.updatedAt = Date()
-        try persistence?.updateSession(updated)
+        try persistence.updateSession(updated)
         loadSessions()
     }
 

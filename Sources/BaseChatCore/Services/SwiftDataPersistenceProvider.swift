@@ -31,7 +31,7 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
         session.promptTemplateRawValue = record.promptTemplate?.rawValue
         session.contextSizeOverride = record.contextSizeOverride
         session.compressionModeRaw = record.compressionMode == .automatic ? nil : record.compressionMode.rawValue
-        session.pinnedMessageIDsRaw = record.pinnedMessageIDs.isEmpty ? nil : record.pinnedMessageIDs.map(\.uuidString).joined(separator: ",")
+        session.pinnedMessageIDsRaw = record.pinnedMessageIDs.isEmpty ? nil : record.pinnedMessageIDs.map(\.uuidString).sorted().joined(separator: ",")
         modelContext.insert(session)
         try modelContext.save()
     }
@@ -51,7 +51,7 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
         session.promptTemplateRawValue = record.promptTemplate?.rawValue
         session.contextSizeOverride = record.contextSizeOverride
         session.compressionModeRaw = record.compressionMode == .automatic ? nil : record.compressionMode.rawValue
-        session.pinnedMessageIDsRaw = record.pinnedMessageIDs.isEmpty ? nil : record.pinnedMessageIDs.map(\.uuidString).joined(separator: ",")
+        session.pinnedMessageIDsRaw = record.pinnedMessageIDs.isEmpty ? nil : record.pinnedMessageIDs.map(\.uuidString).sorted().joined(separator: ",")
         try modelContext.save()
     }
 
