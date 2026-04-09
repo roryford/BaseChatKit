@@ -5,9 +5,9 @@ import BaseChatCore
 /// Creates an in-memory `ModelContainer` suitable for unit and integration tests.
 ///
 /// Delegates to ``ModelContainerFactory/makeInMemoryContainer()`` so the
-/// container is configured with ``BaseChatMigrationPlan`` — the same plan used
+/// container is configured with the current schema — the same setup used
 /// in production. All SwiftData models (ChatMessage, ChatSession, SamplerPreset,
-/// APIEndpoint) are registered. The container is ephemeral — nothing touches disk.
+/// APIEndpoint, ModelBenchmarkCache) are registered. The container is ephemeral — nothing touches disk.
 ///
 /// - Returns: A configured `ModelContainer` with in-memory storage.
 /// - Throws: If `ModelContainer` initialisation fails (should not happen with

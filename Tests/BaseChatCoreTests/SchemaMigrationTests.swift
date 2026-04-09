@@ -3,7 +3,7 @@ import SwiftData
 @testable import BaseChatCore
 import BaseChatTestSupport
 
-/// Tests for the SwiftData VersionedSchema and SchemaMigrationPlan infrastructure.
+/// Tests for the SwiftData schema and ModelContainerFactory infrastructure.
 final class SchemaMigrationTests: XCTestCase {
     private var tempStoreDirectory: URL?
 
@@ -15,48 +15,34 @@ final class SchemaMigrationTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    // MARK: - BaseChatSchemaV1
+    // MARK: - BaseChatSchemaV3
 
-    func test_schemaV1_versionIdentifier() {
-        XCTAssertEqual(BaseChatSchemaV1.versionIdentifier, Schema.Version(1, 0, 0))
+    func test_schemaV3_versionIdentifier() {
+        XCTAssertEqual(BaseChatSchemaV3.versionIdentifier, Schema.Version(3, 0, 0))
     }
 
-    func test_schemaV1_modelsContainsAllExpectedTypes() {
-        let models = BaseChatSchemaV1.models
-        XCTAssertEqual(models.count, 4)
+    func test_schemaV3_modelsContainsAllExpectedTypes() {
+        let models = BaseChatSchemaV3.models
+        XCTAssertEqual(models.count, 5)
         let ids = models.map { ObjectIdentifier($0) }
-        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.ChatMessage.self)))
-        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.ChatSession.self)))
-        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.SamplerPreset.self)))
-        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV3.ChatMessage.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV3.ChatSession.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV3.SamplerPreset.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV3.APIEndpoint.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV3.ModelBenchmarkCache.self)))
     }
 
-    func test_publicTypealiases_matchCurrentSchemaModelTypes() {
-        XCTAssertEqual(ObjectIdentifier(ChatMessage.self), ObjectIdentifier(BaseChatSchemaV2.ChatMessage.self))
-        XCTAssertEqual(ObjectIdentifier(ChatSession.self), ObjectIdentifier(BaseChatSchemaV1.ChatSession.self))
-        XCTAssertEqual(ObjectIdentifier(SamplerPreset.self), ObjectIdentifier(BaseChatSchemaV1.SamplerPreset.self))
-        XCTAssertEqual(ObjectIdentifier(APIEndpoint.self), ObjectIdentifier(BaseChatSchemaV1.APIEndpoint.self))
+    func test_publicTypealiases_matchV3ModelTypes() {
+        XCTAssertEqual(ObjectIdentifier(ChatMessage.self), ObjectIdentifier(BaseChatSchemaV3.ChatMessage.self))
+        XCTAssertEqual(ObjectIdentifier(ChatSession.self), ObjectIdentifier(BaseChatSchemaV3.ChatSession.self))
+        XCTAssertEqual(ObjectIdentifier(SamplerPreset.self), ObjectIdentifier(BaseChatSchemaV3.SamplerPreset.self))
+        XCTAssertEqual(ObjectIdentifier(APIEndpoint.self), ObjectIdentifier(BaseChatSchemaV3.APIEndpoint.self))
         XCTAssertEqual(ObjectIdentifier(ModelBenchmarkCache.self), ObjectIdentifier(BaseChatSchemaV3.ModelBenchmarkCache.self))
-    }
-
-    // MARK: - BaseChatMigrationPlan
-
-    func test_migrationPlan_schemasContainsV1andV2andV3() {
-        let names = BaseChatMigrationPlan.schemas.map { String(describing: $0) }
-        XCTAssertTrue(names.contains(where: { $0.contains("BaseChatSchemaV1") }))
-        XCTAssertTrue(names.contains(where: { $0.contains("BaseChatSchemaV2") }))
-        XCTAssertTrue(names.contains(where: { $0.contains("BaseChatSchemaV3") }))
-        XCTAssertEqual(BaseChatMigrationPlan.schemas.count, 3)
-    }
-
-    func test_migrationPlan_stagesContainsV1toV2andV2toV3() {
-        XCTAssertEqual(BaseChatMigrationPlan.stages.count, 2)
     }
 
     // MARK: - ModelContainerFactory
 
-    func test_containerFactory_opensWithMigrationPlan() throws {
-        // Verifies the container is functional: insert and fetch a ChatMessage.
+    func test_containerFactory_opensSuccessfully() throws {
         let container = try ModelContainerFactory.makeInMemoryContainer()
         let context = ModelContext(container)
         let sessionID = UUID()
@@ -77,48 +63,45 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertNotNil(container)
     }
 
-    func test_containerFactory_currentSchema_matchesNewestMigrationPlanSchema() throws {
-        let newestSchema = try XCTUnwrap(BaseChatMigrationPlan.schemas.last)
-        XCTAssertEqual(ObjectIdentifier(ModelContainerFactory.currentSchema), ObjectIdentifier(newestSchema))
+    func test_containerFactory_currentSchema_isV3() {
+        XCTAssertEqual(ObjectIdentifier(ModelContainerFactory.currentSchema), ObjectIdentifier(BaseChatSchemaV3.self))
     }
 
-    @available(*, deprecated)
-    func test_containerFactory_reopensStoreWrittenThroughDeprecatedSchemaEntryPoint() throws {
+    func test_containerFactory_reopensPersistedStore() throws {
         let storeDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("BaseChatSchemaCompatibility-\(UUID().uuidString)")
+            .appendingPathComponent("BaseChatSchemaV3-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
         tempStoreDirectory = storeDirectory
         let storeURL = storeDirectory.appendingPathComponent("BaseChat.sqlite")
-        let legacySessionID: UUID
+        let originalSessionID: UUID
 
         do {
-            let legacyConfig = ModelConfiguration(url: storeURL)
-            let legacySchema = Schema(BaseChatSchema.allModelTypes)
-            let legacyContainer = try ModelContainer(for: legacySchema, configurations: legacyConfig)
-            let legacyContext = ModelContext(legacyContainer)
+            let config = ModelConfiguration(url: storeURL)
+            let container = try ModelContainerFactory.makeContainer(configurations: [config])
+            let context = ModelContext(container)
 
-            let legacySession = ChatSession(title: "Legacy session")
-            legacyContext.insert(legacySession)
-            try legacyContext.save()
-            legacySessionID = legacySession.id
+            let session = ChatSession(title: "Persisted session")
+            context.insert(session)
+            try context.save()
+            originalSessionID = session.id
         }
 
-        let factoryConfig = ModelConfiguration(url: storeURL)
-        let reopenedContainer = try ModelContainerFactory.makeContainer(configurations: [factoryConfig])
+        let reopenConfig = ModelConfiguration(url: storeURL)
+        let reopenedContainer = try ModelContainerFactory.makeContainer(configurations: [reopenConfig])
         let reopenedContext = ModelContext(reopenedContainer)
         let fetchedSessions = try reopenedContext.fetch(FetchDescriptor<ChatSession>(
-            predicate: #Predicate { $0.id == legacySessionID }
+            predicate: #Predicate { $0.id == originalSessionID }
         ))
 
         XCTAssertEqual(fetchedSessions.count, 1)
-        XCTAssertEqual(fetchedSessions.first?.title, "Legacy session")
+        XCTAssertEqual(fetchedSessions.first?.title, "Persisted session")
     }
 
     func test_schemaOwnedModelAndPublicAlias_areInterchangeable() throws {
         let container = try ModelContainerFactory.makeInMemoryContainer()
         let context = ModelContext(container)
 
-        let nestedMessage = BaseChatSchemaV2.ChatMessage(role: .user, content: "alias check", sessionID: UUID())
+        let nestedMessage = BaseChatSchemaV3.ChatMessage(role: .user, content: "alias check", sessionID: UUID())
         context.insert(nestedMessage)
         try context.save()
         let nestedMessageID = nestedMessage.id
@@ -236,13 +219,10 @@ final class SchemaMigrationTests: XCTestCase {
 
     // MARK: - makeInMemoryContainer helper
 
-    func test_makeInMemoryContainer_usesMigrationPlan() throws {
-        // The TestHelpers helper must delegate to ModelContainerFactory so that
-        // test containers match the production configuration.
+    func test_makeInMemoryContainer_matchesFactory() throws {
         let container = try makeInMemoryContainer()
         XCTAssertNotNil(container)
 
-        // Verify all model types are reachable through the container.
         let context = ModelContext(container)
         let sessionID = UUID()
         let message = ChatMessage(role: .assistant, content: "Test", sessionID: sessionID)

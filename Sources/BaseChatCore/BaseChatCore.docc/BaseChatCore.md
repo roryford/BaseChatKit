@@ -117,16 +117,12 @@ Backends are registered as factories so BaseChatCore stays free of any direct ML
 ### Reliability & Diagnostics
 
 - ``RetryPolicy``
-- ``CircuitBreaker``
 - ``RepetitionDetector``
 - ``BackendError``
 - ``ModelCompatibilityResult``
 - ``ModelTypeCompatibilityProvider``
 - ``FrameworkCapabilityService``
 
-### Schema & Migration
+### Schema
 
-- ``BaseChatSchema``
-- ``BaseChatSchemaV1``
-- ``BaseChatSchemaV2``
-- ``BaseChatMigrationPlan``
+- ``BaseChatSchemaV3``

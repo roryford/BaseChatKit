@@ -26,9 +26,7 @@ final class ModelSelectionE2ETests {
     init() throws {
         modelsDir = try makeE2ETempDir()
 
-        let schema = Schema(BaseChatSchema.allModelTypes)
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try ModelContainer(for: schema, configurations: [config])
+        container = try ModelContainerFactory.makeInMemoryContainer()
         context = container.mainContext
 
         mock = MockInferenceBackend()
