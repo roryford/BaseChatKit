@@ -134,8 +134,9 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             guard activeLoadToken == loadToken else {
                 return false
             }
-            self.model = loadedResources.model
-            self.context = loadedResources.context
+            // steal() transfers ownership; unloadModel's explicit ordered cleanup takes over.
+            self.model = loadedResources.model.steal()
+            self.context = loadedResources.context.steal()
             self.vocab = loadedResources.vocab
             self.isModelLoaded = true
             self._effectiveContextSize = loadedResources.effectiveContextSize
@@ -143,8 +144,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
 
         guard didCommit else {
-            llama_free(loadedResources.context)
-            llama_model_free(loadedResources.model)
+            // loadedResources goes out of scope here. steal() was never called, so
+            // LlamaContextHandle/LlamaModelHandle deinits free the C memory automatically.
             throw CancellationError()
         }
 
@@ -161,10 +162,42 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     }
 
     private struct LoadedResources: @unchecked Sendable {
-        let model: OpaquePointer
-        let context: OpaquePointer
-        let vocab: OpaquePointer?
+        let model: LlamaModelHandle
+        let context: LlamaContextHandle
         let effectiveContextSize: Int32
+        var vocab: OpaquePointer? { context.vocabPtr }
+    }
+
+    // MARK: - RAII Pointer Wrappers
+    //
+    // These types own C pointers and free them on deinit, making error-path
+    // cleanup in initializeModel automatic. On the successful load path,
+    // steal() transfers ownership to the instance vars so that unloadModel's
+    // explicit ordered cleanup (context before model, both before
+    // llama_backend_free) is unaffected.
+
+    /// Owns a `llama_model *`. Calls `llama_model_free` on deinit unless
+    /// ownership was transferred via `steal()`.
+    private final class LlamaModelHandle: @unchecked Sendable {
+        private(set) var pointer: OpaquePointer?
+        init(_ pointer: OpaquePointer) { self.pointer = pointer }
+        /// Transfers ownership to the caller. Subsequent deinit is a no-op.
+        func steal() -> OpaquePointer? { defer { pointer = nil }; return pointer }
+        deinit { if let p = pointer { llama_model_free(p) } }
+    }
+
+    /// Owns a `llama_context *`. Calls `llama_free` on deinit unless
+    /// ownership was transferred via `steal()`.
+    private final class LlamaContextHandle: @unchecked Sendable {
+        private(set) var pointer: OpaquePointer?
+        let vocabPtr: OpaquePointer?
+        init(context: OpaquePointer, vocab: OpaquePointer?) {
+            self.pointer = context
+            self.vocabPtr = vocab
+        }
+        /// Transfers ownership to the caller. Subsequent deinit is a no-op.
+        func steal() -> OpaquePointer? { defer { pointer = nil }; return pointer }
+        deinit { if let p = pointer { llama_free(p) } }
     }
 
     private static func initializeModel(
@@ -178,18 +211,19 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         modelParams.n_gpu_layers = 99  // Offload all layers to Metal
         #endif
 
-        guard let loadedModel = llama_model_load_from_file(url.path, modelParams) else {
+        guard let rawModel = llama_model_load_from_file(url.path, modelParams) else {
             throw InferenceError.modelLoadFailed(underlying: NSError(
                 domain: "LlamaBackend",
                 code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to load GGUF model from \(url.lastPathComponent)"]
             ))
         }
+        let modelHandle = LlamaModelHandle(rawModel)
 
         var ctxParams = llama_context_default_params()
         // Respect the model's actual training context length — hard-capping at 8192
         // prevents long-context models (32K–128K) from using their full window.
-        let trainedContextLength = Int32(llama_model_n_ctx_train(loadedModel))
+        let trainedContextLength = Int32(llama_model_n_ctx_train(rawModel))
         // Device-safe cap: 1 token ≈ 8 KB of KV cache (2 KB per layer element × 4 bytes);
         // physicalMemory / 8 192 gives the token count that would exhaust all RAM,
         // clamped to 128 000 as an absolute ceiling.
@@ -200,8 +234,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         ctxParams.n_threads = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
         ctxParams.n_threads_batch = ctxParams.n_threads
 
-        guard let ctx = llama_init_from_model(loadedModel, ctxParams) else {
-            llama_model_free(loadedModel)
+        guard let ctx = llama_init_from_model(rawModel, ctxParams) else {
+            // modelHandle goes out of scope here → llama_model_free called automatically
             throw InferenceError.modelLoadFailed(underlying: NSError(
                 domain: "LlamaBackend",
                 code: -2,
@@ -209,10 +243,13 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             ))
         }
 
-        return LoadedResources(
-            model: loadedModel,
+        let contextHandle = LlamaContextHandle(
             context: ctx,
-            vocab: llama_model_get_vocab(loadedModel),
+            vocab: llama_model_get_vocab(rawModel)
+        )
+        return LoadedResources(
+            model: modelHandle,
+            context: contextHandle,
             effectiveContextSize: effectiveContextSize
         )
     }
