@@ -1,7 +1,8 @@
-import XCTest
+@preconcurrency import XCTest
 import SwiftUI
 @testable import BaseChatUI
 
+@MainActor
 final class TypingIndicatorViewTests: XCTestCase {
 
     func testTypingIndicatorViewRenders() {

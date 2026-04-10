@@ -1,4 +1,4 @@
-import XCTest
+@preconcurrency import XCTest
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore

@@ -1,4 +1,4 @@
-import XCTest
+@preconcurrency import XCTest
 @testable import BaseChatUI
 
 /// Event-driven helpers that replace Task.sleep polling in ChatViewModel tests.
