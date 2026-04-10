@@ -132,7 +132,7 @@ Downstream projects that reference any of the twelve internalized types by name 
 
 ### Features
 
-**App-defined macros without forking the framework** — The macro system was a closed list: adding a domain-specific token like `{{chapterNumber}}` or `{{diceRoll}}` meant editing BaseChatKit itself, which made updating the dependency painful. Apps can now implement `MacroProvider` and register it at startup; the framework calls each provider in registration order and uses the first non-nil result, falling back to built-ins for standard tokens. The built-in set adds `{{modelName}}` and `{{messageCount}}`, both resolved automatically from the active session. The `{{roll:XdY}}` macro has moved out of core — it was Fireside-specific and had no place in a generic framework; apps that need dice rolls register it themselves ([#103](https://github.com/roryford/BaseChatKit/issues/103)).
+**App-defined macros without forking the framework** — The macro system was a closed list: adding a domain-specific token like `{{chapterNumber}}` or `{{diceRoll}}` meant editing BaseChatKit itself, which made updating the dependency painful. Apps can now implement `MacroProvider` and register it at startup; the framework calls each provider in registration order and uses the first non-nil result, falling back to built-ins for standard tokens. The built-in set adds `{{modelName}}` and `{{messageCount}}`, both resolved automatically from the active session. The `{{roll:XdY}}` macro has moved out of core — it was specific to one consumer app and had no place in a generic framework; apps that need dice rolls register it themselves ([#103](https://github.com/roryford/BaseChatKit/issues/103)).
 
 **Capability tiers in the model picker** — Choosing a model from the list required users to mentally translate file sizes and quantisation strings into a sense of what the model could do. `ModelInfo` now carries a capability tier — minimal, fast, balanced, capable, or frontier — estimated from file size and shown as a badge in the selection row. For apps that want measured data rather than estimates, `ModelBenchmarkRunner` provides a protocol and a default implementation that fires a short fixed prompt and records tokens per second; results are cached in SwiftData (schema v3) and survive app restart. Cloud model tiers are assigned statically at registration time and never require a benchmark run ([#104](https://github.com/roryford/BaseChatKit/issues/104)).
 
@@ -379,7 +379,7 @@ Pins are loaded automatically during `DefaultBackends.register(with:)` and respe
 
 ### Features
 
-* add RepetitionDetector and MacroExpander from Fireside ([#50](https://github.com/roryford/BaseChatKit/issues/50)) ([311f9ae](https://github.com/roryford/BaseChatKit/commit/311f9ae974fdd48944a5d695e3770ad570747c70))
+* add RepetitionDetector and MacroExpander from an internal consumer app ([#50](https://github.com/roryford/BaseChatKit/issues/50)) ([311f9ae](https://github.com/roryford/BaseChatKit/commit/311f9ae974fdd48944a5d695e3770ad570747c70))
 * migrate to Swift 6 language mode ([7704a77](https://github.com/roryford/BaseChatKit/commit/7704a7743e296a7f2e25eff64a53acc0da2e69cc))
 * migrate to Swift 6 language mode ([8ce6dcc](https://github.com/roryford/BaseChatKit/commit/8ce6dccb9fcd2eb7bf804967b38ca7c4f0de41b1))
 

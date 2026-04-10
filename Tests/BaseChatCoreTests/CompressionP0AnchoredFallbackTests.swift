@@ -29,7 +29,7 @@ final class CompressionP0AnchoredFallbackTests: XCTestCase {
 
     func test_customFieldNames_parsedCorrectly() async {
         let compressor = AnchoredCompressor()
-        // Return summary with underscored and spaced field names (Fireside-style)
+        // Return summary with underscored and spaced field names (alternate style)
         compressor.generateFn = { _ in """
             CHARACTERS: Alice, Bob
             LOCATION: Forest clearing
