@@ -74,9 +74,17 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     /// Access only under `stateLock`.
     private var _generationTask: Task<Void, Never>?
 
+    // MARK: - Configuration
+
+    /// Policy controlling MLX's GPU buffer cache size. See `MLXCachePolicy`.
+    /// Defaults to `.auto`, which picks a sensible value based on device RAM.
+    public let cachePolicy: MLXCachePolicy
+
     // MARK: - Init
 
-    public init() {}
+    public init(cachePolicy: MLXCachePolicy = .auto) {
+        self.cachePolicy = cachePolicy
+    }
 
     // MARK: - Model Lifecycle
 
@@ -95,7 +103,17 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             withStateLock {
                 _modelContainer = container
             }
-            Memory.cacheLimit = 20 * 1024 * 1024
+            // Apply the cache policy after loadModelContainer succeeds. Doing
+            // this *after* the load (rather than before) keeps it inside the
+            // implicit "MLX runtime is initialized" window — touching MLX's
+            // Memory namespace before the runtime is up trips a metallib
+            // load error in environments without Xcode-compiled shaders
+            // (e.g. `swift test`). The cost is that the load itself runs
+            // under whatever cacheLimit was previously in effect — usually
+            // mlx-swift's own default on a fresh process, which is fine.
+            let cacheBytes = cachePolicy.resolvedBytes()
+            Memory.cacheLimit = cacheBytes
+            Self.logger.info("MLX cache limit set to \(cacheBytes / (1024 * 1024)) MB (policy: \(String(describing: self.cachePolicy)))")
             isModelLoaded = true
             Self.logger.info("MLX backend loaded model from \(url.lastPathComponent)")
         } catch {
@@ -225,12 +243,25 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     public func unloadModel() {
         stopGeneration()
-        withStateLock {
+        // Capture whether we actually had a loaded container *before* clearing
+        // state. We use this to decide whether to call Memory.clearCache()
+        // below — touching MLX's Memory namespace requires the metallib to be
+        // resident in the process, which is only true after a successful
+        // model load. Calling clearCache() on a never-loaded backend (e.g.
+        // from BackendContractChecks.assertAllInvariants) trips a "Failed to
+        // load default metallib" error under `swift test`, because the
+        // metallib is only compiled by Xcode and isn't present in the SwiftPM
+        // build output.
+        let hadContainer: Bool = withStateLock {
+            let had = _modelContainer != nil
             _modelContainer = nil
             _isModelLoaded = false
             _isGenerating = false
+            return had
         }
-        Memory.clearCache()
+        if hadContainer {
+            Memory.clearCache()
+        }
         Self.logger.info("MLX backend unloaded")
     }
 }
