@@ -37,7 +37,6 @@ public struct RemoteServerConfigSheet: View {
     enum BackendType: String, CaseIterable, Identifiable {
         case openAICompatible = "OpenAI-compatible"
         case ollama = "Ollama"
-        case koboldCpp = "KoboldCpp"
 
         var id: String { rawValue }
 
@@ -45,7 +44,6 @@ public struct RemoteServerConfigSheet: View {
             switch self {
             case .openAICompatible: return "8080"
             case .ollama: return "11434"
-            case .koboldCpp: return "5001"
             }
         }
 
@@ -53,7 +51,6 @@ public struct RemoteServerConfigSheet: View {
             switch self {
             case .openAICompatible: return .custom
             case .ollama: return .ollama
-            case .koboldCpp: return .koboldCpp
             }
         }
 
@@ -124,7 +121,7 @@ public struct RemoteServerConfigSheet: View {
         } header: {
             Text("Connection")
         } footer: {
-            Text("API key is only needed for authenticated endpoints (e.g. vLLM with auth). Leave blank for local Ollama and KoboldCpp servers.")
+            Text("API key is only needed for authenticated endpoints (e.g. vLLM with auth). Leave blank for local Ollama servers.")
                 .font(.caption)
         }
     }

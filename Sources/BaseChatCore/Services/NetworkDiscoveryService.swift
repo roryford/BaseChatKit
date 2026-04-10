@@ -6,7 +6,6 @@ import os
 ///
 /// Known ports:
 /// - **11434**: Ollama (`GET /api/tags`)
-/// - **5001**: KoboldCpp (`GET /api/v1/model`)
 /// - **1234**: LM Studio (`GET /v1/models`)
 public actor NetworkDiscoveryService: ServerDiscoveryService {
 
@@ -21,7 +20,6 @@ public actor NetworkDiscoveryService: ServerDiscoveryService {
 
     private static let knownServers: [ServerProbe] = [
         ServerProbe(port: 11434, serverType: .ollama, displayName: "Ollama", healthPath: "/api/tags"),
-        ServerProbe(port: 5001, serverType: .koboldCpp, displayName: "KoboldCpp", healthPath: "/api/v1/model"),
         ServerProbe(port: 1234, serverType: .lmStudio, displayName: "LM Studio", healthPath: "/v1/models"),
     ]
 
@@ -56,7 +54,7 @@ public actor NetworkDiscoveryService: ServerDiscoveryService {
 
     /// Scans known local ports for running inference servers and yields any discovered endpoints.
     ///
-    /// Probes Ollama (11434), KoboldCpp (5001), and LM Studio (1234) in sequence.
+    /// Probes Ollama (11434) and LM Studio (1234) in sequence.
     /// Results are delivered through ``discoveredServers``. Safe to call while a scan
     /// is already running -- subsequent calls are no-ops until the first completes.
     public func startDiscovery() async {
@@ -92,7 +90,7 @@ public actor NetworkDiscoveryService: ServerDiscoveryService {
 
     /// Probes a single host/port combination for an inference server.
     ///
-    /// If the port matches a known server (Ollama, KoboldCpp, LM Studio), uses the
+    /// If the port matches a known server (Ollama, LM Studio), uses the
     /// server-specific health endpoint. Otherwise falls back to the OpenAI-compatible
     /// `/v1/models` endpoint. Returns `nil` if no server responds.
     public func probe(host: String, port: Int) async -> DiscoveredServer? {
@@ -167,8 +165,6 @@ public actor NetworkDiscoveryService: ServerDiscoveryService {
         switch serverType {
         case .ollama:
             return parseOllamaModels(data: data)
-        case .koboldCpp:
-            return parseKoboldCppModel(data: data)
         case .lmStudio:
             return parseOpenAIModels(data: data)
         case .openAICompatible:
@@ -201,20 +197,6 @@ public actor NetworkDiscoveryService: ServerDiscoveryService {
                 quantization: quantization
             )
         }
-    }
-
-    /// Parses KoboldCpp's `GET /api/v1/model` response: `{"result":"modelname"}`
-    private func parseKoboldCppModel(data: Data) -> [RemoteModelInfo] {
-        struct KoboldResponse: Decodable {
-            let result: String?
-        }
-
-        guard let response = try? JSONDecoder().decode(KoboldResponse.self, from: data),
-              let modelName = response.result, !modelName.isEmpty else {
-            return []
-        }
-
-        return [RemoteModelInfo(name: modelName)]
     }
 
     /// Parses OpenAI-compatible `GET /v1/models` response: `{"data":[{"id":"..."}]}`

@@ -3,7 +3,6 @@ import Foundation
 /// The type of inference server discovered on the network.
 public enum ServerType: String, Sendable, Codable {
     case ollama
-    case koboldCpp
     case lmStudio
     case openAICompatible
 }
@@ -62,7 +61,6 @@ public struct DiscoveredServer: Sendable, Identifiable, Hashable {
     public var apiProvider: APIProvider {
         switch serverType {
         case .ollama: return .ollama
-        case .koboldCpp: return .koboldCpp
         case .lmStudio: return .lmStudio
         case .openAICompatible: return .custom
         }

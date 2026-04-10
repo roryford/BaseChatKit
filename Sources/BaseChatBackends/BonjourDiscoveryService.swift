@@ -5,9 +5,9 @@ import BaseChatCore
 
 /// Discovers local inference servers via Bonjour/mDNS using `NWBrowser`.
 ///
-/// Scans for `_ollama._tcp` and `_kobold._tcp` services and publishes each
-/// as a ``DiscoveredServer`` candidate. Port-probing is performed via HTTP
-/// to fetch the model list and confirm the server is healthy before yielding.
+/// Scans for `_ollama._tcp` services and publishes each as a ``DiscoveredServer``
+/// candidate. Port-probing is performed via HTTP to fetch the model list and
+/// confirm the server is healthy before yielding.
 ///
 /// ## Info.plist requirement (consumer responsibility)
 ///
@@ -17,7 +17,7 @@ import BaseChatCore
 ///
 /// ```xml
 /// <key>NSLocalNetworkUsageDescription</key>
-/// <string>Used to discover Ollama and KoboldCpp servers on your local network.</string>
+/// <string>Used to discover Ollama servers on your local network.</string>
 /// ```
 ///
 /// Usage:
@@ -48,13 +48,6 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
             displayName: "Ollama",
             healthPath: "/api/tags",
             defaultPort: 11434
-        ),
-        ServiceDefinition(
-            type: "_kobold._tcp",
-            serverType: .koboldCpp,
-            displayName: "KoboldCpp",
-            healthPath: "/api/v1/model",
-            defaultPort: 5001
         ),
     ]
 
@@ -285,7 +278,6 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
     private func parseModels(data: Data, serverType: ServerType) -> [RemoteModelInfo] {
         switch serverType {
         case .ollama: return parseOllamaModels(data: data)
-        case .koboldCpp: return parseKoboldCppModel(data: data)
         default: return parseOpenAIModels(data: data)
         }
     }
@@ -305,13 +297,6 @@ public actor BonjourDiscoveryService: ServerDiscoveryService {
                 quantization: parts.count > 1 ? String(parts[1]) : nil
             )
         }
-    }
-
-    private func parseKoboldCppModel(data: Data) -> [RemoteModelInfo] {
-        struct Resp: Decodable { let result: String? }
-        guard let r = try? JSONDecoder().decode(Resp.self, from: data),
-              let name = r.result, !name.isEmpty else { return [] }
-        return [RemoteModelInfo(name: name)]
     }
 
     private func parseOpenAIModels(data: Data) -> [RemoteModelInfo] {

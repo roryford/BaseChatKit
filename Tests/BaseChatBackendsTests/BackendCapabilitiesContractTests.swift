@@ -19,8 +19,6 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                       "OpenAIBackend makes network calls — isRemote must be true")
         XCTAssertTrue(OllamaBackend().capabilities.isRemote,
                       "OllamaBackend makes network calls — isRemote must be true")
-        XCTAssertTrue(KoboldCppBackend().capabilities.isRemote,
-                      "KoboldCppBackend makes network calls — isRemote must be true")
     }
 
     // MARK: - Tool Calling
@@ -32,11 +30,9 @@ final class BackendCapabilitiesContractTests: XCTestCase {
         XCTAssertTrue(OpenAIBackend().capabilities.supportsToolCalling,
                       "OpenAIBackend supports tool calling via tool_calls in delta")
 
-        // Ollama and KoboldCpp do not currently support tool calling
+        // Ollama does not currently support tool calling
         XCTAssertFalse(OllamaBackend().capabilities.supportsToolCalling,
                        "OllamaBackend does not support tool calling")
-        XCTAssertFalse(KoboldCppBackend().capabilities.supportsToolCalling,
-                       "KoboldCppBackend does not support tool calling")
     }
 
     func test_cloudBackends_structuredOutputCapabilities() {
