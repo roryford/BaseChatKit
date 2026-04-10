@@ -62,6 +62,16 @@ public final class InferenceService {
     /// The name of the active backend (e.g., "MLX", "llama.cpp"), for display.
     public private(set) var activeBackendName: String?
 
+    /// Progress of the in-flight model load, in `[0.0, 1.0]`.
+    ///
+    /// `nil` means no load is in progress. Set to `0.0` when `loadModel` or
+    /// `loadCloudBackend` begins, then updated by backends that adopt
+    /// ``LoadProgressReporting``. Backends without granular progress simply
+    /// stay at `0.0` until ``isModelLoaded`` flips to `true`. Returns to `nil`
+    /// once the load completes (success, failure, or supersession by a newer
+    /// request).
+    public private(set) var modelLoadProgress: Double?
+
     /// The prompt template to apply for backends that require one (GGUF).
     public var selectedPromptTemplate: PromptTemplate = .chatML
 
@@ -271,6 +281,7 @@ public final class InferenceService {
             target: modelTypeLogLabel(modelInfo.modelType),
             backend: backendName
         )
+        installProgressHandler(on: newBackend, for: request)
         do {
             // Run backend model loading off the main actor so heavy blocking work
             // (e.g. llama_model_load_from_file, llama_init_from_model) does not
@@ -281,6 +292,7 @@ public final class InferenceService {
                 try await newBackend.loadModel(from: url, contextSize: contextSize)
             }.value
         } catch {
+            (newBackend as? LoadProgressReporting)?.setLoadProgressHandler(nil)
             let isStale = finishLoadAttemptWithFailure(request, error: error)
             if isStale {
                 // The failure arrived after a newer request superseded this one.
@@ -289,6 +301,7 @@ public final class InferenceService {
             }
             throw error
         }
+        (newBackend as? LoadProgressReporting)?.setLoadProgressHandler(nil)
 
         logLoadEvent("load.complete", request: request)
         guard commitLoadIfCurrent(request: request, backend: newBackend, backendName: backendName) else {
@@ -344,6 +357,7 @@ public final class InferenceService {
             target: endpoint.provider.rawValue,
             backend: endpoint.provider.rawValue
         )
+        installProgressHandler(on: newBackend, for: request)
         do {
             // Run backend initialisation off the main actor for consistency with
             // local model loading — cloud backends may perform blocking I/O during
@@ -353,6 +367,7 @@ public final class InferenceService {
                 try await newBackend.loadModel(from: backendURL, contextSize: 0)
             }.value
         } catch {
+            (newBackend as? LoadProgressReporting)?.setLoadProgressHandler(nil)
             let isStale = finishLoadAttemptWithFailure(request, error: error)
             if isStale {
                 // Clean up any partial backend state so resources are not leaked.
@@ -360,6 +375,7 @@ public final class InferenceService {
             }
             throw error
         }
+        (newBackend as? LoadProgressReporting)?.setLoadProgressHandler(nil)
 
         logLoadEvent("load.complete", request: request)
         guard commitLoadIfCurrent(
@@ -748,6 +764,7 @@ public final class InferenceService {
         nextLoadRequestToken = request
         latestRequestedLoadToken = request
         loadPhase = .loading(request: request)
+        modelLoadProgress = 0.0
         loadRequestMetadataByToken[request] = LoadRequestMetadata(
             source: source,
             target: target,
@@ -766,6 +783,7 @@ public final class InferenceService {
             return true
         }
         loadPhase = .idle
+        modelLoadProgress = nil
         logLoadEvent(
             "load.failed",
             request: request,
@@ -783,6 +801,7 @@ public final class InferenceService {
             invalidatedThroughToken = max(invalidatedThroughToken, latestRequestedLoadToken)
         }
         loadPhase = .idle
+        modelLoadProgress = nil
     }
 
     private func canCommitLoad(_ request: LoadRequestToken) -> Bool {
@@ -810,10 +829,34 @@ public final class InferenceService {
 
         backend = newBackend
         isModelLoaded = true
+        modelLoadProgress = nil
         activeBackendName = backendName
         loadPhase = .loaded(request: request)
         logLoadEvent("load.commit", request: request, clearMetadata: true)
         return true
+    }
+
+    /// Installs a stale-suppressing progress handler on the backend if it
+    /// adopts ``LoadProgressReporting``. The handler hops to the main actor
+    /// and only updates ``modelLoadProgress`` while `request` is still the
+    /// active loading request.
+    private func installProgressHandler(
+        on newBackend: any InferenceBackend,
+        for request: LoadRequestToken
+    ) {
+        guard let reporting = newBackend as? LoadProgressReporting else { return }
+        reporting.setLoadProgressHandler { [weak self] progress in
+            Task { @MainActor [weak self] in
+                self?.applyLoadProgress(progress, for: request)
+            }
+        }
+    }
+
+    private func applyLoadProgress(_ progress: Double, for request: LoadRequestToken) {
+        guard case .loading(let activeRequest) = loadPhase, activeRequest == request else {
+            return
+        }
+        modelLoadProgress = max(0.0, min(1.0, progress))
     }
 
     private func modelTypeLogLabel(_ modelType: ModelType) -> String {
@@ -974,4 +1017,18 @@ public protocol CloudBackendURLModelConfigurable: AnyObject {
 /// Adopted by cloud backends that resolve API keys via a Keychain account.
 public protocol CloudBackendKeychainConfigurable: AnyObject {
     func configure(baseURL: URL, keychainAccount: String, modelName: String)
+}
+
+/// Adopted by backends that can report granular model-load progress.
+///
+/// `InferenceService` installs a handler before each load and clears it
+/// (`nil`) once the load has completed or failed. Handlers may be invoked
+/// from any thread; the closure is `@Sendable`. Backends without granular
+/// progress need not adopt this protocol — `InferenceService` will simply
+/// publish `0.0` until `isModelLoaded` flips to `true`.
+public protocol LoadProgressReporting: AnyObject {
+    /// Installs (or clears, when `nil`) a progress callback for the next
+    /// `loadModel` call. Values must be in `[0.0, 1.0]`. Implementations
+    /// should retain the handler only for the duration of the active load.
+    func setLoadProgressHandler(_ handler: (@Sendable (Double) -> Void)?)
 }

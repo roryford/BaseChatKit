@@ -94,8 +94,40 @@ extension ChatViewModel {
     private func beginLoadUIState(generation: UInt64?) -> Bool {
         guard isCurrentLoadIntentGeneration(generation) else { return false }
         errorMessage = nil
-        activityPhase = .modelLoading(progress: nil)
+        activityPhase = .modelLoading(progress: inferenceService.modelLoadProgress)
         return true
+    }
+
+    /// Mirrors `inferenceService.modelLoadProgress` into ``activityPhase`` for
+    /// the duration of a model load. Polls instead of using
+    /// `withObservationTracking` so cancellation is reliable — observation
+    /// continuations don't resume on `Task.cancel()`, which makes them
+    /// deadlock-prone for a long-running mirror like this.
+    ///
+    /// The bridge only writes when the load generation is still current AND
+    /// `activityPhase` is still `.modelLoading`, so any late wake-up after
+    /// `endLoadUIState` has flipped the phase to `.idle` is a no-op.
+    private func observeModelLoadProgress(generation: UInt64?) async {
+        while !Task.isCancelled {
+            applyModelLoadProgress(generation: generation)
+            do {
+                try await Task.sleep(for: progressBridgePollInterval)
+            } catch {
+                // Sleep throws on cancel; one final apply ensures the latest
+                // value is published before the bridge exits.
+                applyModelLoadProgress(generation: generation)
+                return
+            }
+        }
+    }
+
+    private func applyModelLoadProgress(generation: UInt64?) {
+        guard isCurrentLoadIntentGeneration(generation) else { return }
+        guard case .modelLoading(let current) = activityPhase else { return }
+        let snapshot = inferenceService.modelLoadProgress
+        if current != snapshot {
+            activityPhase = .modelLoading(progress: snapshot)
+        }
     }
 
     private func endLoadUIState(generation: UInt64?) {
@@ -141,7 +173,13 @@ extension ChatViewModel {
         }
 
         guard beginLoadUIState(generation: generation) else { return }
-        defer { endLoadUIState(generation: generation) }
+        let bridge = Task { @MainActor [weak self] in
+            await self?.observeModelLoadProgress(generation: generation)
+        }
+        defer {
+            bridge.cancel()
+            endLoadUIState(generation: generation)
+        }
 
         do {
             let contextSize: Int32 = Int32(model.detectedContextLength ?? 2048)
@@ -155,7 +193,13 @@ extension ChatViewModel {
 
     private func loadCloudEndpointInternal(_ endpoint: APIEndpoint, generation: UInt64?) async {
         guard beginLoadUIState(generation: generation) else { return }
-        defer { endLoadUIState(generation: generation) }
+        let bridge = Task { @MainActor [weak self] in
+            await self?.observeModelLoadProgress(generation: generation)
+        }
+        defer {
+            bridge.cancel()
+            endLoadUIState(generation: generation)
+        }
 
         do {
             try await inferenceService.loadCloudBackend(from: endpoint)

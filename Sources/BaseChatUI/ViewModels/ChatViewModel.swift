@@ -320,6 +320,11 @@ public final class ChatViewModel {
     var backgroundTask: Task<Void, Never>?
     var coordinatedLoadTask: Task<Void, Never>?
     var latestLoadIntentGeneration: UInt64 = 0
+
+    /// Polling interval for the model-load progress bridge task that mirrors
+    /// `inferenceService.modelLoadProgress` into ``activityPhase``. Tests may
+    /// override this to a small value for deterministic timing.
+    var progressBridgePollInterval: Duration = .milliseconds(50)
     var lastPressureLevel: MemoryPressureLevel = .nominal
     private var isSynchronizingSelection = false
     var isRestoringSession = false
