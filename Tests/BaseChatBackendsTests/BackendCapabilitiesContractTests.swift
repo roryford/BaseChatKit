@@ -24,13 +24,15 @@ final class BackendCapabilitiesContractTests: XCTestCase {
     // MARK: - Tool Calling
 
     func test_cloudBackends_toolCallingCapabilities() {
-        // Claude and OpenAI support tool calling
-        XCTAssertTrue(ClaudeBackend().capabilities.supportsToolCalling,
-                      "ClaudeBackend supports tool calling via tool_use content blocks")
-        XCTAssertTrue(OpenAIBackend().capabilities.supportsToolCalling,
-                      "OpenAIBackend supports tool calling via tool_calls in delta")
-
-        // Ollama does not currently support tool calling
+        // Tool calling was removed from BCK ahead of the 0.6.0 API freeze.
+        // Every backend must report `false` until a stable cross-backend
+        // contract is reintroduced. The capability flag itself is kept
+        // (separate breaking change) so consumers that branch on it
+        // continue to compile.
+        XCTAssertFalse(ClaudeBackend().capabilities.supportsToolCalling,
+                       "ClaudeBackend no longer advertises tool calling — the public API was removed")
+        XCTAssertFalse(OpenAIBackend().capabilities.supportsToolCalling,
+                       "OpenAIBackend no longer advertises tool calling — the public API was removed")
         XCTAssertFalse(OllamaBackend().capabilities.supportsToolCalling,
                        "OllamaBackend does not support tool calling")
     }
@@ -40,20 +42,6 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                       "ClaudeBackend supports structured output")
         XCTAssertTrue(OpenAIBackend().capabilities.supportsStructuredOutput,
                       "OpenAIBackend supports structured output via json_schema")
-    }
-
-    // MARK: - ToolCallingBackend Conformance
-
-    func test_claudeBackend_conformsToToolCallingBackend() {
-        let backend = ClaudeBackend()
-        XCTAssertTrue(backend is ToolCallingBackend,
-                      "ClaudeBackend must conform to ToolCallingBackend")
-    }
-
-    func test_openAIBackend_conformsToToolCallingBackend() {
-        let backend = OpenAIBackend()
-        XCTAssertTrue(backend is ToolCallingBackend,
-                      "OpenAIBackend must conform to ToolCallingBackend")
     }
 
     // MARK: - Local backends

@@ -21,9 +21,6 @@ public struct GenerationStreamConsumer: Sendable {
 
         case .usage(let prompt, let completion):
             return .recordUsage(prompt: prompt, completion: completion)
-
-        case .toolCall:
-            return .noOp
         }
     }
 
@@ -43,7 +40,5 @@ public struct GenerationStreamConsumer: Sendable {
         case appendText(String)
         /// Record token usage on the current assistant message.
         case recordUsage(prompt: Int, completion: Int)
-        /// No action needed for this event.
-        case noOp
     }
 }

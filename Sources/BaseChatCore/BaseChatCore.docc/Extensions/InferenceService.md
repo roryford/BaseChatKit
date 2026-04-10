@@ -35,11 +35,6 @@
 
 - ``registeredBackendSnapshot()``
 
-### Tool Calling
-
-- ``toolProvider``
-- ``toolCallObserver``
-
 ### Tokenization
 
 - ``tokenizer``

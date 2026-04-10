@@ -47,7 +47,6 @@
 
 ### Extensibility
 
-- ``toolProvider``
 - ``postGenerationTasks``
 - ``onFirstMessage``
 - ``onFirstLaunch``

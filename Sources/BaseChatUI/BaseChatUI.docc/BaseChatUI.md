@@ -4,7 +4,7 @@ SwiftUI views and view models for building on-device and cloud-connected chat in
 
 ## Overview
 
-BaseChatUI provides the view layer for BaseChatKit. It depends only on ``BaseChatCore`` — it has no knowledge of specific inference backends. Drop ``ChatView`` into your app and supply a ``ChatViewModel`` to get a fully-featured chat interface: streaming generation, model selection, session management, context compression, and tool calling.
+BaseChatUI provides the view layer for BaseChatKit. It depends only on ``BaseChatCore`` — it has no knowledge of specific inference backends. Drop ``ChatView`` into your app and supply a ``ChatViewModel`` to get a fully-featured chat interface: streaming generation, model selection, session management, and context compression.
 
 ### Minimum wiring
 

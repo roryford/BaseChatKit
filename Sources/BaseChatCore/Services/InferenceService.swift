@@ -402,27 +402,6 @@ public final class InferenceService {
         activeBackendName = nil
     }
 
-    // MARK: - Tool Calling
-
-    /// The active tool provider, if any. Set before generation to enable tool calling
-    /// on backends that adopt `ToolCallingBackend`.
-    public var toolProvider: (any ToolProvider)? {
-        didSet { propagateToolStateToBackend() }
-    }
-
-    /// Optional observer for tool call activity during generation.
-    public var toolCallObserver: (any ToolCallObserver)? {
-        didSet { propagateToolStateToBackend() }
-    }
-
-    /// Single propagation point so didSet and generate() stay in sync.
-    private func propagateToolStateToBackend() {
-        guard let toolBackend = backend as? ToolCallingBackend else { return }
-        toolBackend.setToolProvider(toolProvider)
-        toolBackend.setTools(toolProvider?.tools ?? [])
-        toolBackend.toolCallObserver = toolCallObserver
-    }
-
     // MARK: - Generation
 
     /// Generates text from a message history, streaming tokens via the active backend.
@@ -439,9 +418,6 @@ public final class InferenceService {
     /// into a single prompt string using `selectedPromptTemplate`. For MLX and
     /// Foundation, the last user message is passed directly (they handle chat
     /// formatting internally).
-    ///
-    /// If a `toolProvider` is set and the backend adopts `ToolCallingBackend`,
-    /// tool definitions and provider are propagated before generation begins.
     public func generate(
         messages: [(role: String, content: String)],
         systemPrompt: String? = nil,
@@ -484,10 +460,6 @@ public final class InferenceService {
         if let historyReceiver = backend as? ConversationHistoryReceiver {
             historyReceiver.setConversationHistory(messages)
         }
-
-        // Ensure tool state is current before each generation in case the
-        // backend was swapped after the provider/observer was set.
-        propagateToolStateToBackend()
 
         return try backend.generate(
             prompt: prompt,
