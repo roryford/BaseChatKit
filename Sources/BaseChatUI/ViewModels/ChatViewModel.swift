@@ -273,6 +273,12 @@ public final class ChatViewModel {
     /// from the conversation history if left `nil`.
     public var macroContext: MacroContext = MacroContext()
 
+    /// Simple key/value substitution for system prompt templates. Tokens written
+    /// as `{{key}}` in the system prompt are replaced with the corresponding value.
+    /// Runs after `macroContext` expansion — if both target the same token, the
+    /// `macroContext` expansion wins because it runs first.
+    public var systemPromptContext: [String: String] = [:]
+
     /// Prompt template for GGUF backends. Ignored by MLX/Foundation.
     public var selectedPromptTemplate: PromptTemplate {
         get { inferenceService.selectedPromptTemplate }

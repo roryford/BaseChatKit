@@ -85,7 +85,11 @@ extension ChatViewModel {
             let rawSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
             let effectiveSystemPrompt: String?
             if let rawSystemPrompt, macroExpansionEnabled {
-                effectiveSystemPrompt = MacroExpander.expand(rawSystemPrompt, context: buildMacroContext())
+                var expanded = MacroExpander.expand(rawSystemPrompt, context: buildMacroContext())
+                for (key, value) in systemPromptContext {
+                    expanded = expanded.replacingOccurrences(of: "{{\(key)}}", with: value)
+                }
+                effectiveSystemPrompt = expanded
             } else {
                 effectiveSystemPrompt = rawSystemPrompt
             }
