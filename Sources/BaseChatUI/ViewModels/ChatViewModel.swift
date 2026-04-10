@@ -273,10 +273,30 @@ public final class ChatViewModel {
     /// from the conversation history if left `nil`.
     public var macroContext: MacroContext = MacroContext()
 
-    /// Simple key/value substitution for system prompt templates. Tokens written
-    /// as `{{key}}` in the system prompt are replaced with the corresponding value.
-    /// Runs after `macroContext` expansion — if both target the same token, the
-    /// `macroContext` expansion wins because it runs first.
+    /// Simple key/value substitution for system prompt templates.
+    ///
+    /// Tokens written as `{{key}}` in the system prompt are replaced with the
+    /// corresponding value. Intended for apps that just need to inject a few
+    /// strings (user name, persona, etc.) without wiring up the full
+    /// ``MacroProvider`` registry.
+    ///
+    /// Behavior:
+    /// - **Ordering.** Substitution runs **after** ``MacroExpander/expand(_:context:)``,
+    ///   so if both ``macroContext`` and `systemPromptContext` target the same
+    ///   token, the macro expansion wins.
+    /// - **Independent of macro expansion.** Substitution runs even when
+    ///   ``macroExpansionEnabled`` is `false`, so apps that disable the full
+    ///   macro pass can still use this dict-based fill.
+    /// - **Non-recursive.** Each `{{key}}` token is replaced exactly once. If a
+    ///   value itself contains `{{otherKey}}`, that nested token is **not**
+    ///   re-expanded — the result is deterministic and independent of dictionary
+    ///   iteration order.
+    /// - **Missing keys pass through.** A token whose key is not in the dict is
+    ///   left in the prompt verbatim (e.g. `{{missing}}`), matching
+    ///   ``MacroExpander/expand(_:context:)``.
+    /// - **Token shape.** Only `{{word}}` (one or more word characters: letters,
+    ///   digits, underscore) is recognized. Tokens with spaces, punctuation, or
+    ///   empty bodies (`{{}}`) are ignored.
     public var systemPromptContext: [String: String] = [:]
 
     /// Prompt template for GGUF backends. Ignored by MLX/Foundation.
