@@ -2,11 +2,11 @@
 
 ## Why we slimmed BCK
 
-Consumer audits of BaseChatKit's two known consumers — Fireside and ChatbotUI-iOS — showed that less than half of the codebase had any real demand. Several large subsystems had zero consumers at all, and several more had a single consumer that used only a narrow slice of the public API. The April 2026 feature-expansion plan that introduced most of this surface area was built without this data, so 0.6.0 is the correction: we are deleting what nobody used and repositioning BCK around what actually makes it valuable to the apps that ship it.
+Consumer audits of BaseChatKit's two known consumers — a private internal app and the public [ChatbotUI-iOS](https://github.com/roryford/ChatbotUI-iOS) demo — showed that less than half of the codebase had any real demand. Several large subsystems had zero consumers at all, and several more had a single consumer that used only a narrow slice of the public API. The April 2026 feature-expansion plan that introduced most of this surface area was built without this data, so 0.6.0 is the correction: we are deleting what nobody used and repositioning BCK around what actually makes it valuable to the apps that ship it.
 
 ## Consumer audit summary
 
-| Capability | Fireside | ChatbotUI-iOS |
+| Capability | Internal consumer | ChatbotUI-iOS |
 |---|---|---|
 | `InferenceService` + `DefaultBackends` | transparent-use | transparent-use |
 | `ChatViewModel` | ✓ | ✓ |
@@ -20,7 +20,7 @@ Consumer audits of BaseChatKit's two known consumers — Fireside and ChatbotUI-
 | Server discovery | ✗ | ✗ |
 | Tool calling | ✗ | ✗ |
 
-Fireside is the original home of the compression pipeline and uses the macro system to drive its `LorebookTriggerEngine`. ChatbotUI-iOS is the drop-in consumer — it takes the UI wholesale (`ChatView`, `SessionListView`, `ModelManagementSheet`, `APIConfigurationView`) plus the HuggingFace downloader, and touches macros only through `macroContext.userName`. Neither consumer uses server discovery, the benchmark runner, or the tool-calling public API.
+The internal consumer is the original home of the compression pipeline and exercises the full macro system through an app-level engine built on top of it. ChatbotUI-iOS is the drop-in consumer — it takes the UI wholesale (`ChatView`, `SessionListView`, `ModelManagementSheet`, `APIConfigurationView`) plus the HuggingFace downloader, and touches macros only through `macroContext.userName`. Neither consumer uses server discovery, the benchmark runner, or the tool-calling public API.
 
 ## What's leaving in 0.6.0
 
@@ -39,18 +39,18 @@ Fireside is the original home of the compression pipeline and uses the macro sys
 
 ## Positioning
 
-BaseChatKit is a drop-in chat framework with operational reliability guarantees, optimized for the ChatbotUI-iOS-shaped consumer: take `ChatView`, `SessionListView`, and `ModelManagementSheet` wholesale, inject an `InferenceService`, and compose app-level features (personas, story engines, lorebooks, custom tools) on top of the `ChatViewModel` API. The value is not "we support every backend" — it's "your chat UI keeps working when the network flickers, the user changes their mind mid-load, or iOS decides to reclaim your model's memory."
+BaseChatKit is a drop-in chat framework with operational reliability guarantees, optimized for the ChatbotUI-iOS-shaped consumer: take `ChatView`, `SessionListView`, and `ModelManagementSheet` wholesale, inject an `InferenceService`, and compose app-level features on top of the `ChatViewModel` API. The value is not "we support every backend" — it's "your chat UI keeps working when the network flickers, the user changes their mind mid-load, or iOS decides to reclaim your model's memory."
 
 AnyLanguageModel optimizes for provider abstraction — one protocol, many providers, API familiarity with Apple's `FoundationModels`. BCK optimizes for production failure modes — drop-in UI, operational reliability, and the things that go wrong between the demo and the App Store review. These are adjacent but distinct positions. We don't compete on backend count; we compete on what happens when the demo ends.
 
 ## Deferred to Weeks 2-3
 
-- **Compression repatriation** — the compression pipeline was originally Fireside's and will be moved back there once Fireside has a clean extraction path. It stays in BCK 0.6.0 to avoid breaking Fireside mid-release.
-- **Macro engine deletion** — the full macro system is Fireside-only and will be deleted from BCK after Fireside takes ownership in its own codebase. ChatbotUI-iOS's `macroContext.userName` usage will migrate to a new `systemPromptContext` property before the engine leaves.
+- **Compression repatriation** — the compression pipeline was originally extracted from the internal consumer and will be moved back there once that app has a clean extraction path. It stays in BCK 0.6.0 to avoid breaking the internal consumer mid-release.
+- **Macro engine deletion** — the full macro system has only one consumer and will be deleted from BCK after that consumer takes ownership in its own codebase. ChatbotUI-iOS's `macroContext.userName` usage will migrate to a new `systemPromptContext` property before the engine leaves.
 - **`BaseChatInference` target extraction** — splitting the inference-only surface out of `BaseChatCore` so that UI-less consumers (server-side, CLI tools, test harnesses) can depend on the engine without pulling SwiftUI types. Target for 0.7.0.
 
 ## Consumer impact
 
-Fireside keeps building — `MacroExpander` and the compression pipeline both stay in 0.6.0. The macro engine deletion is explicitly coordinated with Fireside's extraction timeline; Fireside will not be broken by this release.
+The internal consumer keeps building — `MacroExpander` and the compression pipeline both stay in 0.6.0. The macro engine deletion is explicitly coordinated with that consumer's extraction timeline; it will not be broken by this release.
 
 ChatbotUI-iOS keeps building — the `macroContext` property still exists in 0.6.0 alongside the new `systemPromptContext`. The migration is additive, not breaking. Drop-in UI, `ChatViewModel`, `ModelManagementSheet`, `APIConfigurationView`, and the HuggingFace downloader all remain unchanged.
