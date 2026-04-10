@@ -82,7 +82,7 @@ extension ChatViewModel {
     private func invalidatePendingLoadIntent(resetActivityPhase: Bool = false) {
         _ = nextLoadIntentGeneration(cancelInFlightTask: true)
         if resetActivityPhase, isLoading {
-            activityPhase = .idle
+            transitionPhase(to: .idle)
         }
     }
 
@@ -94,7 +94,7 @@ extension ChatViewModel {
     private func beginLoadUIState(generation: UInt64?) -> Bool {
         guard isCurrentLoadIntentGeneration(generation) else { return false }
         errorMessage = nil
-        activityPhase = .modelLoading(progress: inferenceService.modelLoadProgress)
+        transitionPhase(to: .modelLoading(progress: inferenceService.modelLoadProgress))
         return true
     }
 
@@ -126,14 +126,14 @@ extension ChatViewModel {
         guard case .modelLoading(let current) = activityPhase else { return }
         let snapshot = inferenceService.modelLoadProgress
         if current != snapshot {
-            activityPhase = .modelLoading(progress: snapshot)
+            transitionPhase(to: .modelLoading(progress: snapshot))
         }
     }
 
     private func endLoadUIState(generation: UInt64?) {
         guard isCurrentLoadIntentGeneration(generation) else { return }
         if case .modelLoading = activityPhase {
-            activityPhase = .idle
+            transitionPhase(to: .idle)
         }
     }
 

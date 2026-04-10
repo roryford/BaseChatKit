@@ -57,7 +57,7 @@ extension ChatViewModel {
     /// and the Foundation model upgrade hint.
     func generateIntoMessage(_ assistantMessage: ChatMessageRecord) async {
         backgroundTaskError = nil
-        activityPhase = .waitingForFirstToken
+        transitionPhase(to: .waitingForFirstToken)
         let messageID = assistantMessage.id
         defer {
             // Only call generationDidFinish (which drains the queue) if we
@@ -72,10 +72,10 @@ extension ChatViewModel {
                 // Check before drain, since drain may empty the queue while
                 // starting a new generation.
                 if !willDrainNext {
-                    activityPhase = .idle
+                    transitionPhase(to: .idle)
                 }
             } else {
-                activityPhase = .idle
+                transitionPhase(to: .idle)
             }
         }
 
@@ -160,7 +160,7 @@ extension ChatViewModel {
                         case .appendText(let token):
                             tokenCount += 1
                             if tokenCount == 1 {
-                                self.activityPhase = .streaming
+                                self.transitionPhase(to: .streaming)
                             }
                             if let batch = batcher.append(token, now: ContinuousClock.now) {
                                 var looping = false

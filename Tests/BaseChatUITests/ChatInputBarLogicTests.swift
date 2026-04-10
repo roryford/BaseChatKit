@@ -85,7 +85,7 @@ final class ChatInputBarLogicTests: XCTestCase {
     func test_canSend_falseWhileLoading() {
         let (vm, _) = makeViewModelWithMock()
         vm.inputText = "Hello"
-        vm.activityPhase = .modelLoading(progress: nil)
+        vm.transitionPhase(to: .modelLoading(progress: nil))
         XCTAssertTrue(vm.isLoading, "Precondition: isLoading should be true")
         XCTAssertFalse(canSend(vm), "canSend should be false while model is loading")
     }
@@ -93,7 +93,8 @@ final class ChatInputBarLogicTests: XCTestCase {
     func test_canSend_falseWhileGenerating() {
         let (vm, _) = makeViewModelWithMock()
         vm.inputText = "Hello"
-        vm.activityPhase = .streaming
+        vm.transitionPhase(to: .waitingForFirstToken)
+        vm.transitionPhase(to: .streaming)
         XCTAssertTrue(vm.isGenerating, "Precondition: isGenerating should be true")
         XCTAssertFalse(canSend(vm), "canSend should be false while generating")
     }
@@ -123,7 +124,7 @@ final class ChatInputBarLogicTests: XCTestCase {
 
     func test_textFieldDisabled_whileLoading() {
         let (vm, _) = makeViewModelWithMock()
-        vm.activityPhase = .modelLoading(progress: nil)
+        vm.transitionPhase(to: .modelLoading(progress: nil))
         XCTAssertTrue(isTextFieldDisabled(vm), "Text field should be disabled while model is loading")
     }
 
@@ -169,7 +170,8 @@ final class ChatInputBarLogicTests: XCTestCase {
             ChatMessageRecord(role: .user, content: "Hello", sessionID: sessionID),
             ChatMessageRecord(role: .assistant, content: "Hi", sessionID: sessionID)
         ]
-        vm.activityPhase = .streaming
+        vm.transitionPhase(to: .waitingForFirstToken)
+        vm.transitionPhase(to: .streaming)
         XCTAssertFalse(showRegenerateButton(vm), "Regenerate should be hidden while generating")
     }
 
@@ -192,7 +194,8 @@ final class ChatInputBarLogicTests: XCTestCase {
 
     func test_quickActionDisabled_whileGenerating() {
         let (vm, _) = makeViewModelWithMock()
-        vm.activityPhase = .streaming
+        vm.transitionPhase(to: .waitingForFirstToken)
+        vm.transitionPhase(to: .streaming)
         XCTAssertTrue(isQuickActionDisabled(vm), "Quick actions should be disabled while generating")
     }
 
