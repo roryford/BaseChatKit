@@ -36,7 +36,7 @@ jobs:
         with:
           # Pin to a specific version for reproducible builds and to skip the
           # version-discovery API call that `latest-stable` requires.
-          xcode-version: "16.3"
+          xcode-version: "26.3"
 
       - name: Cache SwiftPM build
         uses: actions/cache@v4
@@ -46,9 +46,9 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/debug
-          key: ${{ runner.os }}-${{ runner.arch }}-xcode-16.3-spm-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-spm-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-xcode-16.3-spm-
+            ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-spm-
             ${{ runner.os }}-${{ runner.arch }}-spm-
 
       # CI smoke profile (GitHub macOS Apple Silicon runners):
