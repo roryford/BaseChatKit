@@ -178,7 +178,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     /// Owns a `llama_model *`. Calls `llama_model_free` on deinit unless
     /// ownership was transferred via `steal()`.
-    final class LlamaModelHandle: @unchecked Sendable {
+    private final class LlamaModelHandle: @unchecked Sendable {
         private(set) var pointer: OpaquePointer?
         init(_ pointer: OpaquePointer) { self.pointer = pointer }
         /// Transfers ownership to the caller. Subsequent deinit is a no-op.
@@ -188,7 +188,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     /// Owns a `llama_context *`. Calls `llama_free` on deinit unless
     /// ownership was transferred via `steal()`.
-    final class LlamaContextHandle: @unchecked Sendable {
+    private final class LlamaContextHandle: @unchecked Sendable {
         private(set) var pointer: OpaquePointer?
         let vocabPtr: OpaquePointer?
         init(context: OpaquePointer, vocab: OpaquePointer?) {
