@@ -183,7 +183,6 @@ This matrix maps every major feature area to its current test coverage and ident
 | Rate limiting (429) | - | - | CloudBackendSSETests | - | - |
 | Malformed SSE handling | - | - | CloudBackendSSETests | - | - |
 | Connection drop mid-stream | - | - | CloudBackendSSETests | - | - |
-| Server discovery | - | ServerDiscoveryViewModelTests | - | - | **No E2E** |
 | API endpoint config | APIEndpointTests | - | - | CloudAPIUITests | - |
 | Keychain storage | KeychainServiceTests | - | - | - | - |
 | Certificate pinning | - | PinnedSessionDelegateTests | - | - | - |
@@ -481,7 +480,6 @@ All shared test infrastructure lives in `Sources/BaseChatTestSupport/`:
 | Mock | Purpose |
 |------|---------|
 | `MockHuggingFaceService` | Stubs HF search results, tracks call counts |
-| `MockServerDiscoveryService` | Emits canned server lists, manual emit for incremental testing |
 | `MockPersistenceProvider` | In-memory session/message storage with configurable errors |
 | `MockURLProtocol` | HTTP interception with immediate, SSE (chunked), and error modes |
 
@@ -595,7 +593,6 @@ These are features or flows that lack adequate test coverage. They represent the
 |------|-------------|-------------------|
 | **Full chat turn** | Send → stream → persist → reload | Wire real ViewModel + MockBackend + in-memory SwiftData. Verify messages survive `switchToSession` round-trip. |
 | **Compression under pressure** | Fill context → auto-compress → continue generating | Use `CharTokenizer` with a tiny context window (100 tokens). Send enough messages to trigger compression. Verify generation continues with compressed context. |
-| **Server discovery → generate** | Discover server → configure endpoint → stream tokens | Use `MockServerDiscoveryService` + `MockURLProtocol`. Verify the full path from discovery to token streaming. |
 | **Download → validate → load → generate** | Download model → validate files → load backend → generate tokens | End-to-end with real filesystem (temp dir). Currently download validation and generation are tested separately. |
 | **Loop detect → auto-stop** | Generate repetitive tokens → detector fires → generation stops | Use `MockInferenceBackend` with repeating tokens. Verify `RepetitionDetector` triggers and partial content is preserved. |
 | **Memory pressure → unload** | Memory warning fires → model unloaded → user informed | Requires simulating memory pressure dispatch source. |

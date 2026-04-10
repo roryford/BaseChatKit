@@ -64,7 +64,6 @@ For a sidebar-based layout with multiple sessions, combine ``ChatView`` with ``S
 - ``ChatViewModel``
 - ``SessionManagerViewModel``
 - ``ModelManagementViewModel``
-- ``ServerDiscoveryViewModel``
 
 ### Chat Views
 

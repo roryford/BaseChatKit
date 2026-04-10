@@ -11,12 +11,6 @@ import BaseChatCore
 /// Use ``OllamaModelListService`` to discover available models before configuring
 /// this backend.
 ///
-/// ## Bonjour Discovery
-///
-/// `BonjourDiscoveryService` scans for `_ollama._tcp` services on the LAN and
-/// surfaces them as ``DiscoveredServer`` candidates. The consuming app must add
-/// `NSLocalNetworkUsageDescription` to its `Info.plist` for Bonjour to work.
-///
 /// Usage:
 /// ```swift
 /// let backend = OllamaBackend()

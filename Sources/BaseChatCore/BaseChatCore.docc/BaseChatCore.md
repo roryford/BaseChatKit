@@ -58,10 +58,7 @@ Backends are registered as factories so BaseChatCore stays free of any direct ML
 
 - ``APIEndpoint``
 - ``APIProvider``
-- ``DiscoveredServer``
 - ``RemoteBackendConfig``
-- ``ServerDiscoveryService``
-- ``ServerType``
 
 ### Chat Sessions & Persistence
 

@@ -2,6 +2,29 @@ import Foundation
 import os
 import BaseChatCore
 
+/// A model available on a remote inference server.
+public struct RemoteModelInfo: Sendable, Identifiable, Hashable {
+    public let id: String
+    public let name: String
+    public let sizeBytes: Int64?
+    public let quantization: String?
+    public let familyTag: String?
+
+    public init(
+        id: String? = nil,
+        name: String,
+        sizeBytes: Int64? = nil,
+        quantization: String? = nil,
+        familyTag: String? = nil
+    ) {
+        self.id = id ?? name
+        self.name = name
+        self.sizeBytes = sizeBytes
+        self.quantization = quantization
+        self.familyTag = familyTag
+    }
+}
+
 /// Fetches the list of locally available models from an Ollama server.
 ///
 /// Calls `GET /api/tags` and returns an array of ``RemoteModelInfo`` values
