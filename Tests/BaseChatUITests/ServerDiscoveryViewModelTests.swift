@@ -144,27 +144,6 @@ final class ServerDiscoveryViewModelTests: XCTestCase {
         XCTAssertTrue(endpoint.name.contains("llama3.2"))
     }
 
-    func test_createEndpoint_koboldCppProvider() throws {
-        let container = try makeInMemoryContainer()
-        let context = container.mainContext
-        let server = DiscoveredServer(
-            displayName: "KoboldCpp",
-            host: "localhost",
-            port: 5001,
-            serverType: .koboldCpp,
-            models: [RemoteModelInfo(name: "mistral-7b")]
-        )
-
-        let endpoint = sut.createEndpoint(
-            server: server,
-            model: server.models[0],
-            modelContext: context
-        )
-
-        XCTAssertEqual(endpoint.provider, APIProvider.koboldCpp)
-        XCTAssertEqual(endpoint.baseURL, "http://localhost:5001")
-    }
-
     // MARK: - Helpers
 
     private func makeOllamaServer(host: String = "localhost") -> DiscoveredServer {

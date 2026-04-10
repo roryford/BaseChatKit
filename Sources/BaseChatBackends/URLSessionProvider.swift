@@ -11,7 +11,7 @@ public enum URLSessionProvider {
 
     /// Session with ``PinnedSessionDelegate`` for production API hosts.
     ///
-    /// Shared by OpenAI, Claude, and KoboldCpp backends. Certificate pinning
+    /// Shared by OpenAI and Claude backends. Certificate pinning
     /// is enforced for `api.openai.com` and `api.anthropic.com`; custom hosts
     /// fall through to default trust evaluation.
     public static let pinned: URLSession = {

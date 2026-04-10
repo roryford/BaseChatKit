@@ -2,7 +2,7 @@ import Foundation
 
 /// Configuration for a remote inference backend.
 ///
-/// Passed to ``OpenAIBackend``, ``OllamaBackend``, or ``KoboldCppBackend``
+/// Passed to ``OpenAIBackend`` or ``OllamaBackend``
 /// when connecting to a self-hosted or third-party server.
 ///
 /// The API key is optional — local servers such as Ollama and LM Studio

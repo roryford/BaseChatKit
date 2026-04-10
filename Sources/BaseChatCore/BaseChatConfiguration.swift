@@ -153,7 +153,7 @@ extension BaseChatConfiguration {
         /// Shows the "Discover Local Servers" button in model management.
         ///
         /// When enabled, the UI displays a button that scans the local network
-        /// for running inference servers (Ollama, KoboldCpp, LM Studio, etc.).
+        /// for running inference servers (Ollama, LM Studio, etc.).
         /// Disable for deployments that don't use local servers.
         public var showServerDiscovery: Bool
 

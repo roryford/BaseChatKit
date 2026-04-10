@@ -40,13 +40,6 @@ final class APIConfigurationLogicTests: XCTestCase {
         XCTAssertFalse(provider.requiresAPIKey, "LM Studio should not require an API key")
     }
 
-    func test_provider_koboldCpp_defaults() {
-        let provider = APIProvider.koboldCpp
-        XCTAssertEqual(provider.defaultBaseURL, "http://localhost:5001")
-        XCTAssertEqual(provider.defaultModelName, "koboldcpp")
-        XCTAssertFalse(provider.requiresAPIKey, "KoboldCpp should not require an API key")
-    }
-
     func test_provider_custom_defaults() {
         let provider = APIProvider.custom
         XCTAssertEqual(provider.defaultBaseURL, "https://")
@@ -58,12 +51,11 @@ final class APIConfigurationLogicTests: XCTestCase {
 
     func test_provider_allCases_containsAllProviders() {
         let cases = APIProvider.allCases
-        XCTAssertEqual(cases.count, 6, "Should have 6 providers")
+        XCTAssertEqual(cases.count, 5, "Should have 5 providers")
         XCTAssertTrue(cases.contains(.openAI))
         XCTAssertTrue(cases.contains(.claude))
         XCTAssertTrue(cases.contains(.ollama))
         XCTAssertTrue(cases.contains(.lmStudio))
-        XCTAssertTrue(cases.contains(.koboldCpp))
         XCTAssertTrue(cases.contains(.custom))
     }
 
@@ -78,7 +70,6 @@ final class APIConfigurationLogicTests: XCTestCase {
         XCTAssertEqual(APIProvider.claude.rawValue, "Claude")
         XCTAssertEqual(APIProvider.ollama.rawValue, "Ollama")
         XCTAssertEqual(APIProvider.lmStudio.rawValue, "LM Studio")
-        XCTAssertEqual(APIProvider.koboldCpp.rawValue, "KoboldCpp")
         XCTAssertEqual(APIProvider.custom.rawValue, "Custom")
     }
 
@@ -160,8 +151,8 @@ final class APIConfigurationLogicTests: XCTestCase {
 
         XCTAssertEqual(Set(requireKey), [.openAI, .claude, .custom],
                        "Only OpenAI, Claude, and Custom should require API keys")
-        XCTAssertEqual(Set(noKey), [.ollama, .lmStudio, .koboldCpp],
-                       "Ollama, LM Studio, and KoboldCpp should not require API keys")
+        XCTAssertEqual(Set(noKey), [.ollama, .lmStudio],
+                       "Ollama and LM Studio should not require API keys")
     }
 
     // MARK: - Provider codable round-trip
