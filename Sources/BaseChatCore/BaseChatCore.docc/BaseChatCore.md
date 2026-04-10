@@ -93,16 +93,6 @@ Backends are registered as factories so BaseChatCore stays free of any direct ML
 - ``PromptTemplateDetector``
 - ``MacroExpander``
 
-### Tool Calling
-
-- ``ToolProvider``
-- ``ToolCallingBackend``
-- ``ToolDefinition``
-- ``ToolCall``
-- ``ToolResult``
-- ``ToolInputSchema``
-- ``ToolCallingError``
-
 ### Post-Generation Tasks
 
 - ``PostGenerationTask``

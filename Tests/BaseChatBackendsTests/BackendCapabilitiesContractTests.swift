@@ -42,20 +42,6 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                       "OpenAIBackend supports structured output via json_schema")
     }
 
-    // MARK: - ToolCallingBackend Conformance
-
-    func test_claudeBackend_conformsToToolCallingBackend() {
-        let backend = ClaudeBackend()
-        XCTAssertTrue(backend is ToolCallingBackend,
-                      "ClaudeBackend must conform to ToolCallingBackend")
-    }
-
-    func test_openAIBackend_conformsToToolCallingBackend() {
-        let backend = OpenAIBackend()
-        XCTAssertTrue(backend is ToolCallingBackend,
-                      "OpenAIBackend must conform to ToolCallingBackend")
-    }
-
     // MARK: - Local backends
 
 #if Llama

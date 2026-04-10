@@ -19,26 +19,7 @@ import BaseChatCore
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
 /// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
-public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBackendURLModelConfigurable, CloudBackendKeychainConfigurable, ToolCallingBackend, @unchecked Sendable {
-
-    // MARK: - Tool Calling State
-
-    private var _toolDefinitions: [ToolDefinition] = []
-    private var _toolProvider: (any ToolProvider)?
-    private var _toolCallObserver: (any ToolCallObserver)?
-
-    public var toolCallObserver: (any ToolCallObserver)? {
-        get { withStateLock { _toolCallObserver } }
-        set { withStateLock { _toolCallObserver = newValue } }
-    }
-
-    public func setTools(_ tools: [ToolDefinition]) {
-        withStateLock { _toolDefinitions = tools }
-    }
-
-    public func setToolProvider(_ provider: (any ToolProvider)?) {
-        withStateLock { _toolProvider = provider }
-    }
+public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBackendURLModelConfigurable, CloudBackendKeychainConfigurable, @unchecked Sendable {
 
     // MARK: - Init
 
@@ -109,7 +90,7 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             messages.append(["role": "user", "content": prompt])
         }
 
-        var body: [String: Any] = [
+        let body: [String: Any] = [
             "model": modelName,
             "messages": messages,
             "stream": true,
@@ -118,34 +99,6 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             "top_p": config.topP,
             "max_tokens": config.maxOutputTokens ?? Int(config.maxTokens)
         ]
-
-        // Include tool definitions when available
-        let toolDefs = withStateLock { _toolDefinitions }
-        if !toolDefs.isEmpty {
-            body["tools"] = toolDefs.map { tool -> [String: Any] in
-                [
-                    "type": "function",
-                    "function": [
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": [
-                            "type": tool.inputSchema.type,
-                            "properties": Dictionary(uniqueKeysWithValues: tool.inputSchema.properties.map { key, prop in
-                                var propDict: [String: Any] = [
-                                    "type": prop.type,
-                                    "description": prop.description
-                                ]
-                                if let enumValues = prop.enumValues {
-                                    propDict["enum"] = enumValues
-                                }
-                                return (key, propDict)
-                            }),
-                            "required": tool.inputSchema.required
-                        ] as [String: Any]
-                    ] as [String: Any]
-                ]
-            }
-        }
 
         var request = URLRequest(url: completionsURL)
         request.httpMethod = "POST"
@@ -227,30 +180,4 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         return (prompt, completion)
     }
 
-    /// Extracts tool call information from an OpenAI streaming delta.
-    ///
-    /// OpenAI streams tool calls via `delta.tool_calls` in the choices array:
-    /// ```json
-    /// {"choices":[{"delta":{"tool_calls":[{"id":"call_123","function":{"name":"get_weather","arguments":"{...}"}}]}}]}
-    /// ```
-    static func parseToolCalls(from json: String) -> [ToolCall]? {
-        guard let data = json.data(using: .utf8),
-              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = parsed["choices"] as? [[String: Any]],
-              let firstChoice = choices.first,
-              let delta = firstChoice["delta"] as? [String: Any],
-              let toolCalls = delta["tool_calls"] as? [[String: Any]] else {
-            return nil
-        }
-
-        return toolCalls.compactMap { call -> ToolCall? in
-            guard let id = call["id"] as? String,
-                  let function = call["function"] as? [String: Any],
-                  let name = function["name"] as? String else {
-                return nil
-            }
-            let arguments = function["arguments"] as? String ?? "{}"
-            return ToolCall(id: id, name: name, arguments: arguments)
-        }
-    }
 }

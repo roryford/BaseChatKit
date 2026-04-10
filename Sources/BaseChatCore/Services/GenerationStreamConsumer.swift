@@ -21,9 +21,6 @@ public struct GenerationStreamConsumer: Sendable {
 
         case .usage(let prompt, let completion):
             return .recordUsage(prompt: prompt, completion: completion)
-
-        case .toolCall:
-            return .noOp
         }
     }
 

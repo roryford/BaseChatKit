@@ -27,14 +27,6 @@ final class GenerationStreamConsumerTests: XCTestCase {
         XCTAssertEqual(action, .recordUsage(prompt: 10, completion: 5))
     }
 
-    // MARK: - Tool Call Events
-
-    func test_toolCallEvent_returnsNoOp() {
-        var consumer = GenerationStreamConsumer()
-        let action = consumer.handle(.toolCall(name: "search", arguments: "{}"))
-        XCTAssertEqual(action, .noOp)
-    }
-
     // MARK: - Loop Detection
 
     func test_shouldStopForLoop_returnsFalse_whenDisabled() {

@@ -120,24 +120,6 @@ When `onFirstLaunch` is `nil`, BaseChatKit auto-selects the Foundation model if 
 chatVM.foundationModelProvider = { FoundationBackend.isAvailable }
 ```
 
-### Adding tool calling
-
-Set a ``ToolProvider`` on ``ChatViewModel`` before the first generation to make tools available to capable backends:
-
-```swift
-struct WeatherTool: ToolProvider {
-    var tools: [ToolDefinition] { [weatherDefinition] }
-
-    func execute(call: ToolCall) async throws -> ToolResult {
-        // …
-    }
-}
-
-chatVM.toolProvider = WeatherTool()
-```
-
-Backends that don't adopt ``ToolCallingBackend`` silently ignore the provider.
-
 ### Adding post-generation tasks
 
 Register background tasks that run after each response completes:
