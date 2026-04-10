@@ -34,26 +34,22 @@ jobs:
         id: setup-xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          # Pin to a specific version for reproducible builds and to skip the
+          # version-discovery API call that `latest-stable` requires.
+          xcode-version: "16.3"
 
-      - name: Cache SwiftPM dependencies
+      - name: Cache SwiftPM build
         uses: actions/cache@v4
         with:
           path: |
             .build/artifacts
             .build/checkouts
             .build/repositories
+            .build/debug
           key: ${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.setup-xcode.outputs.xcode-version }}-spm-${{ hashFiles('Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.setup-xcode.outputs.xcode-version }}-spm-
             ${{ runner.os }}-${{ runner.arch }}-spm-
-
-      - name: Run CI smoke tests
-        run: |
-          set -euo pipefail
-          swift test --filter BaseChatCoreTests --disable-default-traits
-          swift test --filter BaseChatUITests --disable-default-traits
-          swift test --filter BaseChatBackendsTests --disable-default-traits
 
       # CI smoke profile (GitHub macOS Apple Silicon runners):
       # - Runs BaseChatCoreTests + BaseChatUITests + BaseChatBackendsTests.
@@ -64,3 +60,15 @@ jobs:
       # - Run `swift test --filter BaseChatBackendsTests --traits MLX,Llama` on
       #   Apple Silicon for MLX/llama.cpp paths.
       # - Run `swift test --filter BaseChatE2ETests` on physical hardware.
+
+      - name: Build
+        run: swift build --build-tests --disable-default-traits
+
+      - name: Test — Core
+        run: swift test --filter BaseChatCoreTests --disable-default-traits
+
+      - name: Test — UI
+        run: swift test --filter BaseChatUITests --disable-default-traits
+
+      - name: Test — Backends
+        run: swift test --filter BaseChatBackendsTests --disable-default-traits
