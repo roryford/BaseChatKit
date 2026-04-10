@@ -15,12 +15,18 @@ public final class SessionManagerViewModel {
 
     private var persistence: ChatPersistenceProvider?
 
+    /// Optional diagnostics sink for non-fatal operational failures
+    /// (e.g., auto-rename inference errors). Inject via `configure` so
+    /// existing call sites that do not care about diagnostics keep working.
+    public private(set) var diagnostics: DiagnosticsService?
+
     public init() {}
 
     /// Injects the persistence provider. Call once from the view layer.
-    public func configure(persistence: ChatPersistenceProvider) {
+    public func configure(persistence: ChatPersistenceProvider, diagnostics: DiagnosticsService? = nil) {
         guard self.persistence == nil else { return }
         self.persistence = persistence
+        self.diagnostics = diagnostics
         loadSessions()
         Log.persistence.info("SessionManagerViewModel configured")
     }
@@ -69,43 +75,43 @@ public final class SessionManagerViewModel {
     // MARK: - AI Auto-Rename
 
     /// Generates a concise session title by running a short inference request.
+    ///
+    /// Returns `nil` when the model produced an empty response. Throws the
+    /// underlying inference error on failure so callers can surface it to
+    /// `DiagnosticsService` instead of silently dropping it.
     @MainActor
     public func generateTitle(
         from firstMessage: String,
         using inferenceService: InferenceService
-    ) async -> String? {
+    ) async throws -> String? {
         let systemPrompt = "Generate a concise 3-5 word title for a conversation that starts with the following message. Reply with ONLY the title, no punctuation, no quotes."
         let messages: [(role: String, content: String)] = [
             (role: "user", content: firstMessage)
         ]
 
-        do {
-            let stream = try inferenceService.generate(
-                messages: messages,
-                systemPrompt: systemPrompt,
-                temperature: 0.3,
-                topP: 0.9,
-                repeatPenalty: 1.0
-            )
-            var result = ""
-            for try await event in stream.events {
-                if case .token(let text) = event {
-                    result += text
-                }
+        let stream = try inferenceService.generate(
+            messages: messages,
+            systemPrompt: systemPrompt,
+            temperature: 0.3,
+            topP: 0.9,
+            repeatPenalty: 1.0
+        )
+        var result = ""
+        for try await event in stream.events {
+            if case .token(let text) = event {
+                result += text
             }
-            let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            return trimmed.count > 50 ? String(trimmed.prefix(50)) : trimmed
-        } catch {
-            Log.ui.debug("Title generation failed (ignored): \(error)")
-            return nil
         }
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.count > 50 ? String(trimmed.prefix(50)) : trimmed
     }
 
     /// Generates an AI title for the session and saves it.
     ///
-    /// Only renames sessions that are still named "New Chat". Failures are
-    /// silently ignored -- the session keeps its existing title.
+    /// Only renames sessions that are still named "New Chat". Failures
+    /// fall back to the existing title but are recorded on
+    /// `DiagnosticsService` so they can be surfaced to the user.
     @MainActor
     public func autoRenameSession(
         _ session: ChatSessionRecord,
@@ -113,14 +119,24 @@ public final class SessionManagerViewModel {
         inferenceService: InferenceService
     ) async {
         guard session.title == "New Chat" else { return }
-        guard let title = await generateTitle(from: firstMessage, using: inferenceService) else { return }
+        let title: String?
+        do {
+            title = try await generateTitle(from: firstMessage, using: inferenceService)
+        } catch {
+            Log.ui.warning("Title generation failed for session \(session.id): \(error.localizedDescription)")
+            diagnostics?.record(.titleGenerationFailed(sessionID: session.id, reason: error.localizedDescription))
+            return
+        }
+        guard let title else { return }
         var updated = session
         updated.title = title
         updated.updatedAt = Date()
         do {
             try persistence?.updateSession(updated)
         } catch {
-            Log.persistence.error("Failed to auto-rename session: \(error)")
+            Log.persistence.warning("Failed to auto-rename session \(session.id): \(error.localizedDescription)")
+            diagnostics?.record(.titleGenerationFailed(sessionID: session.id, reason: error.localizedDescription))
+            return
         }
         loadSessions()
     }

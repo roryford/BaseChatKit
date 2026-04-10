@@ -318,4 +318,62 @@ final class ModelManagementViewModelTests: XCTestCase {
         let importedURL = URL(fileURLWithPath: vm.modelsDirectoryPath).appendingPathComponent(fileName)
         XCTAssertFalse(FileManager.default.fileExists(atPath: importedURL.path))
     }
+
+    // MARK: - Diagnostics surfacing
+
+    func test_importModel_whenCleanupDeletionFails_recordsDiagnosticWarning() throws {
+        struct DeletionFailure: LocalizedError {
+            var errorDescription: String? { "simulated deletion failure" }
+        }
+
+        let diagnostics = DiagnosticsService()
+        let vm = ModelManagementViewModel(
+            diagnostics: diagnostics,
+            fileRemover: { _ in throw DeletionFailure() }
+        )
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelImportWarning-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let fileName = "unsupported-\(UUID().uuidString).txt"
+        let sourceURL = tempDir.appendingPathComponent(fileName)
+        try Data("not a model".utf8).write(to: sourceURL)
+
+        XCTAssertThrowsError(try vm.importModel(from: sourceURL)) { error in
+            XCTAssertEqual(error as? ModelImportError, .unsupportedFormat)
+        }
+
+        // The cleanup failure should now surface as an OperationalWarning
+        // instead of being silently swallowed.
+        XCTAssertEqual(diagnostics.count, 1, "Deletion failure should be recorded on diagnostics")
+        if case .modelFileDeletionFailed(_, let reason) = diagnostics.warnings.first?.error {
+            XCTAssertTrue(reason.contains("simulated deletion failure"))
+        } else {
+            XCTFail("Expected .modelFileDeletionFailed warning, got \(String(describing: diagnostics.warnings.first?.error))")
+        }
+
+        // Clean up the leaked file — the stub fileRemover didn't touch it.
+        let importedURL = URL(fileURLWithPath: vm.modelsDirectoryPath).appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: importedURL)
+    }
+
+    func test_importModel_whenCleanupSucceeds_recordsNoWarning() throws {
+        let diagnostics = DiagnosticsService()
+        let vm = ModelManagementViewModel(diagnostics: diagnostics)
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelImportWarningOK-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let fileName = "unsupported-\(UUID().uuidString).txt"
+        let sourceURL = tempDir.appendingPathComponent(fileName)
+        try Data("not a model".utf8).write(to: sourceURL)
+
+        XCTAssertThrowsError(try vm.importModel(from: sourceURL))
+
+        XCTAssertTrue(diagnostics.isEmpty, "Successful cleanup should not record a warning")
+    }
 }

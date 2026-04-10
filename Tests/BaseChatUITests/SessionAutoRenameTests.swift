@@ -68,6 +68,28 @@ final class SessionAutoRenameTests: XCTestCase {
         XCTAssertEqual(updated?.title, "New Chat")
     }
 
+    func test_autoRename_onError_recordsDiagnosticWarning() async throws {
+        // Reconfigure with a diagnostics sink so we can assert surfacing.
+        let diagnostics = DiagnosticsService()
+        let freshVM = SessionManagerViewModel()
+        freshVM.configure(
+            persistence: SwiftDataPersistenceProvider(modelContext: context),
+            diagnostics: diagnostics
+        )
+
+        let session = try freshVM.createSession()
+        let service = makeThrowingInferenceService()
+
+        await freshVM.autoRenameSession(session, firstMessage: "Tell me about dogs", inferenceService: service)
+
+        XCTAssertEqual(diagnostics.count, 1, "Title generation failure should be recorded on diagnostics")
+        if case .titleGenerationFailed(let id, _) = diagnostics.warnings.first?.error {
+            XCTAssertEqual(id, session.id)
+        } else {
+            XCTFail("Expected .titleGenerationFailed warning, got \(String(describing: diagnostics.warnings.first?.error))")
+        }
+    }
+
     func test_autoRename_truncatesLongTitle() async {
         let session = try! vm.createSession()
 
