@@ -75,31 +75,12 @@ public struct ChatInputBar: View {
 
     @ViewBuilder
     private var sendOrStopButton: some View {
-        if viewModel.isGenerating {
-            Button {
-                viewModel.stopGeneration()
-            } label: {
-                Image(systemName: "stop.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.red)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Stop generation")
-            .help("Stop generation")
-        } else {
-            Button {
-                sendMessage()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(canSend ? Color.accentColor : Color.gray)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .accessibilityLabel("Send message")
-            .help("Send message (Cmd+Return)")
-            .keyboardShortcut(.return, modifiers: .command)
-        }
+        SendStopButton(
+            isGenerating: viewModel.isGenerating,
+            canSend: canSend,
+            onSend: sendMessage,
+            onStop: { viewModel.stopGeneration() }
+        )
     }
 
     // MARK: - Quick Action Pills
@@ -165,6 +146,60 @@ public struct ChatInputBar: View {
         viewModel.inputText = text
         Task {
             await viewModel.sendMessage()
+        }
+    }
+}
+
+// MARK: - Send/Stop Button
+
+/// The primary send-or-stop button rendered at the trailing edge of the chat
+/// input bar. Extracted as a standalone view so its accessibility contract can
+/// be inspected in unit tests without mounting a full `ChatViewModel`.
+struct SendStopButton: View {
+
+    /// Accessibility label used while the assistant is generating a response.
+    static let stopLabel = "Stop generation"
+    /// Accessibility label used when the button will send the composed message.
+    static let sendLabel = "Send message"
+
+    let isGenerating: Bool
+    let canSend: Bool
+    let onSend: () -> Void
+    let onStop: () -> Void
+
+    init(
+        isGenerating: Bool,
+        canSend: Bool,
+        onSend: @escaping () -> Void,
+        onStop: @escaping () -> Void
+    ) {
+        self.isGenerating = isGenerating
+        self.canSend = canSend
+        self.onSend = onSend
+        self.onStop = onStop
+    }
+
+    var body: some View {
+        if isGenerating {
+            Button(action: onStop) {
+                Image(systemName: "stop.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Self.stopLabel)
+            .help(Self.stopLabel)
+        } else {
+            Button(action: onSend) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(canSend ? Color.accentColor : Color.gray)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .accessibilityLabel(Self.sendLabel)
+            .help("\(Self.sendLabel) (Cmd+Return)")
+            .keyboardShortcut(.return, modifiers: .command)
         }
     }
 }

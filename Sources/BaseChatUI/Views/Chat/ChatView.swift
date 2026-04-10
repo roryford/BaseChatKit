@@ -108,29 +108,13 @@ public struct ChatView: View {
     @ViewBuilder
     private var errorBanner: some View {
         if let error = viewModel.activeError {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.yellow)
-
-                Text(error.message)
-                    .font(.callout)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                recoveryButton(for: error.recovery)
-
-                Button {
-                    viewModel.activeError = nil
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+            ErrorBannerView(
+                error: error,
+                onDismiss: { viewModel.activeError = nil },
+                recoveryAction: {
+                    recoveryButton(for: error.recovery)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss error")
-            }
-            .padding(12)
-            .background(.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            .padding(.horizontal)
-            .padding(.top, 8)
+            )
         }
     }
 
@@ -416,6 +400,64 @@ public struct ChatView: View {
         withAnimation(.easeOut(duration: 0.15)) {
             proxy.scrollTo("chatBottom", anchor: .bottom)
         }
+    }
+}
+
+// MARK: - Error Banner View
+
+/// Standalone chat error banner.
+///
+/// Extracted from ``ChatView`` so that its accessibility contract
+/// ("Error: <message>" header label) can be inspected directly in unit tests
+/// without mounting a full `ChatViewModel` environment.
+struct ErrorBannerView<Recovery: View>: View {
+
+    /// Builds the VoiceOver label for an error banner. Kept as a static helper
+    /// so tests can assert on the exact contract.
+    static func accessibilityLabel(for error: ChatError) -> String {
+        "Error: \(error.message)"
+    }
+
+    let error: ChatError
+    let onDismiss: () -> Void
+    let recoveryAction: () -> Recovery
+
+    init(
+        error: ChatError,
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder recoveryAction: @escaping () -> Recovery
+    ) {
+        self.error = error
+        self.onDismiss = onDismiss
+        self.recoveryAction = recoveryAction
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+                .accessibilityHidden(true)
+
+            Text(error.message)
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            recoveryAction()
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss error")
+        }
+        .padding(12)
+        .background(.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Self.accessibilityLabel(for: error))
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

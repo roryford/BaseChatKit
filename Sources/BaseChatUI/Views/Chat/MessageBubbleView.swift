@@ -32,7 +32,7 @@ public struct MessageBubbleView: View {
             bubbleContent
                 .frame(maxWidth: 700, alignment: alignment)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(message.role.rawValue): \(message.content)")
+                .accessibilityLabel(Self.accessibilityLabel(for: message))
 
             if message.role == .assistant { Spacer(minLength: spacerMinLength) }
         }
@@ -162,6 +162,22 @@ public struct MessageBubbleView: View {
     /// On compact (iPhone), bubbles take ~90% width; on regular (iPad/Mac), ~80%.
     private var spacerMinLength: CGFloat {
         sizeClass == .compact ? 20 : 60
+    }
+
+    // MARK: - Accessibility Contract
+
+    /// Builds the VoiceOver label for a chat message bubble.
+    ///
+    /// Format: `"<Role> said: <content>"` (e.g. `"Assistant said: Hello"`).
+    /// Exposed so the accessibility contract can be asserted by tests without
+    /// duplicating the string-building logic.
+    public static func accessibilityLabel(for message: ChatMessageRecord) -> String {
+        let roleName: String = switch message.role {
+        case .user: "User"
+        case .assistant: "Assistant"
+        case .system: "System"
+        }
+        return "\(roleName) said: \(message.content)"
     }
 }
 

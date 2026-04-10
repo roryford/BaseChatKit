@@ -54,7 +54,8 @@ public struct ContextIndicatorView: View {
         }
         .accessibilityElement(children: .ignore)
         .help("Context: \(usedTokens) / \(maxTokens) tokens (\(percentage)%)")
-        .accessibilityLabel("Context usage \(percentage) percent, \(usedTokens) of \(maxTokens) tokens")
+        .accessibilityLabel("Context used: \(usedTokens) of \(maxTokens) tokens")
+        .accessibilityValue("\(percentage) percent")
         .accessibilityHint("Tap for context details")
         .onTapGesture {
             isPopoverPresented = true

@@ -32,6 +32,9 @@ let package = Package(
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.2.0"),
         .package(url: "https://github.com/mattt/llama.swift", from: "2.8672.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
+        // Test-only: SwiftUI view-tree inspection for accessibility contract tests.
+        // Must never appear in any production target.
+        .package(url: "https://github.com/nalexn/ViewInspector", from: "0.10.3"),
     ],
     targets: [
         // Inference: models, protocols, services — no SwiftData, no heavy ML deps
@@ -112,7 +115,13 @@ let package = Package(
         ),
         .testTarget(
             name: "BaseChatUITests",
-            dependencies: ["BaseChatUI", "BaseChatCore", "BaseChatInference", "BaseChatTestSupport"]
+            dependencies: [
+                "BaseChatUI",
+                "BaseChatCore",
+                "BaseChatInference",
+                "BaseChatTestSupport",
+                .product(name: "ViewInspector", package: "ViewInspector"),
+            ]
         ),
         .testTarget(
             name: "BaseChatE2ETests",
