@@ -52,13 +52,13 @@ final class BackendActivityPhaseTests: XCTestCase {
         let vm = ChatViewModel()
         XCTAssertFalse(vm.isLoading)
 
-        vm.activityPhase = .modelLoading(progress: nil)
+        vm.transitionPhase(to: .modelLoading(progress: nil))
         XCTAssertTrue(vm.isLoading)
 
-        vm.activityPhase = .modelLoading(progress: 0.5)
+        vm.transitionPhase(to: .modelLoading(progress: 0.5))
         XCTAssertTrue(vm.isLoading)
 
-        vm.activityPhase = .idle
+        vm.transitionPhase(to: .idle)
         XCTAssertFalse(vm.isLoading)
     }
 
@@ -66,26 +66,27 @@ final class BackendActivityPhaseTests: XCTestCase {
         let vm = ChatViewModel()
         XCTAssertFalse(vm.isGenerating)
 
-        vm.activityPhase = .waitingForFirstToken
+        vm.transitionPhase(to: .waitingForFirstToken)
         XCTAssertTrue(vm.isGenerating)
 
-        vm.activityPhase = .streaming
+        vm.transitionPhase(to: .streaming)
         XCTAssertTrue(vm.isGenerating)
 
-        vm.activityPhase = .idle
+        vm.transitionPhase(to: .idle)
         XCTAssertFalse(vm.isGenerating)
     }
 
     func testIsLoadingFalseWhenGenerating() {
         let vm = ChatViewModel()
-        vm.activityPhase = .streaming
+        vm.transitionPhase(to: .waitingForFirstToken)
+        vm.transitionPhase(to: .streaming)
         XCTAssertFalse(vm.isLoading)
         XCTAssertTrue(vm.isGenerating)
     }
 
     func testIsGeneratingFalseWhenLoading() {
         let vm = ChatViewModel()
-        vm.activityPhase = .modelLoading(progress: 0.3)
+        vm.transitionPhase(to: .modelLoading(progress: 0.3))
         XCTAssertTrue(vm.isLoading)
         XCTAssertFalse(vm.isGenerating)
     }
@@ -97,9 +98,9 @@ final class BackendActivityPhaseTests: XCTestCase {
         var observations: [Bool] = []
         vm.onGeneratingChanged = { observations.append($0) }
 
-        vm.activityPhase = .waitingForFirstToken
-        vm.activityPhase = .streaming
-        vm.activityPhase = .idle
+        vm.transitionPhase(to: .waitingForFirstToken)
+        vm.transitionPhase(to: .streaming)
+        vm.transitionPhase(to: .idle)
 
         // waitingForFirstToken: generating becomes true
         // streaming: generating stays true -- no fire

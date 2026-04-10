@@ -129,7 +129,7 @@ extension ChatViewModel {
         generationTask = nil
         activeGenerationToken = nil
         inferenceService.stopGeneration()
-        activityPhase = .idle
+        transitionPhase(to: .idle)
 
         // Persist whatever has been generated so far.
         if let lastAssistant = messages.last(where: { $0.role == .assistant }),

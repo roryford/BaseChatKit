@@ -107,14 +107,56 @@ public final class ChatViewModel {
     public var systemPrompt: String = ""
 
     /// The current phase of backend activity, driving all status indicators.
+    ///
+    /// The setter is `internal(set)` for SwiftUI observation, but all production
+    /// code paths must mutate this via ``transitionPhase(to:)`` so the
+    /// ``ActivityPhaseStateMachine`` can validate the transition. Test-only
+    /// direct writes bypass validation — see the state machine tests for
+    /// exhaustive legal-transition coverage.
     public internal(set) var activityPhase: BackendActivityPhase = .idle {
         didSet {
+            phaseMachine = ActivityPhaseStateMachine(phase: activityPhase)
             let wasGenerating = oldValue == .waitingForFirstToken || oldValue == .streaming
             let nowGenerating = activityPhase == .waitingForFirstToken || activityPhase == .streaming
             if wasGenerating != nowGenerating {
                 onGeneratingChanged?(nowGenerating)
             }
             onActivityPhaseChanged?(activityPhase)
+        }
+    }
+
+    /// Single source of truth for legal phase transitions. The view model
+    /// never mutates `activityPhase` directly — every production code path
+    /// routes through ``transitionPhase(to:)``.
+    @ObservationIgnored
+    private var phaseMachine = ActivityPhaseStateMachine(phase: .idle)
+
+    /// Attempt to move to `newPhase`. Illegal transitions are logged and
+    /// dropped — callers that know they may lose a race (stale progress
+    /// callbacks, late stall notifications) rely on this to be a no-op.
+    ///
+    /// Returns `true` if the phase actually changed, `false` if the
+    /// transition was rejected or was a same-phase no-op.
+    @discardableResult
+    func transitionPhase(to newPhase: BackendActivityPhase) -> Bool {
+        let result = phaseMachine.transition(to: newPhase)
+        switch result {
+        case .applied:
+            activityPhase = phaseMachine.phase
+            return true
+        case .unchanged:
+            return false
+        case .rejected(let from, let to):
+            // Rejected transitions are a defence against bugs *and* a
+            // defence against stale async events. We log at warning level
+            // so CI surfaces unexpected bugs without crashing tests in
+            // debug — per CLAUDE.md, `assertionFailure` is reserved for
+            // conditions with no recovery path, and every rejection here
+            // has an implicit recovery (ignore the event).
+            Log.ui.warning(
+                "ActivityPhaseStateMachine rejected transition: \(String(describing: from)) → \(String(describing: to))"
+            )
+            return false
         }
     }
 
