@@ -114,6 +114,7 @@ public final class ChatViewModel {
             if wasGenerating != nowGenerating {
                 onGeneratingChanged?(nowGenerating)
             }
+            onActivityPhaseChanged?(activityPhase)
         }
     }
 
@@ -130,6 +131,9 @@ public final class ChatViewModel {
 
     /// Test-only hook invoked whenever `isGenerating` changes.
     var onGeneratingChanged: ((Bool) -> Void)?
+
+    /// Test-only hook invoked whenever `activityPhase` changes.
+    var onActivityPhaseChanged: ((BackendActivityPhase) -> Void)?
 
     /// Structured error with recovery information for the UI.
     public var activeError: ChatError?

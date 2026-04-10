@@ -846,7 +846,7 @@ public final class InferenceService {
     ) {
         guard let reporting = newBackend as? LoadProgressReporting else { return }
         reporting.setLoadProgressHandler { [weak self] progress in
-            Task { @MainActor [weak self] in
+            await MainActor.run { [weak self] in
                 self?.applyLoadProgress(progress, for: request)
             }
         }
@@ -1030,5 +1030,5 @@ public protocol LoadProgressReporting: AnyObject {
     /// Installs (or clears, when `nil`) a progress callback for the next
     /// `loadModel` call. Values must be in `[0.0, 1.0]`. Implementations
     /// should retain the handler only for the duration of the active load.
-    func setLoadProgressHandler(_ handler: (@Sendable (Double) -> Void)?)
+    func setLoadProgressHandler(_ handler: (@Sendable (Double) async -> Void)?)
 }
