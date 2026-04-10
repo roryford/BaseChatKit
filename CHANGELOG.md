@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.3](https://github.com/roryford/BaseChatKit/compare/v0.5.2...v0.5.3) (2026-04-10)
+
+**Model-load progress and MLX cache tuning** — Two improvements to the local inference path.
+
+`InferenceService` now publishes `modelLoadProgress: Double?` so UI code can render real fractional load progress instead of an indeterminate spinner. Backends with granular progress hooks can opt into the new `LoadProgressReporting` protocol to publish fractional updates as weights load; backends without it continue to work unchanged, showing `0.0` for the load duration. `ChatViewModel.activityPhase` automatically mirrors the value through `.modelLoading(progress:)`, so any view that already observes activity phase picks up the new behaviour without changes. llama.cpp and MLX backend adoption will follow in subsequent releases ([#230](https://github.com/roryford/BaseChatKit/pull/230)).
+
+MLX's GPU buffer cache size is now consumer-tunable via `MLXBackend(cachePolicy:)`. The previous hardcoded 20 MB was inherited from the `mlx-swift-examples` LLMEval sample — a minimum-footprint demo value that was too small for sustained inference on Apple Silicon, forcing MLX to constantly evict and reallocate Metal buffers between forward passes. The new `.auto` default scales by physical memory: 64 MB on ~6 GB iOS devices through 1 GB on 36+ GB Macs. Consumer apps that have benchmarked their workloads can pass `.generous`, `.minimal`, or `.explicit(bytes:)` to the initialiser. All existing `MLXBackend()` call sites pick up the new default without any code changes ([#232](https://github.com/roryford/BaseChatKit/pull/232)).
+
 ## [0.5.2](https://github.com/roryford/BaseChatKit/compare/v0.5.1...v0.5.2) (2026-04-09)
 
 **Demo app hardening** — A code review of the demo app uncovered a build failure, broken recovery UX, layout issues on large displays, and an overly strict memory gate that rejected models that would have loaded fine.
