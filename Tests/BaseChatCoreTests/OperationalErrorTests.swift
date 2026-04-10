@@ -10,6 +10,7 @@ final class OperationalErrorTests: XCTestCase {
             .modelFileDeletionFailed(URL(fileURLWithPath: "/tmp/model.gguf"), reason: "EPERM"),
             .benchmarkCacheUnavailable(reason: "store corrupt"),
             .titleGenerationFailed(sessionID: UUID(), reason: "backend offline"),
+            .sessionRenamePersistenceFailed(sessionID: UUID(), reason: "disk full"),
         ]
     }
 
@@ -18,6 +19,26 @@ final class OperationalErrorTests: XCTestCase {
             XCTAssertFalse(
                 error.localizedDescription.isEmpty,
                 "localizedDescription must be non-empty for \(error)"
+            )
+        }
+    }
+
+    /// Swift bridges `Error.localizedDescription` through
+    /// `LocalizedError.errorDescription` only when the value is type-erased
+    /// to `any Error`. Verify the bridge produces the same prose as the
+    /// direct enum access so UI call sites get a meaningful string even
+    /// when they only see `any Error`.
+    func test_errorDescription_bridgesThroughAnyError() {
+        for error in allCases {
+            let erased: any Error = error
+            XCTAssertEqual(
+                erased.localizedDescription,
+                error.errorDescription,
+                "LocalizedError bridge mismatch for \(error)"
+            )
+            XCTAssertFalse(
+                (error.errorDescription ?? "").isEmpty,
+                "errorDescription must be non-empty for \(error)"
             )
         }
     }
@@ -45,6 +66,19 @@ final class OperationalErrorTests: XCTestCase {
     func test_titleGenerationFailed_descriptionIncludesReason() {
         let error = OperationalError.titleGenerationFailed(sessionID: UUID(), reason: "429 Too Many Requests")
         XCTAssertTrue(error.localizedDescription.contains("429 Too Many Requests"))
+    }
+
+    func test_sessionRenamePersistenceFailed_descriptionIncludesReason() {
+        let error = OperationalError.sessionRenamePersistenceFailed(sessionID: UUID(), reason: "disk full")
+        XCTAssertTrue(error.localizedDescription.contains("disk full"))
+        XCTAssertTrue(error.localizedDescription.lowercased().contains("saved"))
+    }
+
+    func test_titleGenerationFailed_andPersistenceFailed_areDistinct() {
+        let id = UUID()
+        let inferenceFailure = OperationalError.titleGenerationFailed(sessionID: id, reason: "offline")
+        let persistenceFailure = OperationalError.sessionRenamePersistenceFailed(sessionID: id, reason: "offline")
+        XCTAssertNotEqual(inferenceFailure, persistenceFailure)
     }
 
     func test_equatable_sameCasesAreEqual() {

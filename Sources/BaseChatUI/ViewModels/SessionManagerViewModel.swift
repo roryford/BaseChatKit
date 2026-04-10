@@ -134,8 +134,11 @@ public final class SessionManagerViewModel {
         do {
             try persistence?.updateSession(updated)
         } catch {
-            Log.persistence.warning("Failed to auto-rename session \(session.id): \(error.localizedDescription)")
-            diagnostics?.record(.titleGenerationFailed(sessionID: session.id, reason: error.localizedDescription))
+            Log.persistence.warning("Failed to persist auto-rename for session \(session.id): \(error.localizedDescription)")
+            // Persistence failure is a distinct category from inference
+            // failure — different remediation (disk/store health vs.
+            // backend availability), so we surface it as its own case.
+            diagnostics?.record(.sessionRenamePersistenceFailed(sessionID: session.id, reason: error.localizedDescription))
             return
         }
         loadSessions()
