@@ -428,6 +428,17 @@ private struct ModelDownloadTab: View {
                 }
             }
 
+            if viewModel.isSearching {
+                Section {
+                    HStack {
+                        Spacer()
+                        ProgressView("Searching...")
+                            .accessibilityLabel("Searching for models")
+                        Spacer()
+                    }
+                }
+            }
+
             if !viewModel.searchResults.isEmpty {
                 let groups = DownloadableModelGroup.group(viewModel.searchResults)
                 Section("Search Results") {
@@ -461,17 +472,6 @@ private struct ModelDownloadTab: View {
                 }
             }
 
-            if viewModel.isSearching {
-                Section {
-                    HStack {
-                        Spacer()
-                        ProgressView("Searching...")
-                            .accessibilityLabel("Searching for models")
-                        Spacer()
-                    }
-                }
-            }
-
             if let error = importErrorMessage ?? viewModel.searchError {
                 Section {
                     Label {
@@ -483,6 +483,12 @@ private struct ModelDownloadTab: View {
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Search error: \(error)")
+
+                    if viewModel.searchError != nil {
+                        Button("Retry") {
+                            Task { await viewModel.search() }
+                        }
+                    }
                 }
             }
         }
@@ -541,6 +547,7 @@ private struct ModelStorageTab: View {
 
     @State private var modelToDelete: ModelInfo?
     @State private var showDeleteConfirmation = false
+    @State private var deleteErrorMessage: String?
 
     var body: some View {
         List {
@@ -563,6 +570,19 @@ private struct ModelStorageTab: View {
             }
         } message: { model in
             Text("Are you sure you want to delete \"\(model.name)\"? This will free \(model.fileSizeFormatted) of storage. This action cannot be undone.")
+        }
+        .alert(
+            "Delete Failed",
+            isPresented: Binding(
+                get: { deleteErrorMessage != nil },
+                set: { if !$0 { deleteErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                deleteErrorMessage = nil
+            }
+        } message: {
+            Text(deleteErrorMessage ?? "")
         }
     }
 
@@ -652,6 +672,7 @@ private struct ModelStorageTab: View {
             chatViewModel.refreshModels()
         } catch {
             Log.download.error("Failed to delete model: \(error)")
+            deleteErrorMessage = error.localizedDescription
         }
         modelToDelete = nil
     }
