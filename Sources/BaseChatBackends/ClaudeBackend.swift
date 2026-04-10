@@ -32,7 +32,7 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             maxContextTokens: 200_000,
             requiresPromptTemplate: false,
             supportsSystemPrompt: true,
-            supportsToolCalling: true,
+            supportsToolCalling: false,
             supportsStructuredOutput: true,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,

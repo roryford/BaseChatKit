@@ -186,9 +186,6 @@ extension ChatViewModel {
                                 msg.promptTokens = prompt
                                 msg.completionTokens = completion
                             }
-
-                        case .noOp:
-                            break
                         }
                     }
                 } catch {

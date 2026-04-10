@@ -54,7 +54,6 @@ final class SilentCatchAuditTest: XCTestCase {
 
         // BaseChatBackends
         "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
-        "BaseChatBackends/ClaudeBackend.swift:let argsData = (try? JSONSerialization.data(withJSONObject: input)) ?? Data()",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/OpenAIBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",

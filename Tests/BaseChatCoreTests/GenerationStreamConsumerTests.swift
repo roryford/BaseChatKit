@@ -8,7 +8,7 @@ final class GenerationStreamConsumerTests: XCTestCase {
     func test_tokenEvent_returnsAppendText() {
         var consumer = GenerationStreamConsumer()
         let action = consumer.handle(.token("Hello"))
-        // Sabotage check: returning .noOp instead of .appendText in the .token case causes this to fail
+        // Sabotage check: returning .appendText("") instead of .appendText(text) in the .token case causes this to fail
         XCTAssertEqual(action, .appendText("Hello"))
     }
 
@@ -23,7 +23,7 @@ final class GenerationStreamConsumerTests: XCTestCase {
     func test_usageEvent_returnsRecordUsage() {
         var consumer = GenerationStreamConsumer()
         let action = consumer.handle(.usage(prompt: 10, completion: 5))
-        // Sabotage check: returning .noOp instead of .recordUsage in the .usage case causes this to fail
+        // Sabotage check: swapping prompt/completion in the .usage case causes this to fail
         XCTAssertEqual(action, .recordUsage(prompt: 10, completion: 5))
     }
 

@@ -44,7 +44,7 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             maxContextTokens: 128_000,
             requiresPromptTemplate: false,
             supportsSystemPrompt: true,
-            supportsToolCalling: true,
+            supportsToolCalling: false,
             supportsStructuredOutput: true,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
