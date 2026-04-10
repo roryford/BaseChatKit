@@ -53,7 +53,11 @@ let package = Package(
                 .product(name: "Tokenizers", package: "swift-transformers", condition: .when(traits: ["MLX"])),
                 .product(name: "LlamaSwift", package: "llama.swift", condition: .when(traits: ["Llama"])),
             ],
-            path: "Sources/BaseChatBackends"
+            path: "Sources/BaseChatBackends",
+            swiftSettings: [
+                .define("MLX", .when(traits: ["MLX"])),
+                .define("Llama", .when(traits: ["Llama"])),
+            ]
         ),
         // UI: SwiftUI views and view models
         .target(
@@ -68,7 +72,11 @@ let package = Package(
                 "BaseChatCore",
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
             ],
-            path: "Sources/BaseChatTestSupport"
+            path: "Sources/BaseChatTestSupport",
+            swiftSettings: [
+                .define("MLX", .when(traits: ["MLX"])),
+                .define("Llama", .when(traits: ["Llama"])),
+            ]
         ),
         .testTarget(
             name: "BaseChatCoreTests",
@@ -82,6 +90,10 @@ let package = Package(
                 "BaseChatCore",
                 "BaseChatTestSupport",
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
+            ],
+            swiftSettings: [
+                .define("MLX", .when(traits: ["MLX"])),
+                .define("Llama", .when(traits: ["Llama"])),
             ]
         ),
         .testTarget(
@@ -111,6 +123,10 @@ let package = Package(
                 "BaseChatBackends",
                 "BaseChatCore",
                 "BaseChatTestSupport",
+            ],
+            swiftSettings: [
+                .define("MLX", .when(traits: ["MLX"])),
+                .define("Llama", .when(traits: ["Llama"])),
             ]
         ),
     ],
