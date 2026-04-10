@@ -132,6 +132,40 @@ final class ViewSnapshotTests: XCTestCase {
         )
     }
 
+    // MARK: - CompressionIndicatorView (2 previews)
+
+    func test_compressionIndicator_extractive() {
+        assertDumpSnapshot(
+            CompressionIndicatorView(
+                stats: CompressionStats(
+                    strategy: "extractive",
+                    originalNodeCount: 12,
+                    outputMessageCount: 5,
+                    estimatedTokens: 800,
+                    compressionRatio: 2.4,
+                    keywordSurvivalRate: nil
+                )
+            ),
+            named: "extractive"
+        )
+    }
+
+    func test_compressionIndicator_anchoredHeavy() {
+        assertDumpSnapshot(
+            CompressionIndicatorView(
+                stats: CompressionStats(
+                    strategy: "anchored",
+                    originalNodeCount: 48,
+                    outputMessageCount: 8,
+                    estimatedTokens: 1200,
+                    compressionRatio: 6.0,
+                    keywordSurvivalRate: nil
+                )
+            ),
+            named: "anchored_heavy"
+        )
+    }
+
     // MARK: - MemoryIndicatorView (4 previews)
 
     func test_memoryIndicator_nominal() {
