@@ -1,4 +1,4 @@
-import XCTest
+@preconcurrency import XCTest
 @testable import BaseChatCore
 
 /// Integration tests for BackgroundDownloadManager using real filesystem and real UserDefaults.
