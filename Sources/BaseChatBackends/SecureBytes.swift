@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Stores a secret string in a heap-allocated mutable buffer that is zeroed
@@ -25,7 +26,7 @@ final class SecureBytes: @unchecked Sendable {
 
     /// Returns the stored bytes decoded as a UTF-8 string.
     var stringValue: String {
-        String(bytes: buffer, encoding: .utf8) ?? ""
+        String(decoding: buffer, as: UTF8.self)
     }
 
     deinit {

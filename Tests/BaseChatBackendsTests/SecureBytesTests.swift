@@ -28,23 +28,27 @@ struct SecureBytesTests {
 @Suite("SSECloudBackend ephemeralAPIKey")
 struct EphemeralAPIKeyTests {
 
+    private func makeBackend() -> SSECloudBackend {
+        SSECloudBackend(defaultModelName: "test-model", urlSession: .shared)
+    }
+
     @Test("stores and retrieves a key")
     func storeAndRetrieve() {
-        let backend = ClaudeBackend()
+        let backend = makeBackend()
         backend.ephemeralAPIKey = "sk-abc"
         #expect(backend.ephemeralAPIKey == "sk-abc")
     }
 
     @Test("setting an empty string treats key as absent")
     func emptyStringBecomesNil() {
-        let backend = ClaudeBackend()
+        let backend = makeBackend()
         backend.ephemeralAPIKey = ""
         #expect(backend.ephemeralAPIKey == nil)
     }
 
     @Test("key is nil after unloadModel")
     func clearedAfterUnload() async {
-        let backend = ClaudeBackend()
+        let backend = makeBackend()
         let url = URL(string: "https://api.test")!
         backend.configure(baseURL: url, apiKey: "sk-abc", modelName: "test-model")
         #expect(backend.ephemeralAPIKey == "sk-abc")
@@ -54,7 +58,7 @@ struct EphemeralAPIKeyTests {
 
     @Test("resolveAPIKey returns ephemeral key when no keychain account set")
     func resolveReturnsEphemeral() {
-        let backend = ClaudeBackend()
+        let backend = makeBackend()
         let url = URL(string: "https://api.test")!
         backend.configure(baseURL: url, apiKey: "sk-resolve-test", modelName: "test-model")
         #expect(backend.resolveAPIKey() == "sk-resolve-test")
@@ -62,7 +66,7 @@ struct EphemeralAPIKeyTests {
 
     @Test("replacing a key with nil releases the old value")
     func replaceWithNil() {
-        let backend = ClaudeBackend()
+        let backend = makeBackend()
         backend.ephemeralAPIKey = "sk-old"
         backend.ephemeralAPIKey = nil
         #expect(backend.ephemeralAPIKey == nil)
