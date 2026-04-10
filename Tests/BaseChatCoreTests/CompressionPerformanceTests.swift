@@ -11,6 +11,17 @@ final class CompressionPerformanceTests: XCTestCase {
 
     // MARK: - Helpers
 
+    private func measureAsync(block: @escaping @Sendable () async -> Void) {
+        measure {
+            let done = DispatchSemaphore(value: 0)
+            Task.detached {
+                await block()
+                done.signal()
+            }
+            done.wait()
+        }
+    }
+
     private func makeMessages(count: Int) -> [CompressibleMessage] {
         (0..<count).map { i in
             let role = i % 2 == 0 ? "user" : "assistant"
@@ -24,18 +35,13 @@ final class CompressionPerformanceTests: XCTestCase {
         let messages = makeMessages(count: 100)
         let compressor = self.compressor
         let tokenizer = self.tokenizer
-        measure {
-            let semaphore = DispatchSemaphore(value: 0)
-            Task.detached {
-                _ = await compressor.compress(
-                    messages: messages,
-                    systemPrompt: Self.systemPrompt,
-                    contextSize: 2048,
-                    tokenizer: tokenizer
-                )
-                semaphore.signal()
-            }
-            XCTAssertEqual(semaphore.wait(timeout: .now() + 10), .success)
+        measureAsync {
+            _ = await compressor.compress(
+                messages: messages,
+                systemPrompt: Self.systemPrompt,
+                contextSize: 2048,
+                tokenizer: tokenizer
+            )
         }
     }
 
@@ -45,18 +51,13 @@ final class CompressionPerformanceTests: XCTestCase {
         let messages = makeMessages(count: 500)
         let compressor = self.compressor
         let tokenizer = self.tokenizer
-        measure {
-            let semaphore = DispatchSemaphore(value: 0)
-            Task.detached {
-                _ = await compressor.compress(
-                    messages: messages,
-                    systemPrompt: Self.systemPrompt,
-                    contextSize: 2048,
-                    tokenizer: tokenizer
-                )
-                semaphore.signal()
-            }
-            XCTAssertEqual(semaphore.wait(timeout: .now() + 10), .success)
+        measureAsync {
+            _ = await compressor.compress(
+                messages: messages,
+                systemPrompt: Self.systemPrompt,
+                contextSize: 2048,
+                tokenizer: tokenizer
+            )
         }
     }
 }

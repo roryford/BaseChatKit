@@ -42,10 +42,10 @@ final class InferenceServiceProgressTests: XCTestCase {
         let task = Task { try await service.loadModel(from: makeModelInfo()) }
         await backend.waitUntilLoadStarted()
 
-        backend.fireProgress(0.25)
+        await backend.fireProgress(0.25)
         try await waitForProgress(0.25, on: service)
 
-        backend.fireProgress(0.75)
+        await backend.fireProgress(0.75)
         try await waitForProgress(0.75, on: service)
 
         await backend.releaseLoadSuccess()
@@ -59,7 +59,7 @@ final class InferenceServiceProgressTests: XCTestCase {
 
         let task = Task { try await service.loadModel(from: makeModelInfo()) }
         await backend.waitUntilLoadStarted()
-        backend.fireProgress(0.5)
+        await backend.fireProgress(0.5)
         try await waitForProgress(0.5, on: service)
 
         await backend.releaseLoadSuccess()
@@ -77,7 +77,7 @@ final class InferenceServiceProgressTests: XCTestCase {
 
         let task = Task { try await service.loadModel(from: makeModelInfo()) }
         await backend.waitUntilLoadStarted()
-        backend.fireProgress(0.4)
+        await backend.fireProgress(0.4)
         try await waitForProgress(0.4, on: service)
 
         await backend.releaseLoadFailure(ProgressTestError.plannedFailure)
@@ -113,7 +113,7 @@ final class InferenceServiceProgressTests: XCTestCase {
             try await service.loadModel(from: makeModelInfo(name: "First", modelType: .gguf))
         }
         await firstBackend.waitUntilLoadStarted()
-        firstBackend.fireProgress(0.3)
+        await firstBackend.fireProgress(0.3)
         try await waitForProgress(0.3, on: service)
 
         // Start a second load that supersedes the first.
@@ -127,15 +127,17 @@ final class InferenceServiceProgressTests: XCTestCase {
                        "Newer load should reset modelLoadProgress to 0.0")
 
         // First backend keeps firing — these MUST NOT touch modelLoadProgress.
-        firstBackend.fireProgress(0.9)
-        firstBackend.fireProgress(0.95)
-        // Give the late hops a chance to run.
-        try await Task.sleep(for: .milliseconds(20))
+        await firstBackend.fireProgress(0.9)
+        await firstBackend.fireProgress(0.95)
+        // Give the late hops a chance to drain the cooperative queue.
+        await Task.yield()
+        await Task.yield()
+        await Task.yield()
         XCTAssertEqual(service.modelLoadProgress, 0.0,
                        "Stale progress from a superseded load must be ignored")
 
         // Newer load completes normally.
-        secondBackend.fireProgress(0.6)
+        await secondBackend.fireProgress(0.6)
         try await waitForProgress(0.6, on: service)
         await secondBackend.releaseLoadSuccess()
         try await secondTask.value
@@ -158,13 +160,13 @@ final class InferenceServiceProgressTests: XCTestCase {
         let task = Task { try await service.loadModel(from: makeModelInfo()) }
         await backend.waitUntilLoadStarted()
 
-        backend.fireProgress(-0.5)
+        await backend.fireProgress(-0.5)
         try await waitForProgress(0.0, on: service)
 
-        backend.fireProgress(2.0)
+        await backend.fireProgress(2.0)
         try await waitForProgress(1.0, on: service)
 
-        backend.fireProgress(0.5)
+        await backend.fireProgress(0.5)
         try await waitForProgress(0.5, on: service)
 
         await backend.releaseLoadSuccess()
@@ -218,7 +220,7 @@ final class InferenceServiceProgressTests: XCTestCase {
         await backend.waitUntilLoadStarted()
 
         XCTAssertEqual(service.modelLoadProgress, 0.0)
-        backend.fireProgress(0.5)
+        await backend.fireProgress(0.5)
         try await waitForProgress(0.5, on: service)
 
         await backend.releaseLoadSuccess()
@@ -240,19 +242,17 @@ final class InferenceServiceProgressTests: XCTestCase {
     }
 
     /// Polls `service.modelLoadProgress` until it equals `expected` or times out.
-    /// Required because progress handlers hop to the main actor via an unstructured
-    /// `Task { @MainActor in }`, which we can't directly await.
     private func waitForProgress(
         _ expected: Double?,
         on service: InferenceService,
         timeout: TimeInterval = 1.0
     ) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        let deadline = ContinuousClock.now + .seconds(timeout)
+        while ContinuousClock.now < deadline {
             if service.modelLoadProgress == expected {
                 return
             }
-            try await Task.sleep(for: .milliseconds(5))
+            await Task.yield()
         }
         XCTFail("Timed out waiting for modelLoadProgress to become \(String(describing: expected)) — current: \(String(describing: service.modelLoadProgress))")
     }
@@ -317,7 +317,7 @@ private final class ProgressReportingBackend: InferenceBackend,
     )
 
     private let lock = NSLock()
-    private var handler: (@Sendable (Double) -> Void)?
+    private var handler: (@Sendable (Double) async -> Void)?
     private var _handlerInstallCount = 0
     private var _hasNilHandler = true
 
@@ -333,7 +333,7 @@ private final class ProgressReportingBackend: InferenceBackend,
 
     private let gate = ProgressGate()
 
-    func setLoadProgressHandler(_ handler: (@Sendable (Double) -> Void)?) {
+    func setLoadProgressHandler(_ handler: (@Sendable (Double) async -> Void)?) {
         lock.lock()
         self.handler = handler
         _hasNilHandler = (handler == nil)
@@ -343,11 +343,9 @@ private final class ProgressReportingBackend: InferenceBackend,
         lock.unlock()
     }
 
-    func fireProgress(_ value: Double) {
-        lock.lock()
-        let h = handler
-        lock.unlock()
-        h?(value)
+    func fireProgress(_ value: Double) async {
+        let h = lock.withLock { handler }
+        await h?(value)
     }
 
     func waitUntilLoadStarted() async { await gate.waitUntilStarted() }
@@ -389,7 +387,7 @@ private final class ProgressReportingCloudBackend: InferenceBackend,
     )
 
     private let lock = NSLock()
-    private var handler: (@Sendable (Double) -> Void)?
+    private var handler: (@Sendable (Double) async -> Void)?
     private var _hasNilHandler = true
 
     var hasNilHandler: Bool {
@@ -401,18 +399,16 @@ private final class ProgressReportingCloudBackend: InferenceBackend,
 
     func configure(baseURL: URL, modelName: String) {}
 
-    func setLoadProgressHandler(_ handler: (@Sendable (Double) -> Void)?) {
+    func setLoadProgressHandler(_ handler: (@Sendable (Double) async -> Void)?) {
         lock.lock()
         self.handler = handler
         _hasNilHandler = (handler == nil)
         lock.unlock()
     }
 
-    func fireProgress(_ value: Double) {
-        lock.lock()
-        let h = handler
-        lock.unlock()
-        h?(value)
+    func fireProgress(_ value: Double) async {
+        let h = lock.withLock { handler }
+        await h?(value)
     }
 
     func waitUntilLoadStarted() async { await gate.waitUntilStarted() }

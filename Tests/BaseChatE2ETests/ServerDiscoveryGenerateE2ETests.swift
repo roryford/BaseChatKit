@@ -78,6 +78,7 @@ struct ServerDiscoveryGenerateE2ETests {
                 Issue.record("Timed out waiting for \(expected) discovered servers (got \(discoveryVM.discoveredServers.count))")
                 return
             }
+            await Task.yield()
             try await Task.sleep(for: .milliseconds(10))
         }
     }

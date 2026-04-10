@@ -20,7 +20,6 @@ final class ChatViewModelLoadProgressBridgeTests: XCTestCase {
         )
     }
 
-    /// Polls until `vm.activityPhase` matches `expected`, or fails after timeout.
     private func waitForPhase(
         _ expected: BackendActivityPhase,
         on vm: ChatViewModel,
@@ -28,16 +27,19 @@ final class ChatViewModelLoadProgressBridgeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if vm.activityPhase == expected { return }
-            try? await Task.sleep(for: .milliseconds(2))
+        if vm.activityPhase == expected { return }
+        let expectation = XCTestExpectation(description: "activityPhase == \(expected)")
+        let previous = vm.onActivityPhaseChanged
+        vm.onActivityPhaseChanged = { phase in
+            previous?(phase)
+            if phase == expected { expectation.fulfill() }
         }
-        XCTFail(
-            "Timed out waiting for activityPhase \(expected) — current: \(vm.activityPhase)",
-            file: file,
-            line: line
-        )
+        let result = await XCTWaiter().fulfillment(of: [expectation], timeout: timeout)
+        vm.onActivityPhaseChanged = previous
+        if result != .completed {
+            XCTFail("Timed out waiting for activityPhase \(expected) — current: \(vm.activityPhase)",
+                    file: file, line: line)
+        }
     }
 
     // MARK: - Reporting backend
@@ -57,10 +59,10 @@ final class ChatViewModelLoadProgressBridgeTests: XCTestCase {
         // Bridge should publish 0.0 first (the seed value from beginLoadRequest).
         await waitForPhase(.modelLoading(progress: 0.0), on: vm)
 
-        backend.fireProgress(0.4)
+        await backend.fireProgress(0.4)
         await waitForPhase(.modelLoading(progress: 0.4), on: vm)
 
-        backend.fireProgress(0.85)
+        await backend.fireProgress(0.85)
         await waitForPhase(.modelLoading(progress: 0.85), on: vm)
 
         await backend.releaseLoadSuccess()
@@ -119,7 +121,7 @@ final class ChatViewModelLoadProgressBridgeTests: XCTestCase {
         let loadTask = Task { await vm.loadSelectedModel() }
         await backend.waitUntilLoadStarted()
 
-        backend.fireProgress(0.5)
+        await backend.fireProgress(0.5)
         await waitForPhase(.modelLoading(progress: 0.5), on: vm)
 
         await backend.releaseLoadFailure(BridgeTestError.plannedFailure)
@@ -189,21 +191,19 @@ private final class ProgressBridgeBackend: InferenceBackend,
     )
 
     private let lock = NSLock()
-    private var handler: (@Sendable (Double) -> Void)?
+    private var handler: (@Sendable (Double) async -> Void)?
 
     private let gate = BridgeGate()
 
-    func setLoadProgressHandler(_ handler: (@Sendable (Double) -> Void)?) {
+    func setLoadProgressHandler(_ handler: (@Sendable (Double) async -> Void)?) {
         lock.lock()
         self.handler = handler
         lock.unlock()
     }
 
-    func fireProgress(_ value: Double) {
-        lock.lock()
-        let h = handler
-        lock.unlock()
-        h?(value)
+    func fireProgress(_ value: Double) async {
+        let h = lock.withLock { handler }
+        await h?(value)
     }
 
     func waitUntilLoadStarted() async { await gate.waitUntilStarted() }
