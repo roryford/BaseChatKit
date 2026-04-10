@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.4](https://github.com/roryford/BaseChatKit/compare/v0.5.3...v0.5.4) (2026-04-10)
+
+**Security and stability hardening** — Three fixes targeting resource leaks, memory safety, and conditional compilation correctness.
+
+**Ephemeral API key zeroing** — `SSECloudBackend` previously stored in-memory API keys as plain Swift `String` values, which make no guarantee about zeroing backing memory on deallocation. Keys could linger in freed heap pages and be recoverable from a memory dump on a compromised device. Keys are now stored in a `SecureBytes` wrapper that uses `memset_s` (compiler-elision-safe) to zero its buffer whenever the key is replaced, `unloadModel()` is called, or the backend is deallocated. Keychain-backed storage remains the recommended path for production; the property documentation now makes the residual risk of transient `String` copies in HTTP headers explicit ([#236](https://github.com/roryford/BaseChatKit/pull/236)).
+
+**llama.cpp RAII handle wrapping** — `LlamaBackend` held raw C pointers (`llama_model *`, `llama_context *`) as unmanaged stored properties. If the model-load path threw after the model was allocated but before the context was created, the model pointer leaked with no cleanup path. Both pointers are now wrapped in private RAII handle types that call the appropriate `llama_free_*` function on `deinit`, making cleanup unconditional regardless of how the load path exits ([#235](https://github.com/roryford/BaseChatKit/pull/235)).
+
+**MLX and Llama trait propagation** — The `MLX` and `Llama` Swift package traits were not being forwarded as compilation conditions to dependent targets, causing `#if MLX` and `#if Llama` guards inside `BaseChatBackends` to evaluate incorrectly. Conditional compilation blocks that should have been excluded from CI builds were being compiled, and blocks that should have been included in hardware builds were being skipped. The trait definitions in `Package.swift` now correctly propagate to all targets that depend on the backend ([#233](https://github.com/roryford/BaseChatKit/pull/233)).
+
 ## [0.5.3](https://github.com/roryford/BaseChatKit/compare/v0.5.2...v0.5.3) (2026-04-10)
 
 **Model-load progress and MLX cache tuning** — Two improvements to the local inference path.
