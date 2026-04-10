@@ -1,4 +1,4 @@
-import XCTest
+@preconcurrency import XCTest
 import BaseChatCore
 import BaseChatTestSupport
 
