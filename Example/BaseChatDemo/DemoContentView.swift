@@ -63,8 +63,13 @@ struct DemoContentView: View {
             }
 
             // Wire AI auto-rename: fires after the first user message in a session.
+            // We defer the rename call until generation finishes so the rename
+            // inference request does not compete with the active streaming reply.
             viewModel.onFirstMessage = { [inferenceService] session, text in
-                Task {
+                Task { @MainActor in
+                    while viewModel.isGenerating {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
                     await sessionManager.autoRenameSession(
                         session,
                         firstMessage: text,
