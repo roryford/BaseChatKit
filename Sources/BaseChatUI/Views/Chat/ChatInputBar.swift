@@ -17,6 +17,13 @@ public struct ChatInputBar: View {
 
     // MARK: - Body
 
+    private var inputPlaceholder: String {
+        if viewModel.isLoading { return "Loading model…" }
+        if viewModel.activeSession == nil { return "No session selected" }
+        if !viewModel.isModelLoaded { return "No model loaded" }
+        return "Message…"
+    }
+
     public var body: some View {
         @Bindable var viewModel = viewModel
 
@@ -26,7 +33,7 @@ public struct ChatInputBar: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Message...", text: $viewModel.inputText, axis: .vertical)
+                TextField(inputPlaceholder, text: $viewModel.inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...8)
                     .focused($isInputFocused)
@@ -102,6 +109,15 @@ public struct ChatInputBar: View {
             HStack(spacing: 8) {
                 quickActionPill("Continue") {
                     sendQuickAction("Continue")
+                }
+                quickActionPill("Summarize") {
+                    sendQuickAction("Summarize")
+                }
+                quickActionPill("Explain more") {
+                    sendQuickAction("Explain more")
+                }
+                quickActionPill("Give an example") {
+                    sendQuickAction("Give an example")
                 }
             }
             .padding(.horizontal, 4)
