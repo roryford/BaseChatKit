@@ -342,7 +342,7 @@ public final class InferenceService {
                 modelName: endpoint.modelName
             )
 
-        case .ollama, .lmStudio, .koboldCpp:
+        case .ollama, .lmStudio:
             guard let urlModelConfigurable = newBackend as? CloudBackendURLModelConfigurable else {
                 throw InferenceError.inferenceFailure(
                     "Cloud backend \(type(of: newBackend)) must conform to CloudBackendURLModelConfigurable "

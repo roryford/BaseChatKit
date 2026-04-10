@@ -157,70 +157,6 @@ final class NetworkDiscoveryServiceTests: XCTestCase {
         XCTAssertEqual(server?.models.first?.quantization, "q4")
     }
 
-    // MARK: - KoboldCpp Parsing
-
-    func test_koboldCpp_validResponse_parsesSingleModel() async {
-        let json = """
-        {"result": "Llama-3-8B-Q4_K_M.gguf"}
-        """
-        stubURL("http://\(testHost!):5001/api/v1/model", json: json)
-
-        let server = await service.probe(host: testHost, port: 5001)
-
-        XCTAssertNotNil(server)
-        XCTAssertEqual(server?.serverType, .koboldCpp)
-        XCTAssertEqual(server?.displayName, "KoboldCpp")
-        // Sabotage check: KoboldCpp always returns exactly one model
-        XCTAssertEqual(server?.models.count, 1)
-        XCTAssertEqual(server?.models.first?.name, "Llama-3-8B-Q4_K_M.gguf")
-    }
-
-    func test_koboldCpp_emptyResult_returnsServerWithNoModels() async {
-        let json = """
-        {"result": ""}
-        """
-        stubURL("http://\(testHost!):5001/api/v1/model", json: json)
-
-        let server = await service.probe(host: testHost, port: 5001)
-
-        XCTAssertNotNil(server)
-        // Sabotage check: removing the !modelName.isEmpty guard would return 1 model
-        XCTAssertEqual(server?.models.count, 0)
-    }
-
-    func test_koboldCpp_nullResult_returnsServerWithNoModels() async {
-        let json = """
-        {"result": null}
-        """
-        stubURL("http://\(testHost!):5001/api/v1/model", json: json)
-
-        let server = await service.probe(host: testHost, port: 5001)
-
-        XCTAssertNotNil(server)
-        XCTAssertEqual(server?.models.count, 0)
-    }
-
-    func test_koboldCpp_missingResultKey_returnsServerWithNoModels() async {
-        let json = """
-        {"model": "something"}
-        """
-        stubURL("http://\(testHost!):5001/api/v1/model", json: json)
-
-        let server = await service.probe(host: testHost, port: 5001)
-
-        XCTAssertNotNil(server)
-        XCTAssertEqual(server?.models.count, 0)
-    }
-
-    func test_koboldCpp_malformedJSON_returnsServerWithNoModels() async {
-        stubURL("http://\(testHost!):5001/api/v1/model", json: "{broken")
-
-        let server = await service.probe(host: testHost, port: 5001)
-
-        XCTAssertNotNil(server)
-        XCTAssertEqual(server?.models.count, 0)
-    }
-
     // MARK: - LM Studio Parsing (uses OpenAI-compatible format)
 
     func test_lmStudio_validResponse_parsesMultipleModels() async {
@@ -396,11 +332,6 @@ final class NetworkDiscoveryServiceTests: XCTestCase {
         stubURL("http://\(testHost!):11434/api/tags", json: "{\"models\": []}")
         let ollama = await service.probe(host: testHost, port: 11434)
         XCTAssertEqual(ollama?.serverType, .ollama)
-
-        // KoboldCpp on 5001
-        stubURL("http://\(testHost!):5001/api/v1/model", json: "{\"result\": \"test\"}")
-        let kobold = await service.probe(host: testHost, port: 5001)
-        XCTAssertEqual(kobold?.serverType, .koboldCpp)
 
         // LM Studio on 1234
         stubURL("http://\(testHost!):1234/v1/models", json: "{\"data\": []}")

@@ -5,8 +5,8 @@ import BaseChatCore
 /// Base class for cloud inference backends that stream responses via Server-Sent Events.
 ///
 /// Centralises the stream lifecycle, task management, exponential backoff retry,
-/// SSE parsing, and thread-safe state management that OpenAI, Claude, and KoboldCpp
-/// backends all share. Subclasses provide API-specific request building, token
+/// SSE parsing, and thread-safe state management that OpenAI and Claude
+/// backends share. Subclasses provide API-specific request building, token
 /// extraction, and capability declarations.
 ///
 /// Thread safety uses `NSLock` (via ``withStateLock(_:)``) rather than

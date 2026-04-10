@@ -3,7 +3,7 @@ import Foundation
 /// Discovers running inference servers on the local network.
 ///
 /// Implementations scan known ports and probe health endpoints to find
-/// Ollama, KoboldCpp, LM Studio, and other OpenAI-compatible servers.
+/// Ollama, LM Studio, and other OpenAI-compatible servers.
 /// The protocol lives in BaseChatCore so that BaseChatUI can consume
 /// discovered servers without importing BaseChatBackends.
 ///

@@ -52,7 +52,6 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatCore/Services/MacroExpander.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {",
         "BaseChatCore/Services/ModelStorageService.swift:guard let contents = try? fileManager.contentsOfDirectory(",
         "BaseChatCore/Services/NetworkDiscoveryService.swift:guard let response = try? JSONDecoder().decode(OllamaResponse.self, from: data),",
-        "BaseChatCore/Services/NetworkDiscoveryService.swift:guard let response = try? JSONDecoder().decode(KoboldResponse.self, from: data),",
         "BaseChatCore/Services/NetworkDiscoveryService.swift:guard let response = try? JSONDecoder().decode(OpenAIResponse.self, from: data),",
 
         // BaseChatBackends
@@ -60,8 +59,6 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatBackends/BonjourDiscoveryService.swift:guard let r = try? JSONDecoder().decode(Resp.self, from: data),",
         "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/ClaudeBackend.swift:let argsData = (try? JSONSerialization.data(withJSONObject: input)) ?? Data()",
-        "BaseChatBackends/KoboldCppBackend.swift:let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
-        "BaseChatBackends/KoboldCppBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/OpenAIBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
@@ -78,6 +75,10 @@ final class SilentCatchAuditTest: XCTestCase {
         // BaseChatTestSupport — test-only helpers, not production paths.
         "BaseChatTestSupport/TestHelpers.swift:try? FileManager.default.removeItem(at: url)",
         "BaseChatTestSupport/SlowMockBackend.swift:try? await Task.sleep(for: delay)",
+        "BaseChatTestSupport/PerceivedLatencyBackend.swift:try? await Task.sleep(for: ttft)",
+        "BaseChatTestSupport/PerceivedLatencyBackend.swift:try? await Task.sleep(for: delay)",
+        "BaseChatTestSupport/ChaosBackend.swift:try? await Task.sleep(for: delay)",
+        "BaseChatTestSupport/ChaosBackend.swift:try? await Task.sleep(for: stallDuration)",
         "BaseChatTestSupport/HardwareRequirements.swift:let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatTestSupport/HardwareRequirements.swift:if let containers = try? fm.contentsOfDirectory(",
         "BaseChatTestSupport/HardwareRequirements.swift:guard let contents = try? fm.contentsOfDirectory(",

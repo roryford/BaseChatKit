@@ -16,11 +16,6 @@ final class MemoryStrategyBackendTests: XCTestCase {
         XCTAssertEqual(backend.capabilities.memoryStrategy, .external)
     }
 
-    func test_koboldCppBackend_declaresExternalStrategy() {
-        let backend = KoboldCppBackend()
-        XCTAssertEqual(backend.capabilities.memoryStrategy, .external)
-    }
-
     // MARK: - Local Backends (hardware gated)
 
     #if MLX

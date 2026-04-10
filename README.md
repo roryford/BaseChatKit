@@ -4,6 +4,16 @@ A modular SwiftUI framework for building chat interfaces powered by local and cl
 
 BaseChatKit provides a complete, production-ready chat UI with pluggable inference backends, model management, and SwiftData persistence. Drop it into your app, register backends, and you have a working chat interface.
 
+**Built for production failure modes.** BCK is designed around the things that go wrong between a working demo and an App Store release:
+
+- **Streaming resilience** — retry with backoff and a per-host circuit breaker so transient network loss, provider 429s, and cold TLS handshakes don't kill generations mid-token.
+- **Latest-wins model handoff** — racing model loads can't corrupt active state. If the user taps model A, then model B before A finishes, A is discarded and B wins deterministically.
+- **Memory pressure auto-unload** — loaded models are released before iOS reclaims them, so the next generation doesn't crash on a stale pointer.
+- **Mock backend for app-level testing** — `MockInferenceBackend` implements the full streaming contract so your app's tests can exercise BCK without loading a real model.
+- **Certificate pinning with fail-closed defaults** — `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing or empty, so a compromised CA can't silently reroute chat traffic.
+
+See [docs/SCOPE_DECISION.md](docs/SCOPE_DECISION.md) for the scoping rationale behind BCK 0.6.0.
+
 ## Demo
 
 
@@ -26,6 +36,12 @@ BaseChatKit provides a complete, production-ready chat UI with pluggable inferen
 - Swift 5.9+
 - iOS 17+ / macOS 14+
 - Apple Foundation Models require iOS 26+ / macOS 26+
+
+## How BCK compares to AnyLanguageModel
+
+AnyLanguageModel is HuggingFace's Swift package. It mirrors Apple's `FoundationModels` API and exposes many providers behind a single protocol, so code written against Apple's built-in model API can target cloud and open-source models with minimal changes.
+
+BCK and AnyLanguageModel occupy adjacent niches. AnyLanguageModel optimizes for provider coverage and API familiarity — if you need "any LLM behind one protocol that looks like `FoundationModels`," it's the simpler choice. BCK optimizes for production reliability and drop-in chat UI — if you need "a chat framework that survives real failures and ships a working `ChatView` + `SessionListView` + `ModelManagementSheet` on day one," BCK is designed for that. The two aren't competing on the same axis; pick the one whose axis matches the problem you're solving.
 
 ## Architecture
 

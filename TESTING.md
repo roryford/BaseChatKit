@@ -179,7 +179,6 @@ This matrix maps every major feature area to its current test coverage and ident
 |---------|------|-------------|-----|----------|------|
 | OpenAI SSE streaming | - | - | CloudBackendSSETests | - | - |
 | Claude SSE streaming | - | - | CloudBackendSSETests | - | - |
-| KoboldCpp SSE | - | - | KoboldCppSSETests | - | - |
 | Auth errors (401) | - | - | CloudBackendSSETests | - | - |
 | Rate limiting (429) | - | - | CloudBackendSSETests | - | - |
 | Malformed SSE handling | - | - | CloudBackendSSETests | - | - |
@@ -306,7 +305,7 @@ MockURLProtocol.stub(url: endpoint, response: .sse(chunks: chunks, statusCode: 2
 
 **When to use:** Testing SSE parsing, auth errors, rate limiting, connection drops — all without a real server.
 
-**Used in:** `CloudBackendSSETests`, `KoboldCppSSETests`
+**Used in:** `CloudBackendSSETests`
 
 ### Pattern 6: Concurrent Task Spawning
 

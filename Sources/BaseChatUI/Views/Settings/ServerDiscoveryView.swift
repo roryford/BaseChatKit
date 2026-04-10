@@ -156,7 +156,6 @@ public struct ServerDiscoveryView: View {
     private func serverIcon(for type: ServerType) -> String {
         switch type {
         case .ollama: return "server.rack"
-        case .koboldCpp: return "desktopcomputer"
         case .lmStudio: return "display"
         case .openAICompatible: return "cloud"
         }

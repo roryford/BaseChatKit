@@ -4,7 +4,6 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     case claude = "Claude"
     case ollama = "Ollama"
     case lmStudio = "LM Studio"
-    case koboldCpp = "KoboldCpp"
     case custom = "Custom"
 
     public var id: String { rawValue }
@@ -16,7 +15,6 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         case .claude: return "https://api.anthropic.com"
         case .ollama: return "http://localhost:11434"
         case .lmStudio: return "http://localhost:1234"
-        case .koboldCpp: return "http://localhost:5001"
         case .custom: return "https://"
         }
     }
@@ -25,7 +23,7 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     public var requiresAPIKey: Bool {
         switch self {
         case .openAI, .claude, .custom: return true
-        case .ollama, .lmStudio, .koboldCpp: return false
+        case .ollama, .lmStudio: return false
         }
     }
 
@@ -36,7 +34,6 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         case .claude: return "claude-sonnet-4-6"
         case .ollama: return "llama3.2"
         case .lmStudio: return "local-model"
-        case .koboldCpp: return "koboldcpp"
         case .custom: return "model"
         }
     }

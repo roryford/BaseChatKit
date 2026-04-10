@@ -73,7 +73,7 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
     /// How the backend loads model weights into memory.
     public let memoryStrategy: MemoryStrategy
 
-    /// `true` for any backend that makes network calls (cloud APIs, Ollama, KoboldCpp, etc.).
+    /// `true` for any backend that makes network calls (cloud APIs, Ollama, etc.).
     /// All remote backends must also reflect this in their `memoryStrategy`.
     public let isRemote: Bool
 
