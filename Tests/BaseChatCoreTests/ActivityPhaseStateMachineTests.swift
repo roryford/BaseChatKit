@@ -70,6 +70,10 @@ final class ActivityPhaseStateMachineTests: XCTestCase {
         assertLegal(.waitingForFirstToken, .idle)
     }
 
+    func test_waitingForFirstToken_to_modelLoading_legal() {
+        assertLegal(.waitingForFirstToken, .modelLoading(progress: nil))
+    }
+
     func test_waitingForFirstToken_to_stalled_legal() {
         assertLegal(.waitingForFirstToken, .stalled)
     }
@@ -80,6 +84,10 @@ final class ActivityPhaseStateMachineTests: XCTestCase {
 
     func test_streaming_to_idle_legal() {
         assertLegal(.streaming, .idle)
+    }
+
+    func test_streaming_to_modelLoading_legal() {
+        assertLegal(.streaming, .modelLoading(progress: nil))
     }
 
     func test_streaming_to_stalled_legal() {
@@ -94,8 +102,16 @@ final class ActivityPhaseStateMachineTests: XCTestCase {
         assertLegal(.stalled, .streaming)
     }
 
+    func test_stalled_to_waitingForFirstToken_legal() {
+        assertLegal(.stalled, .waitingForFirstToken)
+    }
+
     func test_stalled_to_idle_legal() {
         assertLegal(.stalled, .idle)
+    }
+
+    func test_stalled_to_modelLoading_legal() {
+        assertLegal(.stalled, .modelLoading(progress: nil))
     }
 
     func test_stalled_to_retrying_legal() {
@@ -110,8 +126,16 @@ final class ActivityPhaseStateMachineTests: XCTestCase {
         assertLegal(.retrying(attempt: 2, of: 3), .waitingForFirstToken)
     }
 
+    func test_retrying_to_stalled_legal() {
+        assertLegal(.retrying(attempt: 2, of: 3), .stalled)
+    }
+
     func test_retrying_to_idle_legal() {
         assertLegal(.retrying(attempt: 3, of: 3), .idle)
+    }
+
+    func test_retrying_to_modelLoading_legal() {
+        assertLegal(.retrying(attempt: 2, of: 3), .modelLoading(progress: nil))
     }
 
     func test_retrying_attemptBump_legal() {
@@ -193,6 +217,106 @@ final class ActivityPhaseStateMachineTests: XCTestCase {
     func test_samePhaseSameValue_isUnchanged() {
         var machine = ActivityPhaseStateMachine(phase: .streaming)
         XCTAssertEqual(machine.transition(to: .streaming), .unchanged)
+    }
+
+    func test_idle_to_idle_unchanged() {
+        var machine = ActivityPhaseStateMachine(phase: .idle)
+        XCTAssertEqual(machine.transition(to: .idle), .unchanged)
+    }
+
+    func test_waitingForFirstToken_to_waitingForFirstToken_unchanged() {
+        var machine = ActivityPhaseStateMachine(phase: .waitingForFirstToken)
+        XCTAssertEqual(machine.transition(to: .waitingForFirstToken), .unchanged)
+    }
+
+    func test_stalled_to_stalled_unchanged() {
+        var machine = ActivityPhaseStateMachine(phase: .stalled)
+        XCTAssertEqual(machine.transition(to: .stalled), .unchanged)
+    }
+
+    // MARK: - Exhaustive matrix
+    //
+    // Mechanical backstop for the header invariant: every (from, to) pair
+    // must match the table below. If a transition is added or removed
+    // without updating this table the test fails loudly, which forces the
+    // author to also update the named per-pair tests above.
+
+    func test_exhaustiveTransitionMatrix() {
+        // Legal cross-pairs. Same-case pairs are handled separately by the
+        // `unchanged` tests and are not listed here.
+        let legalCrossPairs: Set<Pair> = [
+            Pair(.idle, .modelLoading),
+            Pair(.idle, .waitingForFirstToken),
+            Pair(.modelLoading, .idle),
+            Pair(.modelLoading, .waitingForFirstToken),
+            Pair(.waitingForFirstToken, .idle),
+            Pair(.waitingForFirstToken, .modelLoading),
+            Pair(.waitingForFirstToken, .streaming),
+            Pair(.waitingForFirstToken, .stalled),
+            Pair(.waitingForFirstToken, .retrying),
+            Pair(.streaming, .idle),
+            Pair(.streaming, .modelLoading),
+            Pair(.streaming, .stalled),
+            Pair(.streaming, .retrying),
+            Pair(.stalled, .idle),
+            Pair(.stalled, .modelLoading),
+            Pair(.stalled, .waitingForFirstToken),
+            Pair(.stalled, .streaming),
+            Pair(.stalled, .retrying),
+            Pair(.retrying, .idle),
+            Pair(.retrying, .modelLoading),
+            Pair(.retrying, .waitingForFirstToken),
+            Pair(.retrying, .streaming),
+            Pair(.retrying, .stalled),
+        ]
+
+        for fromKind in PhaseKind.allCases {
+            for toKind in PhaseKind.allCases {
+                let from = fromKind.representative
+                let to = toKind.representative
+                let expectedLegal: Bool
+                if fromKind == toKind {
+                    // Same-case pairs are always "legal" in the sense that
+                    // `transition(to:)` accepts them (as .applied or
+                    // .unchanged). They're exercised by the named
+                    // `_unchanged` tests.
+                    expectedLegal = true
+                } else {
+                    expectedLegal = legalCrossPairs.contains(Pair(fromKind, toKind))
+                }
+                let actualLegal = ActivityPhaseStateMachine.isLegalTransition(
+                    from: from, to: to
+                )
+                XCTAssertEqual(
+                    actualLegal,
+                    expectedLegal,
+                    "\(fromKind) → \(toKind): expected legal=\(expectedLegal), got \(actualLegal)"
+                )
+            }
+        }
+    }
+
+    private enum PhaseKind: CaseIterable, Hashable {
+        case idle, modelLoading, waitingForFirstToken, streaming, stalled, retrying
+        var representative: BackendActivityPhase {
+            switch self {
+            case .idle: return .idle
+            case .modelLoading: return .modelLoading(progress: 0.5)
+            case .waitingForFirstToken: return .waitingForFirstToken
+            case .streaming: return .streaming
+            case .stalled: return .stalled
+            case .retrying: return .retrying(attempt: 1, of: 3)
+            }
+        }
+    }
+
+    private struct Pair: Hashable {
+        let from: PhaseKind
+        let to: PhaseKind
+        init(_ from: PhaseKind, _ to: PhaseKind) {
+            self.from = from
+            self.to = to
+        }
     }
 
     // MARK: - Race regression scenarios

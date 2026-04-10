@@ -10,29 +10,20 @@ import Foundation
 ///
 /// `ActivityPhaseStateMachine` is the single source of truth for the
 /// legal transition graph. Every phase mutation in the view model now
-/// goes through ``transition(to:)``, and every illegal attempt is either
-/// rejected (for races) or surfaced as a programmer error.
+/// goes through ``transition(to:)``, which reports the outcome via
+/// ``TransitionResult`` so callers can branch on it.
 ///
 /// ## Illegal-transition policy
 ///
 /// Per `CLAUDE.md`, `assertionFailure` is reserved for true programmer
-/// errors with no recovery path. The phase state machine has two flavours
-/// of illegal transition:
-///
-/// 1. **Programmer errors** — e.g. calling `.streaming` before requesting
-///    generation. These cannot legitimately arise from async races and
-///    indicate a bug in the caller. Detected only when ``strictMode`` is
-///    true (default). Still recoverable (we log and ignore), but noisy
-///    in debug so the bug surfaces early.
-///
-/// 2. **Stale async events** — e.g. a late load-progress callback arriving
-///    after a cancellation flipped the phase to `.idle`, or a stalled
-///    backend notification arriving after the user cancelled. These are
-///    race conditions by design and must be silently ignored.
-///
-/// The machine does not itself distinguish (1) from (2); callers pass
-/// ``TransitionOptions/ignoreIfIllegal`` when they know the event can
-/// legitimately lose a race.
+/// errors with no recovery path. Illegal transitions here are always
+/// recoverable — they arise from async races (e.g. a late load-progress
+/// callback arriving after cancellation flipped the phase to `.idle`, or
+/// a stalled-backend notification landing after the user cancelled). The
+/// machine therefore rejects every illegal transition the same way:
+/// `phase` is left untouched and the caller receives
+/// ``TransitionResult/rejected(from:to:)``. Callers log and move on; the
+/// machine never traps.
 public struct ActivityPhaseStateMachine: Sendable {
 
     /// The machine's current phase. Callers mutate this via ``transition(to:)``.
