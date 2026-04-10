@@ -15,12 +15,7 @@ public struct APIConfigurationView: View {
     @Query(sort: \APIEndpoint.createdAt, order: .reverse)
     private var endpoints: [APIEndpoint]
 
-    @Environment(ServerDiscoveryViewModel.self) private var discoveryViewModel: ServerDiscoveryViewModel?
-
-    private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
-
     @State private var showAddSheet = false
-    @State private var showDiscoverySheet = false
     @State private var endpointToEdit: APIEndpoint?
     @State private var showDeleteConfirmation = false
     @State private var endpointToDelete: APIEndpoint?
@@ -57,14 +52,6 @@ public struct APIConfigurationView: View {
                     } label: {
                         Label("Add Endpoint", systemImage: "plus.circle")
                     }
-
-                    if features.showServerDiscovery, discoveryViewModel != nil {
-                        Button {
-                            showDiscoverySheet = true
-                        } label: {
-                            Label("Discover Local Servers", systemImage: "network")
-                        }
-                    }
                 }
 
                 Section {
@@ -90,9 +77,6 @@ public struct APIConfigurationView: View {
             }
             .sheet(isPresented: $showAddSheet) {
                 APIEndpointEditorView(endpoint: nil)
-            }
-            .sheet(isPresented: $showDiscoverySheet) {
-                ServerDiscoveryView()
             }
             .sheet(item: $endpointToEdit) { endpoint in
                 APIEndpointEditorView(endpoint: endpoint)

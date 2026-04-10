@@ -3,8 +3,8 @@ import BaseChatCore
 
 /// Sheet for manually configuring a remote inference server connection.
 ///
-/// Presented alongside ``ServerDiscoveryView`` to let users enter a server URL,
-/// optional API key, and backend type when auto-discovery is unavailable.
+/// Lets users enter a server URL, optional API key, and backend type for a
+/// remote inference endpoint.
 ///
 /// ## Usage
 ///

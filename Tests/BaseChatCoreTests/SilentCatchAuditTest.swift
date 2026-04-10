@@ -51,12 +51,8 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatCore/Services/MacroExpander.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {",
         "BaseChatCore/Services/MacroExpander.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {",
         "BaseChatCore/Services/ModelStorageService.swift:guard let contents = try? fileManager.contentsOfDirectory(",
-        "BaseChatCore/Services/NetworkDiscoveryService.swift:guard let response = try? JSONDecoder().decode(OllamaResponse.self, from: data),",
-        "BaseChatCore/Services/NetworkDiscoveryService.swift:guard let response = try? JSONDecoder().decode(OpenAIResponse.self, from: data),",
 
         // BaseChatBackends
-        "BaseChatBackends/BonjourDiscoveryService.swift:try? await Task.sleep(for: .seconds(3))",
-        "BaseChatBackends/BonjourDiscoveryService.swift:guard let r = try? JSONDecoder().decode(Resp.self, from: data),",
         "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/ClaudeBackend.swift:let argsData = (try? JSONSerialization.data(withJSONObject: input)) ?? Data()",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
@@ -67,7 +63,6 @@ final class SilentCatchAuditTest: XCTestCase {
         // BaseChatUI — Task.sleep cancellation is intentionally ignored;
         // parser/rendering fallbacks are benign optional conversions.
         "BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))",
-        "BaseChatUI/ViewModels/ServerDiscoveryViewModel.swift:try? modelContext.save()",
         "BaseChatUI/Views/Chat/AssistantMarkdownView.swift:if let parsed = try? AttributedString(",
         "BaseChatUI/Views/Chat/TypingIndicatorView.swift:try? await Task.sleep(for: .milliseconds(400))",
         "BaseChatUI/Views/Settings/APIEndpointEditorView.swift:try? modelContext.save()",

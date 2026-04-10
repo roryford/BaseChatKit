@@ -38,8 +38,7 @@ BaseChatConfiguration.shared = BaseChatConfiguration(
     appName: "MyApp",
     bundleIdentifier: "com.example.myapp",
     features: .init(
-        showCloudAPIManagement: false,
-        showServerDiscovery: false
+        showCloudAPIManagement: false
     )
 )
 ```
