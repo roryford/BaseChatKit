@@ -19,6 +19,7 @@ public struct SessionListView: View {
     public var body: some View {
         @Bindable var sessionManager = sessionManager
 
+        Group {
         if sessionManager.sessions.isEmpty {
             ContentUnavailableView {
                 Label("No Chats", systemImage: "bubble.left.and.bubble.right")
@@ -88,6 +89,8 @@ public struct SessionListView: View {
                 if let errorMessage { Text(errorMessage) }
             }
         }
+        }
+        .animation(.default, value: sessionManager.sessions.isEmpty)
     }
 }
 
