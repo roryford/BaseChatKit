@@ -284,7 +284,8 @@ public struct ChatView: View {
                         MessageBubbleView(
                             message: message,
                             isStreaming: isMessageStreaming(message),
-                            isPinned: viewModel.isMessagePinned(id: message.id)
+                            isPinned: viewModel.isMessagePinned(id: message.id),
+                            approvalCoordinator: viewModel.inferenceService.toolApprovalCoordinator
                         )
                         .messageActionMenu(message: message, viewModel: viewModel)
                         .id(message.id)

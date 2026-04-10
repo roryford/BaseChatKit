@@ -13,6 +13,7 @@ public struct MessageBubbleView: View {
     public let message: ChatMessageRecord
     public let isStreaming: Bool
     public let isPinned: Bool
+    let approvalCoordinator: ToolCallApprovalCoordinator?
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -20,6 +21,19 @@ public struct MessageBubbleView: View {
         self.message = message
         self.isStreaming = isStreaming
         self.isPinned = isPinned
+        self.approvalCoordinator = nil
+    }
+
+    init(
+        message: ChatMessageRecord,
+        isStreaming: Bool,
+        isPinned: Bool,
+        approvalCoordinator: ToolCallApprovalCoordinator?
+    ) {
+        self.message = message
+        self.isStreaming = isStreaming
+        self.isPinned = isPinned
+        self.approvalCoordinator = approvalCoordinator
     }
 
     // MARK: - Body
@@ -56,7 +70,11 @@ public struct MessageBubbleView: View {
 
     private var userBubble: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            MessagePartsView(parts: message.contentParts, role: .user)
+            MessagePartsView(
+                parts: message.contentParts,
+                role: .user,
+                approvalCoordinator: approvalCoordinator
+            )
 
             timestampLabel
                 .foregroundStyle(.white.opacity(0.7))
@@ -73,7 +91,11 @@ public struct MessageBubbleView: View {
             if message.contentParts.isEmpty && isStreaming {
                 streamingPlaceholder
             } else {
-                MessagePartsView(parts: message.contentParts, role: .assistant)
+                MessagePartsView(
+                    parts: message.contentParts,
+                    role: .assistant,
+                    approvalCoordinator: approvalCoordinator
+                )
             }
 
             if isStreaming && !message.contentParts.isEmpty {

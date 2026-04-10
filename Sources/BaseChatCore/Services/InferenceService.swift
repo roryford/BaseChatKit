@@ -415,10 +415,45 @@ public final class InferenceService {
         didSet { propagateToolStateToBackend() }
     }
 
+    /// Coordinator that gates tool execution on user approval.
+    ///
+    /// Defaults to ``ToolCallApprovalMode/alwaysAsk`` so destructive tools
+    /// never run silently. Host apps that ship only read-only tools (or
+    /// fully trust their tool set) can flip ``ToolCallApprovalCoordinator/mode``
+    /// to ``ToolCallApprovalMode/autoApprove`` at startup.
+    ///
+    /// Lazily created on first access because the nonisolated `init()` cannot
+    /// synthesise a `@MainActor`-isolated default; the getter runs on the
+    /// main actor like the rest of the service.
+    public var toolApprovalCoordinator: ToolCallApprovalCoordinator {
+        if let existing = _toolApprovalCoordinator {
+            return existing
+        }
+        let created = ToolCallApprovalCoordinator()
+        _toolApprovalCoordinator = created
+        return created
+    }
+
+    private var _toolApprovalCoordinator: ToolCallApprovalCoordinator?
+
     /// Single propagation point so didSet and generate() stay in sync.
+    ///
+    /// Wraps `toolProvider` in ``ApprovingToolProvider`` before handing it to
+    /// the backend so every tool execution routes through
+    /// ``toolApprovalCoordinator``. Backends do not need to know the wrapper
+    /// exists — `ToolProvider` conformance is forwarded transparently.
     private func propagateToolStateToBackend() {
         guard let toolBackend = backend as? ToolCallingBackend else { return }
-        toolBackend.setToolProvider(toolProvider)
+        let effectiveProvider: (any ToolProvider)?
+        if let toolProvider {
+            effectiveProvider = ApprovingToolProvider(
+                underlying: toolProvider,
+                coordinator: toolApprovalCoordinator
+            )
+        } else {
+            effectiveProvider = nil
+        }
+        toolBackend.setToolProvider(effectiveProvider)
         toolBackend.setTools(toolProvider?.tools ?? [])
         toolBackend.toolCallObserver = toolCallObserver
     }
@@ -708,6 +743,11 @@ public final class InferenceService {
             finishAndDiscard(req.token, error: CancellationError())
         }
         requestQueue.removeAll()
+
+        // Releasing any tool-call approval continuations prevents the
+        // approval sheet from dangling when the user cancels generation.
+        // Only touch the coordinator if it was actually created.
+        _toolApprovalCoordinator?.rejectAllPending(reason: "Generation cancelled")
     }
 
     /// Notifies the service that generation has finished (called by view model
