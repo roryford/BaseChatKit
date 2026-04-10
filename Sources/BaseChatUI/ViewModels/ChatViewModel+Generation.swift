@@ -150,15 +150,14 @@ extension ChatViewModel {
                     interval: streamingUpdateInterval,
                     maxBufferedCharacters: streamingBatchCharacterLimit
                 )
+                var consumer = GenerationStreamConsumer(loopDetectionEnabled: self.loopDetectionEnabled)
 
                 do {
                     eventLoop: for try await event in stream.events {
                         if Task.isCancelled { break }
 
-                        // TODO: Migrate to GenerationStreamConsumer.handle() for testability.
-                        // The consumer is extracted and tested but not yet wired in here.
-                        switch event {
-                        case .token(let token):
+                        switch consumer.handle(event) {
+                        case .appendText(let token):
                             tokenCount += 1
                             if tokenCount == 1 {
                                 self.activityPhase = .streaming
@@ -167,9 +166,7 @@ extension ChatViewModel {
                                 var looping = false
                                 self.mutateMessage(id: messageID) { msg in
                                     msg.content += batch
-                                    if self.loopDetectionEnabled,
-                                       msg.content.count >= 100,
-                                       RepetitionDetector.looksLikeLooping(msg.content) {
+                                    if consumer.shouldStopForLoop(content: msg.content) {
                                         looping = true
                                     }
                                 }
@@ -180,13 +177,13 @@ extension ChatViewModel {
                                 }
                             }
 
-                        case .usage(let prompt, let completion):
+                        case .recordUsage(let prompt, let completion):
                             self.mutateMessage(id: messageID) { msg in
                                 msg.promptTokens = prompt
                                 msg.completionTokens = completion
                             }
 
-                        case .toolCall:
+                        case .noOp:
                             break
                         }
                     }
