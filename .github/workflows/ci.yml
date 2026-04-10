@@ -46,9 +46,9 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/debug
-          key: ${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.setup-xcode.outputs.xcode-version }}-spm-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-xcode-16.3-spm-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.setup-xcode.outputs.xcode-version }}-spm-
+            ${{ runner.os }}-${{ runner.arch }}-xcode-16.3-spm-
             ${{ runner.os }}-${{ runner.arch }}-spm-
 
       # CI smoke profile (GitHub macOS Apple Silicon runners):
