@@ -45,6 +45,8 @@ public final class ModelManagementViewModel {
     private let downloadManager: BackgroundDownloadManager?
     private let deviceCapability: DeviceCapabilityService
     private let modelStorage: ModelStorageService
+    private let diagnostics: DiagnosticsService?
+    private let fileRemover: @Sendable (URL) throws -> Void
 
     // MARK: - Download Tracking
 
@@ -90,12 +92,16 @@ public final class ModelManagementViewModel {
         huggingFaceService: (any HuggingFaceServiceProtocol)? = nil,
         downloadManager: BackgroundDownloadManager? = nil,
         deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
-        modelStorage: ModelStorageService = ModelStorageService()
+        modelStorage: ModelStorageService = ModelStorageService(),
+        diagnostics: DiagnosticsService? = nil,
+        fileRemover: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
     ) {
         self.huggingFaceService = huggingFaceService
         self.downloadManager = downloadManager
         self.deviceCapability = deviceCapability
         self.modelStorage = modelStorage
+        self.diagnostics = diagnostics
+        self.fileRemover = fileRemover
     }
 
     /// Creates a production-ready model manager with search and downloads enabled.
@@ -103,14 +109,16 @@ public final class ModelManagementViewModel {
         huggingFaceService: any HuggingFaceServiceProtocol = HuggingFaceService(),
         downloadManager: BackgroundDownloadManager = BackgroundDownloadManager(),
         deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
-        modelStorage: ModelStorageService = ModelStorageService()
+        modelStorage: ModelStorageService = ModelStorageService(),
+        diagnostics: DiagnosticsService? = nil
     ) -> ModelManagementViewModel {
         downloadManager.reconnectBackgroundSession()
         return ModelManagementViewModel(
             huggingFaceService: huggingFaceService,
             downloadManager: downloadManager,
             deviceCapability: deviceCapability,
-            modelStorage: modelStorage
+            modelStorage: modelStorage,
+            diagnostics: diagnostics
         )
     }
 
@@ -332,7 +340,12 @@ public final class ModelManagementViewModel {
             return imported
         }
 
-        try? FileManager.default.removeItem(at: destination)
+        do {
+            try fileRemover(destination)
+        } catch {
+            Log.ui.warning("Failed to clean up unsupported imported model at \(destination.path): \(error.localizedDescription)")
+            diagnostics?.record(.modelFileDeletionFailed(destination, reason: error.localizedDescription))
+        }
         throw ModelImportError.unsupportedFormat
     }
 
@@ -353,12 +366,17 @@ public final class ModelManagementViewModel {
             if let ctx = modelContext {
                 // Upsert: remove any stale entry for this file name before inserting the fresh result.
                 let fileName = model.fileName
-                let existing = try? ctx.fetch(FetchDescriptor<ModelBenchmarkCache>(
-                    predicate: #Predicate { $0.modelFileName == fileName }
-                ))
-                existing?.forEach { ctx.delete($0) }
-                ctx.insert(ModelBenchmarkCache(modelFileName: fileName, result: result))
-                try? ctx.save()
+                do {
+                    let existing = try ctx.fetch(FetchDescriptor<ModelBenchmarkCache>(
+                        predicate: #Predicate { $0.modelFileName == fileName }
+                    ))
+                    existing.forEach { ctx.delete($0) }
+                    ctx.insert(ModelBenchmarkCache(modelFileName: fileName, result: result))
+                    try ctx.save()
+                } catch {
+                    Log.persistence.warning("Failed to persist benchmark result for \(model.name): \(error.localizedDescription)")
+                    diagnostics?.record(.benchmarkCacheUnavailable(reason: error.localizedDescription))
+                }
             }
         } catch {
             Log.inference.error("Benchmark failed for \(model.name): \(error)")
@@ -367,7 +385,14 @@ public final class ModelManagementViewModel {
 
     private func loadCachedBenchmarkResults() {
         guard let ctx = modelContext else { return }
-        let entries = (try? ctx.fetch(FetchDescriptor<ModelBenchmarkCache>())) ?? []
+        let entries: [ModelBenchmarkCache]
+        do {
+            entries = try ctx.fetch(FetchDescriptor<ModelBenchmarkCache>())
+        } catch {
+            Log.persistence.warning("Failed to load cached benchmark results: \(error.localizedDescription)")
+            diagnostics?.record(.benchmarkCacheUnavailable(reason: error.localizedDescription))
+            return
+        }
         for entry in entries {
             benchmarkResults[entry.modelFileName] = entry.toResult()
         }

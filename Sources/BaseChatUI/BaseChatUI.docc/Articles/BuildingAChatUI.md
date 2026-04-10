@@ -32,9 +32,9 @@ struct MyApp: App {
         chatVM = ChatViewModel(inferenceService: inferenceService)
 
         // Connect session title generation to InferenceService
-        chatVM.onFirstMessage = { _, firstMessage in
+        chatVM.onFirstMessage = { session, firstMessage in
             Task { @MainActor in
-                await sessionVM.generateTitle(from: firstMessage, using: inferenceService)
+                await sessionVM.autoRenameSession(session, firstMessage: firstMessage, inferenceService: inferenceService)
             }
         }
     }

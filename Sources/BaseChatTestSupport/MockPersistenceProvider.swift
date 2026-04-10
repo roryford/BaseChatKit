@@ -22,6 +22,7 @@ public final class MockPersistenceProvider: ChatPersistenceProvider {
     public var fetchMessagesCallCount = 0
 
     public var shouldThrowOnInsertSession: Error?
+    public var shouldThrowOnUpdateSession: Error?
     public var shouldThrowOnFetchSessions: Error?
     public var shouldThrowOnInsertMessage: Error?
     public var shouldThrowOnFetchMessages: Error?
@@ -41,6 +42,7 @@ public final class MockPersistenceProvider: ChatPersistenceProvider {
 
     public func updateSession(_ session: ChatSessionRecord) throws {
         updateSessionCallCount += 1
+        if let error = shouldThrowOnUpdateSession { throw error }
         guard let idx = sessions.firstIndex(where: { $0.id == session.id }) else {
             throw ChatPersistenceError.sessionNotFound(session.id)
         }

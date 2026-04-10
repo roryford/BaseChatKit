@@ -68,6 +68,59 @@ final class SessionAutoRenameTests: XCTestCase {
         XCTAssertEqual(updated?.title, "New Chat")
     }
 
+    func test_autoRename_onError_recordsDiagnosticWarning() async throws {
+        // Reconfigure with a diagnostics sink so we can assert surfacing.
+        let diagnostics = DiagnosticsService()
+        let freshVM = SessionManagerViewModel()
+        freshVM.configure(
+            persistence: SwiftDataPersistenceProvider(modelContext: context),
+            diagnostics: diagnostics
+        )
+
+        let session = try freshVM.createSession()
+        let service = makeThrowingInferenceService()
+
+        await freshVM.autoRenameSession(session, firstMessage: "Tell me about dogs", inferenceService: service)
+
+        XCTAssertEqual(diagnostics.count, 1, "Title generation failure should be recorded on diagnostics")
+        if case .titleGenerationFailed(let id, _) = diagnostics.warnings.first?.error {
+            XCTAssertEqual(id, session.id)
+        } else {
+            XCTFail("Expected .titleGenerationFailed warning, got \(String(describing: diagnostics.warnings.first?.error))")
+        }
+    }
+
+    func test_autoRename_onPersistenceFailure_recordsDistinctDiagnostic() async throws {
+        // Use a MockPersistenceProvider so we can force updateSession to
+        // throw after inference succeeds. This separates the inference
+        // path (which records .titleGenerationFailed) from the persistence
+        // path (which must record .sessionRenamePersistenceFailed).
+        let mockPersistence = MockPersistenceProvider()
+        let diagnostics = DiagnosticsService()
+        let freshVM = SessionManagerViewModel()
+        freshVM.configure(persistence: mockPersistence, diagnostics: diagnostics)
+
+        let session = try freshVM.createSession()
+        // Make updateSession throw AFTER createSession has inserted the
+        // record, so the auto-rename path is the one that trips.
+        mockPersistence.shouldThrowOnUpdateSession = ChatPersistenceError.providerNotConfigured
+
+        let service = makeInferenceService(tokens: ["Cooking", " Basics"])
+
+        await freshVM.autoRenameSession(session, firstMessage: "What is cooking?", inferenceService: service)
+
+        XCTAssertEqual(diagnostics.count, 1, "Persistence failure should be recorded once")
+        guard let recorded = diagnostics.warnings.first?.error else {
+            XCTFail("Expected a recorded warning")
+            return
+        }
+        if case .sessionRenamePersistenceFailed(let id, _) = recorded {
+            XCTAssertEqual(id, session.id)
+        } else {
+            XCTFail("Expected .sessionRenamePersistenceFailed, got \(recorded)")
+        }
+    }
+
     func test_autoRename_truncatesLongTitle() async {
         let session = try! vm.createSession()
 
