@@ -58,11 +58,20 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         set { withStateLock { _keychainAccount = newValue } }
     }
 
-    private var _ephemeralAPIKey: String?
+    private var _ephemeralAPIKey: SecureBytes?
     /// Fallback API key for tests or ephemeral use. Prefer ``keychainAccount``.
+    ///
+    /// The backing store is a ``SecureBytes`` buffer that is zeroed with
+    /// `memset_s` when the key is replaced or the backend is deallocated,
+    /// limiting how long the raw key bytes survive in freed memory.
+    ///
+    /// > Warning: The `String` returned by the getter and any copies made while
+    /// > building HTTP headers are *not* covered by this guarantee. For
+    /// > production use prefer ``keychainAccount``-backed storage so the raw
+    /// > key never enters the process heap at all.
     public var ephemeralAPIKey: String? {
-        get { withStateLock { _ephemeralAPIKey } }
-        set { withStateLock { _ephemeralAPIKey = newValue } }
+        get { withStateLock { _ephemeralAPIKey?.stringValue } }
+        set { withStateLock { _ephemeralAPIKey = newValue.flatMap { SecureBytes($0) } } }
     }
 
     private var _conversationHistory: [(role: String, content: String)]?
@@ -178,7 +187,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     public func configure(baseURL: URL, apiKey: String?, modelName: String) {
         withStateLock {
             _baseURL = baseURL
-            _ephemeralAPIKey = apiKey
+            _ephemeralAPIKey = apiKey.flatMap { SecureBytes($0) }
             _keychainAccount = nil
             _modelName = modelName
         }
@@ -201,7 +210,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
 
     /// Retrieves the API key from Keychain or ephemeral storage.
     public func resolveAPIKey() -> String? {
-        let (account, ephemeral) = withStateLock { (_keychainAccount, _ephemeralAPIKey) }
+        let (account, ephemeral) = withStateLock { (_keychainAccount, _ephemeralAPIKey?.stringValue) }
         if let account {
             return KeychainService.retrieve(account: account)
         }
