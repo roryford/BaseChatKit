@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.6.0](https://github.com/roryford/BaseChatKit/compare/v0.5.4...v0.6.0) (2026-04-10)
+
+**Slimming pass — BCK refocuses on production reliability** — A consumer audit of BaseChatKit's two known consumers (a private internal app and the public [ChatbotUI-iOS](https://github.com/roryford/ChatbotUI-iOS) demo) found that less than half of the codebase had real demand. Several large subsystems had zero consumers on either side, and several more were carrying public API surface that would have frozen into 1.0 commitments without any validating users. 0.6.0 is the correction: delete what nobody uses, add the small amount of new API that the audited apps actually need, and reposition BCK around the operational-reliability guarantees that make it valuable to the consumers that ship it. The full rationale, the audit table, and the "what's leaving / what's staying" decisions are recorded in [docs/SCOPE_DECISION.md](https://github.com/roryford/BaseChatKit/blob/main/docs/SCOPE_DECISION.md).
+
+### What was removed
+
+Three subsystems leave the public API this release. The **KoboldCpp backend** ([#266](https://github.com/roryford/BaseChatKit/pull/266)) is gone — zero references in either audited consumer, no evidence of external interest, and KoboldCpp's HTTP API is largely OpenAI-compatible, so apps that still need it can point the custom OpenAI-compatible endpoint path at a KoboldCpp server instead. The **server discovery subsystem** ([#268](https://github.com/roryford/BaseChatKit/pull/268)) — roughly 1,825 lines of Bonjour plus network port-scanning code built speculatively for a "find local LLM servers on the LAN" flow — also had zero consumers on either side; apps that need local discovery can implement their own scanner or use the existing custom-endpoint UI to enter URLs manually. The **tool calling public API surface** ([#269](https://github.com/roryford/BaseChatKit/pull/269)) — `ToolProvider`, `ToolCallingBackend`, and all tool-specific types — was experimental scaffolding that would have become a load-bearing 1.0 contract without any real users exercising it. Removing it now lets a future release ship a stable cross-backend tool-calling design without the burden of maintaining the current shape in parallel.
+
+Note that the `BackendCapabilities.supportsToolCalling: Bool` property stays in place, since removing it is a separable breaking change and keeping the capability-advertising surface stable is useful for apps that want to light up tool UI when a stable contract ships. `MessagePart.toolCall` and `.toolResult` enum cases also remain in this release because they are persisted in the SwiftData schema and need a dedicated migration path.
+
+### New API
+
+A new `ChatViewModel.systemPromptContext: [String: String]` property ([#265](https://github.com/roryford/BaseChatKit/pull/265)) provides a simple key/value substitution pass for the system prompt — apps that want to inject a username, a persona name, or any other small value into their prompts no longer need to wire up a full `MacroProvider` registry. The substitution runs at the existing macro expansion site in `ChatViewModel+Generation`, immediately after `MacroExpander.expand()`, so applications that rely on the richer `macroContext` pipeline continue to work unchanged and `MacroExpander` wins on key collisions. Both APIs coexist in 0.6.0; the full macro system is deferred to a later release pending coordination with its one consumer.
+
+### Positioning update
+
+BCK's README and the new [docs/SCOPE_DECISION.md](https://github.com/roryford/BaseChatKit/blob/main/docs/SCOPE_DECISION.md) ([#264](https://github.com/roryford/BaseChatKit/pull/264)) now lead with the framework's actual value proposition: a drop-in chat framework with operational reliability guarantees — streaming resilience across transient network loss and provider errors, latest-wins model handoff so rapid model switches cannot corrupt active state, memory pressure auto-unload so iOS cannot silently page out a loaded model, a mock backend so apps can unit-test their streaming contracts without loading a real model, and certificate pinning on known cloud APIs so misconfigured devices cannot silently leak chat traffic. These are the production failure modes BCK has caught because it runs in apps that ship to real users on real networks. The docs also clarify that BCK and HuggingFace's [AnyLanguageModel](https://github.com/huggingface/swift-transformers) occupy adjacent rather than competing niches: AnyLanguageModel optimizes for provider abstraction, BCK optimizes for what happens when the demo ends.
+
+### Breaking changes
+
+Apps that directly reference any of the removed symbols will not compile against 0.6.0. The migration path for each is noted inline.
+
+- `APIProvider.koboldCpp` enum case — use `APIProvider.custom` with a KoboldCpp endpoint URL.
+- `ServerType.koboldCpp` enum case — removed along with the enum's owning subsystem.
+- `KoboldCppBackend` class — instantiate a custom OpenAI-compatible backend pointed at your KoboldCpp server.
+- `ServerDiscoveryService` protocol, `DiscoveredServer`, `ServerType`, `NetworkDiscoveryService`, `BonjourDiscoveryService`, `ServerDiscoveryView`, `ServerDiscoveryViewModel`, `MockServerDiscoveryService` — apps that need local server discovery should implement their own scanner or accept URLs via the existing custom-endpoint configuration UI.
+- `BaseChatConfiguration.FeatureFlags.showServerDiscovery` — the flag and its associated UI are gone; remove the assignment.
+- `ToolCallingBackend` protocol, `ToolProvider`, `ToolCall`, `ToolDefinition`, `ToolResult`, `ToolSchema`, `ToolCallingError`, `ToolCallObserver`, `MockToolProvider` — apps that depend on tool calling should pin to 0.5.x until a stable cross-backend contract is designed in a later release.
+- `GenerationEvent.toolCall` case — removed alongside the tool calling API surface. Event handlers that exhaustively switched on the enum lose a case but gain nothing to handle.
+- `StreamAction.noOp` case — unused in the remaining streaming paths.
+- `ChatViewModel.toolProvider` and `ChatViewModel.toolCallObserver` public accessors — removed with the rest of the tool surface.
+
+### Compatibility
+
+Persisted data survives the upgrade. Any saved KoboldCpp endpoints in an app's SwiftData store silently convert to `APIProvider.custom` on load; there is no data loss, but users will see the provider label change in the settings UI. The `MessagePart.toolCall` and `.toolResult` enum cases are deliberately retained in `BaseChatSchemaV3` this release because removing them requires a SwiftData migration; a future release will address that with a proper schema version bump.
+
+### Additional improvements shipped in 0.6.0
+
+Several non-slimming improvements also land in this release: an explicit state machine for `ChatViewModel.activityPhase` that eliminates ambiguous intermediate states ([#261](https://github.com/roryford/BaseChatKit/pull/261)), a visible compression stats indicator so users can see when prompt compression is active and by how much ([#255](https://github.com/roryford/BaseChatKit/pull/255)), a new `OperationalError` type that surfaces previously silent `try?`/`catch` failures through a dedicated error channel ([#262](https://github.com/roryford/BaseChatKit/pull/262)), and several focused UX fixes in `ChatView`, `ChatInputBar`, `SessionListView`, and `ModelManagementSheet` ([#250](https://github.com/roryford/BaseChatKit/pull/250), [#251](https://github.com/roryford/BaseChatKit/pull/251), [#252](https://github.com/roryford/BaseChatKit/pull/252), [#253](https://github.com/roryford/BaseChatKit/pull/253)).
+
 ## [0.5.4](https://github.com/roryford/BaseChatKit/compare/v0.5.3...v0.5.4) (2026-04-10)
 
 **Security and stability hardening** — Three fixes targeting resource leaks, memory safety, and conditional compilation correctness.
