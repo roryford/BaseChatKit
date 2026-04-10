@@ -202,6 +202,9 @@ public struct ChatView: View {
                 ModelLoadingIndicatorView(progress: progress) {
                     viewModel.unloadModel()
                 }
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -240,11 +243,18 @@ public struct ChatView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
         } else {
-            // Models exist but none is selected
+            // Models exist but none is selected — on iPhone there is no visible sidebar,
+            // so provide a button to open model management directly.
             ContentUnavailableView {
                 Label("No Model Selected", systemImage: "cpu")
             } description: {
                 Text("Select a model from the sidebar to start chatting.")
+            } actions: {
+                Button("Select Model") {
+                    showModelManagement = true
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
             .frame(maxHeight: .infinity)
         }
