@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// E2E tests for the download validation pipeline using the real filesystem.

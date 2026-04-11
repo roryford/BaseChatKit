@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 
 /// A mock backend that conforms to both ``TokenizerVendor`` and ``TokenizerProvider``,
 /// returning a configurable fixed token count for every string.

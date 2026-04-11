@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 
 /// A mock backend that adopts ``TokenUsageProvider`` so that
 /// ``InferenceService/lastTokenUsage`` returns non-nil after generation.

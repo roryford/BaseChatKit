@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 
 /// Mock benchmark runner for testing. Returns a configurable result or throws on demand.
 public final class MockBenchmarkRunner: ModelBenchmarkRunner, @unchecked Sendable {

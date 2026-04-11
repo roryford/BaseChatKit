@@ -1,6 +1,6 @@
 import Foundation
 import os
-import BaseChatCore
+import BaseChatInference
 
 /// Cloud inference backend using the OpenAI Chat Completions API.
 ///

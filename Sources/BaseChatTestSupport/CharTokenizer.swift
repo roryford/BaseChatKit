@@ -1,4 +1,4 @@
-import BaseChatCore
+import BaseChatInference
 
 /// Deterministic tokenizer: 1 token per character.
 ///

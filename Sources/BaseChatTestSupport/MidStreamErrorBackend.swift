@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 
 /// A mock backend that yields a configurable list of tokens then throws an error,
 /// enabling tests to verify mid-stream error handling.

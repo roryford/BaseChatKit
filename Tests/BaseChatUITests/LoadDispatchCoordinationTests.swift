@@ -1,6 +1,7 @@
 @preconcurrency import XCTest
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 
 @MainActor
 final class LoadDispatchCoordinationTests: XCTestCase {

@@ -3,6 +3,7 @@ import Foundation
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// E2E tests for the model selection and loading pipeline.

@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import BaseChatBackends
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 // MARK: - Helpers

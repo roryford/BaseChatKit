@@ -3,6 +3,7 @@ import SwiftUI
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Tests that the compression visibility indicator appears whenever

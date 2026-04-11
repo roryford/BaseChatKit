@@ -1,6 +1,6 @@
 import Foundation
 import os
-import BaseChatCore
+import BaseChatInference
 
 /// A model available on a remote inference server.
 public struct RemoteModelInfo: Sendable, Identifiable, Hashable {

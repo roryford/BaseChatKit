@@ -1,6 +1,7 @@
 @preconcurrency import XCTest
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Tests for memory pressure transitions and concurrency edge cases in ChatViewModel.

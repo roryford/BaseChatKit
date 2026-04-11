@@ -1,6 +1,6 @@
 import Foundation
 import CommonCrypto
-import BaseChatCore
+import BaseChatInference
 
 /// URLSession delegate that performs certificate pinning for known API hosts.
 ///

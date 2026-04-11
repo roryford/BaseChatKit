@@ -2,6 +2,7 @@ import XCTest
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Demonstrates running the full `ChatViewModel.sendMessage()` flow through

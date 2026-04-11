@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// E2E test for the memory pressure -> model unload pipeline.

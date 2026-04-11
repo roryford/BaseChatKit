@@ -2,6 +2,7 @@ import XCTest
 import SwiftUI
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 
 /// Verifies that all user-facing controls in ModelManagementSheet and
 /// GenerationSettingsView are present in the view hierarchy.

@@ -1,6 +1,6 @@
 import Foundation
 import os
-import BaseChatCore
+import BaseChatInference
 
 /// Base class for cloud inference backends that stream responses via Server-Sent Events.
 ///

@@ -2,6 +2,7 @@
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Integration tests for the compression system as wired into ChatViewModel.

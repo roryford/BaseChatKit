@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 
 /// A mock backend that yields tokens with configurable delays, enabling
 /// cancellation to be tested mid-stream.

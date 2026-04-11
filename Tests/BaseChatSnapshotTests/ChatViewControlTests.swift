@@ -2,6 +2,7 @@ import XCTest
 import SwiftUI
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Verifies that user-facing controls in ChatView and ChatInputBar are present

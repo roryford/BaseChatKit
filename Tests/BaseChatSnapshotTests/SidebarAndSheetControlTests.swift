@@ -3,6 +3,7 @@ import SwiftUI
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 
 /// Verifies that user-facing controls in SessionListView, ChatExportSheet,
 /// and APIConfigurationView are present in the view hierarchy.

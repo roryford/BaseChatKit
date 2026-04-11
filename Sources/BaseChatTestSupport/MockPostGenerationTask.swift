@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 
 /// Configurable mock for ``PostGenerationTask`` in tests.
 ///

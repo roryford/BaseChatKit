@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// E2E test chaining the full model lifecycle: download files to disk,

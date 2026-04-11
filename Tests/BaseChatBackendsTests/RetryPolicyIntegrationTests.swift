@@ -1,5 +1,6 @@
 import XCTest
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 @testable import BaseChatBackends
 
