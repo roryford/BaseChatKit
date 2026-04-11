@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.2](https://github.com/roryford/BaseChatKit/compare/v0.7.1...v0.7.2) (2026-04-11)
+
+**Generation queue hardening — auto-drain and title generation race eliminated** — Two fixes targeting the InferenceService generation queue, both discovered during an audit of the service's blast radius against consumers like Fireside.
+
+The first fix removes the manual `generationDidFinish()` contract that previously required every `enqueue()` caller to call back into the service after consuming its stream — failure to do so stalled the queue permanently with no error surfaced anywhere. The queue now auto-drains when the stream terminates: the `drainQueue()` task's defer block clears the active request and kicks the next item when the stream finishes, errors, or is cancelled. A token guard (`activeRequest?.token == next.token`) prevents re-entry when `cancel()` or `stopGeneration()` have already cleared the slot. `generationDidFinish()` is retained as a deprecated no-op so existing call sites compile unchanged. ([67ec85c](https://github.com/roryford/BaseChatKit/commit/67ec85c00f89e069b8c280a0cb5228e905a1b224))
+
+The second fix routes title generation through `enqueue(priority: .background, sessionID: nil)` instead of the non-queued `generate()` path. Previously, `SessionManagerViewModel.generateTitle()` called `generate()` directly, which bypassed the priority queue, thermal gating, and session scoping. On MLXBackend, this meant a title generation and an active chat generation could race for the backend's main-thread lock, risking main-thread starvation mid-stream. Title requests now queue as background priority behind any active user-initiated generation, are subject to thermal gating, and drain automatically when complete. ([7afd4d6](https://github.com/roryford/BaseChatKit/commit/7afd4d6d40f415aa36b1d641e311e261ba2e6243))
+
 ## [0.7.1](https://github.com/roryford/BaseChatKit/compare/v0.7.0...v0.7.1) (2026-04-11)
 
 **Accessibility contract tests and VoiceOver polish for chat UI** — The chat view's accessibility surface had no automated coverage because the existing snapshot harness captured view hierarchies via `Swift.dump()`, which strips accessibility labels. This release adds a ViewInspector-driven `ChatA11yContractTests` suite and tightens the labels VoiceOver users actually hear: message bubbles now announce `"User said: …"` / `"Assistant said: …"` instead of the raw enum rawValue, the context indicator reads `"Context used: 1234 of 4096 tokens"` at `"50 percent"`, and the error banner is exposed as an accessibility header with an `"Error: …"` prefix so screen-reader users can orient to it as a landmark. Existing visual snapshots and behaviour are unchanged. ([#258](https://github.com/roryford/BaseChatKit/pull/258))
