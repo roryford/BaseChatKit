@@ -517,6 +517,81 @@ final class InferenceServiceQueueTests: XCTestCase {
         }
     }
 
+    // MARK: - 18. generationDidFinish omission stalls queue
+
+    /// Documents the current contract: if the caller consumes stream1 but never
+    /// calls generationDidFinish(), the queue stalls permanently.
+    func test_queue_stallsIfGenerationDidFinishNeverCalled() async throws {
+        let (service, mock) = makeService()
+
+        let (_, stream1) = try service.enqueue(
+            messages: [("user", "first")],
+            priority: .normal
+        )
+        let (_, stream2) = try service.enqueue(
+            messages: [("user", "second")],
+            priority: .normal
+        )
+
+        XCTAssertEqual(stream2.phase, .queued, "Second should start queued")
+
+        // Let the drain Task run and release stream1.
+        await Task.yield()
+        mock.release(at: 0, tokens: ["a"])
+
+        // Consume stream1 fully — but deliberately do NOT call generationDidFinish().
+        for try await _ in stream1.events {}
+
+        // Yield several times to give the service every chance to self-drain.
+        await Task.yield()
+        await Task.yield()
+        await Task.yield()
+
+        // Queue must still be stalled because generationDidFinish() was not called.
+        XCTAssertEqual(stream2.phase, .queued,
+                       "Queue should be stalled when generationDidFinish() is never called")
+        XCTAssertTrue(service.hasQueuedRequests,
+                      "Service should still report queued requests")
+    }
+
+    // MARK: - 19. Concurrent non-queued generate() + enqueue() state correctness
+
+    /// Verifies that a direct generate() call (the non-queued path used by title
+    /// generation) does not corrupt isGenerating or hasQueuedRequests while a
+    /// queued request is active.
+    func test_nonQueuedGenerate_doesNotCorruptQueueState() async throws {
+        let (service, mock) = makeService()
+
+        // Enqueue one request — it becomes the active request immediately.
+        let (_, stream1) = try service.enqueue(
+            messages: [("user", "queued request")],
+            priority: .normal
+        )
+
+        XCTAssertTrue(service.isGenerating, "isGenerating should be true after enqueue")
+        XCTAssertFalse(service.hasQueuedRequests,
+                       "No extra items should be in the queue — the enqueued one is active")
+
+        // Call generate() directly (the non-queued path, as title generation does).
+        let stream2 = try service.generate(messages: [("user", "title request")])
+
+        // The key assertion: direct generate() must not reset isGenerating.
+        XCTAssertTrue(service.isGenerating,
+                      "isGenerating must remain true after a direct generate() call")
+        XCTAssertFalse(service.hasQueuedRequests,
+                       "hasQueuedRequests must not be affected by a non-queued generate()")
+
+        // Clean up: consume both streams and finish the queued request.
+        await Task.yield()
+        mock.release(at: 0, tokens: ["queued-tok"])
+        mock.release(at: 1, tokens: ["title-tok"])
+
+        for try await _ in stream1.events {}
+        for try await _ in stream2.events {}
+
+        service.generationDidFinish()
+    }
+
     // MARK: - 17. finishAndDiscard always finishes continuation
 
     func test_finishAndDiscard_alwaysFinishesContinuation() async throws {
