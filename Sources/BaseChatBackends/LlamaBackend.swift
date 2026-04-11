@@ -129,6 +129,11 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             return activeLoadToken
         }
 
+        // Snapshotting the handler here means calling setLoadProgressHandler(nil)
+        // mid-load will not cancel in-flight Task callbacks already dispatched by
+        // the C progress hook. Stale callbacks become no-ops at the consumer:
+        // InferenceService.applyLoadProgress(_:for:) drops values whose request
+        // token no longer matches the active loading phase.
         let capturedHandler = withStateLock { _loadProgressHandler }
 
         let loadedResources = try await Task.detached(priority: .userInitiated) { [self] in
@@ -244,6 +249,11 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             modelParams.progress_callback_user_data = callbackContextRef!.toOpaque()
             modelParams.progress_callback = { progress, userData -> Bool in
                 guard let ptr = userData else { return true }
+                // `takeUnretainedValue()` does not bump ARC here — the Task closure below
+                // captures `ctx` as a Swift reference, which provides its own ARC retain
+                // for the Task's lifetime. The Unmanaged retain managed by the outer defer
+                // in `loadModel` is separate and only responsible for keeping the context
+                // alive during the synchronous C load call.
                 let ctx = Unmanaged<ProgressCallbackContext>.fromOpaque(ptr).takeUnretainedValue()
                 let value = Double(progress)
                 Task { await ctx.handler(value) }

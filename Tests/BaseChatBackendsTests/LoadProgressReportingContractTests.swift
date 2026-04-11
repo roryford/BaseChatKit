@@ -13,16 +13,13 @@ private actor ProgressCollector {
     }
 }
 
-/// Contract tests for the ``LoadProgressReporting`` protocol.
+/// Verifies the ``LoadProgressReporting`` protocol contract using ``MockLoadProgressBackend``.
 ///
-/// These tests use ``MockLoadProgressBackend`` — a minimal stub that adopts the protocol
-/// without any hardware dependency. The contract verified here is:
-///   1. A handler installed via `setLoadProgressHandler(_:)` is called during `loadModel`.
-///   2. Every delivered value is in `[0.0, 1.0]`.
-///   3. Clearing the handler (`nil`) before load causes zero calls.
-///
-/// Real backend coverage (LlamaBackend, MLXBackend) lives in `BaseChatMLXIntegrationTests`
-/// and `BaseChatE2ETests` which require hardware and are gated accordingly.
+/// These tests confirm the mock is self-consistent and that the protocol's handler
+/// install/clear/deliver lifecycle works as specified. They do **not** verify that
+/// ``LlamaBackend`` or ``MLXBackend`` implement the protocol correctly — real backend
+/// coverage requires hardware and lives in ``BaseChatMLXIntegrationTests`` and
+/// ``BaseChatE2ETests``.
 final class LoadProgressReportingContractTests: XCTestCase {
 
     private let modelURL = URL(fileURLWithPath: "/tmp/fake-model")
