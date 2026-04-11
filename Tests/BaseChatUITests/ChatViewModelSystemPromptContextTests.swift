@@ -139,6 +139,51 @@ final class ChatViewModelSystemPromptContextTests: XCTestCase {
         )
     }
 
+    // MARK: - Direct unit tests for applySystemPromptContext
+
+    func test_applySystemPromptContext_emptyBraces_areIgnored() {
+        // `{{}}` contains no word characters so `\w+` won't match — the token
+        // should pass through verbatim even when the empty string is in the dict.
+        let result = ChatViewModel.applySystemPromptContext(
+            "Hello {{}} world",
+            context: ["": "X"]
+        )
+        XCTAssertEqual(result, "Hello {{}} world",
+            "Empty `{{}}` must not be substituted — `\\w+` requires at least one word character")
+    }
+
+    func test_applySystemPromptContext_unicodeKey_behavior() {
+        // NSRegularExpression uses ICU's `\w`, which matches Unicode word characters,
+        // so Cyrillic keys are matched and substituted.
+        let result = ChatViewModel.applySystemPromptContext(
+            "{{имя}}",
+            context: ["имя": "Иван"]
+        )
+        XCTAssertEqual(result, "Иван",
+            "ICU `\\w` matches Unicode word chars, so Cyrillic keys must be substituted")
+    }
+
+    func test_applySystemPromptContext_noDoubleBraces_returnsEarly() {
+        // The early-exit guard `text.contains("{{")` should short-circuit before
+        // touching the regex when there is nothing to substitute.
+        let result = ChatViewModel.applySystemPromptContext(
+            "No tokens here.",
+            context: ["name": "Alice"]
+        )
+        XCTAssertEqual(result, "No tokens here.",
+            "Text without `{{` must be returned unchanged (exercises the early-exit path)")
+    }
+
+    func test_applySystemPromptContext_missingKey_passesThrough() {
+        // A key present in the text but absent from the dict must survive verbatim.
+        let result = ChatViewModel.applySystemPromptContext(
+            "Hello {{unknown}}",
+            context: [:]
+        )
+        XCTAssertEqual(result, "Hello {{unknown}}",
+            "An unrecognized `{{key}}` must pass through unchanged when the dict is empty")
+    }
+
     // MARK: - Mid-conversation mutation between sends
 
     func test_systemPromptContext_mutationBetweenSends_appliesToSecondPrompt() async {
