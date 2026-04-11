@@ -195,7 +195,7 @@ extension ChatViewModel {
 
     // MARK: - Message Pinning
 
-    /// Marks a message as pinned, preserving it from context compression.
+    /// Marks a message as pinned, preserving it when history is trimmed to fit the context window.
     public func pinMessage(id messageID: UUID) {
         pinnedMessageIDs.insert(messageID)
         do {

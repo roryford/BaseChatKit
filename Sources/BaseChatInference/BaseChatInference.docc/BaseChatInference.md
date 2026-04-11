@@ -8,7 +8,7 @@ coordinate model loading, generation, context budgeting, and prompt assembly.
 `BaseChatInference` contains the inference surface area of BaseChatKit:
 ``InferenceService`` and the `InferenceBackend` protocol family, generation
 events and streams, context window management, prompt templates and assembly,
-compression, macro expansion, repetition detection, tokenizers, and the
+macro expansion, repetition detection, tokenizers, and the
 capability/compatibility API.
 
 It does **not** depend on SwiftData. Apps that need inference orchestration but

@@ -4,9 +4,9 @@ Models, protocols, and services for building on-device and cloud-connected chat 
 
 ## Overview
 
-BaseChatCore is the foundation layer of BaseChatKit. It defines the protocol surface that backends and UI targets both depend on, and provides production-ready services for inference orchestration, context management, compression, and persistence — with no dependency on MLX, llama.cpp, or any UI framework.
+BaseChatCore is the foundation layer of BaseChatKit. It defines the protocol surface that backends and UI targets both depend on, and provides production-ready services for inference orchestration, context management, and persistence — with no dependency on MLX, llama.cpp, or any UI framework.
 
-The two key entry points are ``BaseChatConfiguration`` (set once at app startup) and ``InferenceService`` (coordinates all model loading and generation). Everything else — persistence, compression, context budgeting — is wired together by the service layer and exposed through SwiftData-backed models.
+The two key entry points are ``BaseChatConfiguration`` (set once at app startup) and ``InferenceService`` (coordinates all model loading and generation). Everything else — persistence, context budgeting — is wired together by the service layer and exposed through SwiftData-backed models.
 
 ### Architecture
 
@@ -77,14 +77,11 @@ Backends are registered as factories so BaseChatCore stays free of any direct ML
 - ``MessagePart``
 - ``ChatError``
 
-### Context & Compression
+### Context
 
 - ``ContextWindowManager``
 - ``PromptAssembler``
 - ``PromptSlot``
-- ``CompressionOrchestrator``
-- ``CompressionMode``
-- ``CompressionStats``
 - ``TokenizerProvider``
 
 ### Prompt Formatting

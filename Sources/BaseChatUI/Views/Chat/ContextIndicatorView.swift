@@ -9,14 +9,12 @@ public struct ContextIndicatorView: View {
 
     public let usedTokens: Int
     public let maxTokens: Int
-    public let lastCompressionStats: CompressionStats?
 
     @State private var isPopoverPresented = false
 
-    public init(usedTokens: Int, maxTokens: Int, lastCompressionStats: CompressionStats? = nil) {
+    public init(usedTokens: Int, maxTokens: Int) {
         self.usedTokens = usedTokens
         self.maxTokens = maxTokens
-        self.lastCompressionStats = lastCompressionStats
     }
 
     private var ratio: Double {
@@ -91,20 +89,6 @@ public struct ContextIndicatorView: View {
 
             Divider()
 
-            if let stats = lastCompressionStats {
-                LabeledContent("Compressed") {
-                    Text("\(stats.originalNodeCount) → \(stats.outputMessageCount) messages · \(String(format: "%.0f", stats.compressionRatio))× ratio")
-                        .monospacedDigit()
-                }
-                .accessibilityLabel("Compressed: \(stats.originalNodeCount) to \(stats.outputMessageCount) messages, \(String(format: "%.0f", stats.compressionRatio)) times ratio")
-
-                Label(stats.strategy, systemImage: "scissors")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-            }
-
             Label("Open Prompt Inspector in Generation Settings for per-slot breakdown.", systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -124,19 +108,4 @@ public struct ContextIndicatorView: View {
 
 #Preview("Critical") {
     ContextIndicatorView(usedTokens: 3900, maxTokens: 4096)
-}
-
-#Preview("With compression stats") {
-    ContextIndicatorView(
-        usedTokens: 800,
-        maxTokens: 4096,
-        lastCompressionStats: CompressionStats(
-            strategy: "extractive",
-            originalNodeCount: 12,
-            outputMessageCount: 5,
-            estimatedTokens: 800,
-            compressionRatio: 2.4,
-            keywordSurvivalRate: nil
-        )
-    )
 }

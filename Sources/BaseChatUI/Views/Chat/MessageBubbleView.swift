@@ -7,7 +7,8 @@ import BaseChatCore
 /// are left-aligned with a secondary background, and system messages are
 /// centered and italic. Supports streaming state with a pulsing indicator.
 /// When `isPinned` is `true`, a small pin icon is shown in the top-trailing
-/// corner of the bubble to indicate the message is preserved from compression.
+/// corner of the bubble to indicate the message is preserved when the
+/// conversation history is trimmed to fit the context window.
 public struct MessageBubbleView: View {
 
     public let message: ChatMessageRecord

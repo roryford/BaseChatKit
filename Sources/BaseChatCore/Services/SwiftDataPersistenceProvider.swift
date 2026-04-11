@@ -30,7 +30,6 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
         session.repeatPenalty = record.repeatPenalty
         session.promptTemplateRawValue = record.promptTemplate?.rawValue
         session.contextSizeOverride = record.contextSizeOverride
-        session.compressionModeRaw = record.compressionMode == .automatic ? nil : record.compressionMode.rawValue
         session.pinnedMessageIDsRaw = record.pinnedMessageIDs.isEmpty ? nil : record.pinnedMessageIDs.map(\.uuidString).sorted().joined(separator: ",")
         modelContext.insert(session)
         try modelContext.save()
@@ -50,7 +49,6 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
         session.repeatPenalty = record.repeatPenalty
         session.promptTemplateRawValue = record.promptTemplate?.rawValue
         session.contextSizeOverride = record.contextSizeOverride
-        session.compressionModeRaw = record.compressionMode == .automatic ? nil : record.compressionMode.rawValue
         session.pinnedMessageIDsRaw = record.pinnedMessageIDs.isEmpty ? nil : record.pinnedMessageIDs.map(\.uuidString).sorted().joined(separator: ",")
         try modelContext.save()
     }
@@ -176,7 +174,6 @@ extension ChatSession {
             repeatPenalty: repeatPenalty,
             promptTemplate: promptTemplateRawValue.flatMap(PromptTemplate.init(rawValue:)),
             contextSizeOverride: contextSizeOverride,
-            compressionMode: compressionModeRaw.flatMap(CompressionMode.init(rawValue:)) ?? .automatic,
             pinnedMessageIDs: Set(pinnedMessageIDsRaw?.split(separator: ",").compactMap { UUID(uuidString: String($0)) } ?? [])
         )
     }

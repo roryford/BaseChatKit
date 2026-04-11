@@ -76,19 +76,6 @@ public struct GenerationSettingsView: View {
                     .pickerStyle(.segmented)
                 }
 
-                // MARK: Basic — Context Compression
-                Section("Context Compression") {
-                    Picker("Compression", selection: $viewModel.compressionMode) {
-                        ForEach(CompressionMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    Text("Controls how conversation history is compressed when the context window fills up.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 // MARK: Basic — Reset
                 Section {
                     Button("Reset to Defaults", role: .destructive) {

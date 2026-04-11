@@ -54,11 +54,7 @@ extension ChatViewModel {
             selectedEndpoint = nil
         }
 
-        // pinnedMessageIDs must be set before compressionMode: the compressionMode
-        // didSet calls saveSettingsToSession(), which writes pinnedMessageIDs back to
-        // the session. Setting pins first ensures the correct value is persisted.
         pinnedMessageIDs = session.pinnedMessageIDs
-        compressionMode = session.compressionMode
 
         showUpgradeHint = false
         loadMessages()
@@ -79,7 +75,6 @@ extension ChatViewModel {
         session.systemPrompt = systemPrompt
         session.selectedModelID = selectedModel?.id
         session.selectedEndpointID = selectedEndpoint?.id
-        session.compressionMode = compressionMode
         session.pinnedMessageIDs = pinnedMessageIDs
         session.updatedAt = Date()
         try persistence.updateSession(session)
