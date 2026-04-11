@@ -80,7 +80,7 @@ extension ChatViewModel {
         }
 
         do {
-            // Build the message history, applying compression if the context is filling up.
+            // Build the message history, trimming to fit the context window.
             let allMessages = messages.filter { $0.id != messageID }
             let rawSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
             let effectiveSystemPrompt: String? = rawSystemPrompt.map { prompt in
@@ -97,40 +97,15 @@ extension ChatViewModel {
             // messages carry over between generation cycles.
             let cachingTokenizer: TokenizerProvider = reusableCachingTokenizer
 
-            let compressible = allMessages.map {
-                CompressibleMessage(
-                    id: $0.id,
-                    role: $0.role.rawValue,
-                    content: $0.content,
-                    isPinned: pinnedMessageIDs.contains($0.id)
-                )
-            }
-
-            let history: [(role: String, content: String)]
-            if compressionOrchestrator.shouldCompress(
-                messages: compressible,
+            let trimmed = ContextWindowManager.trimMessages(
+                allMessages,
                 systemPrompt: effectiveSystemPrompt,
-                contextSize: contextMaxTokens,
+                maxTokens: contextMaxTokens,
+                responseBuffer: 512,
                 tokenizer: cachingTokenizer
-            ) {
-                let result = await compressionOrchestrator.compress(
-                    messages: compressible,
-                    systemPrompt: effectiveSystemPrompt,
-                    contextSize: contextMaxTokens,
-                    tokenizer: cachingTokenizer
-                )
-                lastCompressionStats = result.stats
-                history = result.messages
-            } else {
-                lastCompressionStats = nil
-                let trimmed = ContextWindowManager.trimMessages(
-                    allMessages,
-                    systemPrompt: effectiveSystemPrompt,
-                    maxTokens: contextMaxTokens,
-                    responseBuffer: 512,
-                    tokenizer: cachingTokenizer
-                )
-                history = trimmed.map { (role: $0.role.rawValue, content: $0.content) }
+            )
+            let history: [(role: String, content: String)] = trimmed.map {
+                (role: $0.role.rawValue, content: $0.content)
             }
 
             let (token, stream) = try inferenceService.enqueue(

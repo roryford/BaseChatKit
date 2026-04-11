@@ -101,7 +101,7 @@ This repo uses Conventional Commits. Release Please reads these to determine ver
 ```
 feat: add streaming cancellation to FoundationBackend
 fix: prevent context overflow when system prompt exceeds budget
-perf: precompute keyword densities in ExtractiveCompressor
+perf: cache tokenizer lookups in ContextWindowManager
 test: add XCTMeasure baselines for trimMessages hot path
 chore: update mlx-swift-lm to 2.31.0
 docs: clarify TokenizerProvider fallback behaviour

@@ -145,9 +145,6 @@ public enum BaseChatSchemaV3: VersionedSchema {
         /// User override for context window size; nil uses model default.
         public var contextSizeOverride: Int?
 
-        /// Raw storage for CompressionMode. nil means .automatic.
-        public var compressionModeRaw: String?
-
         /// Comma-separated UUID strings of pinned messages in this session.
         /// nil means no messages are pinned.
         public var pinnedMessageIDsRaw: String?
@@ -162,7 +159,7 @@ public enum BaseChatSchemaV3: VersionedSchema {
 
         /// The set of pinned message IDs for this session.
         ///
-        /// Pinned messages are preserved during context compression regardless of age.
+        /// Pinned messages are preserved when history is trimmed to fit the context window, regardless of age.
         /// Serialized as comma-separated UUID strings in ``pinnedMessageIDsRaw``.
         public var pinnedMessageIDs: Set<UUID> {
             get {
@@ -172,14 +169,6 @@ public enum BaseChatSchemaV3: VersionedSchema {
             set {
                 pinnedMessageIDsRaw = newValue.isEmpty ? nil : newValue.map(\.uuidString).joined(separator: ",")
             }
-        }
-
-        /// The compression mode for this session.
-        ///
-        /// Defaults to `.automatic` when no value is stored.
-        public var compressionMode: CompressionMode {
-            get { compressionModeRaw.flatMap(CompressionMode.init(rawValue:)) ?? .automatic }
-            set { compressionModeRaw = newValue.rawValue }
         }
 
         /// Convenience to get/set the prompt template as a `PromptTemplate` enum.

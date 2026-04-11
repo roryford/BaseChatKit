@@ -179,23 +179,6 @@ final class ModelAndSettingsControlTests: XCTestCase {
         XCTAssertTrue(dump.contains("Dark"), "Should contain the Dark appearance option")
     }
 
-    func test_generationSettings_hasCompressionPicker() {
-        let dump = generationSettingsDump()
-        XCTAssertTrue(dump.contains("Compression"), "Should contain the Compression picker label")
-        XCTAssertTrue(
-            dump.contains("Context Compression"),
-            "Should contain the Context Compression section header"
-        )
-    }
-
-    func test_generationSettings_hasCompressionDescription() {
-        let dump = generationSettingsDump()
-        XCTAssertTrue(
-            dump.contains("Controls how conversation history is compressed"),
-            "Should contain the compression help text"
-        )
-    }
-
     func test_generationSettings_hasResetToDefaults() {
         let dump = generationSettingsDump()
         XCTAssertTrue(
@@ -255,13 +238,6 @@ final class ModelAndSettingsControlTests: XCTestCase {
         )
     }
 
-    func test_generationSettings_hasPopUpControl() {
-        let dump = generationSettingsDump()
-        XCTAssertTrue(
-            dump.contains("AppKitPopUpAdaptor"),
-            "Settings should render a pop-up menu (compression mode picker)"
-        )
-    }
     #endif
 
     // MARK: - GenerationSettingsView — Advanced Section References

@@ -410,8 +410,8 @@ public final class InferenceService {
     /// in the generation queue — use ``enqueue(messages:systemPrompt:temperature:topP:repeatPenalty:maxOutputTokens:priority:sessionID:)``
     /// for user-facing chat generation that must be serialized.
     ///
-    /// Direct callers (title generation, compression) are short-lived and
-    /// don't conflict with queued work because backends serialize at their own
+    /// Direct callers (e.g. title generation) are short-lived and don't
+    /// conflict with queued work because backends serialize at their own
     /// level (LlamaBackend via NSLock, MLXBackend via actor isolation).
     ///
     /// For backends that require prompt templates (GGUF), messages are formatted

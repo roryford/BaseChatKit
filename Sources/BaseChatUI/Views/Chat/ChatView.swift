@@ -31,8 +31,6 @@ public struct ChatView: View {
         VStack(spacing: 0) {
             errorBanner
 
-            compressionBanner
-
             if viewModel.isLoading {
                 loadingView
             } else if !viewModel.isModelLoaded {
@@ -66,8 +64,7 @@ public struct ChatView: View {
                 if features.showContextIndicator {
                     ContextIndicatorView(
                         usedTokens: viewModel.contextUsedTokens,
-                        maxTokens: viewModel.contextMaxTokens,
-                        lastCompressionStats: viewModel.lastCompressionStats
+                        maxTokens: viewModel.contextMaxTokens
                     )
                 }
                 if features.showMemoryIndicator {
@@ -165,15 +162,6 @@ public struct ChatView: View {
             .font(.callout.bold())
         case .dismissOnly, .none:
             EmptyView()
-        }
-    }
-
-    // MARK: - Compression Banner
-
-    @ViewBuilder
-    private var compressionBanner: some View {
-        if let stats = viewModel.lastCompressionStats {
-            CompressionIndicatorView(stats: stats)
         }
     }
 

@@ -46,7 +46,6 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let handle = try? FileHandle(forReadingFrom: fileURL) else {",
         "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let headerData = try? handle.read(upToCount: 4), headerData.count == 4 else {",
         "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: tempURL)",
-        "BaseChatInference/Services/Compression/AnchoredCompressor.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines, .caseInsensitive]) else {",
         "BaseChatInference/Services/GGUFMetadataReader.swift:guard let handle = try? FileHandle(forReadingFrom: url) else { return false }",
         "BaseChatInference/Services/MacroExpander.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {",
         "BaseChatInference/Services/MacroExpander.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {",

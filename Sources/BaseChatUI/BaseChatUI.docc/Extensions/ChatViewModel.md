@@ -35,9 +35,7 @@
 ### Generation Settings
 
 - ``systemPrompt``
-- ``compressionMode``
 - ``pinnedMessageIDs``
-- ``lastCompressionStats``
 
 ### Errors
 

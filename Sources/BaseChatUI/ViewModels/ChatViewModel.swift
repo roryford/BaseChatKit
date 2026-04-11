@@ -32,7 +32,6 @@ public final class ChatViewModel {
     let deviceCapability: DeviceCapabilityService
     let modelStorage: ModelStorageService
     let memoryPressure: MemoryPressureHandler
-    let compressionOrchestrator = CompressionOrchestrator()
 
     // MARK: - Persistence
 
@@ -207,31 +206,13 @@ public final class ChatViewModel {
     /// Surfaced for optional display by the app. Does not interrupt the session.
     public internal(set) var backgroundTaskError: Error?
 
-    // MARK: - Compression
+    // MARK: - Pinned Messages
 
     /// IDs of messages that are pinned in the current session.
     ///
-    /// Pinned messages are excluded from context compression and always preserved
-    /// in the conversation history. Populated from ``ChatSessionRecord/pinnedMessageIDs``
-    /// when switching sessions. Persisted back to the session on changes.
+    /// Populated from ``ChatSessionRecord/pinnedMessageIDs`` when switching
+    /// sessions. Persisted back to the session on changes.
     public internal(set) var pinnedMessageIDs: Set<UUID> = []
-
-    /// The active compression mode. Synced to the orchestrator and persisted to the session.
-    public var compressionMode: CompressionMode = .automatic {
-        didSet {
-            compressionOrchestrator.mode = compressionMode
-            guard !isRestoringSession else { return }
-            do {
-                try saveSettingsToSession()
-            } catch {
-                Log.persistence.error("Failed to persist compression mode: \(error)")
-                errorMessage = "Failed to save settings: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    /// Statistics from the most recent compression pass, or `nil` if no compression occurred.
-    public internal(set) var lastCompressionStats: CompressionStats?
 
     // MARK: - Generation Settings
 
@@ -456,24 +437,6 @@ public final class ChatViewModel {
 
         let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
         self.isFirstRun = !UserDefaults.standard.bool(forKey: firstRunKey)
-
-        compressionOrchestrator.anchored.generateFn = { [weak self] prompt in
-            guard let self else { throw CancellationError() }
-            let stream = try await MainActor.run {
-                try self.inferenceService.generate(
-                    messages: [(role: "user", content: prompt)],
-                    systemPrompt: nil,
-                    temperature: 0.3,
-                    topP: 0.9,
-                    repeatPenalty: 1.0
-                )
-            }
-            var result = ""
-            for try await event in stream.events {
-                if case .token(let text) = event { result += text }
-            }
-            return result
-        }
     }
 
     /// Injects the persistence provider. Call once from the view layer

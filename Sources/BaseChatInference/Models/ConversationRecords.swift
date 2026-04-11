@@ -19,7 +19,6 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
     public var repeatPenalty: Float?
     public var promptTemplate: PromptTemplate?
     public var contextSizeOverride: Int?
-    public var compressionMode: CompressionMode
     public var pinnedMessageIDs: Set<UUID>
 
     public init(
@@ -35,7 +34,6 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
         repeatPenalty: Float? = nil,
         promptTemplate: PromptTemplate? = nil,
         contextSizeOverride: Int? = nil,
-        compressionMode: CompressionMode = .automatic,
         pinnedMessageIDs: Set<UUID> = []
     ) {
         self.id = id
@@ -50,7 +48,6 @@ public struct ChatSessionRecord: Identifiable, Hashable, Sendable {
         self.repeatPenalty = repeatPenalty
         self.promptTemplate = promptTemplate
         self.contextSizeOverride = contextSizeOverride
-        self.compressionMode = compressionMode
         self.pinnedMessageIDs = pinnedMessageIDs
     }
 }

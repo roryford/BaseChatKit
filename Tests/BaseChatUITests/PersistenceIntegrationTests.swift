@@ -317,16 +317,6 @@ final class PersistenceIntegrationTests: XCTestCase {
 
     // MARK: - Typed Record Field Round-Trips
 
-    func test_sessionRecord_compressionMode_roundTrips() throws {
-        let persistence = SwiftDataPersistenceProvider(modelContext: context)
-        var record = ChatSessionRecord(title: "Compression Test")
-        record.compressionMode = .balanced
-        try persistence.insertSession(record)
-
-        let fetched = try persistence.fetchSessions().first { $0.id == record.id }
-        XCTAssertEqual(fetched?.compressionMode, .balanced)
-    }
-
     func test_sessionRecord_promptTemplate_roundTrips() throws {
         let persistence = SwiftDataPersistenceProvider(modelContext: context)
         var record = ChatSessionRecord(title: "Template Test")
@@ -355,7 +345,6 @@ final class PersistenceIntegrationTests: XCTestCase {
         try persistence.insertSession(record)
 
         let fetched = try persistence.fetchSessions().first { $0.id == record.id }
-        XCTAssertEqual(fetched?.compressionMode, .automatic)
         XCTAssertNil(fetched?.promptTemplate)
         XCTAssertEqual(fetched?.pinnedMessageIDs, [])
     }
