@@ -9,6 +9,12 @@ extension APIEndpoint {
 
     /// Returns a storage-agnostic snapshot of this endpoint suitable for
     /// passing to inference services that don't depend on SwiftData.
+    ///
+    /// `baseURL` and `modelName` are forwarded directly because the `@Model`
+    /// stores them as non-optional `String` — the model's own initializer
+    /// resolves any nil inputs to `provider.defaultBaseURL` /
+    /// `provider.defaultModelName` at construction time, so persisted values
+    /// are always concrete. There is no nil sentinel to preserve here.
     public var record: APIEndpointRecord {
         APIEndpointRecord(
             id: id,
