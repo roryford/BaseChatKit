@@ -74,6 +74,16 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     /// Access only under `stateLock`.
     private var _generationTask: Task<Void, Never>?
 
+    // MARK: - Load Progress
+
+    /// Guarded by `stateLock`. Set by `setLoadProgressHandler(_:)` before each load.
+    ///
+    /// `loadModelContainer(from: URL)` in `mlx-swift-lm` provides no granular progress hook
+    /// on local directory loads — the progress handler overload is only available for download
+    /// paths. We emit synthetic bookends (0.0 before, 1.0 after) so `InferenceService` can
+    /// distinguish "load started" from "load complete" rather than showing a flat 0% spinner.
+    private var _loadProgressHandler: (@Sendable (Double) async -> Void)?
+
     // MARK: - Configuration
 
     /// Policy controlling MLX's GPU buffer cache size. See `MLXCachePolicy`.
@@ -90,6 +100,14 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     public func loadModel(from url: URL, contextSize: Int32) async throws {
         unloadModel()
+
+        let progressHandler = withStateLock { _loadProgressHandler }
+
+        // Signal "load started". The `mlx-swift-lm` local-directory API has no granular
+        // progress hook, so we emit a 0.0 bookend here and a 1.0 bookend after the load
+        // completes. This gives InferenceService enough signal to animate a progress
+        // indicator rather than showing a flat 0% spinner for the full load duration.
+        await progressHandler?(0.0)
 
         do {
             // Load from a local directory containing config.json + .safetensors.
@@ -115,6 +133,9 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             Memory.cacheLimit = cacheBytes
             Self.logger.info("MLX cache limit set to \(cacheBytes / (1024 * 1024)) MB (policy: \(String(describing: self.cachePolicy)))")
             isModelLoaded = true
+            // Signal load complete before returning so InferenceService sees 1.0
+            // before it clears the handler and flips isModelLoaded.
+            await progressHandler?(1.0)
             Self.logger.info("MLX backend loaded model from \(url.lastPathComponent)")
         } catch {
             Self.logger.error("MLX model load failed: \(error)")
@@ -263,6 +284,18 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             Memory.clearCache()
         }
         Self.logger.info("MLX backend unloaded")
+    }
+}
+
+// MARK: - LoadProgressReporting
+
+extension MLXBackend: LoadProgressReporting {
+    /// Installs a synthetic-bookend progress handler. Because `mlx-swift-lm`'s local-directory
+    /// load path exposes no granular progress, the handler receives `0.0` when the load begins
+    /// and `1.0` when it completes successfully. This is enough for `InferenceService` to show
+    /// a non-zero progress indicator rather than a flat 0% spinner.
+    public func setLoadProgressHandler(_ handler: (@Sendable (Double) async -> Void)?) {
+        withStateLock { _loadProgressHandler = handler }
     }
 }
 #endif
