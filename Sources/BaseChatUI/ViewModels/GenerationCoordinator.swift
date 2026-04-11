@@ -206,13 +206,14 @@ final class GenerationCoordinator {
             // threw (e.g. queue full), activeGenerationToken is nil and we should
             // not touch anyone else's active request.
             if didEnqueue {
-                let willDrainNext = inferenceService.hasQueuedRequests
                 onSetActiveGenerationToken(nil)
-                // The queue auto-drains when the stream terminates in InferenceService.
-                // Only go idle if no queued request was waiting to start.
-                // Check before drain, since drain may empty the queue while
-                // starting a new generation.
-                if !willDrainNext {
+                // InferenceService auto-drains when our stream terminates, so by
+                // the time this defer fires the next request (if any) is already
+                // active. Only go idle if the service is no longer running anything
+                // — staying in .streaming would lie about UI state if we own the
+                // active gen, but going idle would lie if a sibling consumer's
+                // request just took over.
+                if !inferenceService.isGenerating {
                     _ = onTransitionPhase(.idle)
                 }
             } else {
