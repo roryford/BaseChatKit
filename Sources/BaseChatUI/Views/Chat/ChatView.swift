@@ -455,7 +455,10 @@ struct ErrorBannerView<Recovery: View>: View {
         .background(.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal)
         .padding(.top, 8)
-        .accessibilityElement(children: .contain)
+        // Use .combine so that the container itself becomes the VoiceOver element.
+        // With .contain the label/trait modifiers below would be silently ignored —
+        // .contain exposes children individually and discards container-level overrides.
+        .accessibilityElement(children: .combine)
         .accessibilityLabel(Self.accessibilityLabel(for: error))
         .accessibilityAddTraits(.isHeader)
     }
