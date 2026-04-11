@@ -24,9 +24,6 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// Minimum free disk space buffer beyond the model size (500 MB).
     private static let diskSpaceBuffer: UInt64 = 500_000_000
 
-    /// GGUF magic bytes: "GGUF" in ASCII (0x47, 0x47, 0x55, 0x46).
-    private static let ggufMagic: [UInt8] = [0x47, 0x47, 0x55, 0x46]
-
     // MARK: - Observable State
 
     /// Active and recently completed downloads, keyed by `DownloadableModel.id`.
@@ -52,7 +49,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     // MARK: - Private State
 
-    private struct TaskContext: Codable, Sendable {
+    internal struct TaskContext: Codable, Sendable {
         let modelID: String
         let relativePath: String?
         let expectedBytes: Int64
@@ -87,7 +84,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     private var snapshotDownloads: [String: SnapshotDownloadContext] = [:]
 
     /// The storage service used to determine where to place completed files.
-    private let storageService: ModelStorageService
+    internal let storageService: ModelStorageService
 
     /// Backing store for the lazily created background URL session.
     ///
@@ -240,80 +237,14 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     /// Validates that a downloaded file has the correct format.
     ///
+    /// Delegates to ``DownloadFileValidator`` which contains the format-specific logic.
+    ///
     /// - Parameters:
     ///   - fileURL: The temporary file location from URLSession.
     ///   - modelType: The expected model type.
     /// - Throws: `HuggingFaceError.invalidDownloadedFile` if validation fails.
     public func validateDownloadedFile(at fileURL: URL, modelType: ModelType) throws {
-        switch modelType {
-        case .gguf:
-            try validateGGUFFile(at: fileURL)
-        case .mlx:
-            guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                throw HuggingFaceError.invalidDownloadedFile(reason: "Downloaded MLX file does not exist")
-            }
-            // MLX models must be directories containing config.json + .safetensors files.
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else {
-                // A single file is not a valid MLX model — likely an HTML error page
-                // from trying to download a directory URL.
-                throw HuggingFaceError.invalidDownloadedFile(
-                    reason: "MLX models require snapshot download (multiple files). Single-file download is not supported."
-                )
-            }
-            let configPath = fileURL.appendingPathComponent("config.json").path
-            guard FileManager.default.fileExists(atPath: configPath) else {
-                throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory is missing config.json")
-            }
-            guard let enumerator = FileManager.default.enumerator(
-                at: fileURL,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            ) else {
-                throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory could not be enumerated")
-            }
-            let hasSafetensors = enumerator
-                .compactMap { $0 as? URL }
-                .contains { $0.pathExtension.lowercased() == "safetensors" }
-            guard hasSafetensors else {
-                throw HuggingFaceError.invalidDownloadedFile(reason: "MLX model directory contains no .safetensors files")
-            }
-        case .foundation:
-            throw HuggingFaceError.invalidDownloadedFile(reason: "Foundation models cannot be downloaded")
-        }
-    }
-
-    /// Validates that a file begins with the GGUF magic bytes.
-    private func validateGGUFFile(at fileURL: URL) throws {
-        guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
-            throw HuggingFaceError.invalidDownloadedFile(reason: "Cannot open downloaded GGUF file")
-        }
-        defer { handle.closeFile() }
-
-        guard let headerData = try? handle.read(upToCount: 4), headerData.count == 4 else {
-            throw HuggingFaceError.invalidDownloadedFile(
-                reason: "GGUF file too small — expected at least 4 bytes"
-            )
-        }
-
-        let bytes = [UInt8](headerData)
-        guard bytes == Self.ggufMagic else {
-            throw HuggingFaceError.invalidDownloadedFile(
-                reason: "Invalid GGUF magic bytes: expected [47,47,55,46], got \(bytes)"
-            )
-        }
-
-        // Verify file size is reasonable — a truncated file with correct magic would pass above.
-        let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-        let fileSize = (attrs[.size] as? UInt64) ?? 0
-        guard fileSize > 1_000_000 else {
-            throw HuggingFaceError.invalidDownloadedFile(
-                reason: "Downloaded file is too small (\(fileSize) bytes) — likely corrupted or incomplete"
-            )
-        }
-
-        Log.download.debug("GGUF file validated successfully at \(fileURL.lastPathComponent)")
+        try DownloadFileValidator().validate(at: fileURL, modelType: modelType)
     }
 
     // MARK: - Download Coordination
@@ -409,7 +340,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         }
     }
 
-    private func taskContext(for taskID: Int, taskDescription: String?) -> TaskContext? {
+    internal func taskContext(for taskID: Int, taskDescription: String?) -> TaskContext? {
         if let context = taskContexts[taskID] {
             return context
         }
@@ -433,7 +364,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     }
 
     @MainActor
-    private func removeTaskTracking(taskID: Int, modelID: String) {
+    internal func removeTaskTracking(taskID: Int, modelID: String) {
         taskContexts.removeValue(forKey: taskID)
         guard var snapshot = snapshotDownloads[modelID] else { return }
         snapshot.taskIDs.remove(taskID)
@@ -545,7 +476,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     }
 
     @MainActor
-    private func failSnapshotDownload(modelID: String, error: String, cancelRemainingTasks: Bool) {
+    internal func failSnapshotDownload(modelID: String, error: String, cancelRemainingTasks: Bool) {
         guard let snapshot = snapshotDownloads[modelID] else {
             if case .failed = activeDownloads[modelID]?.status {
                 return
@@ -607,7 +538,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         defaults.set(pending, forKey: pendingDownloadsKey)
     }
 
-    private func removePendingDownload(id: String) {
+    internal func removePendingDownload(id: String) {
         var pending = defaults.dictionary(forKey: pendingDownloadsKey) as? [String: [String: String]] ?? [:]
         pending.removeValue(forKey: id)
         defaults.set(pending, forKey: pendingDownloadsKey)
@@ -663,159 +594,6 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
                 }
             }
             Log.download.info("Restored pending download state for \(id)")
-        }
-    }
-}
-
-// MARK: - URLSessionDownloadDelegate
-
-extension BackgroundDownloadManager: URLSessionDownloadDelegate {
-
-    public func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        let taskID = downloadTask.taskIdentifier
-        let taskDescription = downloadTask.taskDescription
-
-        Task { @MainActor [weak self] in
-            guard let self,
-                  let context = self.taskContext(for: taskID, taskDescription: taskDescription) else { return }
-            if let relativePath = context.relativePath {
-                self.updateSnapshotProgress(
-                    modelID: context.modelID,
-                    relativePath: relativePath,
-                    bytesDownloaded: totalBytesWritten,
-                    totalBytesExpected: totalBytesExpectedToWrite
-                )
-            } else {
-                self.activeDownloads[context.modelID]?.updateProgress(
-                    bytesDownloaded: totalBytesWritten,
-                    totalBytes: totalBytesExpectedToWrite
-                )
-            }
-        }
-    }
-
-    public func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL
-    ) {
-        let taskID = downloadTask.taskIdentifier
-        let taskDescription = downloadTask.taskDescription
-
-        // Copy the file to a safe temporary location before this method returns,
-        // since the system deletes the file at `location` immediately after.
-        let tempURL: URL
-        do {
-            let tempDir = FileManager.default.temporaryDirectory
-            tempURL = tempDir.appendingPathComponent(UUID().uuidString + ".download")
-            try FileManager.default.moveItem(at: location, to: tempURL)
-        } catch {
-            Log.download.error("Failed to preserve downloaded file: \(error.localizedDescription)")
-            return
-        }
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-
-            guard let context = self.taskContext(for: taskID, taskDescription: taskDescription) else {
-                Log.download.error("Completed download has no model ID mapping (task \(taskID))")
-                return
-            }
-
-            guard let state = self.activeDownloads[context.modelID] else {
-                Log.download.error("No DownloadState for completed download: \(context.modelID)")
-                return
-            }
-
-            let model = state.model
-
-            do {
-                if let relativePath = context.relativePath {
-                    try self.completeSnapshotFile(
-                        modelID: context.modelID,
-                        relativePath: relativePath,
-                        tempURL: tempURL
-                    )
-                } else {
-                    try self.validateDownloadedFile(at: tempURL, modelType: model.modelType)
-                    let destination = self.storageService.modelsDirectory.appendingPathComponent(model.fileName)
-                    if FileManager.default.fileExists(atPath: destination.path) {
-                        try FileManager.default.removeItem(at: destination)
-                    }
-
-                    try FileManager.default.moveItem(at: tempURL, to: destination)
-                    Log.download.info("Download complete: \(model.displayName) → \(destination.lastPathComponent)")
-
-                    self.activeDownloads[context.modelID]?.markCompleted(localURL: destination)
-                    self.removePendingDownload(id: context.modelID)
-                }
-                self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
-            } catch {
-                Log.download.error("Post-download processing failed for \(context.modelID): \(error.localizedDescription)")
-                if context.relativePath != nil {
-                    self.failSnapshotDownload(
-                        modelID: context.modelID,
-                        error: error.localizedDescription,
-                        cancelRemainingTasks: true
-                    )
-                } else {
-                    self.activeDownloads[context.modelID]?.markFailed(error: error.localizedDescription)
-                    self.removePendingDownload(id: context.modelID)
-                }
-                self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
-                do {
-                    try FileManager.default.removeItem(at: tempURL)
-                } catch {
-                    Log.download.error("Failed to remove temp download \(tempURL.lastPathComponent): \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-
-    public func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        didCompleteWithError error: Error?
-    ) {
-        guard let error else { return }  // No error means success; handled in didFinishDownloadingTo.
-
-        let taskID = task.taskIdentifier
-        let taskDescription = task.taskDescription
-        let nsError = error as NSError
-        let errorDesc = error.localizedDescription
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard let context = self.taskContext(for: taskID, taskDescription: taskDescription) else { return }
-            Log.download.error("Download failed for \(context.modelID): \(errorDesc)")
-
-            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
-                if context.relativePath != nil {
-                    if case .failed = self.activeDownloads[context.modelID]?.status {
-                        self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
-                        return
-                    }
-                }
-                self.activeDownloads[context.modelID]?.markCancelled()
-            } else {
-                if context.relativePath != nil {
-                    self.failSnapshotDownload(
-                        modelID: context.modelID,
-                        error: errorDesc,
-                        cancelRemainingTasks: true
-                    )
-                } else {
-                    self.activeDownloads[context.modelID]?.markFailed(error: errorDesc)
-                }
-            }
-            self.removePendingDownload(id: context.modelID)
-            self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
         }
     }
 }
