@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.3](https://github.com/roryford/BaseChatKit/compare/v0.7.2...v0.7.3) (2026-04-11)
+
+**Load progress, an InferenceService audit, and internal hardening** — Three improvements from a focused audit of `InferenceService` and its supporting infrastructure.
+
+`LlamaBackend` now adopts `LoadProgressReporting` using the llama.cpp C API's `progress_callback` hook, publishing real fractional progress through `InferenceService.modelLoadProgress` as weights load. `MLXBackend` adopts the same protocol with synthetic `0.0`/`1.0` bookends — the `mlx-swift-lm` local-directory load path exposes no granular progress hook, so the bookend approach replaces the previous flat spinner with a signal that reflects actual load state. The `LoadProgressReporting` infrastructure in `InferenceService` was complete but adopted by no production backend; both backends now wire into it. ([#290](https://github.com/roryford/BaseChatKit/pull/290))
+
+The `unloadModel()` mid-stream safety invariant is now locked in by test. An audit of `InferenceService` confirmed that the existing guards — `stopGeneration()` nils `activeRequest` synchronously before the cancelled Task's defer fires, the auto-drain token guard prevents re-entry on a cancelled slot, and `enqueue()` rejects calls when `backend == nil` — are sufficient to prevent state corruption when a model is unloaded while generation is active. Two tests lock this in: one that unloads before any tokens flow and one that unloads after tokens start streaming, both verifying that `isModelLoaded`, `isGenerating`, and `hasQueuedRequests` are clean afterward and that a subsequent `enqueue()` correctly throws. ([#288](https://github.com/roryford/BaseChatKit/pull/288))
+
+Two smaller improvements round out the release: `NSRegularExpression` for system prompt context substitution is now compiled once as a file-private top-level constant rather than on every generation call ([#287](https://github.com/roryford/BaseChatKit/pull/287)), and `BackgroundDownloadManager` is split into three focused files — the GGUF/MLX format validation logic extracted into a standalone `DownloadFileValidator` struct and the `URLSessionDownloadDelegate` conformance moved to its own extension file, reducing the main file from 821 to ~600 lines ([#289](https://github.com/roryford/BaseChatKit/pull/289)).
+
 ## [0.7.2](https://github.com/roryford/BaseChatKit/compare/v0.7.1...v0.7.2) (2026-04-11)
 
 **Generation queue hardening — auto-drain and title generation race eliminated** — Two fixes targeting the InferenceService generation queue, both discovered during an audit of the service's blast radius against consumers like Fireside.
