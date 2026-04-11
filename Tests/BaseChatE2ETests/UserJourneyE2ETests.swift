@@ -314,6 +314,12 @@ final class UserJourneyE2ETests {
         // the session record straight from SwiftData. This proves that
         // saveSettingsToSession actually reached the store in step 7 — not
         // just the in-memory sessions array that loadSessions() repopulates.
+        //
+        // Sabotage verified: removing the `try vm.saveSettingsToSession()` call
+        // in step 7 causes the assertion below to fail with
+        // `storedSessions.first?.selectedModelID == modelA.id` (or nil) instead
+        // of modelB.id, confirming this assertion catches the real persistence
+        // contract and is not accidentally vacuous.
         let storedSessionID = session.id
         let sessionDescriptor = FetchDescriptor<ChatSession>(
             predicate: #Predicate { $0.id == storedSessionID }
