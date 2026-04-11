@@ -49,6 +49,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     // MARK: - Private State
 
+    // internal: required by BackgroundDownloadManager+URLSessionDelegate.swift
     internal struct TaskContext: Codable, Sendable {
         let modelID: String
         let relativePath: String?
@@ -83,7 +84,8 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// Tracks multi-file MLX downloads by logical model ID.
     private var snapshotDownloads: [String: SnapshotDownloadContext] = [:]
 
-    /// The storage service used to determine where to place completed files.
+    /// Promoted to `internal` (from `private`) so `BackgroundDownloadManager+URLSessionDelegate.swift`
+    /// can read `storageService.modelsDirectory` when moving completed downloads.
     internal let storageService: ModelStorageService
 
     /// Backing store for the lazily created background URL session.
@@ -340,6 +342,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         }
     }
 
+    // internal: required by BackgroundDownloadManager+URLSessionDelegate.swift
     internal func taskContext(for taskID: Int, taskDescription: String?) -> TaskContext? {
         if let context = taskContexts[taskID] {
             return context
@@ -363,6 +366,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         return TaskContext(modelID: taskDescription, relativePath: nil, expectedBytes: 0)
     }
 
+    // internal: required by BackgroundDownloadManager+URLSessionDelegate.swift
     @MainActor
     internal func removeTaskTracking(taskID: Int, modelID: String) {
         taskContexts.removeValue(forKey: taskID)
@@ -475,6 +479,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         snapshotDownloads.removeValue(forKey: modelID)
     }
 
+    // internal: required by BackgroundDownloadManager+URLSessionDelegate.swift
     @MainActor
     internal func failSnapshotDownload(modelID: String, error: String, cancelRemainingTasks: Bool) {
         guard let snapshot = snapshotDownloads[modelID] else {
@@ -538,6 +543,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         defaults.set(pending, forKey: pendingDownloadsKey)
     }
 
+    // internal: required by BackgroundDownloadManager+URLSessionDelegate.swift
     internal func removePendingDownload(id: String) {
         var pending = defaults.dictionary(forKey: pendingDownloadsKey) as? [String: [String: String]] ?? [:]
         pending.removeValue(forKey: id)
