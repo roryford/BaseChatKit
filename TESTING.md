@@ -195,7 +195,7 @@ This matrix maps every major feature area to its current test coverage and ident
 | Prompt template formatting | PromptTemplateTests | - | - | - | - |
 | Prompt slot assembly | PromptAssemblerTests | - | ContextOverflowE2ETests | - | - |
 | Sampler presets | SamplerPresetTests | - | - | - | No integration test |
-| Macro expansion | MacroExpanderTests | ChatViewModelMacroExpansionTests | - | - | - |
+| System prompt templating | - | ChatViewModelSystemPromptContextTests | - | - | - |
 | Generation settings | GenerationConfigTests | GenerationViewModelTests | - | SettingsUITests | - |
 | Backend capabilities | BackendCapabilitiesTests | - | - | - | - |
 | Backend contract | BackendContractTests | - | - | - | - |

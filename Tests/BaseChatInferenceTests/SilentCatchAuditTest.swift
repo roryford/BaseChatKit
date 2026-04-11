@@ -48,8 +48,6 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: tempURL)",
         "BaseChatInference/Services/Compression/AnchoredCompressor.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines, .caseInsensitive]) else {",
         "BaseChatInference/Services/GGUFMetadataReader.swift:guard let handle = try? FileHandle(forReadingFrom: url) else { return false }",
-        "BaseChatInference/Services/MacroExpander.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {",
-        "BaseChatInference/Services/MacroExpander.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {",
         "BaseChatInference/Services/ModelStorageService.swift:guard let contents = try? fileManager.contentsOfDirectory(",
 
         // BaseChatBackends
@@ -61,7 +59,6 @@ final class SilentCatchAuditTest: XCTestCase {
 
         // BaseChatUI — Task.sleep cancellation is intentionally ignored;
         // parser/rendering fallbacks are benign optional conversions.
-        "BaseChatUI/ViewModels/ChatViewModel+Generation.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {",
         "BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))",
         "BaseChatUI/Views/Chat/AssistantMarkdownView.swift:if let parsed = try? AttributedString(",
         "BaseChatUI/Views/Chat/TypingIndicatorView.swift:try? await Task.sleep(for: .milliseconds(400))",
