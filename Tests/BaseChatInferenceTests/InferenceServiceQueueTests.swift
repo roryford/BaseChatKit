@@ -633,6 +633,62 @@ final class InferenceServiceQueueTests: XCTestCase {
                       "service should be generating stream2 after auto-drain")
     }
 
+    // MARK: - 21. unloadModel mid-stream leaves state consistent
+
+    /// Verifies that calling `unloadModel()` while a request is mid-stream leaves
+    /// the service in a fully clean state and prevents new requests from being enqueued.
+    ///
+    /// This locks in the safety invariants established by the existing guards:
+    /// - `stopGeneration()` nils `activeRequest` before the active Task's defer fires,
+    ///   so the defer's token-match guard prevents a spurious `drainQueue()` call.
+    /// - `enqueue()` guards `backend != nil` so no new requests can enter after unload.
+    func test_unloadModel_midStream_doesNotCorruptState() async throws {
+        let (service, _) = makeService()
+
+        // Enqueue a request — it becomes active immediately. The GatedMockBackend
+        // blocks generation until explicitly released, so we're mid-stream.
+        let (_, stream) = try service.enqueue(
+            messages: [("user", "hello")],
+            priority: .normal
+        )
+
+        XCTAssertEqual(stream.phase, .connecting, "Stream should be active (connecting)")
+        XCTAssertTrue(service.isGenerating)
+
+        // Unload while the request is active (before any tokens are released).
+        service.unloadModel()
+
+        // Core state must be fully clean immediately.
+        XCTAssertFalse(service.isModelLoaded, "isModelLoaded must be false after unload")
+        XCTAssertFalse(service.isGenerating, "isGenerating must be false after unload")
+        XCTAssertFalse(service.hasQueuedRequests, "hasQueuedRequests must be false after unload")
+
+        // Let the cancelled Task's defer run — it must not re-corrupt state.
+        await Task.yield()
+
+        XCTAssertFalse(service.isModelLoaded, "isModelLoaded must remain false after Task defer fires")
+        XCTAssertFalse(service.isGenerating, "isGenerating must remain false after Task defer fires")
+        XCTAssertFalse(service.hasQueuedRequests, "hasQueuedRequests must remain false after Task defer fires")
+
+        // The stream from the cancelled request must be in a failed (not stuck) phase.
+        let phase = stream.phase
+        if case .failed = phase {
+            // expected — cancelled mid-stream
+        } else {
+            XCTFail("Stream should be .failed after mid-stream unload, got \(phase)")
+        }
+
+        // Subsequent enqueue must throw because no model is loaded.
+        XCTAssertThrowsError(
+            try service.enqueue(messages: [("user", "after-unload")], priority: .normal)
+        ) { error in
+            XCTAssertTrue(
+                "\(error)".contains("No model loaded"),
+                "Error should mention no model loaded, got: \(error)"
+            )
+        }
+    }
+
     // MARK: - 17. finishAndDiscard always finishes continuation
 
     func test_finishAndDiscard_alwaysFinishesContinuation() async throws {
