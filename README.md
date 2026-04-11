@@ -45,17 +45,23 @@ BCK and AnyLanguageModel occupy adjacent niches. AnyLanguageModel optimizes for 
 
 ## Architecture
 
-BaseChatKit is split into three targets with a clean dependency graph:
+BaseChatKit is split into four targets with a clean dependency graph:
 
 ```
-BaseChatUI  ──────────>  BaseChatCore  <──────────  BaseChatBackends
-(Views, ViewModels)      (Protocols, Models,        (MLX, llama.cpp,
-                          Services)                  Foundation, Cloud)
+BaseChatUI  ──────────>  BaseChatCore  ──────────>  BaseChatInference
+(Views, ViewModels)      (SwiftData schema,         (Protocols, Models,
+                          @Model types,              Services, Inference
+                          persistence, export)       orchestration)
+                                                            ↑
+                         BaseChatBackends ──────────────────┘
+                         (MLX, llama.cpp,
+                          Foundation, Cloud)
 ```
 
-- **BaseChatCore** — Models, protocols, and services. No ML dependencies. This is the integration point for custom backends.
-- **BaseChatBackends** — Concrete inference backend implementations. Depends on MLX, llama.cpp, and cloud APIs.
-- **BaseChatUI** — SwiftUI views and view models. Depends only on BaseChatCore.
+- **BaseChatInference** — Inference orchestration. Protocols, models, and services for model loading, generation, context windows, prompt assembly, compression, macros, tokenizers, and capability detection. No SwiftData. No ML dependencies. This is the integration point for custom backends and the minimum target for apps that bring their own persistence and UI.
+- **BaseChatCore** — SwiftData schema, `@Model` types (`ChatMessage`, `ChatSession`, `SamplerPreset`, `APIEndpoint`, `ModelBenchmarkCache`), `ModelContainerFactory`, `ChatPersistenceProvider`, and chat export. Re-exports `BaseChatInference`, so existing apps that `import BaseChatCore` continue to see the full inference surface unchanged.
+- **BaseChatBackends** — Concrete inference backend implementations. Depends on `BaseChatInference` (not `BaseChatCore`), so backends stay free of SwiftData. Pulls MLX, llama.cpp, and cloud APIs.
+- **BaseChatUI** — SwiftUI views and view models. Depends on `BaseChatCore` (for persistence) and `BaseChatInference` (for inference orchestration).
 
 ## Quick Start
 

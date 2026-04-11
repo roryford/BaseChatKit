@@ -2,6 +2,7 @@
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Integration tests for ChatViewModel persistence using REAL SwiftData (in-memory).

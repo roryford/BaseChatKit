@@ -1,6 +1,7 @@
 @preconcurrency import XCTest
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Tests for the logic that drives ChatInputBar's enabled/disabled states.

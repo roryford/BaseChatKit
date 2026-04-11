@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 
 /// A test double that models the latency profile of a real streaming backend.
 ///

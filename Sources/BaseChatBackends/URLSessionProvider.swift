@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 
 /// Centralized factory for URLSession instances used by cloud backends.
 ///

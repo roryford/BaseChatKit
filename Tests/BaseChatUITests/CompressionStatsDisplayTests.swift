@@ -2,6 +2,7 @@
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Tests that `ChatViewModel.lastCompressionStats` is correctly nil by default,

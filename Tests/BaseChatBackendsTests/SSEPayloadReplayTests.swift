@@ -1,6 +1,7 @@
 import XCTest
 @testable import BaseChatBackends
 @testable import BaseChatCore
+@testable import BaseChatInference
 
 // MARK: - Byte Sequence Helper
 

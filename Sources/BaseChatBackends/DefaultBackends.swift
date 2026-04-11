@@ -1,4 +1,4 @@
-import BaseChatCore
+import BaseChatInference
 
 /// Registers the default set of backends with an InferenceService.
 /// Call this at app startup after configuring BaseChatConfiguration.

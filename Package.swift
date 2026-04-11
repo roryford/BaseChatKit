@@ -9,6 +9,7 @@ let package = Package(
         .macOS(.v14),
     ],
     products: [
+        .library(name: "BaseChatInference", targets: ["BaseChatInference"]),
         .library(name: "BaseChatCore", targets: ["BaseChatCore"]),
         .library(name: "BaseChatBackends", targets: ["BaseChatBackends"]),
         .library(name: "BaseChatUI", targets: ["BaseChatUI"]),
@@ -33,19 +34,26 @@ let package = Package(
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
     ],
     targets: [
-        // Core: models, protocols, services — no heavy ML deps
+        // Inference: models, protocols, services — no SwiftData, no heavy ML deps
         .target(
-            name: "BaseChatCore",
+            name: "BaseChatInference",
             dependencies: [
                 .product(name: "HuggingFace", package: "swift-huggingface"),
             ],
+            path: "Sources/BaseChatInference"
+        ),
+        // Core: SwiftData persistence (schema, @Model types, container, provider)
+        // plus chat export. Re-exports BaseChatInference for source compatibility.
+        .target(
+            name: "BaseChatCore",
+            dependencies: ["BaseChatInference"],
             path: "Sources/BaseChatCore"
         ),
         // Backends: MLX, llama.cpp, Foundation, cloud
         .target(
             name: "BaseChatBackends",
             dependencies: [
-                "BaseChatCore",
+                "BaseChatInference",
                 .product(name: "MLX", package: "mlx-swift", condition: .when(traits: ["MLX"])),
                 .product(name: "MLXLLM", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
@@ -59,10 +67,10 @@ let package = Package(
                 .define("Llama", .when(traits: ["Llama"])),
             ]
         ),
-        // UI: SwiftUI views and view models
+        // UI: SwiftUI views and view models — needs both inference and persistence
         .target(
             name: "BaseChatUI",
-            dependencies: ["BaseChatCore"],
+            dependencies: ["BaseChatCore", "BaseChatInference"],
             path: "Sources/BaseChatUI"
         ),
         // Shared test mocks and utilities
@@ -70,6 +78,7 @@ let package = Package(
             name: "BaseChatTestSupport",
             dependencies: [
                 "BaseChatCore",
+                "BaseChatInference",
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
             ],
             path: "Sources/BaseChatTestSupport",
@@ -80,7 +89,11 @@ let package = Package(
         ),
         .testTarget(
             name: "BaseChatCoreTests",
-            dependencies: ["BaseChatCore", "BaseChatTestSupport"]
+            dependencies: ["BaseChatCore", "BaseChatInference", "BaseChatTestSupport"]
+        ),
+        .testTarget(
+            name: "BaseChatInferenceTests",
+            dependencies: ["BaseChatInference", "BaseChatTestSupport"]
         ),
         .testTarget(
             name: "BaseChatBackendsTests",
@@ -88,6 +101,7 @@ let package = Package(
                 "BaseChatBackends",
                 "BaseChatUI",
                 "BaseChatCore",
+                "BaseChatInference",
                 "BaseChatTestSupport",
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
             ],
@@ -98,17 +112,18 @@ let package = Package(
         ),
         .testTarget(
             name: "BaseChatUITests",
-            dependencies: ["BaseChatUI", "BaseChatCore", "BaseChatTestSupport"]
+            dependencies: ["BaseChatUI", "BaseChatCore", "BaseChatInference", "BaseChatTestSupport"]
         ),
         .testTarget(
             name: "BaseChatE2ETests",
-            dependencies: ["BaseChatBackends", "BaseChatUI", "BaseChatCore", "BaseChatTestSupport"]
+            dependencies: ["BaseChatBackends", "BaseChatUI", "BaseChatCore", "BaseChatInference", "BaseChatTestSupport"]
         ),
         .testTarget(
             name: "BaseChatSnapshotTests",
             dependencies: [
                 "BaseChatUI",
                 "BaseChatCore",
+                "BaseChatInference",
                 "BaseChatTestSupport",
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
@@ -122,6 +137,7 @@ let package = Package(
             dependencies: [
                 "BaseChatBackends",
                 "BaseChatCore",
+                "BaseChatInference",
                 "BaseChatTestSupport",
             ],
             swiftSettings: [

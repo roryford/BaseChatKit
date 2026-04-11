@@ -6,7 +6,7 @@ import MLXLMCommon
 import MLXHuggingFace
 import Tokenizers
 import os
-import BaseChatCore
+import BaseChatInference
 
 /// MLX Swift inference backend for safetensors/MLX-format models.
 ///

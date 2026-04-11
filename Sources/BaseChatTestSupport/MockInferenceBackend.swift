@@ -1,6 +1,6 @@
 import Foundation
 import Darwin
-import BaseChatCore
+import BaseChatInference
 
 /// Configurable mock inference backend for testing.
 ///

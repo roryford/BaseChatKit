@@ -6,6 +6,7 @@ import SwiftData
 // wires cloud backends through InferenceService.
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 import BaseChatTestSupport
 
 /// Integration tests for the cloud endpoint selection and generation pipeline.

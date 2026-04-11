@@ -1,6 +1,7 @@
 @preconcurrency import XCTest
 @testable import BaseChatUI
 @testable import BaseChatCore
+@testable import BaseChatInference
 
 /// Tests for the data model and validation logic that drives API configuration views.
 ///

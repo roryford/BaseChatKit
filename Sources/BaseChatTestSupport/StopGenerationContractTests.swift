@@ -1,5 +1,5 @@
 import XCTest
-import BaseChatCore
+import BaseChatInference
 
 /// Shared conformance tests that verify the `stopGeneration()` contract
 /// documented on `InferenceBackend`.

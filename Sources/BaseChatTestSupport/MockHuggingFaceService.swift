@@ -1,5 +1,5 @@
 import Foundation
-import BaseChatCore
+import BaseChatInference
 import os
 
 /// Configurable mock HuggingFace service for testing.

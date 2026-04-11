@@ -1,6 +1,7 @@
 import XCTest
 @testable import BaseChatCore
 
+@MainActor
 final class SettingsServiceTests: XCTestCase {
 
     private var suiteName: String!
@@ -81,7 +82,7 @@ final class SettingsServiceTests: XCTestCase {
     func test_effectiveValues_nilSession_usesGlobal() {
         service.globalTemperature = 0.5
 
-        XCTAssertEqual(service.effectiveTemperature(session: nil), 0.5, accuracy: 0.01)
+        XCTAssertEqual(service.effectiveTemperature(session: ChatSession?.none), 0.5, accuracy: 0.01)
     }
 
     // MARK: - Appearance
@@ -146,13 +147,13 @@ final class SettingsServiceTests: XCTestCase {
 
     func test_effectiveTemperature_nilGlobalFallsToHardcodedDefault() {
         // Neither session nor global is set
-        XCTAssertEqual(service.effectiveTemperature(session: nil), 0.7, accuracy: 0.01)
+        XCTAssertEqual(service.effectiveTemperature(session: ChatSession?.none), 0.7, accuracy: 0.01)
     }
 
     func test_effectiveTemperature_zeroGlobalDoesNotFallToDefault() {
         service.globalTemperature = 0.0
 
-        XCTAssertEqual(service.effectiveTemperature(session: nil), 0.0, accuracy: 0.01,
+        XCTAssertEqual(service.effectiveTemperature(session: ChatSession?.none), 0.0, accuracy: 0.01,
                        "Global 0.0 should be used, not the hardcoded 0.7 default")
     }
 }

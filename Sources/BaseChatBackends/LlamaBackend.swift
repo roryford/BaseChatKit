@@ -2,7 +2,7 @@
 import Foundation
 import LlamaSwift
 import os
-import BaseChatCore
+import BaseChatInference
 
 /// llama.cpp inference backend for GGUF-format models.
 ///

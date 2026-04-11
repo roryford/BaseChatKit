@@ -2,7 +2,7 @@
 import Foundation
 import FoundationModels
 import os
-import BaseChatCore
+import BaseChatInference
 
 /// Apple FoundationModels inference backend for on-device Apple Intelligence models.
 ///

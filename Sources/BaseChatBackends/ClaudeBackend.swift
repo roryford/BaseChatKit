@@ -1,6 +1,6 @@
 import Foundation
 import os
-import BaseChatCore
+import BaseChatInference
 
 /// Anthropic Claude API inference backend.
 ///

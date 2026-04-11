@@ -1,6 +1,6 @@
 import Foundation
 import os
-import BaseChatCore
+import BaseChatInference
 
 /// Inference backend for Ollama servers using the native `/api/chat` endpoint.
 ///
