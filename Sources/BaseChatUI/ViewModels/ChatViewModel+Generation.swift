@@ -60,14 +60,13 @@ extension ChatViewModel {
         transitionPhase(to: .waitingForFirstToken)
         let messageID = assistantMessage.id
         defer {
-            // Only call generationDidFinish (which drains the queue) if we
-            // actually started a generation. If enqueue() threw (e.g. queue
-            // full), calling it would incorrectly clear someone else's active
-            // request.
+            // Only update state if we actually started a generation. If enqueue()
+            // threw (e.g. queue full), activeGenerationToken is nil and we should
+            // not touch anyone else's active request.
             if activeGenerationToken != nil {
                 let willDrainNext = inferenceService.hasQueuedRequests
                 activeGenerationToken = nil
-                inferenceService.generationDidFinish()
+                // The queue auto-drains when the stream terminates in InferenceService.
                 // Only go idle if no queued request was waiting to start.
                 // Check before drain, since drain may empty the queue while
                 // starting a new generation.

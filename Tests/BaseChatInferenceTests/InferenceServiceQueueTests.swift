@@ -239,15 +239,17 @@ final class InferenceServiceQueueTests: XCTestCase {
         XCTAssertEqual(streamNorm.phase, .queued, "normal should still be queued")
         XCTAssertEqual(streamBg.phase, .queued, "background should still be queued")
 
+        // Release stream at index 1 and yield to let the activeTask's defer fire
+        // (auto-drain). Without consuming the stream, a yield is required.
         await Task.yield()
         mock.release(at: 1)
-        service.generationDidFinish()
+        await Task.yield()
         XCTAssertEqual(streamNorm.phase, .connecting, "normal should run second")
         XCTAssertEqual(streamBg.phase, .queued, "background should still be queued")
 
         await Task.yield()
         mock.release(at: 2)
-        service.generationDidFinish()
+        await Task.yield()
         XCTAssertEqual(streamBg.phase, .connecting, "background should run last")
     }
 
@@ -470,7 +472,7 @@ final class InferenceServiceQueueTests: XCTestCase {
         let _ = try service.enqueue(messages: [("user", "first")], priority: .normal)
         let (_, stream2) = try service.enqueue(messages: [("user", "second")], priority: .normal)
 
-        // generationDidFinish is NOT called, so active stays.
+        // The first stream is not consumed, so auto-drain never fires.
         // Calling drainQueue indirectly via another enqueue should not start second.
         await Task.yield()
 
@@ -517,11 +519,11 @@ final class InferenceServiceQueueTests: XCTestCase {
         }
     }
 
-    // MARK: - 18. generationDidFinish omission stalls queue
+    // MARK: - 18. Queue auto-drains without generationDidFinish()
 
-    /// Documents the current contract: if the caller consumes stream1 but never
-    /// calls generationDidFinish(), the queue stalls permanently.
-    func test_queue_stallsIfGenerationDidFinishNeverCalled() async throws {
+    /// Verifies that the queue drains automatically after stream1 is consumed,
+    /// without any explicit call to generationDidFinish().
+    func test_queue_autoDrains_withoutGenerationDidFinish() async throws {
         let (service, mock) = makeService()
 
         let (_, stream1) = try service.enqueue(
@@ -539,19 +541,18 @@ final class InferenceServiceQueueTests: XCTestCase {
         await Task.yield()
         mock.release(at: 0, tokens: ["a"])
 
-        // Consume stream1 fully — but deliberately do NOT call generationDidFinish().
+        // Consume stream1 fully — deliberately do NOT call generationDidFinish().
+        // The queue should auto-drain when the stream terminates.
         for try await _ in stream1.events {}
 
-        // Yield several times to give the service every chance to self-drain.
-        await Task.yield()
-        await Task.yield()
-        await Task.yield()
-
-        // Queue must still be stalled because generationDidFinish() was not called.
-        XCTAssertEqual(stream2.phase, .queued,
-                       "Queue should be stalled when generationDidFinish() is never called")
-        XCTAssertTrue(service.hasQueuedRequests,
-                      "Service should still report queued requests")
+        // The activeTask's defer fires on the main actor before `for try await`
+        // returns, so auto-drain is synchronous from the test's perspective.
+        XCTAssertEqual(stream2.phase, .connecting,
+                       "Queue should auto-drain after stream1 is consumed without generationDidFinish()")
+        XCTAssertFalse(service.hasQueuedRequests,
+                       "Service should report no queued requests after auto-drain")
+        XCTAssertTrue(service.isGenerating,
+                      "Service should be generating stream2 after auto-drain")
     }
 
     // MARK: - 19. Concurrent non-queued generate() + enqueue() state correctness
@@ -590,6 +591,46 @@ final class InferenceServiceQueueTests: XCTestCase {
         for try await _ in stream2.events {}
 
         service.generationDidFinish()
+    }
+
+    // MARK: - 20. Auto-drain: two requests, no generationDidFinish()
+
+    /// Enqueues two requests, consumes stream1 without calling generationDidFinish(),
+    /// and verifies that stream2 transitions to .connecting automatically.
+    func test_queueAutoDrains_withoutExplicitGenerationDidFinish() async throws {
+        let (service, mock) = makeService()
+
+        let (_, stream1) = try service.enqueue(
+            messages: [("user", "first")],
+            priority: .normal
+        )
+        let (_, stream2) = try service.enqueue(
+            messages: [("user", "second")],
+            priority: .normal
+        )
+
+        XCTAssertEqual(stream1.phase, .connecting)
+        XCTAssertEqual(stream2.phase, .queued)
+
+        // Let the activeTask start and release stream1.
+        await Task.yield()
+        mock.release(at: 0, tokens: ["tok"])
+
+        // Consume stream1 without calling generationDidFinish().
+        var collected: [String] = []
+        for try await event in stream1.events {
+            if case .token(let text) = event {
+                collected.append(text)
+            }
+        }
+
+        XCTAssertEqual(collected, ["tok"], "stream1 should have yielded its token")
+
+        // Auto-drain should have fired: stream2 must now be connecting.
+        XCTAssertEqual(stream2.phase, .connecting,
+                       "stream2 should transition to .connecting automatically after stream1 terminates")
+        XCTAssertTrue(service.isGenerating,
+                      "service should be generating stream2 after auto-drain")
     }
 
     // MARK: - 17. finishAndDiscard always finishes continuation

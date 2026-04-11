@@ -48,8 +48,8 @@ public typealias CloudBackendFactory = @MainActor (APIProvider) -> (any Inferenc
 /// - **Max queue depth**: excess `enqueue()` calls throw. Default: 8.
 /// - **Thermal gating**: `.background` requests are dropped when the device is
 ///   under `.serious` or `.critical` thermal pressure.
-/// - **`generationDidFinish()` contract**: callers MUST call this after consuming
-///   the stream. Failure to do so stalls the queue permanently.
+/// - **Auto-drain**: the queue drains automatically when each stream terminates.
+///   `generationDidFinish()` is deprecated and is now a no-op.
 @Observable
 @MainActor
 public final class InferenceService {
@@ -569,6 +569,19 @@ public final class InferenceService {
                         continuation.finish()
                     }
                 }
+                // Auto-drain: clear the active slot and start the next queued
+                // request without requiring the consumer to call generationDidFinish().
+                //
+                // The token guard is critical: cancel() and stopGeneration() nil
+                // out activeRequest synchronously BEFORE this defer fires. Without
+                // the guard, a cancelled slot would re-enter drain and incorrectly
+                // start a new generation.
+                if self.activeRequest?.token == next.token {
+                    self.activeRequest = nil
+                    self.activeTask = nil
+                    self.isGenerating = false
+                    self.drainQueue()
+                }
             }
 
             do {
@@ -602,8 +615,6 @@ public final class InferenceService {
                     next.stream.setPhase(.failed(error.localizedDescription))
                 }
             }
-            // The consumer's defer block calls generationDidFinish(),
-            // which clears activeRequest and triggers the next drain.
         }
     }
 
@@ -682,13 +693,13 @@ public final class InferenceService {
         requestQueue.removeAll()
     }
 
-    /// Notifies the service that generation has finished (called by view model
-    /// after consuming the stream). Drains the next queued request if any.
+    /// Notifies the service that generation has finished.
+    ///
+    /// - Note: Deprecated. The queue auto-drains when the stream terminates.
+    ///   This method is a no-op and will be removed in a future release.
+    @available(*, deprecated, message: "The queue auto-drains when the stream terminates. This method is a no-op and will be removed in a future release.")
     public func generationDidFinish() {
-        activeRequest = nil
-        activeTask = nil
-        isGenerating = false
-        drainQueue()
+        // No-op. The queue auto-drains via the activeTask defer in drainQueue().
     }
 
     /// Resets conversation state in the active backend without unloading the model.
