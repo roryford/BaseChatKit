@@ -235,26 +235,12 @@ final class ViewSnapshotTests: XCTestCase {
         )
     }
 
-    // MARK: - MessagePartsView (3 snapshots)
+    // MARK: - MessagePartsView (1 snapshot)
 
     func test_messageParts_textOnly() {
         assertDumpSnapshot(
             MessagePartsView(parts: [.text("Hello world")], role: .assistant),
             named: "text_only"
-        )
-    }
-
-    func test_messageParts_toolCall() {
-        assertDumpSnapshot(
-            MessagePartsView(parts: [.toolCall(id: "1", name: "get_weather", arguments: "{\"city\": \"London\"}")], role: .assistant),
-            named: "tool_call"
-        )
-    }
-
-    func test_messageParts_mixedParts() {
-        assertDumpSnapshot(
-            MessagePartsView(parts: [.text("Check this:"), .toolResult(id: "1", content: "Temperature: 18°C")], role: .user),
-            named: "mixed_parts"
         )
     }
 

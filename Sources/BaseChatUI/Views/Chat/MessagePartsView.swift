@@ -3,9 +3,8 @@ import BaseChatCore
 
 /// Renders an array of ``MessagePart`` values within a message bubble.
 ///
-/// Text parts are rendered inline (markdown for assistant, plain for user),
-/// images are shown as thumbnails, and tool calls/results are displayed as
-/// labeled disclosure groups.
+/// Text parts are rendered inline (markdown for assistant, plain for user)
+/// and images are shown as thumbnails.
 struct MessagePartsView: View {
     let parts: [MessagePart]
     let role: MessageRole
@@ -24,12 +23,6 @@ struct MessagePartsView: View {
 
         case .image(let data, _):
             imageView(data)
-
-        case .toolCall(let id, let name, let arguments):
-            toolCallView(id: id, name: name, arguments: arguments)
-
-        case .toolResult(let id, let content):
-            toolResultView(id: id, content: content)
         }
     }
 
@@ -66,43 +59,8 @@ struct MessagePartsView: View {
         #endif
     }
 
-    private func toolCallView(id: String, name: String, arguments: String) -> some View {
-        DisclosureGroup {
-            Text(arguments)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label(name, systemImage: "wrench")
-                .font(.callout.bold())
-        }
-        .padding(8)
-        .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func toolResultView(id: String, content: String) -> some View {
-        DisclosureGroup {
-            Text(content)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label("Tool Result", systemImage: "arrow.turn.down.left")
-                .font(.callout.bold())
-        }
-        .padding(8)
-        .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8))
-    }
 }
 
 #Preview("Text Only") {
     MessagePartsView(parts: [.text("Hello world")], role: .assistant)
-}
-
-#Preview("Tool Call") {
-    MessagePartsView(parts: [.toolCall(id: "1", name: "get_weather", arguments: "{\"city\": \"London\"}")], role: .assistant)
-}
-
-#Preview("Mixed Parts") {
-    MessagePartsView(parts: [.text("Check this:"), .toolResult(id: "1", content: "Temperature: 18°C")], role: .user)
 }
