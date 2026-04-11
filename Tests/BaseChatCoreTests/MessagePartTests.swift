@@ -27,6 +27,7 @@ final class MessagePartTests: XCTestCase {
             .text("Here is the weather:"),
             .image(data: Data([0xFF, 0xD8, 0xFF, 0xE0]), mimeType: "image/jpeg"),
             .text("It's rainy today."),
+            .image(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png"),
         ]
         let data = try JSONEncoder().encode(parts)
         let decoded = try JSONDecoder().decode([MessagePart].self, from: data)
@@ -92,6 +93,20 @@ final class MessagePartTests: XCTestCase {
     func test_chatMessage_decode_emptyString_returnsEmptyArray() {
         let parts = BaseChatSchemaV3.ChatMessage.decode("")
         XCTAssertEqual(parts, [])
+    }
+
+    // Regression lock for the fallback behavior that made the tool-case removal safe — see PR #270 audit.
+    // Simulates a hypothetical pre-0.6.x persisted row containing a removed `.toolCall` discriminator
+    // alongside a still-valid `.text` part. The decode path must not crash; it must degrade to a single
+    // `.text` bubble containing the raw JSON so the user sees something rather than losing the message.
+    func test_chatMessage_decode_legacyToolCaseJSON_fallsBackToRawTextPart() {
+        let legacyJSON = #"""
+        [{"text":{"_0":"Hello"}},{"toolCall":{"_0":{"id":"tc1","name":"get_weather","arguments":"{\"city\":\"London\"}"}}}]
+        """#
+
+        let parts = BaseChatSchemaV3.ChatMessage.decode(legacyJSON)
+
+        XCTAssertEqual(parts, [.text(legacyJSON)])
     }
 
     func test_chatMessage_contentParts_syncContentString() throws {

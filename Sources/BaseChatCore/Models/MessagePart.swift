@@ -7,10 +7,10 @@ import Foundation
 /// render appropriate controls (e.g., inline images) and backends can map
 /// parts to their native message formats.
 ///
-/// `ChatMessage.decode` falls back to a `.text` part when JSON decoding
-/// fails, so any pre-removal persisted rows containing `toolCall` /
-/// `toolResult` discriminators degrade gracefully to a text bubble rather
-/// than crashing.
+/// ``BaseChatSchemaV3/ChatMessage/decode(_:)`` falls back to a `.text` part
+/// when JSON decoding fails, so any pre-removal persisted rows containing
+/// `toolCall` / `toolResult` discriminators degrade gracefully to a text
+/// bubble rather than crashing.
 public enum MessagePart: Codable, Hashable, Sendable {
     case text(String)
     case image(data: Data, mimeType: String)
