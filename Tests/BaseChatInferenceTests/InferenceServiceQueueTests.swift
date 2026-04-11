@@ -519,7 +519,7 @@ final class InferenceServiceQueueTests: XCTestCase {
         }
     }
 
-    // MARK: - 18. Queue auto-drains without generationDidFinish()
+    // MARK: - 17. Queue auto-drains without generationDidFinish()
 
     /// Verifies that the queue drains automatically after stream1 is consumed,
     /// without any explicit call to generationDidFinish().
@@ -555,7 +555,7 @@ final class InferenceServiceQueueTests: XCTestCase {
                       "Service should be generating stream2 after auto-drain")
     }
 
-    // MARK: - 19. Concurrent non-queued generate() + enqueue() state correctness
+    // MARK: - 18. Concurrent non-queued generate() + enqueue() state correctness
 
     /// Verifies that a direct generate() call (the non-queued path used by title
     /// generation) does not corrupt isGenerating or hasQueuedRequests while a
@@ -593,7 +593,7 @@ final class InferenceServiceQueueTests: XCTestCase {
         service.generationDidFinish()
     }
 
-    // MARK: - 20. Auto-drain: two requests, no generationDidFinish()
+    // MARK: - 19. Auto-drain: two requests, no generationDidFinish()
 
     /// Enqueues two requests, consumes stream1 without calling generationDidFinish(),
     /// and verifies that stream2 transitions to .connecting automatically.
@@ -633,7 +633,62 @@ final class InferenceServiceQueueTests: XCTestCase {
                       "service should be generating stream2 after auto-drain")
     }
 
-    // MARK: - 17. finishAndDiscard always finishes continuation
+    // MARK: - 20. unloadModel mid-stream leaves state consistent
+
+    /// Verifies that calling `unloadModel()` while a request is mid-stream leaves
+    /// the service in a fully clean state and prevents new requests from being enqueued.
+    ///
+    /// This locks in the safety invariants established by the existing guards:
+    /// - `stopGeneration()` nils `activeRequest` before the active Task's defer fires,
+    ///   so the defer's token-match guard prevents a spurious `drainQueue()` call.
+    /// - `enqueue()` guards `backend != nil` so no new requests can enter after unload.
+    func test_unloadModel_midStream_doesNotCorruptState() async throws {
+        let (service, _) = makeService()
+
+        // Enqueue a request — it becomes active immediately. The GatedMockBackend
+        // blocks generation until explicitly released, so we're mid-stream.
+        let (_, stream) = try service.enqueue(
+            messages: [("user", "hello")],
+            priority: .normal
+        )
+
+        XCTAssertEqual(stream.phase, .connecting, "Stream should be active (connecting)")
+        XCTAssertTrue(service.isGenerating)
+
+        // Unload while the request is active (before any tokens are released).
+        service.unloadModel()
+
+        // Core state must be fully clean immediately after unload.
+        XCTAssertFalse(service.isModelLoaded, "isModelLoaded must be false after unload")
+        XCTAssertFalse(service.isGenerating, "isGenerating must be false after unload")
+        XCTAssertFalse(service.hasQueuedRequests, "hasQueuedRequests must be false after unload")
+
+        // Drain the stream — this provides a deterministic termination signal and
+        // acts as the synchronization point for the cancelled Task's defer to fire.
+        // The stream must throw (CancellationError or similar) rather than hang.
+        var didThrow = false
+        do {
+            for try await _ in stream.events {}
+        } catch { didThrow = true }
+        XCTAssertTrue(didThrow, "Cancelled stream should throw CancellationError or similar")
+
+        // State must remain clean after the Task defer fires.
+        XCTAssertFalse(service.isModelLoaded, "isModelLoaded must remain false after Task defer fires")
+        XCTAssertFalse(service.isGenerating, "isGenerating must remain false after Task defer fires")
+        XCTAssertFalse(service.hasQueuedRequests, "hasQueuedRequests must remain false after Task defer fires")
+
+        // Subsequent enqueue must throw because no model is loaded.
+        XCTAssertThrowsError(
+            try service.enqueue(messages: [("user", "after-unload")], priority: .normal)
+        ) { error in
+            XCTAssertTrue(
+                "\(error)".contains("No model loaded"),
+                "Error should mention no model loaded, got: \(error)"
+            )
+        }
+    }
+
+    // MARK: - 21. finishAndDiscard always finishes continuation
 
     func test_finishAndDiscard_alwaysFinishesContinuation() async throws {
         let (service, _) = makeService()
@@ -654,6 +709,54 @@ final class InferenceServiceQueueTests: XCTestCase {
             didThrow = true
         }
         XCTAssertTrue(didThrow, "Continuation should have been finished with error")
+    }
+
+    // MARK: - 22. unloadModel mid-consume (after tokens start flowing)
+
+    /// Verifies that calling `unloadModel()` after tokens have begun flowing — but
+    /// before the consumer has finished draining — leaves the service fully clean.
+    ///
+    /// This covers the harder race: the backend has already called `yield(.token(...))`
+    /// at least once, so the stream is genuinely mid-flight when the unload fires.
+    func test_unloadModel_midStream_afterTokensStartFlowing() async throws {
+        let (service, mock) = makeService()
+
+        // Enqueue a request — it becomes active immediately.
+        let (_, stream) = try service.enqueue(
+            messages: [("user", "hello")],
+            priority: .normal
+        )
+
+        // Let the drain Task run so it calls backend.generate() and gates[0] is populated.
+        await Task.yield()
+
+        // Release one token — this starts the stream flowing before we unload.
+        mock.release(at: 0, tokens: ["tok"])
+
+        // Unload immediately, before the consumer has a chance to drain.
+        service.unloadModel()
+
+        // Drain the stream — provides the deterministic termination signal.
+        var didThrow = false
+        do {
+            for try await _ in stream.events {}
+        } catch { didThrow = true }
+        XCTAssertTrue(didThrow, "Cancelled mid-consume stream should throw CancellationError or similar")
+
+        // Service must be fully clean after both the unload and stream termination.
+        XCTAssertFalse(service.isModelLoaded, "isModelLoaded must be false after unload")
+        XCTAssertFalse(service.isGenerating, "isGenerating must be false after unload")
+        XCTAssertFalse(service.hasQueuedRequests, "hasQueuedRequests must be false after unload")
+
+        // Subsequent enqueue must throw because no model is loaded.
+        XCTAssertThrowsError(
+            try service.enqueue(messages: [("user", "after-unload")], priority: .normal)
+        ) { error in
+            XCTAssertTrue(
+                "\(error)".contains("No model loaded"),
+                "Error should mention no model loaded, got: \(error)"
+            )
+        }
     }
 }
 
