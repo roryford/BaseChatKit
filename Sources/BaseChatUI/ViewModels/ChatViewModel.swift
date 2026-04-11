@@ -250,20 +250,26 @@ public final class ChatViewModel {
     /// Simple key/value substitution for system prompt templates.
     ///
     /// Tokens written as `{{key}}` in the system prompt are replaced with the
-    /// corresponding value before the prompt reaches the backend. Intended for
-    /// apps that want to inject a few strings (user name, persona, etc.) into
-    /// a template without writing their own expansion layer.
+    /// corresponding value in a single regex pass before the prompt reaches
+    /// the backend. Intended for apps that want to inject a few strings (user
+    /// name, persona, etc.) into a template without writing their own
+    /// expansion layer.
     ///
     /// Behavior:
-    /// - **Missing keys pass through.** A token whose key is not in the dict is
-    ///   left in the prompt verbatim (e.g. `{{missing}}`), so callers can spot
-    ///   typos by eye.
+    /// - **Missing keys pass through.** A token whose key is not in the dict
+    ///   is left in the prompt verbatim (e.g. `{{missing}}`), so callers can
+    ///   spot typos by eye.
     /// - **All occurrences replaced.** Every occurrence of `{{key}}` in the
     ///   prompt is replaced, not just the first.
-    /// - **Iteration-order dependent on collisions.** If a value itself
-    ///   contains `{{otherKey}}`, whether that nested token gets expanded
-    ///   depends on dict iteration order. Callers that need deterministic
-    ///   non-recursive substitution should pre-render values before assigning.
+    /// - **Non-recursive.** If a value contains its own `{{token}}` pattern,
+    ///   that nested token is left literal rather than re-substituted. E.g.,
+    ///   setting `systemPromptContext["foo"] = "{{bar}}"` results in
+    ///   `{{foo}}` expanding to the literal string `{{bar}}`, not recursively
+    ///   into `{{bar}}`'s value. The single-pass scan also makes the result
+    ///   independent of dictionary iteration order.
+    /// - **Token pattern is `{{\w+}}`** — only alphanumeric and underscore
+    ///   characters are recognized inside the braces. Anything else (spaces,
+    ///   dots, empty `{{}}`) is ignored and passes through as literal text.
     public var systemPromptContext: [String: String] = [:]
 
     /// Prompt template for GGUF backends. Ignored by MLX/Foundation.

@@ -84,11 +84,7 @@ extension ChatViewModel {
             let allMessages = messages.filter { $0.id != messageID }
             let rawSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
             let effectiveSystemPrompt: String? = rawSystemPrompt.map { prompt in
-                var expanded = prompt
-                for (key, value) in systemPromptContext {
-                    expanded = expanded.replacingOccurrences(of: "{{\(key)}}", with: value)
-                }
-                return expanded
+                Self.applySystemPromptContext(prompt, context: systemPromptContext)
             }
             // Reuse the persistent caching tokenizer — token counts for unchanged
             // messages carry over between generation cycles.
@@ -271,6 +267,37 @@ extension ChatViewModel {
                 }
             }
         }
+    }
+
+    /// Substitutes `{{key}}` tokens in `text` with values from `context`.
+    ///
+    /// Single-pass scan: each `{{word}}` token in the source is examined exactly
+    /// once, so substitution is non-recursive (a value containing `{{otherKey}}`
+    /// is not re-expanded) and the result does not depend on dictionary
+    /// iteration order. Tokens whose key is not present in `context` are left
+    /// untouched, mirroring the pass-through behavior documented on
+    /// ``systemPromptContext``.
+    static func applySystemPromptContext(_ text: String, context: [String: String]) -> String {
+        guard !context.isEmpty, text.contains("{{") else { return text }
+        // `{{word}}` where `word` is one or more word characters. Anything that
+        // doesn't match (whitespace, dots, empty `{{}}`) is ignored.
+        let pattern = #"\{\{(\w+)\}\}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return text
+        }
+        let fullRange = NSRange(location: 0, length: (text as NSString).length)
+        // Walk matches in reverse so replacement ranges remain valid as we mutate.
+        let matches = regex.matches(in: text, options: [], range: fullRange).reversed()
+        var result = text
+        for match in matches {
+            guard let keyRange = Range(match.range(at: 1), in: result),
+                  let fullMatchRange = Range(match.range, in: result) else { continue }
+            let key = String(result[keyRange])
+            if let replacement = context[key] {
+                result.replaceSubrange(fullMatchRange, with: replacement)
+            }
+        }
+        return result
     }
 
 }

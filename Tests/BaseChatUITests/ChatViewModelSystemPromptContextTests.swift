@@ -98,6 +98,28 @@ final class ChatViewModelSystemPromptContextTests: XCTestCase {
         )
     }
 
+    // MARK: - Substitution is non-recursive
+
+    func test_systemPromptContext_doesNotRecursivelyExpandValues() async {
+        let mock = MockInferenceBackend()
+        mock.tokensToYield = ["ok"]
+        let vm = makeVM(backend: mock)
+        vm.systemPrompt = "Hello {{first}}."
+        // If substitution were recursive, "{{first}}" would expand to
+        // "{{second}}" then to "Bob". Since we guarantee non-recursion, the
+        // literal "{{second}}" must reach the backend.
+        vm.systemPromptContext = ["first": "{{second}}", "second": "Bob"]
+
+        vm.inputText = "Hi"
+        await vm.sendMessage()
+
+        XCTAssertEqual(
+            mock.lastSystemPrompt,
+            "Hello {{second}}.",
+            "systemPromptContext must not recursively re-expand values, regardless of dict iteration order"
+        )
+    }
+
     // MARK: - Empty string value substitutes correctly
 
     func test_systemPromptContext_emptyStringValue_substitutesAsEmpty() async {

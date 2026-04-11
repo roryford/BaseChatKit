@@ -59,6 +59,7 @@ final class SilentCatchAuditTest: XCTestCase {
 
         // BaseChatUI — Task.sleep cancellation is intentionally ignored;
         // parser/rendering fallbacks are benign optional conversions.
+        "BaseChatUI/ViewModels/ChatViewModel+Generation.swift:guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {",
         "BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))",
         "BaseChatUI/Views/Chat/AssistantMarkdownView.swift:if let parsed = try? AttributedString(",
         "BaseChatUI/Views/Chat/TypingIndicatorView.swift:try? await Task.sleep(for: .milliseconds(400))",
