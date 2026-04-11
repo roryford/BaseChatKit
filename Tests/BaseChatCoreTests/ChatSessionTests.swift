@@ -63,4 +63,43 @@ final class ChatSessionTests: XCTestCase {
         XCTAssertEqual(session.topP, 0.8)
         XCTAssertEqual(session.repeatPenalty, 1.3)
     }
+
+    func test_record_mapsSessionState() {
+        let session = ChatSession(title: "Bridge")
+        let selectedModelID = UUID()
+        let selectedEndpointID = UUID()
+        let firstPinnedID = UUID()
+        let secondPinnedID = UUID()
+        let createdAt = Date(timeIntervalSinceReferenceDate: 100)
+        let updatedAt = Date(timeIntervalSinceReferenceDate: 200)
+
+        session.id = UUID()
+        session.createdAt = createdAt
+        session.updatedAt = updatedAt
+        session.systemPrompt = "System prompt"
+        session.selectedModelID = selectedModelID
+        session.selectedEndpointID = selectedEndpointID
+        session.temperature = 0.8
+        session.topP = 0.95
+        session.repeatPenalty = 1.25
+        session.promptTemplate = .llama3
+        session.contextSizeOverride = 4096
+        session.pinnedMessageIDs = [firstPinnedID, secondPinnedID]
+
+        let record = session.record
+
+        XCTAssertEqual(record.id, session.id)
+        XCTAssertEqual(record.title, "Bridge")
+        XCTAssertEqual(record.createdAt, createdAt)
+        XCTAssertEqual(record.updatedAt, updatedAt)
+        XCTAssertEqual(record.systemPrompt, "System prompt")
+        XCTAssertEqual(record.selectedModelID, selectedModelID)
+        XCTAssertEqual(record.selectedEndpointID, selectedEndpointID)
+        XCTAssertEqual(record.temperature, 0.8)
+        XCTAssertEqual(record.topP, 0.95)
+        XCTAssertEqual(record.repeatPenalty, 1.25)
+        XCTAssertEqual(record.promptTemplate, .llama3)
+        XCTAssertEqual(record.contextSizeOverride, 4096)
+        XCTAssertEqual(record.pinnedMessageIDs, [firstPinnedID, secondPinnedID])
+    }
 }

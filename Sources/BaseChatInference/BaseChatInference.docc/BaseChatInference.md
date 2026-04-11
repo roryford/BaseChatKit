@@ -19,6 +19,8 @@ provider) out of their build graph.
 For apps that want the full chat experience, `BaseChatCore` re-exports
 `BaseChatInference` so a single `import BaseChatCore` brings in everything.
 
+For the source-backed operational contract around loading, streaming, memory handling, cancellation, and pinning, see [`docs/RELIABILITY.md`](../../../docs/RELIABILITY.md).
+
 ## Topics
 
 ### Configuration

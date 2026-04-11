@@ -8,16 +8,16 @@ extension SettingsService {
     /// Returns the effective temperature, using session override if available.
     @MainActor
     public func effectiveTemperature(session: ChatSession?) -> Float {
-        session?.temperature ?? globalTemperature ?? 0.7
+        effectiveTemperature(session: session?.record)
     }
 
     @MainActor
     public func effectiveTopP(session: ChatSession?) -> Float {
-        session?.topP ?? globalTopP ?? 0.9
+        effectiveTopP(session: session?.record)
     }
 
     @MainActor
     public func effectiveRepeatPenalty(session: ChatSession?) -> Float {
-        session?.repeatPenalty ?? globalRepeatPenalty ?? 1.1
+        effectiveRepeatPenalty(session: session?.record)
     }
 }

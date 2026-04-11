@@ -37,6 +37,8 @@ The internal consumer is the original home of the compression pipeline and exerc
 - **Mock backend (`MockInferenceBackend`)** — production failure mode where an app-level feature depends on BCK's streaming contract and has no way to test it without loading a real model. We caught this because BCK consumers write XCTests.
 - **Certificate pinning (fail-closed on known cloud APIs)** — production failure mode where a mis-configured device trusts a compromised CA and silently leaks chat traffic. We caught this because BCK ships cloud backends that actually get used in production.
 
+The concrete, implementation-backed version of those guarantees lives in [RELIABILITY.md](RELIABILITY.md).
+
 ## Positioning
 
 BaseChatKit is a drop-in chat framework with operational reliability guarantees, optimized for the ChatbotUI-iOS-shaped consumer: take `ChatView`, `SessionListView`, and `ModelManagementSheet` wholesale, inject an `InferenceService`, and compose app-level features on top of the `ChatViewModel` API. The value is not "we support every backend" — it's "your chat UI keeps working when the network flickers, the user changes their mind mid-load, or iOS decides to reclaim your model's memory."
