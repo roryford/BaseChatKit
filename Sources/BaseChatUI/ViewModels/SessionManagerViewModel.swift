@@ -89,12 +89,14 @@ public final class SessionManagerViewModel {
             (role: "user", content: firstMessage)
         ]
 
-        let stream = try inferenceService.generate(
+        let (_, stream) = try inferenceService.enqueue(
             messages: messages,
             systemPrompt: systemPrompt,
             temperature: 0.3,
             topP: 0.9,
-            repeatPenalty: 1.0
+            repeatPenalty: 1.0,
+            priority: .background,
+            sessionID: nil
         )
         var result = ""
         for try await event in stream.events {

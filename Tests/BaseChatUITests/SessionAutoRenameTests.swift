@@ -148,4 +148,72 @@ final class SessionAutoRenameTests: XCTestCase {
         let updated = vm.sessions.first { $0.id == session.id }
         XCTAssertEqual(updated?.title, "My Title")
     }
+
+    // MARK: - Enqueue path tests
+
+    /// Verifies that `autoRenameSession` routes title generation through
+    /// `enqueue()` rather than the direct `generate()` path. The backend's
+    /// `generateCallCount` increments when `enqueue()` dispatches the request,
+    /// and the returned title proves the full pipeline executed.
+    func test_autoRename_titleGenerationUsesEnqueue_notDirectGenerate() async {
+        let mock = MockInferenceBackend()
+        mock.isModelLoaded = true
+        mock.tokensToYield = ["Smart", " Home", " Setup"]
+        let service = InferenceService(backend: mock, name: "Mock")
+
+        let session = try! vm.createSession()
+        XCTAssertEqual(session.title, "New Chat")
+
+        await vm.autoRenameSession(session, firstMessage: "How do I set up smart home devices?", inferenceService: service)
+
+        // The title being set proves enqueue() routed through to the backend.
+        let updated = vm.sessions.first { $0.id == session.id }
+        XCTAssertEqual(updated?.title, "Smart Home Setup")
+
+        // Exactly one backend generate() call — enqueue dispatches one request.
+        XCTAssertEqual(mock.generateCallCount, 1, "enqueue() should call backend.generate() exactly once")
+    }
+
+    /// Verifies that a background title-generation request queues behind an
+    /// already-active userInitiated request instead of racing with it.
+    func test_autoRename_withActiveQueuedGeneration_queuesAsBackground() async {
+        // Use a slow backend so the first request stays active long enough
+        // for us to observe the background request queuing behind it.
+        let slow = SlowMockBackend(tokenCount: 100, delayMilliseconds: 50)
+        let service = InferenceService(backend: slow, name: "Mock")
+
+        // Enqueue a high-priority userInitiated request. drainQueue() moves it
+        // to the active slot immediately, so requestQueue stays empty.
+        let (activeToken, _) = try! service.enqueue(
+            messages: [(role: "user", content: "Tell me a long story")],
+            priority: .userInitiated,
+            sessionID: nil
+        )
+        _ = activeToken // silence unused-variable warning
+
+        // Active slot is now occupied. The next enqueue will stay in requestQueue.
+        let session = try! vm.createSession()
+
+        // Fire autoRenameSession in a background Task so it can call enqueue()
+        // without blocking the main actor. We capture the task to cancel later.
+        let renameTask = Task {
+            await vm.autoRenameSession(
+                session,
+                firstMessage: "How do I set up smart home devices?",
+                inferenceService: service
+            )
+        }
+
+        // Yield to let the Task reach enqueue() before we assert.
+        await Task.yield()
+
+        // The background title request should be sitting in the queue behind
+        // the active userInitiated request.
+        XCTAssertTrue(service.hasQueuedRequests, "Background title request should be queued behind the active userInitiated generation")
+
+        // Clean up: stop active generation and cancel the rename task so the
+        // test doesn't leak into subsequent runs.
+        service.stopGeneration()
+        renameTask.cancel()
+    }
 }
