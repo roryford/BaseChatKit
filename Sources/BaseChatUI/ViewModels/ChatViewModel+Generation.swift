@@ -243,6 +243,11 @@ extension ChatViewModel {
         }
     }
 
+    private static let systemPromptContextRegex: NSRegularExpression = {
+        // Force-unwrap is safe: the pattern is a compile-time constant with no user input.
+        try! NSRegularExpression(pattern: #"\{\{(\w+)\}\}"#, options: [])
+    }()
+
     /// Substitutes `{{key}}` tokens in `text` with values from `context`.
     ///
     /// Single-pass scan: each `{{word}}` token in the source is examined exactly
@@ -255,10 +260,7 @@ extension ChatViewModel {
         guard !context.isEmpty, text.contains("{{") else { return text }
         // `{{word}}` where `word` is one or more word characters. Anything that
         // doesn't match (whitespace, dots, empty `{{}}`) is ignored.
-        let pattern = #"\{\{(\w+)\}\}"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return text
-        }
+        let regex = Self.systemPromptContextRegex
         let fullRange = NSRange(location: 0, length: (text as NSString).length)
         // Walk matches in reverse so replacement ranges remain valid as we mutate.
         let matches = regex.matches(in: text, options: [], range: fullRange).reversed()
