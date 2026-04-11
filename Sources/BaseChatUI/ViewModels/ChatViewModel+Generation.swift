@@ -84,14 +84,7 @@ extension ChatViewModel {
             let allMessages = messages.filter { $0.id != messageID }
             let rawSystemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
             let effectiveSystemPrompt: String? = rawSystemPrompt.map { prompt in
-                // MacroExpander runs first when enabled, so its tokens win on
-                // collision with systemPromptContext. systemPromptContext runs
-                // unconditionally — apps that disable macro expansion still
-                // need a way to fill {{key}} tokens.
-                let afterMacros = macroExpansionEnabled
-                    ? MacroExpander.expand(prompt, context: buildMacroContext())
-                    : prompt
-                return Self.applySystemPromptContext(afterMacros, context: systemPromptContext)
+                Self.applySystemPromptContext(prompt, context: systemPromptContext)
             }
             // Reuse the persistent caching tokenizer — token counts for unchanged
             // messages carry over between generation cycles.
@@ -251,41 +244,18 @@ extension ChatViewModel {
         }
     }
 
-    /// Builds a complete `MacroContext` by merging user-supplied values with
-    /// auto-derived values from the current conversation.
-    private func buildMacroContext() -> MacroContext {
-        var ctx = macroContext
-        if ctx.lastMessage == nil {
-            ctx.lastMessage = messages.last(where: { $0.role == .user || $0.role == .assistant })?.content
-        }
-        if ctx.lastUserMessage == nil {
-            ctx.lastUserMessage = messages.last(where: { $0.role == .user })?.content
-        }
-        if ctx.lastCharMessage == nil {
-            ctx.lastCharMessage = messages.last(where: { $0.role == .assistant })?.content
-        }
-        if ctx.modelName == nil {
-            ctx.modelName = selectedModel?.name ?? selectedEndpoint?.name
-        }
-        if ctx.messageCount == nil {
-            ctx.messageCount = messages.count
-        }
-        return ctx
-    }
-
     /// Substitutes `{{key}}` tokens in `text` with values from `context`.
     ///
     /// Single-pass scan: each `{{word}}` token in the source is examined exactly
     /// once, so substitution is non-recursive (a value containing `{{otherKey}}`
     /// is not re-expanded) and the result does not depend on dictionary
     /// iteration order. Tokens whose key is not present in `context` are left
-    /// untouched, mirroring `MacroExpander.expand`'s pass-through behavior.
+    /// untouched, mirroring the pass-through behavior documented on
+    /// ``systemPromptContext``.
     static func applySystemPromptContext(_ text: String, context: [String: String]) -> String {
         guard !context.isEmpty, text.contains("{{") else { return text }
-        // Same token shape as MacroExpander: `{{word}}` where `word` is one or
-        // more word characters. Anything that doesn't match (whitespace, dots,
-        // empty `{{}}`) is ignored, which matches what `MacroExpander.expand`
-        // would do for the same input.
+        // `{{word}}` where `word` is one or more word characters. Anything that
+        // doesn't match (whitespace, dots, empty `{{}}`) is ignored.
         let pattern = #"\{\{(\w+)\}\}"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
             return text
@@ -304,4 +274,5 @@ extension ChatViewModel {
         }
         return result
     }
+
 }

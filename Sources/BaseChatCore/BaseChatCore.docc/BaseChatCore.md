@@ -88,7 +88,6 @@ Backends are registered as factories so BaseChatCore stays free of any direct ML
 
 - ``PromptTemplate``
 - ``PromptTemplateDetector``
-- ``MacroExpander``
 
 ### Post-Generation Tasks
 

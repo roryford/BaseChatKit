@@ -16,11 +16,11 @@ Consumer audits of BaseChatKit's two known consumers — a private internal app 
 | `APIConfigurationView` | ✗ | ✓ |
 | HuggingFace downloader | ✗ | ✓ |
 | Compression pipeline | ✓ | ✗ |
-| Macro system (full) | ✓ | ✗ (uses only `macroContext.userName`) |
+| Macro system (full) | ✓ | ✗ (uses a single `{{user}}` substitution) |
 | Server discovery | ✗ | ✗ |
 | Tool calling | ✗ | ✗ |
 
-The internal consumer is the original home of the compression pipeline and exercises the full macro system through an app-level engine built on top of it. ChatbotUI-iOS is the drop-in consumer — it takes the UI wholesale (`ChatView`, `SessionListView`, `ModelManagementSheet`, `APIConfigurationView`) plus the HuggingFace downloader, and touches macros only through `macroContext.userName`. Neither consumer uses server discovery, the benchmark runner, or the tool-calling public API.
+The internal consumer is the original home of the compression pipeline and exercised the full macro system through an app-level engine built on top of it. ChatbotUI-iOS is the drop-in consumer — it takes the UI wholesale (`ChatView`, `SessionListView`, `ModelManagementSheet`, `APIConfigurationView`) plus the HuggingFace downloader, and only ever needed a single `{{user}}` substitution in the system prompt. Neither consumer uses server discovery, the benchmark runner, or the tool-calling public API.
 
 ## What's leaving in 0.6.0
 
@@ -46,11 +46,11 @@ AnyLanguageModel optimizes for provider abstraction — one protocol, many provi
 ## Deferred to Weeks 2-3
 
 - **Compression repatriation** — the compression pipeline was originally extracted from the internal consumer and will be moved back there once that app has a clean extraction path. It stays in BCK 0.6.0 to avoid breaking the internal consumer mid-release.
-- **Macro engine deletion** — the full macro system has only one consumer and will be deleted from BCK after that consumer takes ownership in its own codebase. ChatbotUI-iOS's `macroContext.userName` usage will migrate to a new `systemPromptContext` property before the engine leaves.
+- **Macro engine deletion** — the full macro system had only one consumer and is being deleted from BCK now that consumer has taken ownership of its own expander. ChatbotUI-iOS's single-field usage migrates to the `systemPromptContext` property added in 0.6.0.
 - **`BaseChatInference` target extraction** — splitting the inference-only surface out of `BaseChatCore` so that UI-less consumers (server-side, CLI tools, test harnesses) can depend on the engine without pulling SwiftUI types. Target for 0.7.0.
 
 ## Consumer impact
 
-The internal consumer keeps building — `MacroExpander` and the compression pipeline both stay in 0.6.0. The macro engine deletion is explicitly coordinated with that consumer's extraction timeline; it will not be broken by this release.
+The internal consumer keeps building on its own vendored expander, so the BCK-side deletion does not affect it.
 
-ChatbotUI-iOS keeps building — the `macroContext` property still exists in 0.6.0 alongside the new `systemPromptContext`. The migration is additive, not breaking. Drop-in UI, `ChatViewModel`, `ModelManagementSheet`, `APIConfigurationView`, and the HuggingFace downloader all remain unchanged.
+ChatbotUI-iOS migrates its single-field usage from the old context property to the `systemPromptContext` dictionary: the dict was added in 0.6.0 as the forward-compatible replacement for that specific use case. Drop-in UI, `ChatViewModel`, `ModelManagementSheet`, `APIConfigurationView`, and the HuggingFace downloader all remain unchanged.

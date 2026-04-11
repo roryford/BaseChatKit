@@ -228,40 +228,29 @@ public final class ChatViewModel {
     /// Defaults to `true`. Disable for apps that handle loop detection themselves.
     public var loopDetectionEnabled: Bool = true
 
-    /// Whether to expand macros (e.g., `{{user}}`, `{{date}}`) in the system prompt
-    /// before generation. Defaults to `true`.
-    public var macroExpansionEnabled: Bool = true
-
-    /// Context values for macro expansion. Apps should populate fields relevant to
-    /// their domain (e.g., `userName`, `charName`). Message-related fields
-    /// (`lastMessage`, `lastUserMessage`, `lastCharMessage`) are auto-populated
-    /// from the conversation history if left `nil`.
-    public var macroContext: MacroContext = MacroContext()
-
     /// Simple key/value substitution for system prompt templates.
     ///
     /// Tokens written as `{{key}}` in the system prompt are replaced with the
-    /// corresponding value. Intended for apps that just need to inject a few
-    /// strings (user name, persona, etc.) without wiring up the full
-    /// ``MacroProvider`` registry.
+    /// corresponding value in a single regex pass before the prompt reaches
+    /// the backend. Intended for apps that want to inject a few strings (user
+    /// name, persona, etc.) into a template without writing their own
+    /// expansion layer.
     ///
     /// Behavior:
-    /// - **Ordering.** Substitution runs **after** ``MacroExpander/expand(_:context:)``,
-    ///   so if both ``macroContext`` and `systemPromptContext` target the same
-    ///   token, the macro expansion wins.
-    /// - **Independent of macro expansion.** Substitution runs even when
-    ///   ``macroExpansionEnabled`` is `false`, so apps that disable the full
-    ///   macro pass can still use this dict-based fill.
-    /// - **Non-recursive.** Each `{{key}}` token is replaced exactly once. If a
-    ///   value itself contains `{{otherKey}}`, that nested token is **not**
-    ///   re-expanded — the result is deterministic and independent of dictionary
-    ///   iteration order.
-    /// - **Missing keys pass through.** A token whose key is not in the dict is
-    ///   left in the prompt verbatim (e.g. `{{missing}}`), matching
-    ///   ``MacroExpander/expand(_:context:)``.
-    /// - **Token shape.** Only `{{word}}` (one or more word characters: letters,
-    ///   digits, underscore) is recognized. Tokens with spaces, punctuation, or
-    ///   empty bodies (`{{}}`) are ignored.
+    /// - **Missing keys pass through.** A token whose key is not in the dict
+    ///   is left in the prompt verbatim (e.g. `{{missing}}`), so callers can
+    ///   spot typos by eye.
+    /// - **All occurrences replaced.** Every occurrence of `{{key}}` in the
+    ///   prompt is replaced, not just the first.
+    /// - **Non-recursive.** If a value contains its own `{{token}}` pattern,
+    ///   that nested token is left literal rather than re-substituted. E.g.,
+    ///   setting `systemPromptContext["foo"] = "{{bar}}"` results in
+    ///   `{{foo}}` expanding to the literal string `{{bar}}`, not recursively
+    ///   into `{{bar}}`'s value. The single-pass scan also makes the result
+    ///   independent of dictionary iteration order.
+    /// - **Token pattern is `{{\w+}}`** — only alphanumeric and underscore
+    ///   characters are recognized inside the braces. Anything else (spaces,
+    ///   dots, empty `{{}}`) is ignored and passes through as literal text.
     public var systemPromptContext: [String: String] = [:]
 
     /// Prompt template for GGUF backends. Ignored by MLX/Foundation.

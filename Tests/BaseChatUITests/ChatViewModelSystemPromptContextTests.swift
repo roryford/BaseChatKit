@@ -43,12 +43,11 @@ final class ChatViewModelSystemPromptContextTests: XCTestCase {
 
     // MARK: - Empty dict is a no-op
 
-    func test_systemPromptContext_emptyDict_leavesMacroExpanderBehaviorUnchanged() async {
+    func test_systemPromptContext_emptyDict_leavesPromptUnchanged() async {
         let mock = MockInferenceBackend()
         mock.tokensToYield = ["ok"]
         let vm = makeVM(backend: mock)
-        vm.systemPrompt = "You are talking to {{user}}."
-        vm.macroContext = MacroContext(userName: "Alice")
+        vm.systemPrompt = "Hello {{name}}."
         vm.systemPromptContext = [:]
 
         vm.inputText = "Hi"
@@ -56,48 +55,8 @@ final class ChatViewModelSystemPromptContextTests: XCTestCase {
 
         XCTAssertEqual(
             mock.lastSystemPrompt,
-            "You are talking to Alice.",
-            "An empty systemPromptContext must not alter MacroExpander's output"
-        )
-    }
-
-    // MARK: - MacroExpander wins on collision (ordering)
-
-    func test_macroExpanderWins_onCollision_withSystemPromptContext() async {
-        let mock = MockInferenceBackend()
-        mock.tokensToYield = ["ok"]
-        let vm = makeVM(backend: mock)
-        vm.systemPrompt = "Hello {{user}}."
-        vm.macroContext = MacroContext(userName: "Bob")
-        vm.systemPromptContext = ["user": "Charlie"]
-
-        vm.inputText = "Hi"
-        await vm.sendMessage()
-
-        XCTAssertEqual(
-            mock.lastSystemPrompt,
-            "Hello Bob.",
-            "MacroExpander runs first, so {{user}} must resolve to the macroContext value (Bob), not the systemPromptContext value (Charlie)"
-        )
-    }
-
-    // MARK: - Additional coverage: tokens untouched by MacroExpander are filled by systemPromptContext
-
-    func test_systemPromptContext_fillsTokens_notHandledByMacroExpander() async {
-        let mock = MockInferenceBackend()
-        mock.tokensToYield = ["ok"]
-        let vm = makeVM(backend: mock)
-        vm.systemPrompt = "You are {{persona}} talking to {{user}}."
-        vm.macroContext = MacroContext(userName: "Alice")
-        vm.systemPromptContext = ["persona": "a helpful guide"]
-
-        vm.inputText = "Hi"
-        await vm.sendMessage()
-
-        XCTAssertEqual(
-            mock.lastSystemPrompt,
-            "You are a helpful guide talking to Alice.",
-            "systemPromptContext should substitute tokens that MacroExpander did not handle, while MacroExpander handles its own tokens"
+            "Hello {{name}}.",
+            "An empty systemPromptContext must leave the prompt untouched"
         )
     }
 
@@ -158,27 +117,6 @@ final class ChatViewModelSystemPromptContextTests: XCTestCase {
             mock.lastSystemPrompt,
             "Hello {{second}}.",
             "systemPromptContext must not recursively re-expand values, regardless of dict iteration order"
-        )
-    }
-
-    // MARK: - Substitution runs even when macroExpansionEnabled is false
-
-    func test_systemPromptContext_runs_whenMacroExpansionDisabled() async {
-        let mock = MockInferenceBackend()
-        mock.tokensToYield = ["ok"]
-        let vm = makeVM(backend: mock)
-        vm.systemPrompt = "Hello {{name}}."
-        vm.systemPromptContext = ["name": "Alice"]
-        vm.macroExpansionEnabled = false
-
-        vm.inputText = "Hi"
-        await vm.sendMessage()
-
-        // The full MacroExpander pass is skipped, but the dict-based pass still runs.
-        XCTAssertEqual(
-            mock.lastSystemPrompt,
-            "Hello Alice.",
-            "systemPromptContext substitution must not be gated on macroExpansionEnabled"
         )
     }
 
