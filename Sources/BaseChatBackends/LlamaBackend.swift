@@ -76,6 +76,9 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     private var nextLoadToken: UInt64 = 0
     private var activeLoadToken: UInt64 = 0
 
+    /// Guarded by `stateLock`. Set by `setLoadProgressHandler(_:)` before each load.
+    private var _loadProgressHandler: (@Sendable (Double) async -> Void)?
+
     // MARK: - Global Backend Lifecycle
 
     /// Guards `llama_backend_init/free` which are global and must only be
@@ -126,8 +129,15 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             return activeLoadToken
         }
 
+        // Snapshotting the handler here means calling setLoadProgressHandler(nil)
+        // mid-load will not cancel in-flight Task callbacks already dispatched by
+        // the C progress hook. Stale callbacks become no-ops at the consumer:
+        // InferenceService.applyLoadProgress(_:for:) drops values whose request
+        // token no longer matches the active loading phase.
+        let capturedHandler = withStateLock { _loadProgressHandler }
+
         let loadedResources = try await Task.detached(priority: .userInitiated) { [self] in
-            return try self.serializedModelLoad(at: url, contextSize: contextSize)
+            return try self.serializedModelLoad(at: url, contextSize: contextSize, progressHandler: capturedHandler)
         }.value
 
         let didCommit = withStateLock {
@@ -155,10 +165,14 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// Synchronous wrapper that holds `loadSerializationLock` while calling the
     /// C-level model init. Called from a detached task so the lock/unlock stays
     /// in a synchronous context (required by Swift 6.3 strict concurrency).
-    private func serializedModelLoad(at url: URL, contextSize: Int32) throws -> LoadedResources {
+    private func serializedModelLoad(
+        at url: URL,
+        contextSize: Int32,
+        progressHandler: (@Sendable (Double) async -> Void)?
+    ) throws -> LoadedResources {
         loadSerializationLock.lock()
         defer { loadSerializationLock.unlock() }
-        return try Self.initializeModel(at: url, requestedContextSize: contextSize)
+        return try Self.initializeModel(at: url, requestedContextSize: contextSize, progressHandler: progressHandler)
     }
 
     private struct LoadedResources: @unchecked Sendable {
@@ -200,9 +214,22 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         deinit { if let p = pointer { llama_free(p) } }
     }
 
+    /// Heap-allocated box used to bridge a Swift async progress handler through the C callback ABI.
+    ///
+    /// `llama_model_params.progress_callback` is a C function pointer — it cannot capture Swift
+    /// context directly. We store the handler in this class, pass an `Unmanaged` retain into
+    /// `progress_callback_user_data`, then release it after `llama_model_load_from_file` returns.
+    private final class ProgressCallbackContext: @unchecked Sendable {
+        let handler: @Sendable (Double) async -> Void
+        init(_ handler: @escaping @Sendable (Double) async -> Void) {
+            self.handler = handler
+        }
+    }
+
     private static func initializeModel(
         at url: URL,
-        requestedContextSize: Int32
+        requestedContextSize: Int32,
+        progressHandler: (@Sendable (Double) async -> Void)? = nil
     ) throws -> LoadedResources {
         var modelParams = llama_model_default_params()
         #if targetEnvironment(simulator)
@@ -210,6 +237,30 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         #else
         modelParams.n_gpu_layers = 99  // Offload all layers to Metal
         #endif
+
+        // Wire up the progress callback when a handler is installed.
+        // The C callback fires on the loader thread; we bridge to async by
+        // creating an unstructured Task so the synchronous C callback returns
+        // quickly. The Unmanaged retain is released once the load call returns.
+        var callbackContextRef: Unmanaged<ProgressCallbackContext>?
+        if let handler = progressHandler {
+            let ctx = ProgressCallbackContext(handler)
+            callbackContextRef = Unmanaged.passRetained(ctx)
+            modelParams.progress_callback_user_data = callbackContextRef!.toOpaque()
+            modelParams.progress_callback = { progress, userData -> Bool in
+                guard let ptr = userData else { return true }
+                // `takeUnretainedValue()` does not bump ARC here — the Task closure below
+                // captures `ctx` as a Swift reference, which provides its own ARC retain
+                // for the Task's lifetime. The Unmanaged retain managed by the outer defer
+                // in `loadModel` is separate and only responsible for keeping the context
+                // alive during the synchronous C load call.
+                let ctx = Unmanaged<ProgressCallbackContext>.fromOpaque(ptr).takeUnretainedValue()
+                let value = Double(progress)
+                Task { await ctx.handler(value) }
+                return true
+            }
+        }
+        defer { callbackContextRef?.release() }
 
         guard let rawModel = llama_model_load_from_file(url.path, modelParams) else {
             throw InferenceError.modelLoadFailed(underlying: NSError(
@@ -506,6 +557,17 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
         invalidUTF8Buffer.removeLast() // remove null terminator, keep accumulating
         return nil
+    }
+}
+
+// MARK: - LoadProgressReporting
+
+extension LlamaBackend: LoadProgressReporting {
+    /// Installs a progress handler that receives fractional progress values in `[0.0, 1.0]`
+    /// delivered by the llama.cpp `progress_callback` during `llama_model_load_from_file`.
+    /// The handler fires from the loader thread via an unstructured Task.
+    public func setLoadProgressHandler(_ handler: (@Sendable (Double) async -> Void)?) {
+        withStateLock { _loadProgressHandler = handler }
     }
 }
 
