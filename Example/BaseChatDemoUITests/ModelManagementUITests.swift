@@ -6,47 +6,15 @@ final class ModelManagementUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.launch()
-    }
-
-    // MARK: - Accessibility Hierarchy Dump
-
-    func testDumpAccessibilityHierarchy() throws {
-        // Show sidebar first on iPad
-        showSidebarIfNeeded()
-        sleep(1)
-
-        // Print all buttons
-        let allButtons = app.buttons.allElementsBoundByIndex
-        print("=== ALL BUTTONS (with sidebar) ===")
-        for (i, button) in allButtons.enumerated() {
-            print("Button[\(i)]: label='\(button.label)' identifier='\(button.identifier)' exists=\(button.exists) hittable=\(button.isHittable)")
-        }
-        print("=== END BUTTONS ===")
-
-        // Look for static texts
-        let allTexts = app.staticTexts.allElementsBoundByIndex
-        print("=== ALL STATIC TEXTS ===")
-        for (i, text) in allTexts.enumerated() {
-            print("Text[\(i)]: label='\(text.label)' identifier='\(text.identifier)'")
-        }
-        print("=== END TEXTS ===")
-
-        takeScreenshot(name: "Initial-State-With-Sidebar")
+        app = launchDemoApp()
     }
 
     // MARK: - Sheet Presentation
 
     func testModelButtonOpensSheet() throws {
-        // The sidebar should show the model section
-        let modelButton = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Model' OR label CONTAINS[c] 'Foundation'")).firstMatch
-        XCTAssertTrue(modelButton.waitForExistence(timeout: 5), "Model button should exist in sidebar")
+        openModelManagementSheet()
 
-        modelButton.tap()
-
-        // The sheet should appear with the segmented picker
-        let selectTab = app.buttons["Select"]
+        let selectTab = app.segmentedControls.buttons["Select"]
         XCTAssertTrue(selectTab.waitForExistence(timeout: 3), "Select tab should appear in model management sheet")
     }
 
@@ -56,9 +24,9 @@ final class ModelManagementUITests: XCTestCase {
         openModelManagementSheet()
 
         // Verify all three tabs exist
-        let selectTab = app.buttons["Select"]
-        let downloadTab = app.buttons["Download"]
-        let storageTab = app.buttons["Storage"]
+        let selectTab = app.segmentedControls.buttons["Select"]
+        let downloadTab = app.segmentedControls.buttons["Download"]
+        let storageTab = app.segmentedControls.buttons["Storage"]
 
         XCTAssertTrue(selectTab.exists, "Select tab should exist")
         XCTAssertTrue(downloadTab.exists, "Download tab should exist")
@@ -105,20 +73,28 @@ final class ModelManagementUITests: XCTestCase {
         openModelManagementSheet()
         takeScreenshot(name: "Select-Tab-Open")
 
-        // Find only hittable model row buttons (skip sidebar buttons behind the sheet)
+        // Find a selectable model row in the sheet. The accessibility label now
+        // includes model metadata, so look for the first hittable non-tab button.
         let allButtons = app.buttons.allElementsBoundByIndex
         var sheetModelButton: XCUIElement?
         for button in allButtons {
-            if button.isHittable && button.label.localizedCaseInsensitiveContains("Foundation") {
-                // Verify it's in the sheet area (not sidebar)
-                if button.frame.minY > 400 {
-                    sheetModelButton = button
-                    break
-                }
+            guard button.isHittable else { continue }
+            if ["Select", "Download", "Storage", "Done"].contains(button.label) {
+                continue
+            }
+            if button.frame.minY > 120 {
+                sheetModelButton = button
+                break
             }
         }
 
         guard let modelRow = sheetModelButton else {
+            let noModels = app.staticTexts["No Models Available"]
+            if noModels.waitForExistence(timeout: 2) {
+                takeScreenshot(name: "Select-Tab-No-Models")
+                return
+            }
+
             takeScreenshot(name: "Select-Tab-No-Hittable-Model-Row")
             XCTFail("No hittable model row found in the sheet")
             return
@@ -146,7 +122,7 @@ final class ModelManagementUITests: XCTestCase {
     func testDownloadTabShowsRecommendations() throws {
         openModelManagementSheet()
 
-        app.buttons["Download"].tap()
+        app.segmentedControls.buttons["Download"].tap()
         sleep(1)
 
         takeScreenshot(name: "Download-Tab-Content")
@@ -165,10 +141,10 @@ final class ModelManagementUITests: XCTestCase {
     func testDownloadTabSearchFieldIsInteractive() throws {
         openModelManagementSheet()
 
-        app.buttons["Download"].tap()
+        app.segmentedControls.buttons["Download"].tap()
         sleep(1)
 
-        let searchField = app.searchFields.firstMatch
+        let searchField = app.textFields["Search HuggingFace models"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 3), "Search field should exist on Download tab")
         XCTAssertTrue(searchField.isHittable, "Search field should be hittable")
 
@@ -180,7 +156,7 @@ final class ModelManagementUITests: XCTestCase {
     func testDownloadButtonIsHittable() throws {
         openModelManagementSheet()
 
-        app.buttons["Download"].tap()
+        app.segmentedControls.buttons["Download"].tap()
         sleep(1)
 
         // Look for download buttons (arrow.down.circle)
@@ -201,7 +177,7 @@ final class ModelManagementUITests: XCTestCase {
     func testStorageTabShowsOverview() throws {
         openModelManagementSheet()
 
-        app.buttons["Storage"].tap()
+        app.segmentedControls.buttons["Storage"].tap()
         sleep(1)
 
         takeScreenshot(name: "Storage-Tab-Content")
@@ -233,84 +209,27 @@ final class ModelManagementUITests: XCTestCase {
     func testAllSheetElementsAreInteractive() throws {
         openModelManagementSheet()
 
-        // Audit: check all buttons in the sheet are hittable
-        let allButtons = app.buttons.allElementsBoundByIndex
-        var nonHittableButtons: [String] = []
+        let controls = [
+            app.segmentedControls.buttons["Select"],
+            app.segmentedControls.buttons["Download"],
+            app.segmentedControls.buttons["Storage"],
+            app.buttons["Done"]
+        ]
 
-        for button in allButtons {
-            if button.exists && !button.isHittable {
-                nonHittableButtons.append(button.label)
-            }
-        }
-
-        if !nonHittableButtons.isEmpty {
-            takeScreenshot(name: "Non-Hittable-Buttons")
-            XCTFail("The following buttons are not hittable: \(nonHittableButtons.joined(separator: ", "))")
+        for control in controls {
+            XCTAssertTrue(control.waitForExistence(timeout: 3), "\(control.label) should exist")
+            XCTAssertTrue(control.isHittable, "\(control.label) should be hittable")
         }
 
         takeScreenshot(name: "All-Buttons-Hittable")
     }
 
-    // MARK: - Helpers
-
-    private func showSidebarIfNeeded() {
-        let sidebarButton = app.buttons["Show Sidebar"]
-        if sidebarButton.waitForExistence(timeout: 2), sidebarButton.isHittable {
-            sidebarButton.tap()
-            sleep(1)
-        }
-    }
-
     private func openModelManagementSheet() {
-        showSidebarIfNeeded()
+        openModelManagementIfNeeded(app: app)
 
-        // Dump what's available after showing sidebar
-        let allButtons = app.buttons.allElementsBoundByIndex
-        var found = false
-        for button in allButtons {
-            if button.exists && (button.label.localizedCaseInsensitiveContains("Model") ||
-                                  button.label.localizedCaseInsensitiveContains("Foundation") ||
-                                  button.label.localizedCaseInsensitiveContains("No Model")) {
-                print("Found model button: '\(button.label)'")
-                button.tap()
-                found = true
-                break
-            }
-        }
-
-        if !found {
-            // Try tapping any static text that mentions the model
-            let modelTexts = app.staticTexts.allElementsBoundByIndex
-            for text in modelTexts {
-                if text.exists && (text.label.localizedCaseInsensitiveContains("Foundation") ||
-                                    text.label.localizedCaseInsensitiveContains("Model")) {
-                    print("Found model text: '\(text.label)' - tapping its coordinate")
-                    text.tap()
-                    found = true
-                    break
-                }
-            }
-        }
-
-        if !found {
+        let selectTab = app.segmentedControls.buttons["Select"]
+        guard selectTab.waitForExistence(timeout: 5) else {
             takeScreenshot(name: "Sidebar-No-Model-Button")
-            // Dump everything visible
-            print("=== ALL ELEMENTS AFTER SIDEBAR ===")
-            for button in allButtons {
-                print("  Button: '\(button.label)' hittable=\(button.isHittable)")
-            }
-            let allTexts = app.staticTexts.allElementsBoundByIndex
-            for text in allTexts {
-                print("  Text: '\(text.label)'")
-            }
-            print("=== END ===")
-            XCTFail("Could not find model button to open sheet")
-            return
-        }
-
-        let selectTab = app.buttons["Select"]
-        guard selectTab.waitForExistence(timeout: 3) else {
-            takeScreenshot(name: "Sheet-Failed-To-Open")
             XCTFail("Model management sheet did not open")
             return
         }

@@ -85,10 +85,19 @@ swift test --filter BaseChatBackendsTests   # cloud/SSE tests only
 swift test --filter BaseChatBackendsTests --traits MLX,Llama
 swift test --filter BaseChatE2ETests
 
-# Example app UI tests (requires Xcode + simulator)
-cd Example
-xcodebuild test -project BaseChatDemo.xcodeproj -scheme BaseChatDemo -destination 'platform=iOS Simulator,name=iPhone 16'
+# Example app UI tests (preferred debug loop)
+scripts/example-ui-tests.sh build-for-testing
+scripts/example-ui-tests.sh test-without-building -only-testing:BaseChatDemoUITests/ChatFlowUITests/testEmptyStateShowsWelcome
+
+# Full UI test sweep when you need it
+scripts/example-ui-tests.sh test
+
+# Discover or override the simulator explicitly when needed
+xcrun simctl list devices available
+scripts/example-ui-tests.sh test-without-building --destination 'platform=iOS Simulator,id=<SIMULATOR_ID>' -only-testing:BaseChatDemoUITests/SettingsUITests
 ```
+
+`build-for-testing` is the expensive step. Run it once, then use `test-without-building` with `-only-testing` for targeted reruns while debugging. The helper prefers a booted iPhone simulator, otherwise the first available iPhone simulator, so contributors do not have to keep stale device names in sync.
 
 ### Hardware gating
 

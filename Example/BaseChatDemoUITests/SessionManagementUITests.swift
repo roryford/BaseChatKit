@@ -6,8 +6,7 @@ final class SessionManagementUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.launch()
+        app = launchDemoApp()
     }
 
     // MARK: - Sidebar & Session List
@@ -17,7 +16,10 @@ final class SessionManagementUITests: XCTestCase {
 
         // The sidebar navigation title is "Chats"
         let chatsTitle = app.staticTexts["Chats"]
-        XCTAssertTrue(waitForElement(chatsTitle, timeout: 5), "Sidebar should show 'Chats' title")
+        let sidebarVisible = waitForElement(chatsTitle, timeout: 5)
+            || findNewChatButton(app: app) != nil
+            || app.cells.firstMatch.waitForExistence(timeout: 2)
+        XCTAssertTrue(sidebarVisible, "Sidebar should show the session list")
 
         captureScreenshot(name: "Sidebar-Sessions-Visible")
     }
@@ -47,8 +49,7 @@ final class SessionManagementUITests: XCTestCase {
         let cellsBefore = app.cells.count
 
         // The "+" button in the toolbar creates a new session (label: "New Chat")
-        let newChatButton = app.buttons["New Chat"]
-        guard waitForElement(newChatButton, timeout: 5) else {
+        guard let newChatButton = findNewChatButton(app: app) else {
             captureScreenshot(name: "No-New-Chat-Button")
             XCTFail("New Chat button not found in sidebar toolbar")
             return
@@ -76,8 +77,7 @@ final class SessionManagementUITests: XCTestCase {
         showSidebarIfNeeded(app: app)
 
         // Ensure we have at least two sessions
-        let newChatButton = app.buttons["New Chat"]
-        guard waitForElement(newChatButton, timeout: 5) else {
+        guard let newChatButton = findNewChatButton(app: app) else {
             captureScreenshot(name: "No-New-Chat-Button-Switch")
             XCTFail("New Chat button not found")
             return
@@ -115,8 +115,7 @@ final class SessionManagementUITests: XCTestCase {
         showSidebarIfNeeded(app: app)
 
         // Ensure at least two sessions so deleting one still leaves one
-        let newChatButton = app.buttons["New Chat"]
-        guard waitForElement(newChatButton, timeout: 5) else {
+        guard let newChatButton = findNewChatButton(app: app) else {
             captureScreenshot(name: "No-New-Chat-Button-Delete")
             return
         }
@@ -138,7 +137,11 @@ final class SessionManagementUITests: XCTestCase {
 
         let deleteButton = app.buttons["Delete"]
         if waitForElement(deleteButton, timeout: 3) {
-            deleteButton.tap()
+            if deleteButton.isHittable {
+                deleteButton.tap()
+            } else {
+                deleteButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
 
             // Confirm deletion in the alert
             let confirmDelete = app.alerts.buttons["Delete"]

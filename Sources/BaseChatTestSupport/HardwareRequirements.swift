@@ -120,14 +120,13 @@ public enum HardwareRequirements {
 
     // MARK: - MLX Models
 
-    /// Scans common model directories for a valid MLX model directory
-    /// (contains `config.json` and at least one `.safetensors` file).
+    /// Scans common model directories for a loadable local MLX model directory.
     ///
     /// Searches:
     /// 1. `~/Documents/Models/` (default `ModelStorageService` location)
     /// 2. App container `Documents/Models/` directories
     ///
-    /// Returns the URL of the first valid MLX directory found, or `nil`.
+    /// Returns the URL of the first loadable MLX directory found, or `nil`.
     public static func findMLXModelDirectory() -> URL? {
         let fm = FileManager.default
 
@@ -173,14 +172,26 @@ public enum HardwareRequirements {
         return nil
     }
 
-    /// Checks whether a directory contains `config.json` and at least one `.safetensors` file.
+    /// Checks whether a directory looks like a loadable local MLX snapshot.
+    ///
+    /// A directory must contain:
+    /// - `config.json` with a non-empty `model_type`
+    /// - at least one `.safetensors` weight file
+    /// - a Hugging Face tokenizer artifact (`tokenizer.json` or `tokenizer.model`)
     static func isValidMLXDirectory(_ url: URL, fileManager: FileManager = .default) -> Bool {
         var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
             return false
         }
-        let configPath = url.appendingPathComponent("config.json").path
-        guard fileManager.fileExists(atPath: configPath) else { return false }
+
+        let configURL = url.appendingPathComponent("config.json")
+        guard fileManager.fileExists(atPath: configURL.path),
+              let configData = try? Data(contentsOf: configURL),
+              let json = try? JSONSerialization.jsonObject(with: configData) as? [String: Any],
+              let modelType = json["model_type"] as? String,
+              !modelType.isEmpty else {
+            return false
+        }
 
         guard let files = try? fileManager.contentsOfDirectory(
             at: url,
@@ -188,6 +199,10 @@ public enum HardwareRequirements {
             options: [.skipsHiddenFiles]
         ) else { return false }
 
-        return files.contains { $0.pathExtension.lowercased() == "safetensors" }
+        let fileNames = Set(files.map { $0.lastPathComponent.lowercased() })
+        let hasWeights = files.contains { $0.pathExtension.lowercased() == "safetensors" }
+        let hasTokenizer = fileNames.contains("tokenizer.json") || fileNames.contains("tokenizer.model")
+
+        return hasWeights && hasTokenizer
     }
 }

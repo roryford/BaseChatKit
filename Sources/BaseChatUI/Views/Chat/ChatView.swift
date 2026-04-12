@@ -144,6 +144,7 @@ public struct ChatView: View {
             }
             .buttonStyle(.borderless)
             .font(.callout.bold())
+            .accessibilityIdentifier("chat-model-management-button")
         case .dismissOnly, .none:
             EmptyView()
         }
@@ -170,6 +171,7 @@ public struct ChatView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.blue)
             .accessibilityLabel("Browse models for extended context")
+            .accessibilityIdentifier("chat-model-management-button")
         }
         .padding(12)
         .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
@@ -223,6 +225,7 @@ public struct ChatView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .accessibilityLabel("Browse and download models")
+                .accessibilityIdentifier("chat-model-management-button")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
@@ -239,6 +242,7 @@ public struct ChatView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .accessibilityIdentifier("chat-model-management-button")
             }
             .frame(maxHeight: .infinity)
         }
@@ -334,6 +338,7 @@ public struct ChatView: View {
             Label("Settings", systemImage: "gear")
         }
         .accessibilityLabel("Generation settings")
+        .accessibilityIdentifier("chat-settings-button")
     }
 
     private var clearChatButton: some View {

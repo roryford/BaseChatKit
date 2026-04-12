@@ -62,12 +62,22 @@ extension ChatViewModel {
     }
 
     /// Persists a message via the persistence provider.
+    ///
+    /// `ChatViewModel` calls this for both brand-new messages and later writes to
+    /// the same logical message (for example, when a cancelled assistant reply is
+    /// saved once from `stopGeneration()` and again at the end of
+    /// `generateIntoMessage`). Treat it as an upsert at the view-model boundary so
+    /// callers do not need to coordinate insert vs. update ownership.
     func saveMessage(_ message: ChatMessageRecord) throws {
         guard let persistence else {
             Log.persistence.warning("saveMessage called before persistence was configured — message will not be persisted")
             return
         }
-        try persistence.insertMessage(message)
+        do {
+            try persistence.updateMessage(message)
+        } catch ChatPersistenceError.messageNotFound {
+            try persistence.insertMessage(message)
+        }
     }
 
     /// Updates an existing message via the persistence provider.

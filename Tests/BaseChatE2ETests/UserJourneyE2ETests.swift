@@ -173,31 +173,19 @@ final class UserJourneyE2ETests {
 
         // Persistence contract check: stopGeneration() promises to save the
         // partial content under the cancelled assistant's ID. Fetch by ID and
-        // verify at least one row exists whose content matches the in-memory
-        // partial. This is the REAL contract the test has to catch regressions
-        // against. The "exactly one row" half of the contract is currently
-        // broken by #260, so it's wrapped separately below.
+        // verify that exactly one row exists whose content matches the in-memory
+        // partial.
         let cancelID = cancelledAssistant.id
         let expectedPartial = cancelledAssistant.content
         let cancelDescriptor = FetchDescriptor<ChatMessage>(
             predicate: #Predicate { $0.id == cancelID }
         )
         let cancelRows = try context.fetch(cancelDescriptor)
-        #expect(!cancelRows.isEmpty, "stopGeneration must persist the partial assistant row")
+        #expect(cancelRows.count == 1, "stopGeneration should leave exactly one persisted row")
         #expect(
             cancelRows.contains { $0.content == expectedPartial },
             "Persisted partial content must match the in-memory partial"
         )
-
-        // Tracked by #260 — stopGeneration() and the tail of generateIntoMessage()
-        // both call saveMessage() on the same assistant record, and
-        // SwiftDataPersistenceProvider.insertMessage is not an upsert, so two
-        // rows with the same id get written. When #260 is fixed, the assertion
-        // below will start passing, withKnownIssue will fire ("expected a known
-        // failure but didn't get one"), and this wrapper must be removed.
-        withKnownIssue("Bug #260: duplicate SwiftData rows from concurrent save paths") {
-            #expect(cancelRows.count == 1, "stopGeneration should leave exactly one persisted row")
-        }
 
         // 6. Regenerate — replace the last assistant message with a fresh one.
         backend.tokensToYield = ["Regenerated", " reply"]
@@ -234,9 +222,8 @@ final class UserJourneyE2ETests {
         #expect(vm.messages[5].content == "Model B reply")
 
         // In-memory ordering and content assertions — these verify the real
-        // "full HISTORY is intact after model switch" contract without being
-        // affected by #260's orphan row. The VM tracks the authoritative
-        // sequence the user actually sees.
+        // "full HISTORY is intact after model switch" contract. The VM tracks
+        // the authoritative sequence the user actually sees.
         #expect(
             vm.messages.map(\.role) == [.user, .assistant, .user, .assistant, .user, .assistant],
             "VM message roles must alternate user/assistant in send order"
@@ -248,23 +235,16 @@ final class UserJourneyE2ETests {
         )
         #expect(vm.messages[5].content == "Model B reply", "Last turn must land under modelB")
 
-        // DB-side history check: count is wrapped in withKnownIssue because
-        // #260 leaves an orphan row from the step 5 cancel that persists all
-        // the way through. When #260 is fixed this will start passing and
-        // the wrapper must be removed. The "correct" rows still exist in
-        // the DB regardless — we verify that by filtering out the orphan
-        // below.
+        // DB-side history check: after cancel + regenerate, persistence should
+        // contain exactly the six visible turns with no orphaned assistant row.
         descriptor = FetchDescriptor<ChatMessage>(
             predicate: #Predicate { $0.sessionID == sessionID },
             sortBy: [SortDescriptor(\.timestamp)]
         )
         dbMessages = try context.fetch(descriptor)
-        withKnownIssue("Bug #260: orphan row from step 5 cancel inflates persisted count") {
-            #expect(dbMessages.count == 6, "Full conversation history must be persisted")
-        }
+        #expect(dbMessages.count == 6, "Full conversation history must be persisted")
         // Content anchors that must exist somewhere in the persisted set —
-        // these are robust against #260's extra row and prove the real
-        // turns landed on disk.
+        // these prove the real turns landed on disk.
         #expect(
             dbMessages.contains { $0.content == "Hello" && $0.role == .user },
             "First user turn must be persisted"
@@ -305,10 +285,7 @@ final class UserJourneyE2ETests {
             vm.messages.contains { $0.content == "Model B reply" && $0.role == .assistant },
             "Reloaded session must restore the model-B reply"
         )
-        // Count is inflated by #260's orphan row — wrap separately.
-        withKnownIssue("Bug #260: orphan row from step 5 cancel inflates reloaded message count") {
-            #expect(vm.messages.count == 6, "Reloaded session must restore exactly all turns")
-        }
+        #expect(vm.messages.count == 6, "Reloaded session must restore exactly all turns")
 
         // Independent verification: bypass sessionManager entirely and read
         // the session record straight from SwiftData. This proves that

@@ -22,14 +22,16 @@ final class HardwareRequirementsMLXTests: XCTestCase {
     // MARK: - Valid directories
 
     func test_isValidMLXDirectory_withConfigAndSafetensors_returnsTrue() {
-        createFile("config.json")
+        createFile("config.json", contents: #"{"model_type":"llama"}"#)
+        createFile("tokenizer.json")
         createFile("model.safetensors")
 
         XCTAssertTrue(HardwareRequirements.isValidMLXDirectory(tempDirectory))
     }
 
     func test_isValidMLXDirectory_withMultipleSafetensors_returnsTrue() {
-        createFile("config.json")
+        createFile("config.json", contents: #"{"model_type":"llama"}"#)
+        createFile("tokenizer.model")
         createFile("model-00001-of-00002.safetensors")
         createFile("model-00002-of-00002.safetensors")
 
@@ -39,13 +41,30 @@ final class HardwareRequirementsMLXTests: XCTestCase {
     // MARK: - Missing files
 
     func test_isValidMLXDirectory_missingConfig_returnsFalse() {
+        createFile("tokenizer.json")
+        createFile("model.safetensors")
+
+        XCTAssertFalse(HardwareRequirements.isValidMLXDirectory(tempDirectory))
+    }
+
+    func test_isValidMLXDirectory_missingModelType_returnsFalse() {
+        createFile("config.json", contents: "{}")
+        createFile("tokenizer.json")
         createFile("model.safetensors")
 
         XCTAssertFalse(HardwareRequirements.isValidMLXDirectory(tempDirectory))
     }
 
     func test_isValidMLXDirectory_missingSafetensors_returnsFalse() {
-        createFile("config.json")
+        createFile("config.json", contents: #"{"model_type":"llama"}"#)
+        createFile("tokenizer.json")
+
+        XCTAssertFalse(HardwareRequirements.isValidMLXDirectory(tempDirectory))
+    }
+
+    func test_isValidMLXDirectory_missingTokenizer_returnsFalse() {
+        createFile("config.json", contents: #"{"model_type":"llama"}"#)
+        createFile("model.safetensors")
 
         XCTAssertFalse(HardwareRequirements.isValidMLXDirectory(tempDirectory))
     }
@@ -66,9 +85,9 @@ final class HardwareRequirementsMLXTests: XCTestCase {
     // MARK: - Helpers
 
     @discardableResult
-    private func createFile(_ name: String) -> URL {
+    private func createFile(_ name: String, contents: String = "") -> URL {
         let url = tempDirectory.appendingPathComponent(name)
-        fm.createFile(atPath: url.path, contents: Data())
+        fm.createFile(atPath: url.path, contents: Data(contents.utf8))
         return url
     }
 }

@@ -136,6 +136,7 @@ public struct GenerationSettingsView: View {
                         Text("Advanced Settings")
                             .font(.headline)
                     }
+                    .accessibilityIdentifier("advanced-settings-disclosure")
                 }
 
                 // Sampler Presets — inside advanced, rendered as its own Section

@@ -49,6 +49,25 @@ swift test --filter BaseChatBackendsTests
 swift test --filter BaseChatE2ETests
 ```
 
+### Example app UI tests
+
+When debugging `BaseChatDemoUITests`, prefer the fast rerun loop instead of repeating full `xcodebuild test` runs:
+
+```bash
+scripts/example-ui-tests.sh build-for-testing
+scripts/example-ui-tests.sh test-without-building -only-testing:BaseChatDemoUITests/ChatFlowUITests/testEmptyStateShowsWelcome
+```
+
+- `build-for-testing` does the expensive compile once.
+- `test-without-building` reuses that build for targeted reruns.
+- The helper auto-selects a real available simulator destination instead of hardcoding stale device names. Use `xcrun simctl list devices available` plus `--destination 'platform=iOS Simulator,id=<SIMULATOR_ID>'` if you want to pin a specific simulator.
+
+Run the full sweep only when needed:
+
+```bash
+scripts/example-ui-tests.sh test
+```
+
 To run everything at once on a capable machine:
 
 ```bash

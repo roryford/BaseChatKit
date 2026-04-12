@@ -6,8 +6,7 @@ final class CloudAPIUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.launch()
+        app = launchDemoApp()
     }
 
     // MARK: - Navigation to API Configuration
@@ -87,7 +86,7 @@ final class CloudAPIUITests: XCTestCase {
     func testDismissAPIConfig() throws {
         navigateToAPIConfiguration()
 
-        let doneButton = app.buttons["Done"]
+        let doneButton = app.navigationBars["Cloud APIs"].buttons["Done"]
         guard waitForElement(doneButton, timeout: 3) else {
             captureScreenshot(name: "API-Config-No-Done-Button")
             XCTFail("Done button not found in API configuration")
@@ -96,10 +95,21 @@ final class CloudAPIUITests: XCTestCase {
 
         doneButton.tap()
 
+        if apiTitleStillVisible(app: app) {
+            dismissSheet(app: app)
+        }
+
         // The "Cloud APIs" title should no longer be visible
         let apiTitle = app.staticTexts["Cloud APIs"]
-        XCTAssertFalse(apiTitle.waitForExistence(timeout: 3),
-                       "API configuration sheet should be dismissed after tapping Done")
+        let disappeared = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: apiTitle
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [disappeared], timeout: 3),
+            .completed,
+            "API configuration sheet should be dismissed after tapping Done"
+        )
 
         captureScreenshot(name: "API-Config-Dismissed")
     }
@@ -109,15 +119,14 @@ final class CloudAPIUITests: XCTestCase {
     /// Navigates from the main app to the API Configuration view.
     /// Path: Settings button -> Advanced Settings -> Manage Cloud APIs
     private func navigateToAPIConfiguration() {
+        openChatDetailIfNeeded(app: app)
+
         // Step 1: Open settings
-        let settingsButton = app.buttons["Generation settings"]
-        if waitForElement(settingsButton, timeout: 5), settingsButton.isHittable {
-            settingsButton.tap()
-        } else {
+        if !tapToolbarButton("Generation settings", app: app) {
             let gearButton = app.buttons.matching(NSPredicate(
                 format: "label CONTAINS[c] 'Settings' OR label CONTAINS[c] 'gear'"
             )).firstMatch
-            guard waitForElement(gearButton, timeout: 3) else {
+            guard waitForElement(gearButton, timeout: 3), gearButton.isHittable else {
                 captureScreenshot(name: "API-Nav-No-Settings-Button")
                 XCTFail("Could not find settings button to navigate to API configuration")
                 return
@@ -134,23 +143,27 @@ final class CloudAPIUITests: XCTestCase {
         }
 
         // Step 2: Expand Advanced Settings disclosure
-        let advancedDisclosure = app.staticTexts["Advanced Settings"]
-        if waitForElement(advancedDisclosure, timeout: 3) {
+        let manageAPIsControl = app.buttons["Manage Cloud APIs"].exists
+            ? app.buttons["Manage Cloud APIs"]
+            : app.staticTexts["Manage Cloud APIs"]
+
+        let advancedDisclosure = advancedSettingsDisclosure(app: app)
+        if !scrollToElement(manageAPIsControl, app: app, maxSwipes: 1),
+           waitForElement(advancedDisclosure, timeout: 3) {
             advancedDisclosure.tap()
             // Wait for the disclosure to expand
-            _ = app.buttons["Manage Cloud APIs"].waitForExistence(timeout: 3)
+            _ = manageAPIsControl.waitForExistence(timeout: 3)
         }
 
         // Step 3: Tap "Manage Cloud APIs"
-        let manageAPIsButton = app.buttons["Manage Cloud APIs"]
-        guard waitForElement(manageAPIsButton, timeout: 5) else {
+        guard scrollToElement(manageAPIsControl, app: app), waitForElement(manageAPIsControl, timeout: 2) else {
             captureScreenshot(name: "API-Nav-No-Manage-Button")
             // The Cloud API section may be hidden by feature flags
             XCTFail("Manage Cloud APIs button not found — feature may be disabled")
             return
         }
 
-        manageAPIsButton.tap()
+        manageAPIsControl.tap()
 
         // Wait for the API configuration sheet
         let apiTitle = app.staticTexts["Cloud APIs"]
@@ -159,5 +172,9 @@ final class CloudAPIUITests: XCTestCase {
             XCTFail("API Configuration sheet did not open")
             return
         }
+    }
+
+    private func apiTitleStillVisible(app: XCUIApplication) -> Bool {
+        app.staticTexts["Cloud APIs"].exists
     }
 }

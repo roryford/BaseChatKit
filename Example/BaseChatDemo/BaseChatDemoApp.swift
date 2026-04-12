@@ -24,6 +24,7 @@ struct BaseChatDemoApp: App {
             #if canImport(UIKit)
             UIView.setAnimationsEnabled(false)
             #endif
+            UserDefaults.standard.removeObject(forKey: "showAdvancedSettings")
         }
         // Configure BaseChatKit for this app
         BaseChatConfiguration.shared = BaseChatConfiguration(

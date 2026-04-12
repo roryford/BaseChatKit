@@ -114,6 +114,53 @@ final class CancellationTests: XCTestCase {
         XCTAssertNotEqual(assistantMessage.content, fullOutput, "Content should differ from full output")
     }
 
+    func test_stopGeneration_thenRegenerate_thenReload_keepsSingleAssistantRow() async throws {
+        let session = createAndActivateSession()
+
+        try await sendAndStopMidStream()
+
+        XCTAssertEqual(vm.messages.count, 2, "Should have user + partial assistant after stop")
+        let cancelledAssistant = vm.messages[1]
+        let cancelledAssistantID = cancelledAssistant.id
+
+        let cancelledDescriptor = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate { $0.id == cancelledAssistantID }
+        )
+        XCTAssertEqual(
+            try context.fetch(cancelledDescriptor).count,
+            1,
+            "Cancelling should persist exactly one assistant row"
+        )
+
+        slowBackend.tokensToYield = ["Regenerated", " reply"]
+        slowBackend.delayPerToken = .milliseconds(10)
+        await vm.regenerateLastResponse()
+
+        let sessionID = session.id
+        let sessionDescriptor = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate { $0.sessionID == sessionID },
+            sortBy: [SortDescriptor(\.timestamp)]
+        )
+        let persisted = try context.fetch(sessionDescriptor)
+        XCTAssertEqual(persisted.count, 2, "Regenerate should replace the cancelled assistant row")
+        XCTAssertFalse(
+            persisted.contains(where: { $0.id == cancelledAssistant.id }),
+            "Cancelled assistant row should not survive regeneration"
+        )
+        XCTAssertEqual(
+            persisted.filter { $0.role == .assistant }.count,
+            1,
+            "Persistence should contain exactly one assistant row after regeneration"
+        )
+
+        vm.switchToSession(session)
+
+        XCTAssertEqual(vm.messages.count, 2, "Reload should restore only the visible user/assistant pair")
+        let assistants = vm.messages.filter { $0.role == .assistant }
+        XCTAssertEqual(assistants.count, 1, "Reload should restore exactly one assistant message")
+        XCTAssertEqual(assistants.first?.content, "Regenerated reply")
+    }
+
     func test_stopGeneration_thenSendAgain_works() async throws {
         createAndActivateSession()
 

@@ -35,7 +35,9 @@ final class MLXModelE2ETests: XCTestCase {
         try XCTSkipUnless(HardwareRequirements.hasMetalDevice, "Requires Metal GPU")
 
         guard let mlxDir = HardwareRequirements.findMLXModelDirectory() else {
-            throw XCTSkip("No MLX model found on disk. Download one via the app or huggingface-cli.")
+            throw XCTSkip(
+                "No loadable MLX model found on disk. Install a local MLX snapshot with config.json, tokenizer, and safetensors weights."
+            )
         }
         modelURL = mlxDir
 
