@@ -124,6 +124,11 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
         let nsError = error as NSError
         let errorDesc = error.localizedDescription
 
+        // Capture resume data before the task object is released. Resume data is only
+        // available on URLSessionDownloadTask failures (not snapshot/MLX partial files)
+        // and only when the server did not cancel the request.
+        let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard let context = self.taskContext(for: taskID, taskDescription: taskDescription) else { return }
@@ -137,18 +142,31 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
                     }
                 }
                 self.activeDownloads[context.modelID]?.markCancelled()
+                // Pending metadata is removed on cancellation — retryDownload is not
+                // offered for cancelled downloads (only .failed shows a Retry button).
+                self.removePendingDownload(id: context.modelID)
             } else {
+                // Persist resume data for single-file downloads so retryDownload(id:) can
+                // resume from where the download stopped rather than restarting from scratch.
+                // MLX snapshot files are excluded — each file is small enough to restart.
+                if context.relativePath == nil, let resumeData {
+                    self.persistResumeData(resumeData, for: context.modelID)
+                }
+
                 if context.relativePath != nil {
+                    // failSnapshotDownload calls removePendingDownload internally.
                     self.failSnapshotDownload(
                         modelID: context.modelID,
                         error: errorDesc,
                         cancelRemainingTasks: true
                     )
                 } else {
+                    // Keep pending metadata intact so retryDownload(id:) can reconstruct
+                    // the model and reach the resume-data path. removePendingDownload is
+                    // called only after a successful retry or a fresh-start retry begins.
                     self.activeDownloads[context.modelID]?.markFailed(error: errorDesc)
                 }
             }
-            self.removePendingDownload(id: context.modelID)
             self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
         }
     }

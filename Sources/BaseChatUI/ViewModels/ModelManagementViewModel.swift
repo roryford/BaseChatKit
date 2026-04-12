@@ -369,6 +369,24 @@ public final class ModelManagementViewModel {
         Log.download.info("Cancelled download: \(id)")
     }
 
+    /// Retries a failed download for the given model.
+    ///
+    /// Delegates to ``BackgroundDownloadManager/retryDownload(id:)``, which resumes
+    /// from the previously-downloaded bytes when resume data is available, or falls
+    /// back to a fresh download transparently when the server rejects stale data.
+    public func retryDownload(for model: DownloadableModel) {
+        guard let manager = downloadManager else {
+            searchError = "Download manager is not available yet."
+            return
+        }
+
+        Task {
+            await manager.retryDownload(id: model.id)
+            trackedDownloads[model.id] = manager.activeDownloads[model.id]
+            startDownloadSync()
+        }
+    }
+
     // MARK: - Local Model Management
 
     /// Deletes a downloaded model from disk.
