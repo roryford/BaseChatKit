@@ -71,6 +71,7 @@ UI automation tests that launch the real Example app in a simulator and drive it
 | `BaseChatUITests` | Integration | Yes | None | XCTest |
 | `BaseChatBackendsTests` | Unit, E2E | Partial | MLX/Llama need Apple Silicon | Mixed |
 | `BaseChatE2ETests` | E2E | Yes | None (mock backends) | Swift Testing |
+| `BaseChatMLXIntegrationTests` | E2E | No | Apple Silicon + Metal + local MLX model | XCTest |
 | `BaseChatDemoUITests` | XCUITest | No | Simulator | XCTest (XCUIApplication) |
 
 ### Running tests
@@ -84,6 +85,10 @@ swift test --filter BaseChatBackendsTests   # cloud/SSE tests only
 # Apple Silicon only
 swift test --filter BaseChatBackendsTests --traits MLX,Llama
 swift test --filter BaseChatE2ETests
+
+# Xcode-only — real MLX model inference (requires local MLX fixture; see below)
+# Cannot run via swift test; MLX Metal shaders are only compiled by Xcode.
+xcodebuild test -scheme BaseChatKit-Package -only-testing BaseChatMLXIntegrationTests -destination 'platform=macOS'
 
 # Example app UI tests (preferred debug loop)
 scripts/example-ui-tests.sh build-for-testing
@@ -117,6 +122,31 @@ Available flags (from `BaseChatTestSupport/HardwareRequirements.swift`):
 | `isAppleSilicon` | Running on arm64 |
 | `isPhysicalDevice` | Not the iOS Simulator |
 | `hasFoundationModels` | macOS 26+ / iOS 26+ |
+
+### Local MLX model fixture (`BaseChatMLXIntegrationTests`)
+
+`BaseChatMLXIntegrationTests` runs real GPU inference using a model you provide locally. The harness calls `HardwareRequirements.findMLXModelDirectory()` during `setUp`; if no valid directory is found the entire suite is **skipped**, not failed.
+
+**Required fixture shape**
+
+Each model must live in its own subdirectory and contain all three of the following:
+
+| File | Requirement |
+|------|-------------|
+| `config.json` | Valid JSON with a non-empty `model_type` field |
+| `*.safetensors` | At least one weight shard |
+| `tokenizer.json` or `tokenizer.model` | Hugging Face tokenizer artifact (either form accepted) |
+
+**Where the harness searches** (in order, first valid directory wins):
+
+1. `~/Documents/Models/<model-dir>/`
+2. `~/Library/Containers/*/Data/Documents/Models/<model-dir>/`
+
+Place your MLX snapshot in either location. The harness scans all immediate subdirectories of each `Models/` folder, so a layout like `~/Documents/Models/my-model/` with the files above is sufficient.
+
+**When no fixture is found**
+
+The suite calls `XCTSkip` and is marked skipped — CI sees a green pass, not a failure. You only need a local fixture when you're actively working on `BaseChatMLXIntegrationTests` or `MLXBackend`.
 
 ---
 
