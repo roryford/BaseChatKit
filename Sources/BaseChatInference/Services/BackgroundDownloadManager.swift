@@ -183,13 +183,19 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
               let displayName = info["displayName"],
               let typeStr = info["modelType"] else {
             // Fall back to the existing failed state's model when metadata is absent.
-            // This covers the case where removePendingDownload already ran but the
-            // retry UI was still visible (e.g. the user tapped Retry very fast).
+            // This should be rare — pending metadata is now kept alive until a successful
+            // retry or explicit removal. The guard covers true edge cases (e.g. corrupt
+            // UserDefaults, or the model was deleted between failure and retry tap).
             guard let existingState = activeDownloads[id] else {
                 Log.download.error("retryDownload called for unknown download ID: \(id)")
                 return
             }
-            await retryWithFreshDownload(model: existingState.model)
+            let model = existingState.model
+            // Reset state so the UI transitions away from .failed immediately.
+            activeDownloads[model.id] = DownloadState(model: model)
+            // Consume any stale resume data so it doesn't leak in UserDefaults.
+            _ = consumeResumeData(for: id)
+            await retryWithFreshDownload(model: model)
             return
         }
 

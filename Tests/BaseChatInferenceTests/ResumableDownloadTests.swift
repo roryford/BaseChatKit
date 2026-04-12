@@ -181,9 +181,9 @@ final class ResumableDownloadTests: XCTestCase {
 
     // MARK: - retryDownload: state machine transitions
 
-    /// retryDownload with no resume data and a valid pending entry should reset the
-    /// download to queued/active and not leave it in .failed.
-    func test_retryDownload_withNoPendingMetadata_usesExistingModelFromState() async {
+    /// When pending metadata is absent, retryDownload should use the in-memory model,
+    /// reset the state away from .failed, and consume any stale resume data.
+    func test_retryDownload_withNoPendingMetadata_resetsStateAndConsumesResumeData() async {
         let model = makeModel()
 
         // Set up a failed state but do NOT seed pending metadata.
@@ -191,17 +191,31 @@ final class ResumableDownloadTests: XCTestCase {
         failedState.markFailed(error: "No metadata")
         manager.activeDownloads[model.id] = failedState
 
-        // Should fall back to the existing model from activeDownloads without crashing.
+        // Pre-seed stale resume data to verify it gets consumed even in the fallback path.
+        let staleResumeData = Data("stale-resume".utf8)
+        manager.persistResumeData(staleResumeData, for: model.id)
+
         await manager.retryDownload(id: model.id)
 
-        // The manager must still have an entry (not nil) — exact status depends on
-        // whether the background URLSession task reported back before the assertion.
-        XCTAssertNotNil(
-            manager.activeDownloads[model.id],
-            "activeDownloads should retain an entry even when pending metadata is absent"
-        )
+        // State must not remain .failed — retryDownload should have replaced it.
+        let newState = manager.activeDownloads[model.id]
+        XCTAssertNotNil(newState, "activeDownloads should retain an entry")
+        if let newState {
+            if case .failed = newState.status {
+                XCTFail("retryDownload should have transitioned state away from .failed")
+            }
+            XCTAssertNotEqual(
+                ObjectIdentifier(newState), ObjectIdentifier(failedState),
+                "retryDownload should replace the old state object"
+            )
+        }
 
-        UserDefaults.standard.removeObject(forKey: pendingKey)
+        // Stale resume data must be consumed so it cannot leak across retries.
+        let key = "resumeData.\(model.id)"
+        XCTAssertNil(
+            UserDefaults.standard.data(forKey: key),
+            "Fallback retry path must consume stale resume data"
+        )
     }
 
     /// Verifies that consumeResumeData removes data and that persisting then consuming
@@ -260,6 +274,37 @@ final class ResumableDownloadTests: XCTestCase {
         }
 
         UserDefaults.standard.removeObject(forKey: pendingKey)
+    }
+
+    // MARK: - Pending metadata preserved on failure
+
+    /// The delegate must NOT remove pending metadata when a single-file download fails.
+    /// Keeping the metadata alive lets retryDownload(id:) reconstruct the model and
+    /// reach the resume-data code path rather than falling back to a fresh download.
+    func test_delegateFailure_keepsPendingMetadataForSingleFileDownload() {
+        let model = makeModel(
+            repoID: "test/keep-pending",
+            fileName: "keep-pending.gguf",
+            displayName: "Keep Pending"
+        )
+
+        // Seed pending metadata as if a download had been started.
+        seedPendingDownload(model)
+
+        // Simulate what didCompleteWithError does on a non-cancelled single-file failure:
+        // it calls persistResumeData and markFailed — but must NOT call removePendingDownload.
+        let resumeBytes = Data("resume-payload".utf8)
+        manager.persistResumeData(resumeBytes, for: model.id)
+        let failedState = DownloadState(model: model)
+        manager.activeDownloads[model.id] = failedState
+        failedState.markFailed(error: "Network timeout")
+
+        // Pending metadata must still be present — retryDownload depends on it.
+        let pending = UserDefaults.standard.dictionary(forKey: pendingKey) as? [String: [String: String]]
+        XCTAssertNotNil(
+            pending?[model.id],
+            "Pending metadata must survive a single-file failure so retryDownload can use it"
+        )
     }
 
     // MARK: - Key isolation: resume data key format
