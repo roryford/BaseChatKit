@@ -79,6 +79,14 @@ public final class ModelManagementViewModel {
         didSet { loadCachedBenchmarkResults() }
     }
 
+    // MARK: - Active Model
+
+    /// The file name of the currently active (loaded) model.
+    ///
+    /// Set externally by the host view whenever `ChatViewModel.selectedModel` changes,
+    /// so `DownloadableModelRow` can distinguish the in-use model from other downloaded models.
+    public var activeModelFileName: String?
+
     // MARK: - Private State
 
     private var searchTask: Task<Void, Never>?
@@ -279,6 +287,13 @@ public final class ModelManagementViewModel {
                 trackedDownloads[model.id] = state
                 Log.download.info("Started download: \(model.displayName), id=\(state.id)")
                 startDownloadSync()
+            } catch HuggingFaceError.insufficientDiskSpace(let required, let available) {
+                let fmt = ByteCountFormatter()
+                fmt.countStyle = .file
+                let requiredStr = fmt.string(fromByteCount: Int64(required))
+                let availableStr = fmt.string(fromByteCount: Int64(available))
+                searchError = "Not enough storage — this model needs \(requiredStr) but only \(availableStr) is available."
+                Log.download.error("Insufficient disk space: need \(required) bytes, have \(available)")
             } catch {
                 searchError = "Failed to start download: \(error.localizedDescription)"
                 Log.download.error("Download start error: \(error)")
@@ -468,6 +483,28 @@ public final class ModelManagementViewModel {
     /// Whether this device has enough RAM to run a model of the given size.
     public func canRunModel(sizeBytes: UInt64) -> Bool {
         deviceCapability.canLoadModel(estimatedMemoryBytes: sizeBytes)
+    }
+
+    /// Whether there is insufficient free disk space to download this model.
+    ///
+    /// Returns `true` when `model.sizeBytes > 0` and the volume's available capacity
+    /// for important usage is less than `model.sizeBytes`. Returns `false` when the
+    /// size is unknown (`sizeBytes == 0`) or on any filesystem query error, so the
+    /// download button is not blocked unnecessarily.
+    public func diskSpaceInsufficient(for model: DownloadableModel) -> Bool {
+        guard model.sizeBytes > 0 else { return false }
+        do {
+            let values = try URL.documentsDirectory
+                .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            guard let available = values.volumeAvailableCapacityForImportantUsage,
+                  available >= 0 else {
+                return false
+            }
+            return UInt64(available) < model.sizeBytes
+        } catch {
+            Log.download.warning("Disk space query failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// Whether a downloadable model's file already exists on disk.

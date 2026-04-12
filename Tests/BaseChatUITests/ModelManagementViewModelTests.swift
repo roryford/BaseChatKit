@@ -378,6 +378,7 @@ final class ModelManagementViewModelTests: XCTestCase {
         XCTAssertTrue(diagnostics.isEmpty, "Successful cleanup should not record a warning")
     }
 
+
     // MARK: - Issue #309: Auto-clean failed/cancelled downloads from trackedDownloads
 
     func test_downloadSync_removesFailedEntry_afterDisplayWindow() async {
@@ -623,5 +624,94 @@ final class ModelManagementViewModelTests: XCTestCase {
             "the cancelled first task must not clear it"
         )
         XCTAssertFalse(vm.isSearching, "isSearching must be false after the second search completes")
+    }
+
+    // MARK: - Disk Space (#312)
+
+    func test_diskSpaceInsufficient_returnsFalse_whenSizeBytesIsZero() {
+        let vm = ModelManagementViewModel()
+        let model = DownloadableModel(
+            repoID: "test/repo",
+            fileName: "unknown-size.gguf",
+            displayName: "Unknown Size Model",
+            modelType: .gguf,
+            sizeBytes: 0
+        )
+        // sizeBytes == 0 means the size is unknown — should never block the download button.
+        XCTAssertFalse(
+            vm.diskSpaceInsufficient(for: model),
+            "Model with unknown size (sizeBytes == 0) should never report insufficient disk space"
+        )
+    }
+
+    func test_diskSpaceInsufficient_returnsTrue_whenModelExceedsAvailableCapacity() {
+        let vm = ModelManagementViewModel()
+        // UInt64.max bytes is guaranteed to exceed any real device's free space.
+        let model = DownloadableModel(
+            repoID: "test/repo",
+            fileName: "impossibly-large.gguf",
+            displayName: "Impossibly Large Model",
+            modelType: .gguf,
+            sizeBytes: UInt64.max
+        )
+        XCTAssertTrue(
+            vm.diskSpaceInsufficient(for: model),
+            "A model requiring UInt64.max bytes should always report insufficient disk space"
+        )
+    }
+
+    func test_diskSpaceInsufficient_returnsFalse_whenModelFitsOnDisk() {
+        let vm = ModelManagementViewModel()
+        // 1 byte is guaranteed to fit in available disk space on any real device.
+        let model = DownloadableModel(
+            repoID: "test/repo",
+            fileName: "tiny.gguf",
+            displayName: "Tiny Model",
+            modelType: .gguf,
+            sizeBytes: 1
+        )
+        XCTAssertFalse(
+            vm.diskSpaceInsufficient(for: model),
+            "A model requiring 1 byte should never report insufficient disk space"
+        )
+    }
+
+    // MARK: - Active Model Badge (#315)
+
+    func test_activeModelFileName_isNilByDefault() {
+        let vm = ModelManagementViewModel()
+        XCTAssertNil(vm.activeModelFileName, "activeModelFileName should be nil on init")
+    }
+
+    func test_activeModelFileName_canBeSetExternally() {
+        let vm = ModelManagementViewModel()
+        vm.activeModelFileName = "active-model.gguf"
+        XCTAssertEqual(
+            vm.activeModelFileName,
+            "active-model.gguf",
+            "activeModelFileName should reflect the assigned value"
+        )
+    }
+
+    func test_activeModelFileName_distinguishesActiveFromDownloaded() {
+        let vm = ModelManagementViewModel()
+        let activeFileName = "active-model.gguf"
+        let otherFileName = "other-model.gguf"
+
+        vm.activeModelFileName = activeFileName
+
+        XCTAssertEqual(vm.activeModelFileName, activeFileName)
+        // The active file name does not match the other model.
+        XCTAssertNotEqual(vm.activeModelFileName, otherFileName)
+    }
+
+    func test_activeModelFileName_nilAfterClearing() {
+        let vm = ModelManagementViewModel()
+        vm.activeModelFileName = "some-model.gguf"
+        vm.activeModelFileName = nil
+        XCTAssertNil(
+            vm.activeModelFileName,
+            "activeModelFileName should be nil after being cleared"
+        )
     }
 }

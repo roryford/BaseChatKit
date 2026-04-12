@@ -217,6 +217,9 @@ struct HuggingFaceBrowserView: View {
         } message: { _ in
             Text("The download is complete. Switch to this model?")
         }
+        .onChange(of: chatViewModel.selectedModel) { _, newModel in
+            viewModel.activeModelFileName = newModel?.fileName
+        }
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: Self.importContentTypes,
@@ -225,6 +228,7 @@ struct HuggingFaceBrowserView: View {
             handleImport(result)
         }
         .onAppear {
+            viewModel.activeModelFileName = chatViewModel.selectedModel?.fileName
             viewModel.loadRecommendations(preferredModelIDs: recommendedModelIDs)
         }
     }

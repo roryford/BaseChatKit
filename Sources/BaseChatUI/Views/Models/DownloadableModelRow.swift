@@ -130,12 +130,24 @@ public struct DownloadableModelRow: View {
     @ViewBuilder
     private var trailingContent: some View {
         if viewModel.isModelDownloaded(model) {
-            downloadedBadge
+            if viewModel.activeModelFileName == model.fileName {
+                activeModelBadge
+            } else {
+                downloadedBadge
+            }
         } else if let state = viewModel.downloadState(for: model) {
             DownloadProgressView(state: state)
         } else {
             downloadButton
         }
+    }
+
+    private var activeModelBadge: some View {
+        Label("In Use", systemImage: "checkmark.circle.fill")
+            .font(.caption)
+            .foregroundStyle(.blue)
+            .labelStyle(.titleAndIcon)
+            .accessibilityLabel("Active model")
     }
 
     private var downloadedBadge: some View {
@@ -146,16 +158,30 @@ public struct DownloadableModelRow: View {
     }
 
     private var downloadButton: some View {
-        Button {
-            viewModel.startDownload(model)
-        } label: {
-            Image(systemName: "arrow.down.circle")
-                .font(.title2)
-                .foregroundStyle(.blue)
+        let insufficient = viewModel.diskSpaceInsufficient(for: model)
+        return VStack(alignment: .trailing, spacing: 2) {
+            Button {
+                viewModel.startDownload(model)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.title2)
+                    .foregroundStyle(insufficient ? Color.secondary : Color.blue)
+            }
+            .buttonStyle(.plain)
+            .disabled(insufficient)
+            .accessibilityLabel("Download \(model.displayName)")
+            .accessibilityHint(
+                insufficient
+                ? "Insufficient storage"
+                : "Downloads \(model.sizeFormatted) model to this device"
+            )
+
+            if insufficient {
+                Text("Insufficient storage")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Download \(model.displayName)")
-        .accessibilityHint("Downloads \(model.sizeFormatted) model to this device")
     }
 }
 
