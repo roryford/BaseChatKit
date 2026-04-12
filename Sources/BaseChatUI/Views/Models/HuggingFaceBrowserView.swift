@@ -15,6 +15,11 @@ struct HuggingFaceBrowserView: View {
     @State private var showImporter = false
     @State private var importSuccessMessage: String?
     @State private var importErrorMessage: String?
+    @State private var pendingUseNowModel: DownloadableModel?
+    /// Tracks model IDs we have already offered a "Use Now" prompt for, so that
+    /// stale completed entries remaining in `trackedDownloads` are never re-offered
+    /// when a subsequent download finishes and increments `completedDownloadCount`.
+    @State private var promptedModelIDs: Set<String> = []
 
     private static var importContentTypes: [UTType] {
         let gguf = UTType(filenameExtension: "gguf") ?? .data
@@ -165,6 +170,52 @@ struct HuggingFaceBrowserView: View {
         .onChange(of: viewModel.completedDownloadCount) {
             viewModel.invalidateModelCache()
             chatViewModel.refreshModels()
+
+            // After refreshing, offer to switch to the newly completed model if it
+            // isn't already the active selection and no prompt is already pending.
+            // We filter by `promptedModelIDs` so that stale completed entries that
+            // remain in `trackedDownloads` across multiple download cycles are never
+            // re-offered when the count increments for a later download.
+            guard pendingUseNowModel == nil else { return }
+            let justCompleted = viewModel.trackedDownloads.values
+                .filter {
+                    if case .completed = $0.status { return true }
+                    return false
+                }
+                .map(\.model)
+                .first {
+                    $0.fileName != chatViewModel.selectedModel?.fileName
+                        && !promptedModelIDs.contains($0.id)
+                }
+            if let model = justCompleted {
+                promptedModelIDs.insert(model.id)
+                pendingUseNowModel = model
+            }
+        }
+        .alert(
+            "Use \(pendingUseNowModel?.displayName ?? "") now?",
+            isPresented: Binding(
+                get: { pendingUseNowModel != nil },
+                set: { if !$0 { pendingUseNowModel = nil } }
+            ),
+            presenting: pendingUseNowModel
+        ) { model in
+            Button("Use Now") {
+                if let match = chatViewModel.availableModels.first(where: { $0.fileName == model.fileName }) {
+                    chatViewModel.selectedModel = match
+                } else {
+                    // refreshModels() runs synchronously in onChange, so this branch is
+                    // only reachable if the file was deleted between download completion
+                    // and the user tapping "Use Now".
+                    Log.download.warning("Use Now: \(model.fileName) not found in availableModels — file may have been deleted")
+                }
+                pendingUseNowModel = nil
+            }
+            Button("Not Now", role: .cancel) {
+                pendingUseNowModel = nil
+            }
+        } message: { _ in
+            Text("The download is complete. Switch to this model?")
         }
         .fileImporter(
             isPresented: $showImporter,
