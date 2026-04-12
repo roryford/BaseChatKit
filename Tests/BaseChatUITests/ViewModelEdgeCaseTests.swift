@@ -66,6 +66,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         vm.topP = 0.8
         vm.repeatPenalty = 1.5
         vm.systemPrompt = "Be concise."
+        vm.selectedPromptTemplate = .llama3
 
         try vm.saveSettingsToSession()
 
@@ -78,6 +79,8 @@ final class ViewModelEdgeCaseTests: XCTestCase {
                        "Session repeatPenalty should match view model value")
         XCTAssertEqual(updated.systemPrompt, "Be concise.",
                        "Session systemPrompt should match view model value")
+        XCTAssertEqual(updated.promptTemplate, .llama3,
+                       "Session promptTemplate should match view model value")
     }
 
     func test_saveSettingsToSession_noActiveSession_isNoop() throws {
