@@ -12,6 +12,54 @@ struct AssistantMarkdownBlock: Identifiable, Equatable {
     let text: String
 }
 
+// MARK: - Attributed String Cache
+
+/// Thread-safe LRU cache for rendered `AttributedString` values.
+///
+/// During token streaming the assistant message grows one batch at a time.
+/// All blocks except the final (growing) one are stable — their text never
+/// changes. Caching avoids repeating `AttributedString(markdown:)` (an O(N)
+/// Foundation call) for every stable block on every token delivery, reducing
+/// total rendering work from O(N²) to O(N).
+final class MarkdownAttributedStringCache: @unchecked Sendable {
+    static let shared = MarkdownAttributedStringCache()
+
+    // NSCache handles memory pressure eviction automatically.
+    private let cache = NSCache<NSString, AttributedStringBox>()
+
+    private init() {
+        cache.countLimit = 500
+    }
+
+    func attributedString(for markdown: String) -> AttributedString {
+        let key = markdown as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached.value
+        }
+        let rendered = Self.render(markdown)
+        cache.setObject(AttributedStringBox(rendered), forKey: key)
+        return rendered
+    }
+
+    private static func render(_ markdown: String) -> AttributedString {
+        if let parsed = try? AttributedString(
+            markdown: markdown,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
+        ) {
+            return parsed
+        }
+        return AttributedString(markdown)
+    }
+
+    // NSCache requires AnyObject values.
+    private final class AttributedStringBox {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+}
+
+// MARK: - Parser
+
 enum AssistantMarkdownParser {
     static func parseBlocks(from source: String) -> [AssistantMarkdownBlock] {
         guard !source.isEmpty else { return [] }
@@ -104,13 +152,7 @@ enum AssistantMarkdownParser {
     }
 
     static func attributedString(from markdown: String) -> AttributedString {
-        if let parsed = try? AttributedString(
-            markdown: markdown,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
-        ) {
-            return parsed
-        }
-        return AttributedString(markdown)
+        MarkdownAttributedStringCache.shared.attributedString(for: markdown)
     }
 }
 
@@ -129,6 +171,7 @@ struct AssistantMarkdownView: View {
             ForEach(blocks) { block in
                 switch block.kind {
                 case .markdown:
+                    // attributedString(from:) is cache-backed — stable blocks are O(1) lookups.
                     Text(AssistantMarkdownParser.attributedString(from: block.text))
                         .font(.body)
                         .frame(maxWidth: .infinity, alignment: .leading)

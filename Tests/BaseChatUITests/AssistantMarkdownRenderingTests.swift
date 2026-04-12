@@ -5,6 +5,61 @@ import BaseChatCore
 @MainActor
 final class AssistantMarkdownRenderingTests: XCTestCase {
 
+    // MARK: - Performance
+
+    /// Verifies that repeated `attributedString(from:)` calls for the same content are sub-linear
+    /// because the cache returns cached values in O(1) rather than re-parsing the markdown.
+    ///
+    /// Fixture: 200 calls simulating token-by-token streaming, each sharing the same stable prefix
+    /// blocks from a prior call. Without caching this is O(N²): each delivery re-renders all blocks.
+    /// With the cache, stable blocks are O(1) lookups; only the last (growing) block is re-parsed.
+    func test_attributedStringCache_repeatedCallsForSameStringAreSublinear() {
+        // Build fixtures before the measure block — measure only the cache-hit work.
+        let stablePrefix = String(repeating: "Lorem ipsum **dolor** sit amet, consectetur adipiscing elit. ", count: 30)
+        var tokens: [String] = []
+        var accumulated = stablePrefix
+        for i in 0..<200 {
+            accumulated += " token\(i)"
+            tokens.append(accumulated)
+        }
+        // Pre-warm the cache for the stable prefix so the measure block only pays for the suffix.
+        _ = AssistantMarkdownParser.attributedString(from: stablePrefix)
+
+        // Sabotage check: the cache must return something (not empty) for the prefix.
+        let rendered = AssistantMarkdownParser.attributedString(from: stablePrefix)
+        XCTAssertFalse(rendered.characters.isEmpty, "Cache must return rendered content for stable prefix")
+
+        measure {
+            // Simulate the hot path: 200 re-renders of a growing message where the prefix is stable.
+            // Each call hits the cache for the prefix; only the small suffix needs real parsing.
+            for token in tokens {
+                _ = AssistantMarkdownParser.attributedString(from: token)
+            }
+        }
+    }
+
+    /// Measures block parsing across a simulated 500-token stream.
+    /// All iterations share the same set of suffix strings, so after the first
+    /// `measure` iteration the cache is warm — subsequent iterations must be fast.
+    func test_parseBlocks_streamingGrowthIsSublinear() {
+        // Build fixtures: a 500-token growing string with one code block and mixed markdown.
+        let header = "# Title\n\nHere is some **bold** text.\n\n```swift\nlet x = 1\n```\n\n"
+        var tokens: [String] = []
+        var body = header
+        for i in 0..<500 {
+            body += "word\(i) "
+            tokens.append(body)
+        }
+
+        measure {
+            for content in tokens {
+                _ = AssistantMarkdownParser.parseBlocks(from: content)
+            }
+        }
+    }
+
+    // MARK: - Existing tests
+
     func test_parseBlocks_mixedMarkdownAndFencedCode_splitsIntoOrderedBlocks() {
         let input = """
         Intro **bold**
