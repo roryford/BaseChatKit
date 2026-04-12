@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.4](https://github.com/roryford/BaseChatKit/compare/v0.7.3...v0.7.4) (2026-04-12)
+
+**Test workflow hardening and persistence cleanup** — A cancelled assistant response could be saved twice, leaving orphaned rows that resurfaced after reload and forced the main user-journey E2E to tolerate known issues. This change makes chat-message persistence behave like an upsert at the view-model boundary, removes the known-issue wrappers from the end-to-end journey, tightens MLX integration fixture detection so malformed local snapshots are skipped instead of failing the suite, and stabilizes the Example app's UI test contract with explicit accessibility hooks plus a scripted `build-for-testing` / `test-without-building` loop. The result is a test matrix that is both more trustworthy and much faster to debug when failures do happen. ([#297](https://github.com/roryford/BaseChatKit/pull/297))
+
 ## [0.7.3](https://github.com/roryford/BaseChatKit/compare/v0.7.2...v0.7.3) (2026-04-11)
 
 **Load progress, an InferenceService audit, and internal hardening** — Three improvements from a focused audit of `InferenceService` and its supporting infrastructure.
