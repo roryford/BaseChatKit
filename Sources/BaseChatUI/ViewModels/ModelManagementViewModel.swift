@@ -207,6 +207,8 @@ public final class ModelManagementViewModel {
     /// Searches HuggingFace for models matching `searchQuery`.
     ///
     /// Debounces by 500ms so rapid typing doesn't fire excessive requests.
+    /// `isSearching` is set to `true` immediately — before the debounce sleep —
+    /// so the UI spinner appears as soon as the user types, not after the delay.
     public func search() async {
         // Cancel any in-flight search.
         searchTask?.cancel()
@@ -225,25 +227,37 @@ public final class ModelManagementViewModel {
         }
 
         searchError = nil
+        // Set immediately so the UI shows a spinner during the debounce window,
+        // not just after the 500ms delay has elapsed.
         isSearching = true
 
         let task = Task {
             // Debounce: wait 500ms before actually searching.
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                // A newer search() call cancelled this task — clear the spinner
+                // so the replacement task can manage it from a clean state.
+                isSearching = false
+                return
+            }
 
             do {
                 let results = try await service.searchModels(query: query)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else {
+                    isSearching = false
+                    return
+                }
                 searchResults = results
                 Log.network.info("Search returned \(results.count) results for '\(query, privacy: .private)'")
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else {
+                    isSearching = false
+                    return
+                }
                 searchError = "Search failed: \(error.localizedDescription)"
                 Log.network.error("Search error: \(error)")
             }
 
-            guard !Task.isCancelled else { return }
             isSearching = false
         }
 
@@ -284,10 +298,17 @@ public final class ModelManagementViewModel {
     /// This bridges the gap between the `BackgroundDownloadManager` (which updates
     /// via URLSession delegate callbacks) and this view model's stored properties
     /// (which SwiftUI observes for re-rendering).
+    ///
+    /// Terminal states (`.failed`, `.cancelled`) are held briefly for user feedback,
+    /// then swept from `trackedDownloads` so stale rows don't accumulate indefinitely.
     private func startDownloadSync() {
         guard downloadSyncTask == nil else { return }
 
         downloadSyncTask = Task { @MainActor [weak self] in
+            // Timestamps of when each download first reached a terminal state.
+            // Used to enforce a short display window before removal.
+            var terminalSince: [String: Date] = [:]
+
             while !Task.isCancelled {
                 guard let self, let manager = self.downloadManager else { break }
 
@@ -295,6 +316,39 @@ public final class ModelManagementViewModel {
                 let managerDownloads = manager.activeDownloads
                 for (id, state) in managerDownloads {
                     self.trackedDownloads[id] = state
+                }
+
+                // Record when each download first reaches a terminal state.
+                let now = Date()
+                for (id, state) in self.trackedDownloads {
+                    switch state.status {
+                    case .failed, .cancelled:
+                        if terminalSince[id] == nil {
+                            terminalSince[id] = now
+                        }
+                    default:
+                        terminalSince.removeValue(forKey: id)
+                    }
+                }
+
+                // Remove terminal entries once their display window has elapsed.
+                // .cancelled rows are cleared after ~1 s; .failed rows after ~3 s.
+                for (id, since) in terminalSince {
+                    guard let state = self.trackedDownloads[id] else {
+                        terminalSince.removeValue(forKey: id)
+                        continue
+                    }
+                    let elapsed = now.timeIntervalSince(since)
+                    let window: TimeInterval
+                    switch state.status {
+                    case .cancelled: window = 1
+                    case .failed: window = 3
+                    default: continue
+                    }
+                    if elapsed >= window {
+                        self.trackedDownloads.removeValue(forKey: id)
+                        terminalSince.removeValue(forKey: id)
+                    }
                 }
 
                 // Stop polling if no active downloads remain.
@@ -305,8 +359,8 @@ public final class ModelManagementViewModel {
                     }
                 }
 
-                if !hasActive && !managerDownloads.isEmpty {
-                    // Final sync then stop.
+                if !hasActive && !managerDownloads.isEmpty && terminalSince.isEmpty {
+                    // Final sync complete and all terminal windows have elapsed.
                     break
                 }
 
@@ -418,8 +472,18 @@ public final class ModelManagementViewModel {
 
     /// Invalidates the cached model discovery results, forcing a fresh filesystem scan
     /// on the next `isModelDownloaded` call.
+    ///
+    /// Also removes any `.failed` or `.cancelled` entries from `trackedDownloads`
+    /// immediately, since a cache reset signals a state change (e.g. download complete
+    /// or cancelled) and stale terminal rows should not persist across resets.
     public func invalidateModelCache() {
         discoveredModelFileNames = nil
+        trackedDownloads = trackedDownloads.filter { _, state in
+            switch state.status {
+            case .failed, .cancelled: return false
+            default: return true
+            }
+        }
     }
 
     /// Returns the active download state for a model, if any.
