@@ -496,7 +496,8 @@ public final class ModelManagementViewModel {
         do {
             let values = try URL.documentsDirectory
                 .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            guard let available = values.volumeAvailableCapacityForImportantUsage else {
+            guard let available = values.volumeAvailableCapacityForImportantUsage,
+                  available >= 0 else {
                 return false
             }
             return UInt64(available) < model.sizeBytes

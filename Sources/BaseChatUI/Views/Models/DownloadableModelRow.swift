@@ -165,7 +165,7 @@ public struct DownloadableModelRow: View {
             } label: {
                 Image(systemName: "arrow.down.circle")
                     .font(.title2)
-                    .foregroundColor(insufficient ? Color.secondary : Color.blue)
+                    .foregroundStyle(insufficient ? Color.secondary : Color.blue)
             }
             .buttonStyle(.plain)
             .disabled(insufficient)
