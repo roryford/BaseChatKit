@@ -36,6 +36,10 @@ public final class ModelManagementViewModel {
     /// Whether a search request is in flight.
     public private(set) var isSearching: Bool = false
 
+    /// `true` when the last successful search used a direct repo lookup (via `getModelFiles`)
+    /// rather than a freetext search. The UI uses this to label results contextually.
+    public private(set) var isDirectRepoLookup: Bool = false
+
     /// User-facing error from the last search or download attempt.
     public var searchError: String?
 
@@ -217,6 +221,10 @@ public final class ModelManagementViewModel {
     /// Debounces by 500ms so rapid typing doesn't fire excessive requests.
     /// `isSearching` is set to `true` immediately — before the debounce sleep —
     /// so the UI spinner appears as soon as the user types, not after the delay.
+    ///
+    /// When the query looks like a repo ID (`org/repo`), skips freetext search and
+    /// calls `getModelFiles(repoID:)` directly. Falls back to freetext search if the
+    /// direct lookup fails (repo not found, private, or network error).
     public func search() async {
         // Cancel any in-flight search.
         searchTask?.cancel()
@@ -226,6 +234,7 @@ public final class ModelManagementViewModel {
             searchResults = []
             searchError = nil
             isSearching = false
+            isDirectRepoLookup = false
             return
         }
 
@@ -248,14 +257,32 @@ public final class ModelManagementViewModel {
             // cancel() call and before this guard runs on @MainActor.
             guard !Task.isCancelled else { return }
 
+            if looksLikeRepoID(query) {
+                // Attempt a direct repo lookup first; fall back to freetext on any error.
+                do {
+                    let results = try await service.getModelFiles(repoID: query)
+                    guard !Task.isCancelled else { return }
+                    searchResults = results
+                    isDirectRepoLookup = true
+                    Log.network.info("Direct repo lookup returned \(results.count) files for '\(query, privacy: .private)'")
+                    isSearching = false
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    Log.network.warning("Direct repo lookup failed for '\(query, privacy: .private)', falling back to freetext: \(error)")
+                }
+            }
+
             do {
                 let results = try await service.searchModels(query: query)
                 guard !Task.isCancelled else { return }
                 searchResults = results
+                isDirectRepoLookup = false
                 Log.network.info("Search returned \(results.count) results for '\(query, privacy: .private)'")
             } catch {
                 guard !Task.isCancelled else { return }
                 searchError = "Search failed: \(error.localizedDescription)"
+                isDirectRepoLookup = false
                 Log.network.error("Search error: \(error)")
             }
 
@@ -264,6 +291,17 @@ public final class ModelManagementViewModel {
 
         searchTask = task
         await task.value
+    }
+
+    /// Returns `true` when `query` matches the `owner/repo` pattern used by HuggingFace repo IDs.
+    ///
+    /// Requires exactly one `/` with non-empty, space-free text on both sides.
+    /// URLs (which contain `://` or multiple slashes) and multi-segment paths do not match.
+    private func looksLikeRepoID(_ query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        // Require exactly one slash so that URLs and three-segment paths are rejected.
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 2 && parts.allSatisfy { !$0.isEmpty && !$0.contains(" ") }
     }
 
     // MARK: - Downloads
@@ -505,6 +543,31 @@ public final class ModelManagementViewModel {
             Log.download.warning("Disk space query failed: \(error.localizedDescription)")
             return false
         }
+    }
+
+    /// Exposes the underlying `DeviceCapabilityService` for use by views that need
+    /// to compute per-variant recommendations (e.g., `ModelDownloadTab`).
+    public var deviceCapabilityService: DeviceCapabilityService {
+        deviceCapability
+    }
+
+    /// Compatibility tier for sorting a group by device fit (lower = better).
+    ///
+    /// - 0: at least one variant comfortably fits (`canLoadModel` passes)
+    /// - 1: at least one variant borderline fits (passes at 80% of declared size)
+    /// - 2: all variants too large
+    /// - 3: all variants have unknown size (`sizeBytes == 0`)
+    public func compatibilityTier(for group: DownloadableModelGroup) -> Int {
+        let sized = group.variants.filter { $0.sizeBytes > 0 }
+        guard !sized.isEmpty else { return 3 }
+
+        if sized.contains(where: { deviceCapability.canLoadModel(estimatedMemoryBytes: $0.sizeBytes) }) {
+            return 0
+        }
+        if sized.contains(where: { deviceCapability.canLoadModel(estimatedMemoryBytes: $0.sizeBytes * 80 / 100) }) {
+            return 1
+        }
+        return 2
     }
 
     /// Whether a downloadable model's file already exists on disk.

@@ -13,7 +13,11 @@ public protocol HuggingFaceServiceProtocol: Sendable {
     ///
     /// Results include one `DownloadableModel` per downloadable file (each GGUF
     /// quant variant is a separate row; MLX repos produce a single row).
-    func searchModels(query: String) async throws -> [DownloadableModel]
+    ///
+    /// - Parameters:
+    ///   - query: The search string sent to the HuggingFace API.
+    ///   - limit: Maximum number of repos to fetch from the API before filtering. Defaults to 40.
+    func searchModels(query: String, limit: Int) async throws -> [DownloadableModel]
 
     /// Returns curated models appropriate for the given device size recommendation.
     func curatedModels(for recommendation: ModelSizeRecommendation) -> [DownloadableModel]
@@ -26,6 +30,13 @@ public protocol HuggingFaceServiceProtocol: Sendable {
 
     /// Constructs the direct download URL for a model file on HuggingFace.
     func downloadURL(for model: DownloadableModel) -> URL
+}
+
+public extension HuggingFaceServiceProtocol {
+    /// Searches HuggingFace using the default limit of 40 repos.
+    func searchModels(query: String) async throws -> [DownloadableModel] {
+        try await searchModels(query: query, limit: 40)
+    }
 }
 
 // MARK: - Implementation
@@ -45,7 +56,7 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
 
     // MARK: - Search
 
-    public func searchModels(query: String) async throws -> [DownloadableModel] {
+    public func searchModels(query: String, limit: Int = 40) async throws -> [DownloadableModel] {
         Log.network.info("Searching HuggingFace for: \(query, privacy: .private)")
 
         let response: PaginatedResponse<Model>
@@ -54,7 +65,7 @@ public final class HuggingFaceService: HuggingFaceServiceProtocol {
                 search: query,
                 sort: "downloads",
                 direction: .descending,
-                limit: 20,
+                limit: limit,
                 full: true,
                 pipelineTag: "text-generation"
             )
