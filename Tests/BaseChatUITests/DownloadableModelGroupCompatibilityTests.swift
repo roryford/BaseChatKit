@@ -211,6 +211,20 @@ final class DownloadableModelGroupCompatibilityTests: XCTestCase {
         XCTAssertEqual(vm.compatibilityTier(for: group), 0)
     }
 
+    func test_compatibilityTier_borderlineFit_returnsOne() {
+        // A 6 GB device (budget = 6 * 0.70 = 4.2 GB) cannot fit a 4 GB model outright
+        // (requires 4 * 1.20 = 4.8 GB), but the 80% threshold check passes
+        // (4 * 0.80 * 1.20 = 3.84 GB ≤ 4.2 GB).
+        let device = DeviceCapabilityService(physicalMemory: 6 * oneGB)
+        let vm = ModelManagementViewModel(deviceCapability: device)
+
+        let models = [makeModel(repoID: "repo/a", fileName: "a.gguf", sizeBytes: 4 * oneGB)]
+        let group = DownloadableModelGroup.group(models).first!
+
+        XCTAssertEqual(vm.compatibilityTier(for: group), 1,
+            "A model that fails the full check but passes at 80% of declared size should be tier 1 (borderline)")
+    }
+
     func test_compatibilityTier_allTooLarge_returnsTwo() {
         let device = DeviceCapabilityService(physicalMemory: 4 * oneGB)
         let vm = ModelManagementViewModel(deviceCapability: device)

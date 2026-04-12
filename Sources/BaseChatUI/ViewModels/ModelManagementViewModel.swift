@@ -547,7 +547,7 @@ public final class ModelManagementViewModel {
 
     /// Exposes the underlying `DeviceCapabilityService` for use by views that need
     /// to compute per-variant recommendations (e.g., `ModelDownloadTab`).
-    public var deviceCapabilityService: DeviceCapabilityService {
+    var deviceCapabilityService: DeviceCapabilityService {
         deviceCapability
     }
 
