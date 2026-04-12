@@ -239,17 +239,21 @@ final class InferenceServiceQueueTests: XCTestCase {
         XCTAssertEqual(streamNorm.phase, .queued, "normal should still be queued")
         XCTAssertEqual(streamBg.phase, .queued, "background should still be queued")
 
-        // Release stream at index 1 and yield to let the activeTask's defer fire
-        // (auto-drain). Without consuming the stream, a yield is required.
+        // Release the userInitiated stream and consume it so the auto-drain
+        // fires deterministically (consuming the consumer stream waits for the
+        // Task's defer block, which calls drainQueue for the next request).
         await Task.yield()
-        mock.release(at: 1)
-        await Task.yield()
+        mock.release(at: 1, tokens: ["tok"])
+        for try await _ in streamUi.events {}
+
         XCTAssertEqual(streamNorm.phase, .connecting, "normal should run second")
         XCTAssertEqual(streamBg.phase, .queued, "background should still be queued")
 
+        // Same pattern for normal → background.
         await Task.yield()
-        mock.release(at: 2)
-        await Task.yield()
+        mock.release(at: 2, tokens: ["tok"])
+        for try await _ in streamNorm.events {}
+
         XCTAssertEqual(streamBg.phase, .connecting, "background should run last")
     }
 

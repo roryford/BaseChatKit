@@ -25,6 +25,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     public var generateCallCount = 0
     public var stopCallCount = 0
     public var unloadCallCount = 0
+    public var resetConversationCallCount = 0
 
     /// Records whether `loadModel` was called on the main thread.
     /// `nil` until `loadModel` has been called at least once.
@@ -101,6 +102,10 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         unloadCallCount += 1
         isModelLoaded = false
         isGenerating = false
+    }
+
+    public func resetConversation() {
+        resetConversationCallCount += 1
     }
 
     // MARK: - ConversationHistoryReceiver
