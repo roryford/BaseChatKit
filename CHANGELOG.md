@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.5](https://github.com/roryford/BaseChatKit/compare/v0.7.4...v0.7.5) (2026-04-12)
+
+**Streaming performance fix and background-cancellation handler** — Two improvements targeting the chat UI's behaviour during and after active generation.
+
+When an assistant reply grew beyond ~1 KB, the UI was calling `AttributedString(markdown:)` on the full accumulated text on every token delivery. With a 500-token response that is 500 full re-parses of an ever-longer string — O(N²) total work — causing visible lag on Apple Silicon at 2 KB and above. A new `MarkdownAttributedStringCache` memoizes the rendered `AttributedString` per block: stable blocks (everything except the last, still-growing line) are returned from cache in O(1), reducing total rendering work to O(N). ([#301](https://github.com/roryford/BaseChatKit/pull/301), closes [#245](https://github.com/roryford/BaseChatKit/issues/245))
+
+`ChatViewModel` now exposes `handleScenePhaseChange(to:)` so host apps can cleanly cancel active generation when the app moves to `.background`. Without this, a user pressing the home button mid-stream left a zombie generation task running until the backend eventually timed out or was killed by the OS. The method is a no-op on `.active` and `.inactive`, making it safe to call unconditionally from `onChange(of: scenePhase)`. ([#302](https://github.com/roryford/BaseChatKit/pull/302), closes [#241](https://github.com/roryford/BaseChatKit/issues/241))
+
 ## [0.7.4](https://github.com/roryford/BaseChatKit/compare/v0.7.3...v0.7.4) (2026-04-12)
 
 **Test workflow hardening and persistence cleanup** — A cancelled assistant response could be saved twice, leaving orphaned rows that resurfaced after reload and forced the main user-journey E2E to tolerate known issues. This change makes chat-message persistence behave like an upsert at the view-model boundary, removes the known-issue wrappers from the end-to-end journey, tightens MLX integration fixture detection so malformed local snapshots are skipped instead of failing the suite, and stabilizes the Example app's UI test contract with explicit accessibility hooks plus a scripted `build-for-testing` / `test-without-building` loop. The result is a test matrix that is both more trustworthy and much faster to debug when failures do happen. ([#297](https://github.com/roryford/BaseChatKit/pull/297))
