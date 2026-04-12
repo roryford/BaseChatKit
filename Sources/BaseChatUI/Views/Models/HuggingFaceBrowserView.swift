@@ -15,6 +15,7 @@ struct HuggingFaceBrowserView: View {
     @State private var showImporter = false
     @State private var importSuccessMessage: String?
     @State private var importErrorMessage: String?
+    @State private var pendingUseNowModel: DownloadableModel?
 
     private static var importContentTypes: [UTType] {
         let gguf = UTType(filenameExtension: "gguf") ?? .data
@@ -165,6 +166,38 @@ struct HuggingFaceBrowserView: View {
         .onChange(of: viewModel.completedDownloadCount) {
             viewModel.invalidateModelCache()
             chatViewModel.refreshModels()
+
+            // After refreshing, offer to switch to the newly completed model if it
+            // isn't already the active selection and no prompt is already pending.
+            guard pendingUseNowModel == nil else { return }
+            let justCompleted = viewModel.trackedDownloads.values
+                .filter {
+                    if case .completed = $0.status { return true }
+                    return false
+                }
+                .map(\.model)
+                .first { $0.fileName != chatViewModel.selectedModel?.fileName }
+            pendingUseNowModel = justCompleted
+        }
+        .alert(
+            "Use \(pendingUseNowModel?.displayName ?? "") now?",
+            isPresented: Binding(
+                get: { pendingUseNowModel != nil },
+                set: { if !$0 { pendingUseNowModel = nil } }
+            ),
+            presenting: pendingUseNowModel
+        ) { model in
+            Button("Use Now") {
+                if let match = chatViewModel.availableModels.first(where: { $0.fileName == model.fileName }) {
+                    chatViewModel.selectedModel = match
+                }
+                pendingUseNowModel = nil
+            }
+            Button("Not Now", role: .cancel) {
+                pendingUseNowModel = nil
+            }
+        } message: { _ in
+            Text("The download is complete. Switch to this model?")
         }
         .fileImporter(
             isPresented: $showImporter,
