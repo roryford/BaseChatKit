@@ -6,12 +6,13 @@ BaseChatKit provides a complete, production-ready chat UI with pluggable inferen
 
 **Built for production failure modes.** BCK is designed around the things that go wrong between a working demo and an App Store release:
 
-- **Streaming resilience** — retry with backoff and a per-host circuit breaker so transient network loss, provider 429s, and cold TLS handshakes don't kill generations mid-token.
+- **Streaming resilience** — cloud backends retry the initial connection with backoff on retryable errors and preserve already-yielded output if a later failure occurs.
 - **Latest-wins model handoff** — racing model loads can't corrupt active state. If the user taps model A, then model B before A finishes, A is discarded and B wins deterministically.
-- **Memory pressure auto-unload** — loaded models are released before iOS reclaims them, so the next generation doesn't crash on a stale pointer.
+- **Memory admission and pressure handling** — `MemoryGate` can reject risky loads, and the drop-in `ChatViewModel` stops generation and unloads the model on critical memory pressure.
 - **Mock backend for app-level testing** — `MockInferenceBackend` implements the full streaming contract so your app's tests can exercise BCK without loading a real model.
-- **Certificate pinning with fail-closed defaults** — `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing or empty, so a compromised CA can't silently reroute chat traffic.
+- **Certificate pinning with fail-closed defaults** — `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing or empty, while custom hosts use platform trust unless you configure pins.
 
+For the exact source-backed contract, see [docs/RELIABILITY.md](docs/RELIABILITY.md).
 See [docs/SCOPE_DECISION.md](docs/SCOPE_DECISION.md) for the scoping rationale behind BCK 0.6.0.
 
 ## Demo

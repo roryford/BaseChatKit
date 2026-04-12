@@ -161,21 +161,7 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
 extension ChatSession {
     /// Converts a SwiftData model to a plain record.
     func toRecord() -> ChatSessionRecord {
-        ChatSessionRecord(
-            id: id,
-            title: title,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            systemPrompt: systemPrompt,
-            selectedModelID: selectedModelID,
-            selectedEndpointID: selectedEndpointID,
-            temperature: temperature,
-            topP: topP,
-            repeatPenalty: repeatPenalty,
-            promptTemplate: promptTemplateRawValue.flatMap(PromptTemplate.init(rawValue:)),
-            contextSizeOverride: contextSizeOverride,
-            pinnedMessageIDs: Set(pinnedMessageIDsRaw?.split(separator: ",").compactMap { UUID(uuidString: String($0)) } ?? [])
-        )
+        record
     }
 }
 

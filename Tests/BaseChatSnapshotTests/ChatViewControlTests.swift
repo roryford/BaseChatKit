@@ -103,7 +103,7 @@ final class ChatViewControlTests: XCTestCase {
         )
     }
 
-    // MARK: - ChatInputBar — Default State
+    // MARK: - ChatInputBar — Text Input Affordance
 
     private func inputBarDump(viewModel: ChatViewModel? = nil) -> String {
         let vm = viewModel ?? makeChatViewModel()
@@ -114,10 +114,10 @@ final class ChatViewControlTests: XCTestCase {
     }
 
     func test_inputBar_hasTextField() {
-        let dump = inputBarDump()
+        let dump = inputBarDump(viewModel: makeChatViewModelWithMock())
         XCTAssertTrue(
-            dump.contains("Message..."),
-            "ChatInputBar should contain a text field with 'Message...' placeholder"
+            dump.contains("Message…"),
+            "ChatInputBar should contain a text field with 'Message…' placeholder when input is available"
         )
     }
 

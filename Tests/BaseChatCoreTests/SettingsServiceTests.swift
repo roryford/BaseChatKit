@@ -85,6 +85,33 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(service.effectiveTemperature(session: ChatSession?.none), 0.5, accuracy: 0.01)
     }
 
+    func test_chatSessionOverloads_matchRecordOverloads() {
+        service.globalTemperature = 0.6
+        service.globalTopP = 0.85
+        service.globalRepeatPenalty = 1.05
+
+        let session = ChatSession()
+        session.temperature = 0.8
+        session.topP = nil
+        session.repeatPenalty = 1.2
+
+        XCTAssertEqual(
+            service.effectiveTemperature(session: session),
+            service.effectiveTemperature(session: session.record),
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            service.effectiveTopP(session: session),
+            service.effectiveTopP(session: session.record),
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            service.effectiveRepeatPenalty(session: session),
+            service.effectiveRepeatPenalty(session: session.record),
+            accuracy: 0.01
+        )
+    }
+
     // MARK: - Appearance
 
     func test_appearanceMode_defaultsToSystem() {
@@ -148,6 +175,14 @@ final class SettingsServiceTests: XCTestCase {
     func test_effectiveTemperature_nilGlobalFallsToHardcodedDefault() {
         // Neither session nor global is set
         XCTAssertEqual(service.effectiveTemperature(session: ChatSession?.none), 0.7, accuracy: 0.01)
+    }
+
+    func test_effectiveTopP_nilGlobalFallsToHardcodedDefault() {
+        XCTAssertEqual(service.effectiveTopP(session: ChatSession?.none), 0.9, accuracy: 0.01)
+    }
+
+    func test_effectiveRepeatPenalty_nilGlobalFallsToHardcodedDefault() {
+        XCTAssertEqual(service.effectiveRepeatPenalty(session: ChatSession?.none), 1.1, accuracy: 0.01)
     }
 
     func test_effectiveTemperature_zeroGlobalDoesNotFallToDefault() {
