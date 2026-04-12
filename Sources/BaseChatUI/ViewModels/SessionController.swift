@@ -70,7 +70,13 @@ final class SessionController {
             return
         }
 
-        try persistence.updateSession(session)
+        do {
+            try persistence.updateSession(session)
+        } catch ChatPersistenceError.sessionNotFound {
+            Log.persistence.warning(
+                "Active session was not yet persisted when updating session timestamp: \(session.id, privacy: .private)"
+            )
+        }
     }
 
     func saveSettingsToSession(
