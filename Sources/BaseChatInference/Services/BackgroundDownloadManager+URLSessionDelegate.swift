@@ -124,6 +124,11 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
         let nsError = error as NSError
         let errorDesc = error.localizedDescription
 
+        // Capture resume data before the task object is released. Resume data is only
+        // available on URLSessionDownloadTask failures (not snapshot/MLX partial files)
+        // and only when the server did not cancel the request.
+        let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard let context = self.taskContext(for: taskID, taskDescription: taskDescription) else { return }
@@ -138,6 +143,13 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
                 }
                 self.activeDownloads[context.modelID]?.markCancelled()
             } else {
+                // Persist resume data for single-file downloads so retryDownload(id:) can
+                // resume from where the download stopped rather than restarting from scratch.
+                // MLX snapshot files are excluded — each file is small enough to restart.
+                if context.relativePath == nil, let resumeData {
+                    self.persistResumeData(resumeData, for: context.modelID)
+                }
+
                 if context.relativePath != nil {
                     self.failSnapshotDownload(
                         modelID: context.modelID,

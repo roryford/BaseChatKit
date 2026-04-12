@@ -166,6 +166,96 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         return state
     }
 
+    /// Retries a failed download, resuming from where it left off when possible.
+    ///
+    /// If resume data was persisted when the previous attempt failed, the download
+    /// restarts from the byte offset that was already transferred. When the server
+    /// rejects stale resume data the method transparently falls back to a fresh
+    /// download from the original URL.
+    ///
+    /// - Parameter id: The `DownloadableModel.id` of the failed download to retry.
+    @MainActor public func retryDownload(id: String) async {
+        // Retrieve the persisted model metadata needed to restart the download.
+        guard let pending = defaults.dictionary(forKey: pendingDownloadsKey) as? [String: [String: String]],
+              let info = pending[id],
+              let repoID = info["repoID"],
+              let fileName = info["fileName"],
+              let displayName = info["displayName"],
+              let typeStr = info["modelType"] else {
+            // Fall back to the existing failed state's model when metadata is absent.
+            // This covers the case where removePendingDownload already ran but the
+            // retry UI was still visible (e.g. the user tapped Retry very fast).
+            guard let existingState = activeDownloads[id] else {
+                Log.download.error("retryDownload called for unknown download ID: \(id)")
+                return
+            }
+            await retryWithFreshDownload(model: existingState.model)
+            return
+        }
+
+        let modelType: ModelType = typeStr == "gguf" ? .gguf : .mlx
+        let sizeBytes = UInt64(info["sizeBytes"] ?? "") ?? 0
+        let model = DownloadableModel(
+            repoID: repoID,
+            fileName: fileName,
+            displayName: displayName,
+            modelType: modelType,
+            sizeBytes: sizeBytes
+        )
+
+        // Reset to queued so the UI reflects that a new attempt is underway.
+        let state = DownloadState(model: model)
+        activeDownloads[model.id] = state
+
+        // Consume any persisted resume data. Clean it up regardless of outcome so
+        // we never retry with stale data on a subsequent failure.
+        let resumeData = consumeResumeData(for: id)
+
+        if let resumeData {
+            Log.download.info("Retrying download \(id) with resume data (\(resumeData.count) bytes)")
+            let task = backgroundSession.downloadTask(withResumeData: resumeData)
+            let context = TaskContext(
+                modelID: model.id,
+                relativePath: nil,
+                expectedBytes: Int64(sizeBytes)
+            )
+            task.taskDescription = encodeTaskDescription(context)
+            taskContexts[task.taskIdentifier] = context
+            do {
+                try savePendingDownload(model: model)
+            } catch {
+                Log.download.error("Failed to persist retry download for \(id): \(error.localizedDescription)")
+            }
+            task.resume()
+        } else {
+            Log.download.info("Retrying download \(id) from scratch (no resume data)")
+            await retryWithFreshDownload(model: model)
+        }
+    }
+
+    /// Starts a fresh single-file download for a model from its HuggingFace URL.
+    ///
+    /// Used as the fallback when resume data is absent or rejected by the server.
+    @MainActor private func retryWithFreshDownload(model: DownloadableModel) async {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "huggingface.co"
+        let segments = ([model.repoID, "resolve", "main"] + model.fileName.components(separatedBy: "/"))
+            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
+        components.percentEncodedPath = "/" + segments.joined(separator: "/")
+        guard let url = components.url else {
+            Log.download.error("Failed to build retry URL for \(model.id)")
+            activeDownloads[model.id]?.markFailed(error: "Could not construct download URL for retry")
+            return
+        }
+        do {
+            try startSingleFileDownload(model: model, url: url)
+        } catch {
+            Log.download.error("Failed to start fresh retry download for \(model.id): \(error.localizedDescription)")
+            activeDownloads[model.id]?.markFailed(error: error.localizedDescription)
+        }
+    }
+
     /// Cancels an in-progress download.
     ///
     /// - Parameter id: The `DownloadableModel.id` of the download to cancel.
@@ -512,6 +602,29 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         } catch {
             Log.download.error("Failed to remove snapshot staging directory: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: - Persistence (Resume Data)
+
+    /// UserDefaults key prefix for persisted resume data, scoped by download ID.
+    private func resumeDataKey(for id: String) -> String { "resumeData.\(id)" }
+
+    /// Persists resume data to UserDefaults so it survives app restarts.
+    ///
+    /// Called by the delegate when a non-cancelled single-file download fails.
+    internal func persistResumeData(_ data: Data, for id: String) {
+        defaults.set(data, forKey: resumeDataKey(for: id))
+        Log.download.info("Persisted \(data.count) bytes of resume data for \(id)")
+    }
+
+    /// Reads and removes resume data from UserDefaults (one-shot consumption).
+    ///
+    /// Removing immediately prevents stale data from being used on a subsequent failure.
+    @MainActor internal func consumeResumeData(for id: String) -> Data? {
+        let key = resumeDataKey(for: id)
+        let data = defaults.data(forKey: key)
+        defaults.removeObject(forKey: key)
+        return data
     }
 
     // MARK: - Persistence (Pending Downloads)

@@ -85,15 +85,27 @@ public struct DownloadProgressView: View {
     }
 
     private func failedView(error: String) -> some View {
-        Label {
-            Text("Failed")
-                .font(.caption)
-        } icon: {
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.red)
+        VStack(alignment: .trailing, spacing: 4) {
+            Label {
+                Text("Failed")
+                    .font(.caption)
+            } icon: {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(.red)
+            }
+            .help(error)
+            .accessibilityLabel("Download failed: \(error)")
+
+            Button {
+                viewModel.retryDownload(for: state.model)
+            } label: {
+                Text("Retry")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Retry download")
         }
-        .help(error)
-        .accessibilityLabel("Download failed: \(error)")
     }
 
     private var cancelledView: some View {
