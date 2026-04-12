@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.6](https://github.com/roryford/BaseChatKit/compare/v0.7.5...v0.7.6) (2026-04-12)
+
+**Model browser overhaul — smarter downloads, resilient transfers, and device-aware recommendations** — Six improvements to the model download and browsing experience, covering the full lifecycle from finding a model to getting it running.
+
+Downloads now survive network interruptions. When a transfer fails part-way through — timeout, dropped connection, or the app moving to background — the download manager stores the incomplete file and resumes from the byte offset where it left off on retry, rather than starting over. A retry button appears inline on the failed row. Stale download state from previous sessions is also reconciled on launch: orphaned in-memory entries are removed and a diagnostic log is emitted for each cleanup, eliminating the phantom progress rows that could appear after a crash or force-quit. ([#322](https://github.com/roryford/BaseChatKit/pull/322), [#320](https://github.com/roryford/BaseChatKit/pull/320))
+
+The moment a download completes, a "Use \<ModelName\> now?" alert appears automatically if the finished model is not already the active selection. Tapping "Use Now" maps the downloaded file to the corresponding `ModelInfo` and switches the session immediately, removing the extra tap to the Select tab. The prompt is suppressed if the model is already loaded, and only one prompt can be pending at a time so back-to-back downloads don't stack alerts. ([#319](https://github.com/roryford/BaseChatKit/pull/319))
+
+Disk space errors are now surfaced before and during download. When a model's declared size exceeds the volume's available capacity for important usage, the download button is grayed out and disabled proactively, with an "Insufficient storage" caption below it. If a download is attempted anyway and fails with an `insufficientDiskSpace` error, the error message is formatted as a human-readable string (e.g. "Not enough storage — this model needs 4.1 GB but only 1.2 GB is available") rather than a raw system error. A blue "In Use" badge also replaces the green "Downloaded" badge for the currently loaded model, so the active model is visually distinct from others that happen to be on disk. ([#321](https://github.com/roryford/BaseChatKit/pull/321))
+
+Search results are now sorted by device compatibility rather than raw download count. Groups whose variants fit comfortably in device RAM appear before oversized models regardless of HuggingFace popularity, with download count used only to break ties within the same compatibility tier. Inside each disclosure group, the best-fitting variant (the largest quantization that passes the memory check, or the smallest when nothing fits) is sorted to the top and labelled "Recommended" or "Smallest available" with a green capsule badge — matching the existing "Curated" badge style — so the right quant is obvious without cross-referencing the device's RAM manually. The search pool is also doubled from 20 to 40 repos, surfacing more quant options per query. ([#325](https://github.com/roryford/BaseChatKit/pull/325), [#323](https://github.com/roryford/BaseChatKit/pull/323))
+
 ## [0.7.5](https://github.com/roryford/BaseChatKit/compare/v0.7.4...v0.7.5) (2026-04-12)
 
 **Streaming performance fix and background-cancellation handler** — Two improvements targeting the chat UI's behaviour during and after active generation.
