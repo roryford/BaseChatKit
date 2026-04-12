@@ -211,7 +211,6 @@ struct ContentView: View {
 |------|---------|
 | `ChatView` | Main chat interface with message list and input bar |
 | `SessionListView` | Sidebar session list with rename/delete |
-| `ModelBrowserView` | HuggingFace model search and download |
 | `GenerationSettingsView` | Temperature, top-p, system prompt, prompt template |
 | `APIConfigurationView` | Cloud API endpoint management |
 | `ModelManagementSheet` | Combined model browser + storage management |

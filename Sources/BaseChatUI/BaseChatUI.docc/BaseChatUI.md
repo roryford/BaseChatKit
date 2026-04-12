@@ -74,7 +74,6 @@ For a sidebar-based layout with multiple sessions, combine ``ChatView`` with ``S
 ### Model Management
 
 - ``ModelManagementSheet``
-- ``ModelBrowserView``
 
 ### Settings
 
