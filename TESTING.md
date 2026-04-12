@@ -592,6 +592,42 @@ After your test passes, temporarily break the code path being tested and confirm
 
 ---
 
+## withKnownIssue Policy
+
+Swift Testing's `withKnownIssue` lets you mark a failing assertion as an expected failure so the test suite stays green while the underlying bug is tracked. Use it sparingly — it is test debt, not a fix.
+
+### When it is acceptable
+
+- The failure is caused by a confirmed bug in the system under test (not a flaky test or bad assertion).
+- A tracking issue exists and is linked in the wrapper comment.
+- The wrapper is scoped as tightly as possible — only the failing assertion, not the whole test body.
+
+```swift
+// FIXME: https://github.com/your-org/BaseChatKit/issues/123 — context boundary off-by-one under compression
+withKnownIssue("context trim drops one message too many, tracked in #123") {
+    #expect(vm.messages.count == 4)
+}
+```
+
+### When it is not acceptable
+
+- You do not have a tracking issue — open one before adding the wrapper.
+- The failure is in a critical E2E path (full chat turn, download → load → generate, cancellation). Known issues in E2E coverage must be resolved promptly; they represent gaps in your safety net.
+- The underlying issue is already fixed — remove the wrapper in the same PR that fixes the bug.
+
+### Lifecycle rules
+
+| Stage | Action |
+|-------|--------|
+| Adding `withKnownIssue` | Link the tracking issue in a `// FIXME:` comment on the line above |
+| Issue is fixed | Remove the wrapper in the same PR; do not leave it as a no-op |
+| PR review | Reviewers should block any `withKnownIssue` that lacks a tracking issue link |
+| E2E known issues | Escalate — treat them as P1 bugs, not deferred polish |
+
+A `withKnownIssue` that survives more than one release without a linked fix plan is a sign the feature lacks real coverage. Prefer a `XCTSkipIf` with a comment if the scenario genuinely cannot be tested yet, and file a separate tracking issue.
+
+---
+
 ## Known Gaps
 
 These are features or flows that lack adequate test coverage. They represent the highest-value areas for new test contributions.

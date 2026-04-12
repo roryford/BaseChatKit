@@ -48,6 +48,7 @@ When writing hardware-gated tests, add `XCTSkipIf` guards at the top of the test
 - Async tests: use real `async/await`, not `XCTestExpectation` wrappers unless testing callback-based code. Avoid artificial `sleep` or fixed timeouts — instead use `XCTestExpectation` / `XCTWaiter` with tight deadlines for callback-based code.
 - After asserting an expected outcome, add a sabotage check: temporarily break the code path being tested and confirm the test fails. Remove the sabotage before committing.
 - Performance tests use `measure { }` (XCTMeasure). Build all fixtures before the measure block.
+- `withKnownIssue` is test debt, not a fix. Every use must have a `// FIXME: <issue URL>` comment on the line above. Remove the wrapper in the same PR that fixes the underlying bug. Never use it in critical E2E paths — see [TESTING.md §withKnownIssue Policy](TESTING.md#withknownissue-policy).
 
 ## Service sharing
 
