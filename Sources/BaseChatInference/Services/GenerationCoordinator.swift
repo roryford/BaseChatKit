@@ -296,7 +296,4 @@ final class GenerationCoordinator {
         requestQueue.removeAll()
     }
 
-    func resetConversation() {
-        provider?.currentBackend?.resetConversation()
-    }
 }

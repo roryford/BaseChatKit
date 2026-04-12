@@ -142,6 +142,8 @@ private final class GatedBackend: InferenceBackend, @unchecked Sendable {
         supportsSystemPrompt: true
     )
 
+    private var activeContinuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation?
+
     func loadModel(from url: URL, contextSize: Int32) async throws {
         isModelLoaded = true
     }
@@ -152,16 +154,22 @@ private final class GatedBackend: InferenceBackend, @unchecked Sendable {
         config: GenerationConfig
     ) throws -> GenerationStream {
         isGenerating = true
-        let stream = AsyncThrowingStream<GenerationEvent, Error> { _ in }
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { [weak self] continuation in
+            self?.activeContinuation = continuation
+        }
         return GenerationStream(stream)
     }
 
     func stopGeneration() {
         isGenerating = false
+        activeContinuation?.finish()
+        activeContinuation = nil
     }
 
     func unloadModel() {
         isModelLoaded = false
         isGenerating = false
+        activeContinuation?.finish()
+        activeContinuation = nil
     }
 }

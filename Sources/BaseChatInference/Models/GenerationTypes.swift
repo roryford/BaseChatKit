@@ -2,10 +2,6 @@
 public struct GenerationRequestToken: Hashable, Comparable, Sendable, CustomStringConvertible {
     public let rawValue: UInt64
 
-    public init(rawValue: UInt64) {
-        self.rawValue = rawValue
-    }
-
     static let zero = Self(rawValue: 0)
 
     public static func < (lhs: Self, rhs: Self) -> Bool {

@@ -268,10 +268,6 @@ final class ModelLifecycleCoordinator {
         (backend as? TokenizerVendor)?.tokenizer
     }
 
-    var lastTokenUsage: (promptTokens: Int, completionTokens: Int)? {
-        (backend as? TokenUsageProvider)?.lastUsage
-    }
-
     func registeredBackendSnapshot() -> EnabledBackends {
         EnabledBackends(
             localModelTypes: supportedLocalModelTypes,

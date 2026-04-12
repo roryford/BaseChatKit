@@ -108,6 +108,10 @@ public final class InferenceService {
 
     // MARK: - Model Lifecycle
 
+    /// Loads a model using the appropriate backend for its format.
+    ///
+    /// If another load request starts before this call completes, this request is
+    /// treated as stale and its completion is suppressed.
     public func loadModel(
         from modelInfo: ModelInfo,
         contextSize: Int32 = 2048
@@ -117,12 +121,18 @@ public final class InferenceService {
         try await lifecycle.loadModel(from: modelInfo, contextSize: contextSize)
     }
 
+    /// Loads a cloud API backend from an `APIEndpointRecord` configuration.
+    ///
+    /// Follows the same latest-wins/stale-suppression semantics as `loadModel`.
     public func loadCloudBackend(from endpoint: APIEndpointRecord) async throws {
         ensureProviderWired()
         generation.stopGeneration()
         try await lifecycle.loadCloudBackend(from: endpoint)
     }
 
+    /// Unloads the current model and frees all associated memory.
+    ///
+    /// Also cancels in-flight generation and preempts outstanding load requests.
     public func unloadModel() {
         ensureProviderWired()
         generation.stopGeneration()
@@ -131,6 +141,10 @@ public final class InferenceService {
 
     // MARK: - Generation
 
+    /// Generates text from a message history, streaming tokens via the active backend.
+    ///
+    /// This is the low-level, non-queued entry point. Use ``enqueue`` for
+    /// user-facing chat generation that must be serialized.
     public func generate(
         messages: [(role: String, content: String)],
         systemPrompt: String? = nil,
@@ -152,6 +166,10 @@ public final class InferenceService {
 
     // MARK: - Generation Queue
 
+    /// Enqueues a generation request and returns a token + stream pair.
+    ///
+    /// The stream starts in `.queued` phase and transitions to `.connecting`
+    /// when the request reaches the front of the queue.
     public func enqueue(
         messages: [(role: String, content: String)],
         systemPrompt: String? = nil,
@@ -175,6 +193,10 @@ public final class InferenceService {
         )
     }
 
+    /// Cancels a specific generation request by token.
+    ///
+    /// If the token matches the active request, it is stopped and the next
+    /// queued item begins. If queued, the request is removed without executing.
     public func cancel(_ token: GenerationRequestToken) {
         ensureProviderWired()
         generation.cancel(token)
@@ -186,15 +208,20 @@ public final class InferenceService {
     }
 
     public var lastTokenUsage: (promptTokens: Int, completionTokens: Int)? {
-        generation.lastTokenUsage
+        ensureProviderWired()
+        return generation.lastTokenUsage
     }
 
+    /// Requests that the current generation stop and cancels all queued requests.
     public func stopGeneration() {
         ensureProviderWired()
         generation.stopGeneration()
     }
 
-    public var hasQueuedRequests: Bool { generation.hasQueuedRequests }
+    public var hasQueuedRequests: Bool {
+        ensureProviderWired()
+        return generation.hasQueuedRequests
+    }
 
     @available(*, deprecated, message: "The queue auto-drains when the stream terminates. This method is a no-op and will be removed in a future release.")
     public func generationDidFinish() {}
