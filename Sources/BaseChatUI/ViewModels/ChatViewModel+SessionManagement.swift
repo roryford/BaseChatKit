@@ -1,5 +1,4 @@
 import Foundation
-import SwiftData
 import BaseChatCore
 
 // MARK: - ChatViewModel + Session Management
@@ -16,8 +15,9 @@ extension ChatViewModel {
         isRestoringSession = true
         defer { isRestoringSession = false }
 
-        activeSession = session
+        let selectionState = sessionController.activateSession(session)
         inferenceService.resetConversation()
+        inferenceService.selectedPromptTemplate = sessionController.selectedPromptTemplate
 
         // Discard any queued requests that belong to a different session.
         inferenceService.discardRequests(notMatching: session.id)
@@ -27,21 +27,10 @@ extension ChatViewModel {
         backgroundTask = nil
         backgroundTaskError = nil
 
-        // Load session's generation settings (fall back to defaults)
-        systemPrompt = session.systemPrompt
-        temperature = session.temperature ?? 0.7
-        topP = session.topP ?? 0.9
-        repeatPenalty = session.repeatPenalty ?? 1.1
-
-        // Load prompt template if session has one
-        if let template = session.promptTemplate {
-            selectedPromptTemplate = template
-        }
-
-        let resolvedEndpoint = session.selectedEndpointID.flatMap { endpointID in
+        let resolvedEndpoint = selectionState.selectedEndpointID.flatMap { endpointID in
             availableEndpoints.first(where: { $0.id == endpointID })
         }
-        let resolvedModel = session.selectedModelID.flatMap { modelID in
+        let resolvedModel = selectionState.selectedModelID.flatMap { modelID in
             availableModels.first(where: { $0.id == modelID })
         }
 
@@ -54,8 +43,6 @@ extension ChatViewModel {
             selectedEndpoint = nil
         }
 
-        pinnedMessageIDs = session.pinnedMessageIDs
-
         showUpgradeHint = false
         loadMessages()
         updateContextEstimate()
@@ -64,21 +51,10 @@ extension ChatViewModel {
 
     /// Saves the current generation settings back to the active session.
     func saveSettingsToSession() throws {
-        guard var session = activeSession else { return }
-        guard let persistence else {
-            Log.persistence.warning("saveSettingsToSession called before persistence was configured")
-            throw ChatPersistenceError.providerNotConfigured
-        }
-        session.temperature = temperature
-        session.topP = topP
-        session.repeatPenalty = repeatPenalty
-        session.systemPrompt = systemPrompt
-        session.selectedModelID = selectedModel?.id
-        session.selectedEndpointID = selectedEndpoint?.id
-        session.pinnedMessageIDs = pinnedMessageIDs
-        session.updatedAt = Date()
-        try persistence.updateSession(session)
-        activeSession = session
+        try sessionController.saveSettingsToSession(
+            selectedModelID: selectedModel?.id,
+            selectedEndpointID: selectedEndpoint?.id
+        )
     }
 
     // MARK: - Model Discovery

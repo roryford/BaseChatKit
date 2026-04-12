@@ -37,7 +37,12 @@ extension ChatViewModel {
         }
 
         // Update session timestamp.
-        activeSession?.updatedAt = Date()
+        do {
+            try sessionController.touchActiveSessionUpdatedAt()
+        } catch {
+            Log.persistence.error("Failed to persist session timestamp: \(error)")
+            surfaceError(error, kind: .persistence)
+        }
 
         // Trigger auto-title on the first user message in this session.
         if let session = activeSession, messages.filter({ $0.role == .user }).count == 1 {

@@ -102,6 +102,25 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         XCTAssertEqual(dbMessages[1].content, "Hello from the assistant")
     }
 
+    func test_sendMessage_persistsSessionUpdatedAt() async throws {
+        let provider = SwiftDataPersistenceProvider(modelContext: context)
+        var session = createAndActivateSession()
+        let originalUpdatedAt = Date(timeIntervalSince1970: 1)
+        session.updatedAt = originalUpdatedAt
+        try provider.updateSession(session)
+        vm.switchToSession(session)
+
+        vm.inputText = "Update the timestamp"
+        await vm.sendMessage()
+
+        let updatedSession = try XCTUnwrap(fetchSessions().first { $0.id == session.id })
+        XCTAssertGreaterThan(
+            updatedSession.updatedAt,
+            originalUpdatedAt,
+            "Sending a message should persist the session's updatedAt timestamp"
+        )
+    }
+
     // MARK: - Multi-Turn Conversation Persistence
 
     func test_multiTurnConversation_allMessagesPersisted() async {
@@ -248,6 +267,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         vm.topP = 0.8
         vm.repeatPenalty = 1.3
         vm.systemPrompt = "You are a pirate."
+        vm.selectedPromptTemplate = .llama3
         try! vm.saveSettingsToSession()
 
         // Fetch session from database and verify
@@ -258,15 +278,19 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         XCTAssertEqual(dbSession?.topP, 0.8)
         XCTAssertEqual(dbSession?.repeatPenalty, 1.3)
         XCTAssertEqual(dbSession?.systemPrompt, "You are a pirate.")
+        XCTAssertEqual(dbSession?.promptTemplate, .llama3)
     }
 
     // MARK: - Session Switching Restores Settings
 
     func test_switchSession_restoresGenerationSettings() async {
+        let defaultPromptTemplate = vm.selectedPromptTemplate
+
         // Session A with custom settings
         createAndActivateSession(title: "Session A")
         vm.temperature = 0.3
         vm.systemPrompt = "Be concise."
+        vm.selectedPromptTemplate = .llama3
         try! vm.saveSettingsToSession()
         let sessionA = vm.activeSession!
 
@@ -274,6 +298,7 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         createAndActivateSession(title: "Session B")
         vm.temperature = 1.8
         vm.systemPrompt = "Be verbose."
+        vm.selectedPromptTemplate = .mistral
         try! vm.saveSettingsToSession()
         let sessionB = vm.activeSession!
 
@@ -281,11 +306,22 @@ final class ChatViewModelIntegrationTests: XCTestCase {
         vm.switchToSession(sessionA)
         XCTAssertEqual(vm.temperature, 0.3, "Temperature should restore from session A")
         XCTAssertEqual(vm.systemPrompt, "Be concise.", "System prompt should restore from session A")
+        XCTAssertEqual(vm.selectedPromptTemplate, .llama3, "Prompt template should restore from session A")
 
         // Switch to B — settings should restore
         vm.switchToSession(sessionB)
         XCTAssertEqual(vm.temperature, 1.8, "Temperature should restore from session B")
         XCTAssertEqual(vm.systemPrompt, "Be verbose.", "System prompt should restore from session B")
+        XCTAssertEqual(vm.selectedPromptTemplate, .mistral, "Prompt template should restore from session B")
+
+        // Session C keeps the default template when it has never saved an override.
+        let sessionC = createAndActivateSession(title: "Session C")
+        vm.switchToSession(sessionC)
+        XCTAssertEqual(
+            vm.selectedPromptTemplate,
+            defaultPromptTemplate,
+            "Sessions without a saved prompt template should fall back to the default template instead of inheriting the prior session's override"
+        )
     }
 
     // MARK: - Empty Response DB Verification

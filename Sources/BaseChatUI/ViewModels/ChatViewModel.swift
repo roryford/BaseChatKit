@@ -35,15 +35,23 @@ public final class ChatViewModel {
 
     // MARK: - Persistence
 
-    var persistence: ChatPersistenceProvider?
+    let sessionController: SessionController
+
+    var persistence: ChatPersistenceProvider? {
+        get { sessionController.persistence }
+        set { sessionController.persistence = newValue }
+    }
 
     // MARK: - Session
 
     /// The currently active chat session. Set via `switchToSession(_:)`.
-    public var activeSession: ChatSessionRecord?
+    public var activeSession: ChatSessionRecord? {
+        get { sessionController.activeSession }
+        set { sessionController.activeSession = newValue }
+    }
 
     /// The session ID for the active session, or `nil` if no session is selected.
-    var activeSessionID: UUID? { activeSession?.id }
+    var activeSessionID: UUID? { sessionController.activeSessionID }
 
     /// Called when a session might need its title auto-generated.
     /// Set by the view layer to connect to SessionManagerViewModel.
@@ -97,13 +105,19 @@ public final class ChatViewModel {
     }
 
     /// Ordered messages for the active session.
-    public internal(set) var messages: [ChatMessageRecord] = []
+    public internal(set) var messages: [ChatMessageRecord] {
+        get { sessionController.messages }
+        set { sessionController.messages = newValue }
+    }
 
     /// The user's current input text.
     public var inputText: String = ""
 
     /// Editable system prompt prepended to every generation.
-    public var systemPrompt: String = ""
+    public var systemPrompt: String {
+        get { sessionController.systemPrompt }
+        set { sessionController.systemPrompt = newValue }
+    }
 
     /// The current phase of backend activity, driving all status indicators.
     ///
@@ -212,13 +226,25 @@ public final class ChatViewModel {
     ///
     /// Populated from ``ChatSessionRecord/pinnedMessageIDs`` when switching
     /// sessions. Persisted back to the session on changes.
-    public internal(set) var pinnedMessageIDs: Set<UUID> = []
+    public internal(set) var pinnedMessageIDs: Set<UUID> {
+        get { sessionController.pinnedMessageIDs }
+        set { sessionController.pinnedMessageIDs = newValue }
+    }
 
     // MARK: - Generation Settings
 
-    public var temperature: Float = 0.7
-    public var topP: Float = 0.9
-    public var repeatPenalty: Float = 1.1
+    public var temperature: Float {
+        get { sessionController.temperature }
+        set { sessionController.temperature = newValue }
+    }
+    public var topP: Float {
+        get { sessionController.topP }
+        set { sessionController.topP = newValue }
+    }
+    public var repeatPenalty: Float {
+        get { sessionController.repeatPenalty }
+        set { sessionController.repeatPenalty = newValue }
+    }
     /// Minimum interval between batched UI updates during streaming (~30 fps by default).
     public var streamingUpdateInterval: Duration = .milliseconds(33)
     /// Maximum characters to buffer before forcing a UI flush during streaming.
@@ -255,8 +281,11 @@ public final class ChatViewModel {
 
     /// Prompt template for GGUF backends. Ignored by MLX/Foundation.
     public var selectedPromptTemplate: PromptTemplate {
-        get { inferenceService.selectedPromptTemplate }
-        set { inferenceService.selectedPromptTemplate = newValue }
+        get { sessionController.selectedPromptTemplate }
+        set {
+            sessionController.selectedPromptTemplate = newValue
+            inferenceService.selectedPromptTemplate = newValue
+        }
     }
 
     // MARK: - Context Tracking
@@ -386,13 +415,19 @@ public final class ChatViewModel {
     }
 
     /// Number of messages to load per page when paginating history.
-    static let messagePageSize = 50
+    static let messagePageSize = SessionController.messagePageSize
 
     /// Whether older messages are available to load above the current page.
-    public internal(set) var hasOlderMessages: Bool = false
+    public internal(set) var hasOlderMessages: Bool {
+        get { sessionController.hasOlderMessages }
+        set { sessionController.hasOlderMessages = newValue }
+    }
 
     /// Whether a page of older messages is currently being fetched.
-    public internal(set) var isLoadingOlderMessages: Bool = false
+    public internal(set) var isLoadingOlderMessages: Bool {
+        get { sessionController.isLoadingOlderMessages }
+        set { sessionController.isLoadingOlderMessages = newValue }
+    }
 
     // MARK: - Initialisation
 
@@ -419,6 +454,7 @@ public final class ChatViewModel {
         self.deviceCapability = deviceCapability
         self.modelStorage = modelStorage
         self.memoryPressure = memoryPressure
+        self.sessionController = SessionController(selectedPromptTemplate: inferenceService.selectedPromptTemplate)
 
         if inferenceService.memoryGate == nil {
             inferenceService.memoryGate = MemoryGate()
@@ -431,9 +467,7 @@ public final class ChatViewModel {
     /// Injects the persistence provider. Call once from the view layer
     /// after the storage backend is available.
     public func configure(persistence: ChatPersistenceProvider) {
-        guard self.persistence == nil else { return }
-        self.persistence = persistence
-        Log.persistence.info("ChatViewModel configured with persistence provider")
+        sessionController.configure(persistence: persistence)
     }
 
     // MARK: - Structured Error Surfacing
