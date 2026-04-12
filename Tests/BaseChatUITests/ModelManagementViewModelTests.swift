@@ -714,4 +714,136 @@ final class ModelManagementViewModelTests: XCTestCase {
             "activeModelFileName should be nil after being cleared"
         )
     }
+
+    // MARK: - Repo ID Detection (#310)
+
+    func test_repoIDDetection_validOrgSlashRepo_callsGetModelFiles() async {
+        let mock = MockHuggingFaceService()
+        mock.modelFiles = [
+            DownloadableModel(
+                repoID: "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
+                fileName: "mistral-7b.gguf",
+                displayName: "Mistral 7B",
+                modelType: .gguf,
+                sizeBytes: 4_000_000_000
+            )
+        ]
+        let vm = ModelManagementViewModel(huggingFaceService: mock)
+
+        // A valid repo ID triggers getModelFiles, not searchModels.
+        vm.searchQuery = "bartowski/Mistral-7B-Instruct-v0.3-GGUF"
+        await vm.search()
+
+        XCTAssertEqual(mock.getModelFilesCallCount, 1, "Valid repo ID should call getModelFiles")
+        XCTAssertEqual(mock.searchCallCount, 0, "Valid repo ID should NOT call searchModels")
+        XCTAssertEqual(vm.searchResults.count, 1)
+        XCTAssertTrue(vm.isDirectRepoLookup, "isDirectRepoLookup should be true after a direct lookup")
+    }
+
+    func test_repoIDDetection_plainText_callsSearchModels() async {
+        let mock = MockHuggingFaceService()
+        mock.searchResults = [
+            DownloadableModel(
+                repoID: "test/repo",
+                fileName: "test.gguf",
+                displayName: "Test",
+                modelType: .gguf,
+                sizeBytes: 1_000_000
+            )
+        ]
+        let vm = ModelManagementViewModel(huggingFaceService: mock)
+
+        vm.searchQuery = "mistral 7b"
+        await vm.search()
+
+        XCTAssertEqual(mock.searchCallCount, 1, "Plain text should call searchModels")
+        XCTAssertEqual(mock.getModelFilesCallCount, 0, "Plain text should NOT call getModelFiles")
+        XCTAssertFalse(vm.isDirectRepoLookup, "isDirectRepoLookup should be false after freetext search")
+    }
+
+    func test_repoIDDetection_urlQuery_callsSearchModels() async {
+        let mock = MockHuggingFaceService()
+        let vm = ModelManagementViewModel(huggingFaceService: mock)
+
+        // URLs have multiple slashes and should not match the org/repo pattern.
+        vm.searchQuery = "https://huggingface.co/bartowski/Mistral"
+        await vm.search()
+
+        XCTAssertEqual(mock.searchCallCount, 1, "URL-like query should fall through to freetext search")
+        XCTAssertEqual(mock.getModelFilesCallCount, 0, "URL-like query should NOT call getModelFiles")
+    }
+
+    func test_repoIDDetection_threeSegments_callsSearchModels() async {
+        let mock = MockHuggingFaceService()
+        let vm = ModelManagementViewModel(huggingFaceService: mock)
+
+        // Three path segments: should not be treated as a repo ID.
+        vm.searchQuery = "org/repo/extra"
+        await vm.search()
+
+        XCTAssertEqual(mock.searchCallCount, 1, "Three-segment path should fall through to freetext search")
+        XCTAssertEqual(mock.getModelFilesCallCount, 0, "Three-segment path should NOT call getModelFiles")
+    }
+
+    func test_repoIDDetection_spacesInSegments_callsSearchModels() async {
+        let mock = MockHuggingFaceService()
+        let vm = ModelManagementViewModel(huggingFaceService: mock)
+
+        vm.searchQuery = "my org/my repo"
+        await vm.search()
+
+        XCTAssertEqual(mock.searchCallCount, 1, "Segments with spaces should fall through to freetext search")
+        XCTAssertEqual(mock.getModelFilesCallCount, 0, "Segments with spaces should NOT call getModelFiles")
+    }
+
+    func test_repoIDDetection_directLookupFailure_fallsBackToFreetextSearch() async {
+        let mock = MockHuggingFaceService()
+        mock.modelFilesError = NSError(domain: "test", code: 404, userInfo: [
+            NSLocalizedDescriptionKey: "Repo not found"
+        ])
+        mock.searchResults = [
+            DownloadableModel(
+                repoID: "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
+                fileName: "mistral-7b.gguf",
+                displayName: "Mistral 7B",
+                modelType: .gguf,
+                sizeBytes: 4_000_000_000
+            )
+        ]
+        let vm = ModelManagementViewModel(huggingFaceService: mock)
+
+        vm.searchQuery = "bartowski/Mistral-7B-Instruct-v0.3-GGUF"
+        await vm.search()
+
+        XCTAssertEqual(mock.getModelFilesCallCount, 1, "Should attempt direct lookup first")
+        XCTAssertEqual(mock.searchCallCount, 1, "Should fall back to freetext when direct lookup fails")
+        XCTAssertEqual(vm.searchResults.count, 1, "Fallback freetext results should be surfaced")
+        XCTAssertFalse(vm.isDirectRepoLookup, "isDirectRepoLookup should be false after falling back to freetext")
+        XCTAssertNil(vm.searchError, "Fallback should not surface the lookup error as a user-visible error")
+    }
+
+    func test_repoIDDetection_isDirectRepoLookup_resetOnQueryClear() async {
+        let mock = MockHuggingFaceService()
+        mock.modelFiles = [
+            DownloadableModel(
+                repoID: "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
+                fileName: "mistral-7b.gguf",
+                displayName: "Mistral 7B",
+                modelType: .gguf,
+                sizeBytes: 4_000_000_000
+            )
+        ]
+        let vm = ModelManagementViewModel(huggingFaceService: mock)
+
+        vm.searchQuery = "bartowski/Mistral-7B-Instruct-v0.3-GGUF"
+        await vm.search()
+        XCTAssertTrue(vm.isDirectRepoLookup)
+
+        // Clearing the query should reset the flag.
+        vm.searchQuery = ""
+        await vm.search()
+        XCTAssertFalse(vm.isDirectRepoLookup, "isDirectRepoLookup should be reset to false when query is cleared")
+        XCTAssertTrue(vm.searchResults.isEmpty, "searchResults should be cleared when query is empty")
+    }
+
 }

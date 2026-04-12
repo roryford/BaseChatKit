@@ -115,15 +115,37 @@ struct HuggingFaceBrowserView: View {
             }
 
             if !viewModel.searchResults.isEmpty {
-                let groups = DownloadableModelGroup.group(viewModel.searchResults)
-                Section("Search Results") {
+                let groups = DownloadableModelGroup.group(
+                    viewModel.searchResults,
+                    sortKey: { viewModel.compatibilityTier(for: $0) }
+                )
+                Section(viewModel.isDirectRepoLookup ? "Files in \(viewModel.searchQuery)" : "Search Results") {
                     ForEach(groups) { group in
                         if group.variants.count == 1 {
                             DownloadableModelRow(model: group.variants[0])
                         } else {
+                            let recommended = group.recommendedVariant(for: viewModel.deviceCapabilityService)
+                            let noVariantFits = recommended != nil && !group.variants.contains(where: {
+                                $0.sizeBytes > 0 && viewModel.canRunModel(sizeBytes: $0.sizeBytes)
+                            })
+                            let sortedVariants = recommended.map { rec in
+                                [rec] + group.variants.filter { $0.id != rec.id }
+                            } ?? group.variants
                             DisclosureGroup {
-                                ForEach(group.variants) { variant in
-                                    DownloadableModelRow(model: variant)
+                                ForEach(sortedVariants) { variant in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        DownloadableModelRow(model: variant)
+                                        if variant.id == recommended?.id {
+                                            Text(noVariantFits ? "Smallest available" : "Recommended")
+                                                .font(.caption2)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(.green.opacity(0.15), in: Capsule())
+                                                .foregroundStyle(.green)
+                                                .padding(.leading, 22)
+                                                .padding(.bottom, 2)
+                                        }
+                                    }
                                 }
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {

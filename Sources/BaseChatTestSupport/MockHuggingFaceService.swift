@@ -10,9 +10,11 @@ public final class MockHuggingFaceService: HuggingFaceServiceProtocol {
         var searchResults: [DownloadableModel] = []
         var searchError: Error?
         var modelFiles: [DownloadableModel] = []
+        var modelFilesError: Error?
         var downloadPlans: [String: ModelDownloadPlan] = [:]
         var downloadPlanError: Error?
         var searchCallCount = 0
+        var getModelFilesCallCount = 0
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -32,8 +34,17 @@ public final class MockHuggingFaceService: HuggingFaceServiceProtocol {
         set { state.withLock { $0.modelFiles = newValue } }
     }
 
+    public var modelFilesError: Error? {
+        get { state.withLock { $0.modelFilesError } }
+        set { state.withLock { $0.modelFilesError = newValue } }
+    }
+
     public var searchCallCount: Int {
         state.withLock { $0.searchCallCount }
+    }
+
+    public var getModelFilesCallCount: Int {
+        state.withLock { $0.getModelFilesCallCount }
     }
 
     public var downloadPlans: [String: ModelDownloadPlan] {
@@ -48,7 +59,7 @@ public final class MockHuggingFaceService: HuggingFaceServiceProtocol {
 
     public init() {}
 
-    public func searchModels(query: String) async throws -> [DownloadableModel] {
+    public func searchModels(query: String, limit: Int = 40) async throws -> [DownloadableModel] {
         let (error, results) = state.withLock { state in
             state.searchCallCount += 1
             return (state.searchError, state.searchResults)
@@ -64,7 +75,12 @@ public final class MockHuggingFaceService: HuggingFaceServiceProtocol {
     }
 
     public func getModelFiles(repoID: String) async throws -> [DownloadableModel] {
-        state.withLock { $0.modelFiles }
+        let (error, files) = state.withLock { state in
+            state.getModelFilesCallCount += 1
+            return (state.modelFilesError, state.modelFiles)
+        }
+        if let error { throw error }
+        return files
     }
 
     public func downloadPlan(for model: DownloadableModel) async throws -> ModelDownloadPlan {
