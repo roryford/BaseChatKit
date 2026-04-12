@@ -23,6 +23,7 @@ public struct SessionRowView: View {
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(session.title), updated \(session.updatedAt, style: .relative) ago")
+        .accessibilityIdentifier("session-row")
     }
 }
 

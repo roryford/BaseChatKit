@@ -8,11 +8,13 @@ struct DemoContentView: View {
     @Environment(ModelManagementViewModel.self) private var managementViewModel
     @Environment(SessionManagerViewModel.self) private var sessionManager
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @Query(filter: #Predicate<APIEndpoint> { $0.isEnabled }, sort: \APIEndpoint.createdAt)
     private var cloudEndpoints: [APIEndpoint]
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var preferredCompactColumn: NavigationSplitViewColumn = .detail
     @State private var isModelManagementPresented = false
 
     let inferenceService: InferenceService
@@ -22,10 +24,26 @@ struct DemoContentView: View {
     var skipAutoModelLoad: Bool = false
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(
+            columnVisibility: $columnVisibility,
+            preferredCompactColumn: $preferredCompactColumn
+        ) {
             sidebar
         } detail: {
             ChatView(showModelManagement: $isModelManagementPresented)
+                .toolbar {
+                    if horizontalSizeClass == .compact {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                preferredCompactColumn = .sidebar
+                            } label: {
+                                Label("Show Sidebar", systemImage: "sidebar.leading")
+                            }
+                            .accessibilityLabel("Show Sidebar")
+                            .accessibilityIdentifier("show-sidebar-button")
+                        }
+                    }
+                }
         }
         .sheet(isPresented: $isModelManagementPresented) {
             ModelManagementSheet()
@@ -33,6 +51,11 @@ struct DemoContentView: View {
                 .environment(managementViewModel)
         }
         .onAppear {
+            if horizontalSizeClass == .compact {
+                columnVisibility = .detailOnly
+                preferredCompactColumn = .detail
+            }
+
             let persistence = SwiftDataPersistenceProvider(modelContext: modelContext)
             viewModel.configure(persistence: persistence)
             sessionManager.configure(persistence: persistence)
@@ -89,6 +112,10 @@ struct DemoContentView: View {
         }
         .onChange(of: sessionManager.activeSession) { _, newSession in
             if let session = newSession {
+                if horizontalSizeClass == .compact {
+                    columnVisibility = .detailOnly
+                    preferredCompactColumn = .detail
+                }
                 viewModel.switchToSession(session)
             }
         }
@@ -99,6 +126,17 @@ struct DemoContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            if horizontalSizeClass == .compact {
+                Button(action: createSession) {
+                    Label("New Chat", systemImage: "plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding()
+                .accessibilityLabel("New Chat")
+                .accessibilityIdentifier("new-chat-button")
+            }
+
             SessionListView()
 
             Divider()
@@ -122,6 +160,7 @@ struct DemoContentView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("sidebar-model-management-button")
 
                 if viewModel.isModelLoaded {
                     Label("Ready", systemImage: "checkmark.circle.fill")
@@ -145,17 +184,29 @@ struct DemoContentView: View {
         }
         .navigationTitle("Chats")
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    do {
-                        try sessionManager.createSession()
-                    } catch {
-                        viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
-                    }
-                } label: {
+            ToolbarItem(placement: toolbarPlacement) {
+                Button(action: createSession) {
                     Label("New Chat", systemImage: "plus")
                 }
+                .accessibilityLabel("New Chat")
+                .accessibilityIdentifier("new-chat-button")
             }
         }
+    }
+
+    private func createSession() {
+        do {
+            try sessionManager.createSession()
+        } catch {
+            viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
+        }
+    }
+
+    private var toolbarPlacement: ToolbarItemPlacement {
+        #if os(iOS)
+        .topBarTrailing
+        #else
+        .automatic
+        #endif
     }
 }

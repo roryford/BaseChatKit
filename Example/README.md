@@ -8,6 +8,17 @@ The full-featured demo showing all BaseChatKit capabilities working together. Th
 2. The project references `BaseChatKit` as a local package from `../../`
 3. Build and run on iOS Simulator or Mac
 
+### UI test debugging
+
+From the repository root, use the fast rerun loop:
+
+```bash
+scripts/example-ui-tests.sh build-for-testing
+scripts/example-ui-tests.sh test-without-building -only-testing:BaseChatDemoUITests/ChatFlowUITests/testEmptyStateShowsWelcome
+```
+
+The helper auto-selects an available simulator destination. If you need to pin one manually, inspect `xcrun simctl list devices available` and pass `--destination 'platform=iOS Simulator,id=<SIMULATOR_ID>'`.
+
 ### What This Demonstrates
 
 - Configuring `BaseChatConfiguration` at startup

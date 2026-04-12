@@ -125,6 +125,7 @@ public struct ModelManagementSheet: View {
             }
             .pickerStyle(.segmented)
             .accessibilityLabel("Model management section")
+            .accessibilityIdentifier("model-management-tab-picker")
         }
     }
 

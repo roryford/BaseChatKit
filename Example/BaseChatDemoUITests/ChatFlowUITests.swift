@@ -6,8 +6,8 @@ final class ChatFlowUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.launch()
+        app = launchDemoApp()
+        openChatDetailIfNeeded(app: app)
     }
 
     // MARK: - Empty / Welcome State

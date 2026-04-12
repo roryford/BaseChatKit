@@ -30,6 +30,10 @@ swift test --filter BaseChatE2ETests --disable-default-traits
 # Cannot run via swift test; MLX Metal shaders are only compiled by Xcode.
 xcodebuild test -scheme BaseChatKit-Package -only-testing BaseChatMLXIntegrationTests -destination 'platform=macOS'
 
+# Example app UI tests — prefer build-for-testing once, then targeted reruns
+scripts/example-ui-tests.sh build-for-testing
+scripts/example-ui-tests.sh test-without-building -only-testing:BaseChatDemoUITests/ChatFlowUITests/testEmptyStateShowsWelcome
+
 # Real Ollama server E2E (requires Ollama running at localhost:11434)
 swift test --filter OllamaE2ETests --disable-default-traits
 ```

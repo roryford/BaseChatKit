@@ -6,30 +6,25 @@ final class SettingsUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.launch()
+        app = launchDemoApp()
     }
 
     // MARK: - Open / Dismiss Settings
 
     func testOpenSettings() throws {
-        let settingsButton = app.buttons["Generation settings"]
-        guard waitForElement(settingsButton, timeout: 5) else {
-            // Try alternative label
+        openChatDetailIfNeeded(app: app)
+
+        if !tapToolbarButton("Generation settings", app: app) {
             let gearButton = app.buttons.matching(NSPredicate(
                 format: "label CONTAINS[c] 'Settings' OR label CONTAINS[c] 'gear'"
             )).firstMatch
-            guard waitForElement(gearButton, timeout: 3) else {
+            guard waitForElement(gearButton, timeout: 3), gearButton.isHittable else {
                 captureScreenshot(name: "No-Settings-Button")
                 XCTFail("Settings button not found in toolbar")
                 return
             }
             gearButton.tap()
-            verifySettingsSheetOpened()
-            return
         }
-
-        settingsButton.tap()
         verifySettingsSheetOpened()
     }
 
@@ -95,7 +90,7 @@ final class SettingsUITests: XCTestCase {
         openSettingsSheet()
 
         // The advanced settings section uses a DisclosureGroup with label "Advanced Settings"
-        let advancedDisclosure = app.staticTexts["Advanced Settings"]
+        let advancedDisclosure = advancedSettingsDisclosure(app: app)
         guard waitForElement(advancedDisclosure, timeout: 3) else {
             captureScreenshot(name: "Settings-No-Advanced-Disclosure")
             // Advanced settings may be hidden by feature flags — not a hard failure
@@ -127,10 +122,9 @@ final class SettingsUITests: XCTestCase {
     // MARK: - Helpers
 
     private func openSettingsSheet() {
-        let settingsButton = app.buttons["Generation settings"]
-        if waitForElement(settingsButton, timeout: 5), settingsButton.isHittable {
-            settingsButton.tap()
-        } else {
+        openChatDetailIfNeeded(app: app)
+
+        if !tapToolbarButton("Generation settings", app: app) {
             // Try broader match
             let gearButton = app.buttons.matching(NSPredicate(
                 format: "label CONTAINS[c] 'Settings' OR label CONTAINS[c] 'gear'"

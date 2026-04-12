@@ -47,6 +47,7 @@ public struct SessionListView: View {
                             .tint(.blue)
                         }
                 }
+                .accessibilityIdentifier("session-list")
             }
         }
         .animation(.default, value: sessionManager.sessions.isEmpty)
