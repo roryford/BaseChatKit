@@ -566,4 +566,62 @@ final class ModelManagementViewModelTests: XCTestCase {
 
         XCTAssertFalse(vm.isSearching, "isSearching should be false after empty-query short-circuit")
     }
+
+    func test_search_cancelledTaskDoesNotClobberReplacementSpinner() async {
+        // Regression test for the race where the first task's cancellation guard fires
+        // on @MainActor *after* the second search() call has set isSearching = true,
+        // incorrectly clearing the replacement task's spinner.
+        //
+        // The fix: cancelled tasks must NOT touch isSearching — they return immediately
+        // without modifying state they no longer own.
+        //
+        // This test captures the transient state: between the second search() setting
+        // isSearching = true and the cancelled first task's guard running, isSearching
+        // must stay true throughout the second search's debounce window.
+        let mock = MockHuggingFaceService()
+        mock.searchResults = [
+            DownloadableModel(
+                repoID: "test/repo",
+                fileName: "model.gguf",
+                displayName: "Test Model",
+                modelType: .gguf,
+                sizeBytes: 1_000_000
+            )
+        ]
+
+        let vm = ModelManagementViewModel(huggingFaceService: mock)
+
+        // First search — starts the debounce Task and suspends inside the 500 ms sleep.
+        vm.searchQuery = "llama"
+        let firstSearchTask = Task { @MainActor in
+            await vm.search()
+        }
+
+        // Yield so the first search() runs far enough to set isSearching = true.
+        await Task.yield()
+        XCTAssertTrue(vm.isSearching, "isSearching should be true after first search() starts")
+
+        // Observe isSearching during the second search's debounce window.
+        // If the bug is present the cancelled first task sets isSearching = false before
+        // the second task's guard check, causing a transient false reading here.
+        nonisolated(unsafe) var observedDuringSecondDebounce = false
+        let observerTask = Task { @MainActor in
+            // Wake 150 ms into the second debounce window — well before the 500 ms sleep ends.
+            try? await Task.sleep(for: .milliseconds(150))
+            observedDuringSecondDebounce = vm.isSearching
+        }
+
+        // Second search cancels the first's debounce task and starts its own.
+        vm.searchQuery = "mistral"
+        await vm.search()
+        await firstSearchTask.value
+        await observerTask.value
+
+        XCTAssertTrue(
+            observedDuringSecondDebounce,
+            "isSearching must remain true during the second search's debounce — " +
+            "the cancelled first task must not clear it"
+        )
+        XCTAssertFalse(vm.isSearching, "isSearching must be false after the second search completes")
+    }
 }

@@ -234,26 +234,19 @@ public final class ModelManagementViewModel {
         let task = Task {
             // Debounce: wait 500ms before actually searching.
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else {
-                // A newer search() call cancelled this task — clear the spinner
-                // so the replacement task can manage it from a clean state.
-                isSearching = false
-                return
-            }
+            // When this task is cancelled a newer search() call is already running
+            // and owns isSearching. Do NOT touch isSearching here — clearing it would
+            // clobber the replacement task's spinner, which was set to true after the
+            // cancel() call and before this guard runs on @MainActor.
+            guard !Task.isCancelled else { return }
 
             do {
                 let results = try await service.searchModels(query: query)
-                guard !Task.isCancelled else {
-                    isSearching = false
-                    return
-                }
+                guard !Task.isCancelled else { return }
                 searchResults = results
                 Log.network.info("Search returned \(results.count) results for '\(query, privacy: .private)'")
             } catch {
-                guard !Task.isCancelled else {
-                    isSearching = false
-                    return
-                }
+                guard !Task.isCancelled else { return }
                 searchError = "Search failed: \(error.localizedDescription)"
                 Log.network.error("Search error: \(error)")
             }
