@@ -116,17 +116,6 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         return request
     }
 
-    // MARK: - SSE Payload Handling
-
-    public override func extractToken(from payload: String) -> String? {
-        Self.parseToken(from: payload)
-    }
-
-    public override func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? {
-        guard let usage = Self.parseUsage(from: payload) else { return nil }
-        return (promptTokens: usage.promptTokens, completionTokens: usage.completionTokens)
-    }
-
     // MARK: - SSE Payload Handler
 
     /// OpenAI-specific SSE payload interpreter for use with `SSEStreamParser.streamTokens`.
