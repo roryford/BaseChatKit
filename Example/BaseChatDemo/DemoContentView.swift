@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import BaseChatCore
+import BaseChatInference
 import BaseChatUI
 
 struct DemoContentView: View {
@@ -83,6 +84,14 @@ struct DemoContentView: View {
                 } catch {
                     viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
                 }
+            }
+
+            // Auto-select the most recent session on launch so the chat detail
+            // is ready immediately — on iPad the split view is already visible
+            // and "No session selected" would otherwise sit in the detail pane
+            // until the user taps a row.
+            if sessionManager.activeSession == nil, let first = sessionManager.sessions.first {
+                sessionManager.activeSession = first
             }
 
             // Wire AI auto-rename: fires after the first user message in a session.

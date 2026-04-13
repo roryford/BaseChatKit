@@ -42,6 +42,21 @@ final class SessionManagementUITests: XCTestCase {
         XCTAssertTrue(hasSession || newChatText.exists, "At least one session should exist after launch")
     }
 
+    func testSessionAutoSelectedOnLaunch() throws {
+        openChatDetailIfNeeded(app: app)
+
+        // After launch, a session should be auto-selected so the chat input
+        // never shows "No session selected" — this was an iPad-specific regression
+        // where createSession() didn't activate the session it created.
+        let noSessionPlaceholder = app.staticTexts["No session selected"]
+        XCTAssertFalse(
+            noSessionPlaceholder.waitForExistence(timeout: 3),
+            "Input bar must not show 'No session selected' — session should be auto-activated on launch"
+        )
+
+        captureScreenshot(name: "Session-Auto-Selected")
+    }
+
     func testCreateNewSession() throws {
         showSidebarIfNeeded(app: app)
 
