@@ -120,14 +120,18 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// resume-data files. Using Caches lets the OS reclaim space under extreme pressure,
     /// which is acceptable — a missing resume-data file causes a fresh download, not a
     /// crash or data corruption.
-    private var persistenceDirectory: URL {
+    ///
+    /// Stored as a lazy property so the path is computed once and reused, avoiding
+    /// repeated filesystem lookups on every call.
+    @ObservationIgnored
+    private lazy var persistenceDirectory: URL = {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return caches.appendingPathComponent(
             "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
             isDirectory: true
         )
-    }
+    }()
 
     /// URL of the single JSON file that stores all pending-download metadata.
     private var pendingMetadataFileURL: URL {
@@ -686,21 +690,28 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         return try? JSONDecoder().decode([String: [String: String]].self, from: data)
     }
 
-    /// Writes the pending-downloads dictionary atomically (write to temp file, then rename).
+    /// Writes the pending-downloads dictionary atomically (write to temp file, then atomic swap).
     ///
-    /// Atomic rename means a crash between the write and the rename leaves the old file intact —
-    /// the partial write is never visible to a subsequent read.
+    /// Uses `replaceItemAt(_:withItemAt:backupItemName:options:)` which does the swap in a single
+    /// kernel operation — there is never a moment where the destination file is absent.
     private func writePendingMetadata(_ pending: [String: [String: String]]) throws {
         try ensurePersistenceDirectory()
         let data = try JSONEncoder().encode(pending)
         let tempURL = pendingMetadataFileURL.deletingLastPathComponent()
             .appendingPathComponent("pending-downloads-\(UUID().uuidString).tmp")
         try data.write(to: tempURL, options: .atomic)
-        // Replace the target atomically; removeItem+move is the portable approach on Darwin.
         if FileManager.default.fileExists(atPath: pendingMetadataFileURL.path) {
-            _ = try? FileManager.default.removeItem(at: pendingMetadataFileURL)
+            // replaceItemAt atomically swaps tempURL into the destination, removing tempURL.
+            try FileManager.default.replaceItemAt(
+                pendingMetadataFileURL,
+                withItemAt: tempURL,
+                backupItemName: nil,
+                options: []
+            )
+        } else {
+            // Destination doesn't exist yet; a plain move is sufficient.
+            try FileManager.default.moveItem(at: tempURL, to: pendingMetadataFileURL)
         }
-        try FileManager.default.moveItem(at: tempURL, to: pendingMetadataFileURL)
     }
 
     private func savePendingDownload(
@@ -804,7 +815,8 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     /// Deletes resume-data files for download IDs not present in the current pending-metadata
     /// list. These orphans accumulate when a download crashes without the normal teardown path.
-    private func deleteOrphanedResumeDataFiles(knownIDs: Set<String>) {
+    // internal (not private) so unit tests can call it directly with @testable import.
+    internal func deleteOrphanedResumeDataFiles(knownIDs: Set<String>) {
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: persistenceDirectory,
             includingPropertiesForKeys: nil,
@@ -833,7 +845,11 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     ///
     /// Runs once on first launch after the upgrade. Subsequent launches skip it because
     /// the old keys are no longer present.
-    private func migrateFromUserDefaults() {
+    ///
+    /// UserDefaults keys are only removed after the corresponding file write succeeds, so
+    /// a failed write leaves the data intact for the next launch to retry.
+    // internal (not private) so unit tests can call it directly with @testable import.
+    internal func migrateFromUserDefaults() {
         let defaults = UserDefaults.standard
         let pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
 
@@ -843,12 +859,17 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
            !legacy.isEmpty {
             do {
                 try writePendingMetadata(legacy)
+                // Only clear the key once the file write has confirmed success.
+                defaults.removeObject(forKey: pendingKey)
                 Log.download.info("Migrated \(legacy.count) pending-download(s) from UserDefaults to file")
             } catch {
                 Log.download.error("Failed to migrate pending downloads from UserDefaults: \(error.localizedDescription)")
+                // Leave the UserDefaults key intact so the next launch can retry.
             }
+        } else {
+            // No legacy data to migrate — remove the (now-empty or absent) key.
+            defaults.removeObject(forKey: pendingKey)
         }
-        defaults.removeObject(forKey: pendingKey)
 
         // Migrate any resume-data blobs stored under the legacy "resumeData.<id>" keys.
         let allKeys = defaults.dictionaryRepresentation().keys
@@ -858,12 +879,17 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
                 do {
                     try ensurePersistenceDirectory()
                     try data.write(to: resumeDataFileURL(for: id), options: .atomic)
+                    // Only clear the key once the file has been written successfully.
+                    defaults.removeObject(forKey: key)
                     Log.download.info("Migrated resume data for \(id) from UserDefaults to file")
                 } catch {
                     Log.download.error("Failed to migrate resume data for \(id): \(error.localizedDescription)")
+                    // Leave the UserDefaults key intact so the next launch can retry.
                 }
+            } else {
+                // No data blob — remove the dangling key.
+                defaults.removeObject(forKey: key)
             }
-            defaults.removeObject(forKey: key)
         }
     }
 }

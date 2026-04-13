@@ -54,7 +54,6 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: url)",
         "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let data = try? Data(contentsOf: pendingMetadataFileURL) else { return nil }",
         "BaseChatInference/Services/BackgroundDownloadManager.swift:return try? JSONDecoder().decode([String: [String: String]].self, from: data)",
-        "BaseChatInference/Services/BackgroundDownloadManager.swift:_ = try? FileManager.default.removeItem(at: pendingMetadataFileURL)",
         "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: resumeDataFileURL(for: id))",
         "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let contents = try? FileManager.default.contentsOfDirectory(",
         "BaseChatInference/Services/DownloadFileValidator.swift:guard let handle = try? FileHandle(forReadingFrom: fileURL) else {",

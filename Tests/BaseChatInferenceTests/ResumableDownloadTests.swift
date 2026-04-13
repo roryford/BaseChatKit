@@ -27,6 +27,16 @@ final class ResumableDownloadTests: XCTestCase {
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
+        // Clean up the Caches persistence directory to prevent test bleed.
+        // The directory is shared with the real app process but is safe to remove
+        // between test runs because it only holds transient resume/pending data.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+        try? FileManager.default.removeItem(at: persistenceDir)
         tempDirectory = nil
         manager = nil
         try await super.tearDown()
@@ -350,5 +360,148 @@ final class ResumableDownloadTests: XCTestCase {
 
         // Clean up.
         _ = manager.consumeResumeData(for: model.id)
+    }
+
+    // MARK: - migrateFromUserDefaults
+
+    /// Happy-path migration: seed UserDefaults with old-format pending-download data, run
+    /// migration, and confirm the JSON file is written and the UserDefaults key is removed.
+    func test_migrateFromUserDefaults_writesFileAndClearsKey() throws {
+        let pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
+        let modelID = "test/migrate-model::migrate-model.gguf"
+
+        // Seed legacy UserDefaults data.
+        let legacy: [String: [String: String]] = [
+            modelID: [
+                "repoID": "test/migrate-model",
+                "fileName": "migrate-model.gguf",
+                "displayName": "Migrate Model",
+                "modelType": "gguf",
+                "sizeBytes": "999",
+            ]
+        ]
+        UserDefaults.standard.set(legacy, forKey: pendingKey)
+
+        // Ensure the destination file does NOT already exist so the migration branch runs.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+        let metadataURL = persistenceDir.appendingPathComponent("pending-downloads.json")
+        try? FileManager.default.removeItem(at: metadataURL)
+
+        manager.migrateFromUserDefaults()
+
+        // The JSON file must now exist with the migrated entry.
+        let writtenData = try XCTUnwrap(
+            try? Data(contentsOf: metadataURL),
+            "Migration must write a pending-downloads.json file"
+        )
+        let decoded = try JSONDecoder().decode([String: [String: String]].self, from: writtenData)
+        XCTAssertNotNil(decoded[modelID], "Migrated entry must appear in the JSON file")
+
+        // The UserDefaults key must be gone after a successful write.
+        XCTAssertNil(
+            UserDefaults.standard.dictionary(forKey: pendingKey),
+            "UserDefaults key must be removed after a successful migration"
+        )
+    }
+
+    /// Failure-safety: if the file write somehow fails (simulated by making the persistence
+    /// directory a file rather than a directory), the UserDefaults key must NOT be cleared.
+    func test_migrateFromUserDefaults_keepsUserDefaultsKeyOnWriteFailure() throws {
+        let pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
+        let modelID = "test/fail-migrate::fail-migrate.gguf"
+
+        let legacy: [String: [String: String]] = [
+            modelID: [
+                "repoID": "test/fail-migrate",
+                "fileName": "fail-migrate.gguf",
+                "displayName": "Fail Migrate",
+                "modelType": "gguf",
+                "sizeBytes": "1",
+            ]
+        ]
+        UserDefaults.standard.set(legacy, forKey: pendingKey)
+
+        // Block the write by placing a regular FILE where the persistence DIRECTORY should be,
+        // so ensurePersistenceDirectory() and createDirectory() both fail.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistencePath = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
+        )
+        // Remove any existing directory first, then plant a file as a blocker.
+        try? FileManager.default.removeItem(at: persistencePath)
+        try Data("blocker".utf8).write(to: persistencePath)
+
+        manager.migrateFromUserDefaults()
+
+        // The UserDefaults key must still be present because the write failed.
+        XCTAssertNotNil(
+            UserDefaults.standard.dictionary(forKey: pendingKey),
+            "UserDefaults key must be preserved when the file write fails"
+        )
+
+        // Sabotage check: if we comment out the `defaults.removeObject(forKey: pendingKey)` inside
+        // the success branch and instead leave it outside, the key would be cleared unconditionally
+        // even on failure — causing this assertion to fail.
+
+        // Clean up: remove the blocker file so tearDown can recreate a proper directory.
+        try? FileManager.default.removeItem(at: persistencePath)
+        UserDefaults.standard.removeObject(forKey: pendingKey)
+    }
+
+    // MARK: - deleteOrphanedResumeDataFiles
+
+    /// An orphaned `.bin` file (no matching pending download) must be deleted.
+    func test_deleteOrphanedResumeDataFiles_deletesOrphan() throws {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: persistenceDir, withIntermediateDirectories: true)
+
+        // Write an orphaned resume-data file for an ID that has no pending download entry.
+        let orphanID = "orphan-id-\(UUID().uuidString)"
+        let encodedID = orphanID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? orphanID
+        let orphanURL = persistenceDir.appendingPathComponent("resume-\(encodedID).bin")
+        try Data("orphan".utf8).write(to: orphanURL)
+
+        // Call with an empty knownIDs set — every .bin file is an orphan.
+        manager.deleteOrphanedResumeDataFiles(knownIDs: [])
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: orphanURL.path),
+            "Orphaned resume-data file must be deleted by the cleanup sweep"
+        )
+    }
+
+    /// A `.bin` file whose ID appears in the current pending downloads must be preserved.
+    func test_deleteOrphanedResumeDataFiles_preservesActiveDownloadBinFile() throws {
+        let model = makeModel(
+            repoID: "test/active-bin",
+            fileName: "active-bin.gguf",
+            displayName: "Active Bin"
+        )
+
+        // Write resume data for this model using the public API so the file path matches
+        // exactly what the manager itself would produce.
+        let resumeBytes = Data("keep-me".utf8)
+        manager.persistResumeData(resumeBytes, for: model.id)
+
+        // deleteOrphanedResumeDataFiles is called with the model's ID in knownIDs.
+        manager.deleteOrphanedResumeDataFiles(knownIDs: [model.id])
+
+        // The resume-data file must still exist.
+        let consumed = manager.consumeResumeData(for: model.id)
+        XCTAssertEqual(
+            consumed, resumeBytes,
+            "Resume-data file for a current pending download must not be deleted by the cleanup sweep"
+        )
     }
 }
