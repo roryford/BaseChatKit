@@ -17,7 +17,7 @@ public enum StopGenerationContractTests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) async throws {
-        let config = GenerationConfig(maxTokens: 64)
+        let config = GenerationConfig(maxOutputTokens: 64)
 
         // 1. Start generation and immediately stop.
         let stream = try backend.generate(

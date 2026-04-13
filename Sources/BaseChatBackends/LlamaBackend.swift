@@ -332,7 +332,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             throw InferenceError.inferenceFailure("Failed to tokenize prompt")
         }
 
-        let maxTokens = config.maxOutputTokens ?? Int(config.maxTokens)
+        let maxTokens = config.maxOutputTokens ?? 2048
 
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: GenerationEvent.self)
         let generationStream = GenerationStream(stream)

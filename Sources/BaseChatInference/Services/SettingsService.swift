@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import SwiftUI
 
 /// Manages global default settings persisted via UserDefaults.
 ///
@@ -84,14 +83,4 @@ public enum AppearanceMode: String, CaseIterable, Identifiable {
     case dark = "Dark"
 
     public var id: String { rawValue }
-
-    /// Maps to SwiftUI's `ColorScheme` for use with `.preferredColorScheme()`.
-    /// Returns `nil` for `.system` to follow the OS setting.
-    public var colorScheme: ColorScheme? {
-        switch self {
-        case .system: nil
-        case .light: .light
-        case .dark: .dark
-        }
-    }
 }
