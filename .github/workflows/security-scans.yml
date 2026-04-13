@@ -34,7 +34,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Fail on newly introduced vulnerable dependencies
         # continue-on-error: the action exits non-zero when the repo's dependency
@@ -55,7 +55,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout full history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # TruffleHog uses git history to diff PR/push ranges.
           fetch-depth: 0
