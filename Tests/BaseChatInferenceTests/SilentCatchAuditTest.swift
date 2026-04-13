@@ -44,6 +44,9 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatInference/Models/ModelInfo.swift:guard let contents = try? fileManager.contentsOfDirectory(",
         "BaseChatInference/Models/ModelInfo.swift:let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])",
         "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: tempURL)",
+        // Best-effort temp-file cleanup before throwing a path-traversal error; the removal
+        // failure is irrelevant since the download is already being rejected.
+        "BaseChatInference/Services/BackgroundDownloadManager+URLSessionDelegate.swift:try? FileManager.default.removeItem(at: tempURL)",
         "BaseChatInference/Services/DownloadFileValidator.swift:guard let handle = try? FileHandle(forReadingFrom: fileURL) else {",
         "BaseChatInference/Services/DownloadFileValidator.swift:guard let headerData = try? handle.read(upToCount: 4), headerData.count == 4 else {",
         "BaseChatInference/Services/GGUFMetadataReader.swift:guard let handle = try? FileHandle(forReadingFrom: url) else { return false }",
