@@ -30,7 +30,8 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     public init(urlSession: URLSession? = nil) {
         super.init(
             defaultModelName: "gpt-4o-mini",
-            urlSession: urlSession ?? URLSessionProvider.pinned
+            urlSession: urlSession ?? URLSessionProvider.pinned,
+            payloadHandler: OpenAIPayloadHandler()
         )
     }
 
