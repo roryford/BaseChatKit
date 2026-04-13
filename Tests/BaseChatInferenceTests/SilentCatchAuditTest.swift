@@ -47,6 +47,15 @@ final class SilentCatchAuditTest: XCTestCase {
         // Best-effort temp-file cleanup before throwing a path-traversal error; the removal
         // failure is irrelevant since the download is already being rejected.
         "BaseChatInference/Services/BackgroundDownloadManager+URLSessionDelegate.swift:try? FileManager.default.removeItem(at: tempURL)",
+        // File-based persistence helpers: reading optional data whose absence is expected
+        // (no pending downloads or no resume data), decoding optional JSON (corrupt file
+        // falls back to empty dict), and best-effort cleanup of stale/consumed files.
+        "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let data = try? Data(contentsOf: url) else { return nil }",
+        "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: url)",
+        "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let data = try? Data(contentsOf: pendingMetadataFileURL) else { return nil }",
+        "BaseChatInference/Services/BackgroundDownloadManager.swift:return try? JSONDecoder().decode([String: [String: String]].self, from: data)",
+        "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: resumeDataFileURL(for: id))",
+        "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let contents = try? FileManager.default.contentsOfDirectory(",
         "BaseChatInference/Services/DownloadFileValidator.swift:guard let handle = try? FileHandle(forReadingFrom: fileURL) else {",
         "BaseChatInference/Services/DownloadFileValidator.swift:guard let headerData = try? handle.read(upToCount: 4), headerData.count == 4 else {",
         "BaseChatInference/Services/GGUFMetadataReader.swift:guard let handle = try? FileHandle(forReadingFrom: url) else { return false }",

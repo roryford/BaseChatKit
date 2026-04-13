@@ -11,9 +11,6 @@ final class ResumableDownloadTests: XCTestCase {
     private var manager: BackgroundDownloadManager!
     private var tempDirectory: URL!
 
-    /// Isolated UserDefaults key to avoid collisions with real app data or parallel tests.
-    private var pendingKey: String!
-
     override func setUp() async throws {
         try await super.setUp()
 
@@ -24,22 +21,24 @@ final class ResumableDownloadTests: XCTestCase {
         manager = BackgroundDownloadManager(
             storageService: ModelStorageService(baseDirectory: tempDirectory)
         )
-        pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
     }
 
     override func tearDown() async throws {
-        // Clean up resume data keys written during the test.
-        for key in UserDefaults.standard.dictionaryRepresentation().keys
-            where key.hasPrefix("resumeData.") {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
-        UserDefaults.standard.removeObject(forKey: pendingKey)
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
+        // Clean up the Caches persistence directory to prevent test bleed.
+        // The directory is shared with the real app process but is safe to remove
+        // between test runs because it only holds transient resume/pending data.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+        try? FileManager.default.removeItem(at: persistenceDir)
         tempDirectory = nil
         manager = nil
-        pendingKey = nil
         try await super.tearDown()
     }
 
@@ -60,10 +59,26 @@ final class ResumableDownloadTests: XCTestCase {
         )
     }
 
-    /// Seeds the pending downloads UserDefaults key with a single-file GGUF entry
+    /// Seeds the pending-downloads metadata file with a single-file GGUF entry
     /// so retryDownload(id:) can reconstruct the model metadata.
-    private func seedPendingDownload(_ model: DownloadableModel) {
-        var pending = UserDefaults.standard.dictionary(forKey: pendingKey) as? [String: [String: String]] ?? [:]
+    private func seedPendingDownload(_ model: DownloadableModel) throws {
+        // Write a pending-downloads JSON file into the manager's persistence directory.
+        // We replicate the internal format so the test remains honest about what the
+        // real code reads back.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: persistenceDir, withIntermediateDirectories: true)
+        let metadataURL = persistenceDir.appendingPathComponent("pending-downloads.json")
+
+        var pending: [String: [String: String]] = [:]
+        if let existing = try? Data(contentsOf: metadataURL),
+           let decoded = try? JSONDecoder().decode([String: [String: String]].self, from: existing) {
+            pending = decoded
+        }
         pending[model.id] = [
             "repoID": model.repoID,
             "fileName": model.fileName,
@@ -71,23 +86,32 @@ final class ResumableDownloadTests: XCTestCase {
             "modelType": "gguf",
             "sizeBytes": String(model.sizeBytes),
         ]
-        UserDefaults.standard.set(pending, forKey: pendingKey)
+        try JSONEncoder().encode(pending).write(to: metadataURL)
     }
 
     // MARK: - Resume Data Persistence
 
-    func test_persistResumeData_storesInUserDefaults() {
+    func test_persistResumeData_storesOnDisk() throws {
         let model = makeModel()
         let fakeResumeData = Data("fake-resume-bytes".utf8)
 
         manager.persistResumeData(fakeResumeData, for: model.id)
 
-        let key = "resumeData.\(model.id)"
-        let stored = UserDefaults.standard.data(forKey: key)
-        XCTAssertEqual(stored, fakeResumeData, "Resume data should be persisted under resumeData.<id>")
+        // Verify the file exists in the caches persistence directory.
+        let safeID = model.id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? model.id
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
+        )
+        let fileURL = persistenceDir.appendingPathComponent("resume-\(safeID).bin")
+        let stored = try? Data(contentsOf: fileURL)
+        XCTAssertEqual(stored, fakeResumeData, "Resume data should be persisted as a file under the caches directory")
+
+        // Clean up.
+        try? FileManager.default.removeItem(at: fileURL)
     }
 
-    func test_consumeResumeData_returnsAndRemovesData() {
+    func test_consumeResumeData_returnsAndDeletesFile() {
         let model = makeModel()
         let fakeResumeData = Data("consume-me".utf8)
 
@@ -96,9 +120,14 @@ final class ResumableDownloadTests: XCTestCase {
         let consumed = manager.consumeResumeData(for: model.id)
         XCTAssertEqual(consumed, fakeResumeData, "consumeResumeData should return the persisted data")
 
-        // After consumption the key must be gone so the next retry starts fresh.
-        let key = "resumeData.\(model.id)"
-        XCTAssertNil(UserDefaults.standard.data(forKey: key), "consumeResumeData should remove the key")
+        // After consumption the file must be gone so the next retry starts fresh.
+        let safeID = model.id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? model.id
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
+        )
+        let fileURL = persistenceDir.appendingPathComponent("resume-\(safeID).bin")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "consumeResumeData should delete the file")
     }
 
     func test_consumeResumeData_returnsNilWhenAbsent() {
@@ -150,10 +179,9 @@ final class ResumableDownloadTests: XCTestCase {
         manager.persistResumeData(resumeBytes, for: model.id)
         fakeState.markFailed(error: "Network connection lost")
 
-        // Assert resume data was persisted.
-        let key = "resumeData.\(model.id)"
-        let stored = UserDefaults.standard.data(forKey: key)
-        XCTAssertEqual(stored, resumeBytes, "Resume data should be in UserDefaults after delegate failure")
+        // Assert resume data was persisted (readable via consumeResumeData).
+        let stored = manager.consumeResumeData(for: model.id)
+        XCTAssertEqual(stored, resumeBytes, "Resume data should be persisted to disk after delegate failure")
 
         // Assert the download state reflects failure.
         guard case .failed(let error) = fakeState.status else {
@@ -172,9 +200,8 @@ final class ResumableDownloadTests: XCTestCase {
         fakeState.markCancelled()
 
         // No resume data should be present after cancellation.
-        let key = "resumeData.\(model.id)"
         XCTAssertNil(
-            UserDefaults.standard.data(forKey: key),
+            manager.consumeResumeData(for: model.id),
             "Cancellation should never store resume data"
         )
     }
@@ -210,10 +237,9 @@ final class ResumableDownloadTests: XCTestCase {
             )
         }
 
-        // Stale resume data must be consumed so it cannot leak across retries.
-        let key = "resumeData.\(model.id)"
+        // Stale resume data must be consumed so it cannot accumulate across retries.
         XCTAssertNil(
-            UserDefaults.standard.data(forKey: key),
+            manager.consumeResumeData(for: model.id),
             "Fallback retry path must consume stale resume data"
         )
     }
@@ -228,25 +254,20 @@ final class ResumableDownloadTests: XCTestCase {
             fileName: "resume-consume.gguf",
             displayName: "Resume Consume"
         )
-        let key = "resumeData.\(model.id)"
 
         // Simulate what didCompleteWithError does on failure.
         manager.persistResumeData(Data("resume-bytes".utf8), for: model.id)
-        XCTAssertNotNil(UserDefaults.standard.data(forKey: key), "Data should be present after persist")
+        XCTAssertNotNil(manager.consumeResumeData(for: model.id), "Data should be readable after persist")
 
         // Simulate what retryDownload does before starting the URLSession task.
-        let consumed = manager.consumeResumeData(for: model.id)
-        XCTAssertNotNil(consumed, "consumeResumeData should return the stored data")
+        // A second consume should be nil — the file was already removed.
         XCTAssertNil(
-            UserDefaults.standard.data(forKey: key),
+            manager.consumeResumeData(for: model.id),
             "Key should be removed after consume, preventing stale data on next failure"
         )
-
-        // A subsequent consume (second failure without a new persist) should return nil.
-        XCTAssertNil(manager.consumeResumeData(for: model.id))
     }
 
-    func test_retryDownload_resetsStateToQueued() async {
+    func test_retryDownload_resetsStateToQueued() async throws {
         let model = makeModel(
             repoID: "test/reset-queued",
             fileName: "reset-queued.gguf",
@@ -256,7 +277,7 @@ final class ResumableDownloadTests: XCTestCase {
         let failedState = DownloadState(model: model)
         failedState.markFailed(error: "Previous failure")
         manager.activeDownloads[model.id] = failedState
-        seedPendingDownload(model)
+        try seedPendingDownload(model)
 
         // Capture the identity of the old state object. retryDownload creates a new one.
         let oldStateID = ObjectIdentifier(failedState)
@@ -272,8 +293,6 @@ final class ResumableDownloadTests: XCTestCase {
                 "retryDownload should create a new DownloadState, not reuse the old failed one"
             )
         }
-
-        UserDefaults.standard.removeObject(forKey: pendingKey)
     }
 
     // MARK: - Pending metadata preserved on failure
@@ -281,7 +300,7 @@ final class ResumableDownloadTests: XCTestCase {
     /// The delegate must NOT remove pending metadata when a single-file download fails.
     /// Keeping the metadata alive lets retryDownload(id:) reconstruct the model and
     /// reach the resume-data code path rather than falling back to a fresh download.
-    func test_delegateFailure_keepsPendingMetadataForSingleFileDownload() {
+    func test_delegateFailure_keepsPendingMetadataForSingleFileDownload() throws {
         let model = makeModel(
             repoID: "test/keep-pending",
             fileName: "keep-pending.gguf",
@@ -289,7 +308,7 @@ final class ResumableDownloadTests: XCTestCase {
         )
 
         // Seed pending metadata as if a download had been started.
-        seedPendingDownload(model)
+        try seedPendingDownload(model)
 
         // Simulate what didCompleteWithError does on a non-cancelled single-file failure:
         // it calls persistResumeData and markFailed — but must NOT call removePendingDownload.
@@ -300,26 +319,189 @@ final class ResumableDownloadTests: XCTestCase {
         failedState.markFailed(error: "Network timeout")
 
         // Pending metadata must still be present — retryDownload depends on it.
-        let pending = UserDefaults.standard.dictionary(forKey: pendingKey) as? [String: [String: String]]
+        // We verify by checking that retryDownload can find the model metadata.
+        // The manager's retryDownload method reads from the file; if the file is
+        // present with the right entry, it will find the metadata.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
+        )
+        let metadataURL = persistenceDir.appendingPathComponent("pending-downloads.json")
+        let data = try XCTUnwrap(
+            try? Data(contentsOf: metadataURL),
+            "Pending metadata file must exist after simulated failure"
+        )
+        let pending = try JSONDecoder().decode([String: [String: String]].self, from: data)
         XCTAssertNotNil(
-            pending?[model.id],
+            pending[model.id],
             "Pending metadata must survive a single-file failure so retryDownload can use it"
+        )
+
+        // Clean up the seeded metadata file.
+        try? FileManager.default.removeItem(at: metadataURL)
+        _ = manager.consumeResumeData(for: model.id)
+    }
+
+    // MARK: - No UserDefaults contamination
+
+    /// Resume data must NOT appear in UserDefaults — verifies the new file-based path
+    /// does not accidentally write to the old keys.
+    func test_persistResumeData_doesNotWriteToUserDefaults() {
+        let model = makeModel()
+        let data = Data("no-defaults".utf8)
+
+        manager.persistResumeData(data, for: model.id)
+
+        let legacyKey = "resumeData.\(model.id)"
+        XCTAssertNil(
+            UserDefaults.standard.data(forKey: legacyKey),
+            "Resume data must not be written to UserDefaults (legacy path)"
+        )
+
+        // Clean up.
+        _ = manager.consumeResumeData(for: model.id)
+    }
+
+    // MARK: - migrateFromUserDefaults
+
+    /// Happy-path migration: seed UserDefaults with old-format pending-download data, run
+    /// migration, and confirm the JSON file is written and the UserDefaults key is removed.
+    func test_migrateFromUserDefaults_writesFileAndClearsKey() throws {
+        let pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
+        let modelID = "test/migrate-model::migrate-model.gguf"
+
+        // Seed legacy UserDefaults data.
+        let legacy: [String: [String: String]] = [
+            modelID: [
+                "repoID": "test/migrate-model",
+                "fileName": "migrate-model.gguf",
+                "displayName": "Migrate Model",
+                "modelType": "gguf",
+                "sizeBytes": "999",
+            ]
+        ]
+        UserDefaults.standard.set(legacy, forKey: pendingKey)
+
+        // Ensure the destination file does NOT already exist so the migration branch runs.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+        let metadataURL = persistenceDir.appendingPathComponent("pending-downloads.json")
+        try? FileManager.default.removeItem(at: metadataURL)
+
+        manager.migrateFromUserDefaults()
+
+        // The JSON file must now exist with the migrated entry.
+        let writtenData = try XCTUnwrap(
+            try? Data(contentsOf: metadataURL),
+            "Migration must write a pending-downloads.json file"
+        )
+        let decoded = try JSONDecoder().decode([String: [String: String]].self, from: writtenData)
+        XCTAssertNotNil(decoded[modelID], "Migrated entry must appear in the JSON file")
+
+        // The UserDefaults key must be gone after a successful write.
+        XCTAssertNil(
+            UserDefaults.standard.dictionary(forKey: pendingKey),
+            "UserDefaults key must be removed after a successful migration"
         )
     }
 
-    // MARK: - Key isolation: resume data key format
+    /// Failure-safety: if the file write somehow fails (simulated by making the persistence
+    /// directory a file rather than a directory), the UserDefaults key must NOT be cleared.
+    func test_migrateFromUserDefaults_keepsUserDefaultsKeyOnWriteFailure() throws {
+        let pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
+        let modelID = "test/fail-migrate::fail-migrate.gguf"
 
-    func test_resumeDataKeyFormat_containsDownloadID() {
-        // Verify the key format matches what didCompleteWithError stores.
-        // Tests that iterate UserDefaults keys by prefix depend on this.
-        let model = makeModel()
-        let data = Data("x".utf8)
-        manager.persistResumeData(data, for: model.id)
+        let legacy: [String: [String: String]] = [
+            modelID: [
+                "repoID": "test/fail-migrate",
+                "fileName": "fail-migrate.gguf",
+                "displayName": "Fail Migrate",
+                "modelType": "gguf",
+                "sizeBytes": "1",
+            ]
+        ]
+        UserDefaults.standard.set(legacy, forKey: pendingKey)
 
-        let expected = "resumeData.\(model.id)"
+        // Block the write by placing a regular FILE where the persistence DIRECTORY should be,
+        // so ensurePersistenceDirectory() and createDirectory() both fail.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistencePath = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
+        )
+        // Remove any existing directory first, then plant a file as a blocker.
+        try? FileManager.default.removeItem(at: persistencePath)
+        try Data("blocker".utf8).write(to: persistencePath)
+
+        manager.migrateFromUserDefaults()
+
+        // The UserDefaults key must still be present because the write failed.
         XCTAssertNotNil(
-            UserDefaults.standard.data(forKey: expected),
-            "Resume data key should be 'resumeData.<modelID>'"
+            UserDefaults.standard.dictionary(forKey: pendingKey),
+            "UserDefaults key must be preserved when the file write fails"
+        )
+
+        // Sabotage check: if we comment out the `defaults.removeObject(forKey: pendingKey)` inside
+        // the success branch and instead leave it outside, the key would be cleared unconditionally
+        // even on failure — causing this assertion to fail.
+
+        // Clean up: remove the blocker file so tearDown can recreate a proper directory.
+        try? FileManager.default.removeItem(at: persistencePath)
+        UserDefaults.standard.removeObject(forKey: pendingKey)
+    }
+
+    // MARK: - deleteOrphanedResumeDataFiles
+
+    /// An orphaned `.bin` file (no matching pending download) must be deleted.
+    func test_deleteOrphanedResumeDataFiles_deletesOrphan() throws {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let persistenceDir = caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: persistenceDir, withIntermediateDirectories: true)
+
+        // Write an orphaned resume-data file for an ID that has no pending download entry.
+        let orphanID = "orphan-id-\(UUID().uuidString)"
+        let encodedID = orphanID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? orphanID
+        let orphanURL = persistenceDir.appendingPathComponent("resume-\(encodedID).bin")
+        try Data("orphan".utf8).write(to: orphanURL)
+
+        // Call with an empty knownIDs set — every .bin file is an orphan.
+        manager.deleteOrphanedResumeDataFiles(knownIDs: [])
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: orphanURL.path),
+            "Orphaned resume-data file must be deleted by the cleanup sweep"
+        )
+    }
+
+    /// A `.bin` file whose ID appears in the current pending downloads must be preserved.
+    func test_deleteOrphanedResumeDataFiles_preservesActiveDownloadBinFile() throws {
+        let model = makeModel(
+            repoID: "test/active-bin",
+            fileName: "active-bin.gguf",
+            displayName: "Active Bin"
+        )
+
+        // Write resume data for this model using the public API so the file path matches
+        // exactly what the manager itself would produce.
+        let resumeBytes = Data("keep-me".utf8)
+        manager.persistResumeData(resumeBytes, for: model.id)
+
+        // deleteOrphanedResumeDataFiles is called with the model's ID in knownIDs.
+        manager.deleteOrphanedResumeDataFiles(knownIDs: [model.id])
+
+        // The resume-data file must still exist.
+        let consumed = manager.consumeResumeData(for: model.id)
+        XCTAssertEqual(
+            consumed, resumeBytes,
+            "Resume-data file for a current pending download must not be deleted by the cleanup sweep"
         )
     }
 }

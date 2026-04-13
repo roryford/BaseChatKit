@@ -1,10 +1,10 @@
 @preconcurrency import XCTest
 @testable import BaseChatInference
 
-/// Integration tests for BackgroundDownloadManager using real filesystem and real UserDefaults.
+/// Integration tests for BackgroundDownloadManager using real filesystem.
 ///
-/// These tests exercise the actual persistence format (UserDefaults) and file
-/// validation (filesystem) without mocking either subsystem. Tests that would
+/// These tests exercise the actual persistence format (file-based JSON + binary resume files)
+/// and file validation (filesystem) without mocking either subsystem. Tests that would
 /// require creating a real background URLSession are avoided — they belong in
 /// device-level E2E tests.
 @MainActor
@@ -13,13 +13,23 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
     private var manager: BackgroundDownloadManager!
     private var tempDirectory: URL!
 
-    /// Per-test isolated key to avoid parallel test interference on UserDefaults.standard.
-    private var isolatedKey: String!
+    // Per-test persistence directory derived from the manager's caches layout.
+    private var persistenceDir: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+    }
+
+    private var pendingMetadataURL: URL {
+        persistenceDir.appendingPathComponent("pending-downloads.json")
+    }
 
     override func setUp() async throws {
         try await super.setUp()
         manager = BackgroundDownloadManager()
-        isolatedKey = "com.basechatkit.tests.pending-\(UUID().uuidString)"
 
         tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("BackgroundDownloadIntegrationTests-\(UUID().uuidString)")
@@ -32,10 +42,9 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         }
         tempDirectory = nil
 
-        if let isolatedKey {
-            UserDefaults.standard.removeObject(forKey: isolatedKey)
-        }
-        isolatedKey = nil
+        // Remove the pending metadata file so tests don't bleed state.
+        try? FileManager.default.removeItem(at: pendingMetadataURL)
+
         manager = nil
         try await super.tearDown()
     }
@@ -58,34 +67,39 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         )
     }
 
-    /// Writes pending download data to an isolated UserDefaults key using the
-    /// same format BackgroundDownloadManager uses internally.
-    private func writePendingDownload(_ model: DownloadableModel) {
-        var pending = UserDefaults.standard.dictionary(forKey: isolatedKey) as? [String: [String: String]] ?? [:]
+    /// Writes pending download data to the JSON metadata file using the same format
+    /// BackgroundDownloadManager uses internally.
+    private func writePendingDownload(_ model: DownloadableModel) throws {
+        try FileManager.default.createDirectory(at: persistenceDir, withIntermediateDirectories: true)
+        var pending: [String: [String: String]] = [:]
+        if let existing = try? Data(contentsOf: pendingMetadataURL),
+           let decoded = try? JSONDecoder().decode([String: [String: String]].self, from: existing) {
+            pending = decoded
+        }
         pending[model.id] = [
             "repoID": model.repoID,
             "fileName": model.fileName,
             "displayName": model.displayName,
             "modelType": model.modelType == .gguf ? "gguf" : "mlx",
         ]
-        UserDefaults.standard.set(pending, forKey: isolatedKey)
-        UserDefaults.standard.synchronize()
+        try JSONEncoder().encode(pending).write(to: pendingMetadataURL)
     }
 
-    /// Reads pending downloads from the isolated UserDefaults key.
+    /// Reads pending downloads from the JSON metadata file.
     private func readPendingDownloads() -> [String: [String: String]]? {
-        UserDefaults.standard.dictionary(forKey: isolatedKey) as? [String: [String: String]]
+        guard let data = try? Data(contentsOf: pendingMetadataURL) else { return nil }
+        return try? JSONDecoder().decode([String: [String: String]].self, from: data)
     }
 
     // MARK: - Pending Download Persistence Format
 
-    func test_pendingDownloadFormat_roundTrips() {
+    func test_pendingDownloadFormat_roundTrips() throws {
         let model = makeModel(repoID: "bartowski/Mistral-7B", fileName: "mistral-7b-q4.gguf", displayName: "Mistral 7B Q4")
 
-        writePendingDownload(model)
+        try writePendingDownload(model)
 
         let stored = readPendingDownloads()
-        XCTAssertNotNil(stored, "Pending download should be stored in UserDefaults")
+        XCTAssertNotNil(stored, "Pending download should be stored in the JSON file")
         XCTAssertNotNil(stored?[model.id], "Should be keyed by model ID (\(model.id))")
         XCTAssertEqual(stored?[model.id]?["repoID"], "bartowski/Mistral-7B")
         XCTAssertEqual(stored?[model.id]?["fileName"], "mistral-7b-q4.gguf")
@@ -93,7 +107,7 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         XCTAssertEqual(stored?[model.id]?["modelType"], "gguf")
     }
 
-    func test_pendingDownloadFormat_MLXModel() {
+    func test_pendingDownloadFormat_MLXModel() throws {
         let model = makeModel(
             repoID: "mlx-community/Llama-3.2-3B",
             fileName: "llama-3.2-3b",
@@ -101,50 +115,53 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
             modelType: .mlx
         )
 
-        writePendingDownload(model)
+        try writePendingDownload(model)
 
         let stored = readPendingDownloads()
         XCTAssertNotNil(stored?[model.id])
         XCTAssertEqual(stored?[model.id]?["modelType"], "mlx")
     }
 
-    func test_removePendingDownload_actuallyRemovesEntry() {
+    func test_removePendingDownload_actuallyRemovesEntry() throws {
         let model1 = makeModel(repoID: "test/model1", fileName: "model1.gguf", displayName: "Model 1")
         let model2 = makeModel(repoID: "test/model2", fileName: "model2.gguf", displayName: "Model 2")
 
-        writePendingDownload(model1)
-        writePendingDownload(model2)
+        try writePendingDownload(model1)
+        try writePendingDownload(model2)
 
         var stored = readPendingDownloads()
         XCTAssertEqual(stored?.count, 2)
 
-        // Remove one.
-        stored?.removeValue(forKey: model1.id)
-        UserDefaults.standard.set(stored, forKey: isolatedKey)
+        // Remove one via the manager's internal method.
+        manager.removePendingDownload(id: model1.id)
 
         let remaining = readPendingDownloads()
         XCTAssertEqual(remaining?.count, 1)
         XCTAssertNil(remaining?[model1.id])
         XCTAssertNotNil(remaining?[model2.id])
+
+        // Clean up model2.
+        stored?.removeValue(forKey: model2.id)
     }
 
-    func test_pendingDownloadFormat_corruptEntry_missingFields() {
+    func test_pendingDownloadFormat_corruptEntry_missingFields() throws {
         // Verify format: the restore logic requires repoID, fileName, displayName, modelType.
-        let pending: [String: Any] = [
+        let pending: [String: [String: String]] = [
             "test/repo/valid.gguf": [
                 "repoID": "test/repo",
                 "fileName": "valid.gguf",
                 "displayName": "Valid Model",
                 "modelType": "gguf",
-            ] as [String: String],
+            ],
             "test/repo/invalid.gguf": [
                 "repoID": "test/repo",
                 // Missing fileName, displayName, modelType
-            ] as [String: String],
+            ],
         ]
-        UserDefaults.standard.set(pending, forKey: isolatedKey)
+        try FileManager.default.createDirectory(at: persistenceDir, withIntermediateDirectories: true)
+        try JSONEncoder().encode(pending).write(to: pendingMetadataURL)
 
-        let stored = UserDefaults.standard.dictionary(forKey: isolatedKey) as? [String: [String: String]]
+        let stored = readPendingDownloads()
         XCTAssertNotNil(stored)
 
         let validEntry = stored?["test/repo/valid.gguf"]
@@ -275,8 +292,8 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
             XCTFail("activeDownloads[\(model.id)] should not be nil after startDownload")
         }
 
-        // Clean up the pending downloads key written by startDownload.
-        UserDefaults.standard.removeObject(forKey: BaseChatConfiguration.shared.pendingDownloadsKey)
+        // Clean up.
+        try? FileManager.default.removeItem(at: pendingMetadataURL)
     }
 
     func test_startDownload_duplicateModel_doesNotAddTwice() async throws {
@@ -301,7 +318,7 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         )
 
         // Clean up.
-        UserDefaults.standard.removeObject(forKey: BaseChatConfiguration.shared.pendingDownloadsKey)
+        try? FileManager.default.removeItem(at: pendingMetadataURL)
     }
 
     func test_cancelDownload_removesFromActive() async throws {
@@ -323,38 +340,26 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
 
         // cancelDownload goes through getAllTasks (async callback) then Task { @MainActor in },
         // so poll until the pending entry is removed, with a 2-second timeout.
-        let key = BaseChatConfiguration.shared.pendingDownloadsKey
         let deadline = Date().addingTimeInterval(2.0)
         while Date() < deadline {
-            let pending = UserDefaults.standard.dictionary(forKey: key) as? [String: [String: String]]
+            let pending = readPendingDownloads()
             if pending?[model.id] == nil { break }
             await Task.yield()
         }
 
-        let pending = UserDefaults.standard.dictionary(forKey: key) as? [String: [String: String]]
+        let pending = readPendingDownloads()
         XCTAssertNil(
             pending?[model.id],
-            "cancelDownload should remove the entry from the pending downloads UserDefaults key"
+            "cancelDownload should remove the entry from the pending-downloads JSON file"
         )
 
-        // Clean up any remaining key.
-        UserDefaults.standard.removeObject(forKey: BaseChatConfiguration.shared.pendingDownloadsKey)
+        // Clean up any remaining file.
+        try? FileManager.default.removeItem(at: pendingMetadataURL)
     }
 
     // MARK: - Session Reconnection / Pending Download Persistence
 
-    func test_reconnectBackgroundSession_restoresPendingDownloads() {
-        let realKey = BaseChatConfiguration.shared.pendingDownloadsKey
-        let previousValue = UserDefaults.standard.dictionary(forKey: realKey)
-        defer {
-            // Restore whatever was in the key before the test.
-            if let previousValue {
-                UserDefaults.standard.set(previousValue, forKey: realKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: realKey)
-            }
-        }
-
+    func test_reconnectBackgroundSession_restoresPendingDownloads() throws {
         let model = makeModel(
             repoID: "test/reconnect",
             fileName: "reconnect.gguf",
@@ -362,16 +367,7 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         )
 
         // Write pending download data using the same format as the real code.
-        let pending: [String: [String: String]] = [
-            model.id: [
-                "repoID": model.repoID,
-                "fileName": model.fileName,
-                "displayName": model.displayName,
-                "modelType": "gguf",
-            ]
-        ]
-        UserDefaults.standard.set(pending, forKey: realKey)
-        UserDefaults.standard.synchronize()
+        try writePendingDownload(model)
 
         // A fresh manager starts with no active downloads.
         let freshManager = BackgroundDownloadManager()
@@ -387,16 +383,6 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
     }
 
     func test_reconnectBackgroundSession_restoresPendingMLXSnapshotMetadata() throws {
-        let realKey = BaseChatConfiguration.shared.pendingDownloadsKey
-        let previousValue = UserDefaults.standard.dictionary(forKey: realKey)
-        defer {
-            if let previousValue {
-                UserDefaults.standard.set(previousValue, forKey: realKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: realKey)
-            }
-        }
-
         let manager = BackgroundDownloadManager(
             storageService: ModelStorageService(baseDirectory: tempDirectory)
         )
@@ -407,12 +393,10 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
             modelType: .mlx,
             sizeBytes: 1_000
         )
-        let snapshotFiles = """
-            [
-              { "relativePath": "config.json", "sizeBytes": 100 },
-              { "relativePath": "weights/model.safetensors", "sizeBytes": 900 }
-            ]
-            """
+
+        // Write the pending JSON in the format the real code produces.
+        try FileManager.default.createDirectory(at: persistenceDir, withIntermediateDirectories: true)
+        let snapshotFilesJSON = "[{\"relativePath\":\"config.json\",\"sizeBytes\":100},{\"relativePath\":\"weights/model.safetensors\",\"sizeBytes\":900}]"
         let pending: [String: [String: String]] = [
             model.id: [
                 "repoID": model.repoID,
@@ -421,11 +405,10 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
                 "modelType": "mlx",
                 "sizeBytes": "1000",
                 "stagingDirectoryName": ".staging-test-mlx",
-                "snapshotFiles": snapshotFiles,
+                "snapshotFiles": snapshotFilesJSON,
             ]
         ]
-        UserDefaults.standard.set(pending, forKey: realKey)
-        UserDefaults.standard.synchronize()
+        try JSONEncoder().encode(pending).write(to: pendingMetadataURL)
 
         manager.reconnectBackgroundSession()
 
@@ -459,11 +442,6 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
     }
 
     func test_pendingDownload_removedOnCancellation() async throws {
-        let realKey = BaseChatConfiguration.shared.pendingDownloadsKey
-        defer {
-            UserDefaults.standard.removeObject(forKey: realKey)
-        }
-
         let model = makeModel(
             repoID: "test/pending-removal",
             fileName: "pending-removal.gguf",
@@ -471,32 +449,33 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         )
         let downloadURL = URL(string: "http://localhost/pending-removal.gguf")!
 
-        // Start a download — this writes to pendingDownloadsKey.
+        // Start a download — this writes to the pending-downloads JSON file.
         _ = try await manager.startDownload(model, downloadURL: downloadURL)
 
-        let pendingAfterStart = UserDefaults.standard.dictionary(forKey: realKey) as? [String: [String: String]]
+        let pendingAfterStart = readPendingDownloads()
         XCTAssertNotNil(
             pendingAfterStart?[model.id],
-            "startDownload should write the model to the pending downloads key"
+            "startDownload should write the model to the pending-downloads JSON file"
         )
 
-        // Cancel it — this should remove from pendingDownloadsKey.
+        // Cancel it — this should remove from the pending-downloads file.
         manager.cancelDownload(id: model.id)
 
         // cancelDownload routes through getAllTasks (async callback) then a Task { @MainActor in },
         // so two yields are not enough. Poll until the entry disappears, with a timeout.
         let deadline = Date().addingTimeInterval(2.0)
         while Date() < deadline {
-            let pending = UserDefaults.standard.dictionary(forKey: realKey) as? [String: [String: String]]
-            if pending?[model.id] == nil { break }
+            if readPendingDownloads()?[model.id] == nil { break }
             await Task.yield()
         }
 
-        let pendingAfterCancel = UserDefaults.standard.dictionary(forKey: realKey) as? [String: [String: String]]
         XCTAssertNil(
-            pendingAfterCancel?[model.id],
-            "cancelDownload should remove the model from the pending downloads UserDefaults key"
+            readPendingDownloads()?[model.id],
+            "cancelDownload should remove the model from the pending-downloads JSON file"
         )
+
+        // Clean up any remaining file.
+        try? FileManager.default.removeItem(at: pendingMetadataURL)
     }
 
     // MARK: - Validation (named variants)
@@ -525,5 +504,30 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
             try manager.validateDownloadedFile(at: mlxDir, modelType: .mlx),
             "A directory with config.json and a .safetensors file should pass MLX validation"
         )
+    }
+
+    // MARK: - No UserDefaults contamination
+
+    /// startDownload must not write anything to UserDefaults under the pending downloads key.
+    func test_startDownload_doesNotWriteToUserDefaults() async throws {
+        let model = makeModel(
+            repoID: "test/no-defaults",
+            fileName: "no-defaults.gguf",
+            displayName: "No Defaults Test"
+        )
+        let legacyKey = BaseChatConfiguration.shared.pendingDownloadsKey
+        let beforeValue = UserDefaults.standard.dictionary(forKey: legacyKey)
+
+        _ = try await manager.startDownload(model, downloadURL: URL(string: "http://localhost/x.gguf")!)
+
+        let afterValue = UserDefaults.standard.dictionary(forKey: legacyKey)
+        XCTAssertEqual(
+            NSDictionary(dictionary: beforeValue ?? [:]),
+            NSDictionary(dictionary: afterValue ?? [:]),
+            "startDownload must not modify the legacy UserDefaults pending-downloads key"
+        )
+
+        // Clean up.
+        try? FileManager.default.removeItem(at: pendingMetadataURL)
     }
 }
