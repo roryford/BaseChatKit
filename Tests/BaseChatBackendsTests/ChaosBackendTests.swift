@@ -1,5 +1,6 @@
 import XCTest
 import BaseChatCore
+import BaseChatInference
 import BaseChatTestSupport
 
 /// One assertion per failure mode on `ChaosBackend`. These tests lock in the

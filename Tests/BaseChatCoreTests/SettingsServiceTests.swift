@@ -1,5 +1,6 @@
 import XCTest
 @testable import BaseChatCore
+import BaseChatInference
 
 @MainActor
 final class SettingsServiceTests: XCTestCase {

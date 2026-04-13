@@ -1,6 +1,7 @@
 @preconcurrency import XCTest
 @testable import BaseChatUI
 import BaseChatCore
+import BaseChatInference
 import BaseChatTestSupport
 
 /// Tests for message pagination: loadMessages pages, loadOlderMessages prepend,

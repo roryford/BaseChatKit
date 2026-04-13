@@ -1,5 +1,6 @@
 import XCTest
 import BaseChatCore
+import BaseChatInference
 @testable import BaseChatBackends
 
 /// Tests for `DefaultBackends` static capability queries and the

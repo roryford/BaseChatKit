@@ -1,5 +1,6 @@
 import XCTest
 @testable import BaseChatCore
+import BaseChatInference
 
 final class ChatSessionTests: XCTestCase {
 

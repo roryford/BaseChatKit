@@ -1,4 +1,5 @@
 import Foundation
+import BaseChatInference
 import SwiftData
 
 /// Default ``ChatPersistenceProvider`` backed by SwiftData.

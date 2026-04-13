@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Sheet for manually configuring a remote inference server connection.
 ///

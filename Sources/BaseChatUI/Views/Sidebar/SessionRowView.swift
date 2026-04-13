@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// A single row in the session list showing the chat title and relative timestamp.
 public struct SessionRowView: View {

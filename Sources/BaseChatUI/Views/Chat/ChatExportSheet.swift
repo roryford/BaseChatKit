@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Sheet for exporting the current chat session.
 public struct ChatExportSheet: View {

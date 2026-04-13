@@ -1,5 +1,6 @@
 import XCTest
 import BaseChatCore
+import BaseChatInference
 import BaseChatTestSupport
 
 /// Real-clock tests for `PerceivedLatencyBackend`.

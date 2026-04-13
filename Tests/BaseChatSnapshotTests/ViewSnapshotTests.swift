@@ -3,6 +3,7 @@ import SnapshotTesting
 import SwiftUI
 @testable import BaseChatUI
 import BaseChatCore
+import BaseChatInference
 
 /// Snapshot tests for SwiftUI preview configurations.
 ///

@@ -1,5 +1,6 @@
 import XCTest
 @testable import BaseChatCore
+import BaseChatInference
 
 /// Tests for APIProvider enum and APIEndpoint model.
 final class APIEndpointTests: XCTestCase {

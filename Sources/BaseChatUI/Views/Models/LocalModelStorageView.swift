@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Inline local model storage content used by `ModelManagementSheet`.
 struct LocalModelStorageView: View {

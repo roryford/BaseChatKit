@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Editor for creating or editing an `APIEndpoint`.
 ///

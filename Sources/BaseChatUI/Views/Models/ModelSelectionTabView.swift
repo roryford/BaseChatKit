@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Inline model selection content used by `ModelManagementSheet`.
 struct ModelSelectionTabView: View {

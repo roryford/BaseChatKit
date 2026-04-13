@@ -1,5 +1,6 @@
 import Foundation
 import BaseChatCore
+import BaseChatInference
 
 /// In-memory mock of ``ChatPersistenceProvider`` for testing.
 ///

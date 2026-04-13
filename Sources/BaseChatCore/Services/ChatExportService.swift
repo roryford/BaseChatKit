@@ -1,4 +1,5 @@
 import Foundation
+import BaseChatInference
 
 /// Format options for chat export.
 public enum ExportFormat: String, CaseIterable, Identifiable {

@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SwiftData
 import BaseChatCore
+import BaseChatInference
 
 public enum ModelImportError: LocalizedError, Equatable {
     case unsupportedFormat

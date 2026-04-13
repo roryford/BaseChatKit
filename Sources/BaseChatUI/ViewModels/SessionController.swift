@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import BaseChatCore
+import BaseChatInference
 
 @Observable
 @MainActor

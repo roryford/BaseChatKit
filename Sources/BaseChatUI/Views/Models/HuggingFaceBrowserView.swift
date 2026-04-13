@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import BaseChatCore
+import BaseChatInference
 
 /// Inline HuggingFace browser content used by `ModelManagementSheet`.
 struct HuggingFaceBrowserView: View {

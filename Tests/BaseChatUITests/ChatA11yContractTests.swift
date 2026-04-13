@@ -2,6 +2,7 @@ import XCTest
 import SwiftUI
 import ViewInspector
 @testable import BaseChatCore
+import BaseChatInference
 @testable import BaseChatUI
 
 /// Accessibility contract tests for chat UI surfaces.
