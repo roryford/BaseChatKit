@@ -32,7 +32,14 @@ public final class SessionManagerViewModel {
         Log.persistence.info("SessionManagerViewModel configured")
     }
 
-    /// Creates a new session, inserts it, and returns it.
+    /// Creates a new session, inserts it, activates it, and returns it.
+    ///
+    /// Setting `activeSession` to the new record ensures that
+    /// `onChange(of: sessionManager.activeSession)` fires in the host view so
+    /// `ChatViewModel.switchToSession(_:)` is called immediately. Without this,
+    /// callers that rely on the binding (e.g. `SessionListView`'s `List(selection:)`)
+    /// would leave the chat detail in a "No session selected" state until the user
+    /// manually tapped a row.
     @discardableResult
     public func createSession(title: String = "New Chat") throws -> ChatSessionRecord {
         guard let persistence else {
@@ -42,6 +49,7 @@ public final class SessionManagerViewModel {
         let record = ChatSessionRecord(title: title)
         try persistence.insertSession(record)
         loadSessions()
+        activeSession = record
         return record
     }
 

@@ -5,13 +5,13 @@
 | Target | Role | ML deps |
 |--------|------|---------|
 | `BaseChatInference` | Inference orchestration — protocols, models, services (no persistence) | None |
-| `BaseChatCore` | SwiftData persistence — schema, `@Model` types, container, provider, export. Re-exports `BaseChatInference` | None |
+| `BaseChatCore` | SwiftData persistence — schema, `@Model` types, container, provider, export | None |
 | `BaseChatBackends` | MLX, llama.cpp, Foundation, cloud backends (depends on `BaseChatInference`) | MLX, LlamaSwift |
 | `BaseChatUI` | SwiftUI views and view models | None |
 | `BaseChatTestSupport` | Shared mocks and fakes (`MockInferenceBackend`, `CharTokenizer`, etc.) | None |
 | `BaseChatMLXIntegrationTests` | Xcode-only real MLX model E2E tests | MLX |
 
-`BaseChatUI` depends only on `BaseChatCore` (and transitively `BaseChatInference`) — keep it that way. Never import `BaseChatBackends` from UI. `BaseChatBackends` depends on `BaseChatInference` directly, not `BaseChatCore`, so backend implementations stay free of SwiftData. Apps that only need inference orchestration can depend on `BaseChatInference` alone; existing apps that import `BaseChatCore` keep working via `@_exported import BaseChatInference`.
+`BaseChatUI` depends only on `BaseChatCore` (and transitively `BaseChatInference`) — keep it that way. Never import `BaseChatBackends` from UI. `BaseChatBackends` depends on `BaseChatInference` directly, not `BaseChatCore`, so backend implementations stay free of SwiftData. Apps that only need inference orchestration can depend on `BaseChatInference` alone. `BaseChatCore` does **not** re-export `BaseChatInference` — files that use `InferenceService` or other inference types directly must `import BaseChatInference` explicitly.
 
 ## Running tests
 

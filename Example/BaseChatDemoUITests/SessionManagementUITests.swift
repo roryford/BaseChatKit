@@ -42,6 +42,31 @@ final class SessionManagementUITests: XCTestCase {
         XCTAssertTrue(hasSession || newChatText.exists, "At least one session should exist after launch")
     }
 
+    func testSessionAutoSelectedOnLaunch() throws {
+        openChatDetailIfNeeded(app: app)
+
+        // After launch, a session should be auto-selected so the chat input
+        // never shows "No session selected" — this was an iPad-specific regression
+        // where createSession() didn't activate the session it created.
+        //
+        // TextField placeholders do not appear as staticTexts in the accessibility
+        // hierarchy; use placeholderValue on the field directly.
+        let messageInput = app.textFields["Message input"]
+        guard messageInput.waitForExistence(timeout: 5) else {
+            captureScreenshot(name: "Session-Auto-Selected-No-Input")
+            XCTFail("Message input field not found")
+            return
+        }
+
+        let placeholder = messageInput.placeholderValue ?? ""
+        captureScreenshot(name: "Session-Auto-Selected")
+        XCTAssertNotEqual(
+            placeholder,
+            "No session selected",
+            "Input bar must not show 'No session selected' — session should be auto-activated on launch"
+        )
+    }
+
     func testCreateNewSession() throws {
         showSidebarIfNeeded(app: app)
 

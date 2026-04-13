@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import BaseChatCore
+import BaseChatInference
 import BaseChatUI
 
 struct DemoContentView: View {
@@ -83,6 +84,14 @@ struct DemoContentView: View {
                 } catch {
                     viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
                 }
+            }
+
+            // On first launch, createSession() above activates the new session.
+            // On subsequent launches, sessions already exist but none is active yet —
+            // restore the most recent one so the chat detail is ready immediately
+            // without waiting for the user to tap a row in the sidebar.
+            if sessionManager.activeSession == nil, let first = sessionManager.sessions.first {
+                sessionManager.activeSession = first
             }
 
             // Wire AI auto-rename: fires after the first user message in a session.

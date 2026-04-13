@@ -44,6 +44,19 @@ final class SessionManagerViewModelTests: XCTestCase {
         XCTAssertEqual(session.title, "New Chat")
     }
 
+    @MainActor
+    func test_createSession_activatesSession() throws {
+        XCTAssertNil(vm.activeSession, "Precondition: no session active before creation")
+
+        let session = try vm.createSession(title: "Auto-Activate Test")
+
+        XCTAssertEqual(vm.activeSession?.id, session.id,
+                       "createSession should activate the new session immediately")
+
+        // Sabotage check: if activeSession is not set in createSession, this test fails.
+        // Verified by temporarily removing `activeSession = record` from createSession.
+    }
+
     // MARK: - Delete
 
     @MainActor
