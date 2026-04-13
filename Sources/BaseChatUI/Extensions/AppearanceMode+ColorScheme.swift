@@ -1,5 +1,4 @@
 import SwiftUI
-import BaseChatCore
 import BaseChatInference
 
 extension AppearanceMode {
