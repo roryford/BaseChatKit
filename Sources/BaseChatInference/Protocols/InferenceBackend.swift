@@ -5,6 +5,7 @@ public struct GenerationConfig: Sendable {
     public var temperature: Float
     public var topP: Float
     public var repeatPenalty: Float
+    @available(*, deprecated, renamed: "maxOutputTokens", message: "Use maxOutputTokens instead.")
     public var maxTokens: Int32
     public var topK: Int32?
     public var typicalP: Float?
@@ -16,11 +17,12 @@ public struct GenerationConfig: Sendable {
     /// `nil` means no explicit limit beyond the backend's own defaults.
     public var maxOutputTokens: Int?
 
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
         repeatPenalty: Float = 1.1,
-        maxTokens: Int32 = 512,
+        maxTokens: Int32,
         topK: Int32? = nil,
         typicalP: Float? = nil,
         maxOutputTokens: Int? = 2048
@@ -29,6 +31,23 @@ public struct GenerationConfig: Sendable {
         self.topP = topP
         self.repeatPenalty = repeatPenalty
         self.maxTokens = maxTokens
+        self.topK = topK
+        self.typicalP = typicalP
+        self.maxOutputTokens = maxOutputTokens
+    }
+
+    public init(
+        temperature: Float = 0.7,
+        topP: Float = 0.9,
+        repeatPenalty: Float = 1.1,
+        topK: Int32? = nil,
+        typicalP: Float? = nil,
+        maxOutputTokens: Int? = 2048
+    ) {
+        self.temperature = temperature
+        self.topP = topP
+        self.repeatPenalty = repeatPenalty
+        self.maxTokens = 512
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens

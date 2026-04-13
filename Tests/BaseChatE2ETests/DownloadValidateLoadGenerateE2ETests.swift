@@ -49,7 +49,7 @@ struct DownloadValidateLoadGenerateE2ETests {
         #expect(backend.loadModelCallCount == 1)
 
         // 4. Generate tokens.
-        let config = GenerationConfig(temperature: 0.7, maxTokens: 512)
+        let config = GenerationConfig(temperature: 0.7, maxOutputTokens: 512)
         let output = try await collectTokens(backend.generate(
             prompt: "Tell me a story",
             systemPrompt: "You are a storyteller.",

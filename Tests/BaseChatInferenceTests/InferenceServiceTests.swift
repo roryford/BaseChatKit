@@ -109,7 +109,7 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertEqual(config.temperature, 0.7)
         XCTAssertEqual(config.topP, 0.9)
         XCTAssertEqual(config.repeatPenalty, 1.1)
-        XCTAssertEqual(config.maxTokens, 512)
+        XCTAssertEqual(config.maxOutputTokens, 2048)
     }
 
     // MARK: - ModelType backend selection

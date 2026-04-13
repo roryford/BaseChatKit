@@ -97,7 +97,7 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             "stream_options": ["include_usage": true],
             "temperature": config.temperature,
             "top_p": config.topP,
-            "max_tokens": config.maxOutputTokens ?? Int(config.maxTokens)
+            "max_tokens": config.maxOutputTokens ?? 2048
         ]
 
         var request = URLRequest(url: completionsURL)

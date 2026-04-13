@@ -81,7 +81,7 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
 
         var body: [String: Any] = [
             "model": modelName,
-            "max_tokens": config.maxOutputTokens ?? Int(config.maxTokens),
+            "max_tokens": config.maxOutputTokens ?? 2048,
             "messages": chatMessages,
             "stream": true,
             "temperature": config.temperature,

@@ -54,7 +54,6 @@ final class OllamaE2ETests: XCTestCase {
     ) async throws -> String {
         let config = GenerationConfig(
             temperature: 0.3,
-            maxTokens: Int32(maxTokens),
             maxOutputTokens: maxTokens
         )
         let stream = try backend.generate(
@@ -96,7 +95,6 @@ final class OllamaE2ETests: XCTestCase {
     func test_realInference_stopGeneration() async throws {
         let config = GenerationConfig(
             temperature: 0.7,
-            maxTokens: 2048,
             maxOutputTokens: 2048
         )
 

@@ -98,7 +98,7 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             "top_p": config.topP,
             "top_k": config.topK.map { Int($0) } ?? 40,
             "repeat_penalty": config.repeatPenalty,
-            "num_predict": config.maxOutputTokens ?? Int(config.maxTokens),
+            "num_predict": config.maxOutputTokens ?? 2048,
         ]
 
         let body: [String: Any] = [
