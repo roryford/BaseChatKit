@@ -79,6 +79,12 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
                 } else {
                     try self.validateDownloadedFile(at: tempURL, modelType: model.modelType)
                     let destination = self.storageService.modelsDirectory.appendingPathComponent(model.fileName)
+                    let resolvedDestination = destination.standardized
+                    let resolvedModels = self.storageService.modelsDirectory.standardized
+                    guard resolvedDestination.path.hasPrefix(resolvedModels.path + "/") else {
+                        try? FileManager.default.removeItem(at: tempURL)
+                        throw HuggingFaceError.invalidDownloadedFile(reason: "Model filename escapes models directory: \(model.fileName)")
+                    }
                     if FileManager.default.fileExists(atPath: destination.path) {
                         try FileManager.default.removeItem(at: destination)
                     }

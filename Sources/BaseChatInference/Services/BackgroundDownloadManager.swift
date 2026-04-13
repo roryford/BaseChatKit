@@ -268,19 +268,23 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     @MainActor public func cancelDownload(id: String) {
         Log.download.info("Cancelling download: \(id)")
 
+        // getAllTasks delivers its callback on the URLSession delegate queue (a background
+        // thread). Reading taskContexts — which is written from @MainActor — on that queue
+        // is a data race. We hop back to @MainActor for the dictionary read, match tasks
+        // by model ID, and then cancel them. URLSessionTask.cancel() is thread-safe.
         backgroundSession.getAllTasks { [weak self] tasks in
             guard let self else { return }
-            for task in tasks {
-                let context = self.taskContext(
-                    for: task.taskIdentifier,
-                    taskDescription: task.taskDescription
-                )
-                if context?.modelID == id {
-                    task.cancel()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                for task in tasks {
+                    let context = self.taskContext(
+                        for: task.taskIdentifier,
+                        taskDescription: task.taskDescription
+                    )
+                    if context?.modelID == id {
+                        task.cancel()
+                    }
                 }
-            }
-
-            Task { @MainActor in
                 self.activeDownloads[id]?.markCancelled()
                 self.removePendingDownload(id: id)
                 // Mark the snapshot as cancelling rather than removing it immediately.
@@ -565,7 +569,13 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         guard snapshot.completedFiles.count == snapshot.files.count else { return }
 
         try validateDownloadedFile(at: snapshot.stagingDirectory, modelType: .mlx)
-        let finalURL = storageService.modelsDirectory.appendingPathComponent(activeDownloads[modelID]?.model.fileName ?? snapshot.stagingDirectory.lastPathComponent)
+        let finalFileName = activeDownloads[modelID]?.model.fileName ?? snapshot.stagingDirectory.lastPathComponent
+        let finalURL = storageService.modelsDirectory.appendingPathComponent(finalFileName)
+        let resolvedFinalURL = finalURL.standardized
+        let resolvedModelsDir = storageService.modelsDirectory.standardized
+        guard resolvedFinalURL.path.hasPrefix(resolvedModelsDir.path + "/") else {
+            throw HuggingFaceError.invalidDownloadedFile(reason: "Model filename escapes models directory: \(finalFileName)")
+        }
         if FileManager.default.fileExists(atPath: finalURL.path) {
             try FileManager.default.removeItem(at: finalURL)
         }
