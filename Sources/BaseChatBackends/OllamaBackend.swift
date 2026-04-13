@@ -33,7 +33,8 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     public init(urlSession: URLSession? = nil) {
         super.init(
             defaultModelName: "llama3.2",
-            urlSession: urlSession ?? URLSessionProvider.unpinned
+            urlSession: urlSession ?? URLSessionProvider.unpinned,
+            payloadHandler: OllamaPayloadHandler()
         )
     }
 
@@ -183,6 +184,23 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             let message = Self.extractErrorMessage(from: errorBody) ?? "Unexpected server error (status \(statusCode))"
             throw CloudBackendError.serverError(statusCode: statusCode, message: message)
         }
+    }
+
+    // MARK: - SSE Payload Handler
+
+    /// Ollama-specific SSE payload handler.
+    ///
+    /// Ollama uses NDJSON rather than SSE, so ``parseResponseStream(bytes:continuation:)``
+    /// is overridden to bypass the SSE path entirely. This handler satisfies the
+    /// ``SSECloudBackend`` initialiser contract and delegates to the same static
+    /// parsing logic used by the NDJSON path.
+    struct OllamaPayloadHandler: SSEPayloadHandler {
+        func extractToken(from payload: String) -> String? {
+            OllamaBackend.extractToken(from: payload)
+        }
+        func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? { nil }
+        func isStreamEnd(_ payload: String) -> Bool { false }
+        func extractStreamError(from payload: String) -> Error? { nil }
     }
 
     // MARK: - SSE Hooks (unused for NDJSON, but required by base class)

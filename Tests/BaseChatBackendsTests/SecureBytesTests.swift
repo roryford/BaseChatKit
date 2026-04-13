@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import BaseChatInference
 @testable import BaseChatBackends
 
 @Suite("SecureBytes")
@@ -28,8 +29,17 @@ struct SecureBytesTests {
 @Suite("SSECloudBackend ephemeralAPIKey")
 struct EphemeralAPIKeyTests {
 
+    /// No-op payload handler used to satisfy `SSECloudBackend`'s init contract
+    /// in tests that only exercise key-storage behaviour.
+    private struct NullPayloadHandler: SSEPayloadHandler {
+        func extractToken(from payload: String) -> String? { nil }
+        func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? { nil }
+        func isStreamEnd(_ payload: String) -> Bool { false }
+        func extractStreamError(from payload: String) -> Error? { nil }
+    }
+
     private func makeBackend() -> SSECloudBackend {
-        SSECloudBackend(defaultModelName: "test-model", urlSession: .shared)
+        SSECloudBackend(defaultModelName: "test-model", urlSession: .shared, payloadHandler: NullPayloadHandler())
     }
 
     @Test("stores and retrieves a key")
