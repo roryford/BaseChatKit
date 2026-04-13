@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.7](https://github.com/roryford/BaseChatKit/compare/v0.7.6...v0.7.7) (2026-04-13)
+
+
+### Bug Fixes
+
+* **arch:** remove @_exported import BaseChatInference re-export from BaseChatCore ([#338](https://github.com/roryford/BaseChatKit/issues/338)) ([13f3d46](https://github.com/roryford/BaseChatKit/commit/13f3d460e73713991a588cd6198970039e2c75cf))
+* **arch:** remove SwiftUI from inference layer and deprecate maxTokens ([#332](https://github.com/roryford/BaseChatKit/issues/332)) ([2ab67c3](https://github.com/roryford/BaseChatKit/commit/2ab67c3f5dd7197a7fc48f0fcb7f275a06e03043))
+* **concurrency:** serialize BackgroundDownloadManager.cancelDownload taskContext read on MainActor ([20c6126](https://github.com/roryford/BaseChatKit/commit/20c61268500368d9c120dd24cb679d0cfe2c7a4c))
+* **security:** sanitize model.fileName against path traversal in download placement ([#331](https://github.com/roryford/BaseChatKit/issues/331)) ([20c6126](https://github.com/roryford/BaseChatKit/commit/20c61268500368d9c120dd24cb679d0cfe2c7a4c))
+
 ## [0.7.6](https://github.com/roryford/BaseChatKit/compare/v0.7.5...v0.7.6) (2026-04-12)
 
 **Model browser overhaul — smarter downloads, resilient transfers, and device-aware recommendations** — Six improvements to the model download and browsing experience, covering the full lifecycle from finding a model to getting it running.
