@@ -86,10 +86,10 @@ struct DemoContentView: View {
                 }
             }
 
-            // Auto-select the most recent session on launch so the chat detail
-            // is ready immediately — on iPad the split view is already visible
-            // and "No session selected" would otherwise sit in the detail pane
-            // until the user taps a row.
+            // On first launch, createSession() above activates the new session.
+            // On subsequent launches, sessions already exist but none is active yet —
+            // restore the most recent one so the chat detail is ready immediately
+            // without waiting for the user to tap a row in the sidebar.
             if sessionManager.activeSession == nil, let first = sessionManager.sessions.first {
                 sessionManager.activeSession = first
             }
