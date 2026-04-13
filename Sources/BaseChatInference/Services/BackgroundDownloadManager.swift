@@ -114,10 +114,40 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         return session
     }
 
-    /// Persists download metadata so we can reconnect after app restart.
-    private let defaults = UserDefaults.standard
-    private var pendingDownloadsKey: String {
-        BaseChatConfiguration.shared.pendingDownloadsKey
+    // MARK: - File-based Persistence
+
+    /// Directory in Caches where we store the pending-downloads JSON and per-download
+    /// resume-data files. Using Caches lets the OS reclaim space under extreme pressure,
+    /// which is acceptable — a missing resume-data file causes a fresh download, not a
+    /// crash or data corruption.
+    private var persistenceDirectory: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return caches.appendingPathComponent(
+            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+            isDirectory: true
+        )
+    }
+
+    /// URL of the single JSON file that stores all pending-download metadata.
+    private var pendingMetadataFileURL: URL {
+        persistenceDirectory.appendingPathComponent("pending-downloads.json")
+    }
+
+    /// URL of the resume-data binary file for a given download ID.
+    private func resumeDataFileURL(for id: String) -> URL {
+        // URL-encode the ID so that slash-separated repo paths (e.g. "user/repo/file.gguf")
+        // don't create subdirectories inside the persistence directory.
+        let safeID = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? id
+        return persistenceDirectory.appendingPathComponent("resume-\(safeID).bin")
+    }
+
+    /// Ensures the persistence directory exists, creating it if necessary.
+    private func ensurePersistenceDirectory() throws {
+        try FileManager.default.createDirectory(
+            at: persistenceDirectory,
+            withIntermediateDirectories: true
+        )
     }
 
     // MARK: - Init
@@ -176,7 +206,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// - Parameter id: The `DownloadableModel.id` of the failed download to retry.
     @MainActor public func retryDownload(id: String) async {
         // Retrieve the persisted model metadata needed to restart the download.
-        guard let pending = defaults.dictionary(forKey: pendingDownloadsKey) as? [String: [String: String]],
+        guard let pending = loadPendingMetadata(),
               let info = pending[id],
               let repoID = info["repoID"],
               let fileName = info["fileName"],
@@ -185,7 +215,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
             // Fall back to the existing failed state's model when metadata is absent.
             // This should be rare — pending metadata is now kept alive until a successful
             // retry or explicit removal. The guard covers true edge cases (e.g. corrupt
-            // UserDefaults, or the model was deleted between failure and retry tap).
+            // pending metadata file, or the model was deleted between failure and retry tap).
             guard let existingState = activeDownloads[id] else {
                 Log.download.error("retryDownload called for unknown download ID: \(id)")
                 return
@@ -193,7 +223,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
             let model = existingState.model
             // Reset state so the UI transitions away from .failed immediately.
             activeDownloads[model.id] = DownloadState(model: model)
-            // Consume any stale resume data so it doesn't leak in UserDefaults.
+            // Consume any stale resume data so it doesn't accumulate on disk.
             _ = consumeResumeData(for: id)
             await retryWithFreshDownload(model: model)
             return
@@ -622,35 +652,63 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     // MARK: - Persistence (Resume Data)
 
-    /// UserDefaults key prefix for persisted resume data, scoped by download ID.
-    private func resumeDataKey(for id: String) -> String { "resumeData.\(id)" }
-
-    /// Persists resume data to UserDefaults so it survives app restarts.
+    /// Persists resume data to a binary file in the caches directory so it survives app restarts.
+    ///
+    /// Large partial-download blobs are kept out of UserDefaults to avoid bloating
+    /// the app's plist and delaying app launch.
     ///
     /// Called by the delegate when a non-cancelled single-file download fails.
     internal func persistResumeData(_ data: Data, for id: String) {
-        defaults.set(data, forKey: resumeDataKey(for: id))
-        Log.download.info("Persisted \(data.count) bytes of resume data for \(id)")
+        do {
+            try ensurePersistenceDirectory()
+            try data.write(to: resumeDataFileURL(for: id), options: .atomic)
+            Log.download.info("Persisted \(data.count) bytes of resume data for \(id)")
+        } catch {
+            Log.download.error("Failed to persist resume data for \(id): \(error.localizedDescription)")
+        }
     }
 
-    /// Reads and removes resume data from UserDefaults (one-shot consumption).
+    /// Reads and removes the resume-data file (one-shot consumption).
     ///
     /// Removing immediately prevents stale data from being used on a subsequent failure.
     @MainActor internal func consumeResumeData(for id: String) -> Data? {
-        let key = resumeDataKey(for: id)
-        let data = defaults.data(forKey: key)
-        defaults.removeObject(forKey: key)
+        let url = resumeDataFileURL(for: id)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        try? FileManager.default.removeItem(at: url)
         return data
     }
 
     // MARK: - Persistence (Pending Downloads)
+
+    /// Loads the pending-downloads JSON from disk, returning nil if the file is absent or unreadable.
+    private func loadPendingMetadata() -> [String: [String: String]]? {
+        guard let data = try? Data(contentsOf: pendingMetadataFileURL) else { return nil }
+        return try? JSONDecoder().decode([String: [String: String]].self, from: data)
+    }
+
+    /// Writes the pending-downloads dictionary atomically (write to temp file, then rename).
+    ///
+    /// Atomic rename means a crash between the write and the rename leaves the old file intact —
+    /// the partial write is never visible to a subsequent read.
+    private func writePendingMetadata(_ pending: [String: [String: String]]) throws {
+        try ensurePersistenceDirectory()
+        let data = try JSONEncoder().encode(pending)
+        let tempURL = pendingMetadataFileURL.deletingLastPathComponent()
+            .appendingPathComponent("pending-downloads-\(UUID().uuidString).tmp")
+        try data.write(to: tempURL, options: .atomic)
+        // Replace the target atomically; removeItem+move is the portable approach on Darwin.
+        if FileManager.default.fileExists(atPath: pendingMetadataFileURL.path) {
+            _ = try? FileManager.default.removeItem(at: pendingMetadataFileURL)
+        }
+        try FileManager.default.moveItem(at: tempURL, to: pendingMetadataFileURL)
+    }
 
     private func savePendingDownload(
         model: DownloadableModel,
         snapshotFiles: [SnapshotFileMetadata] = [],
         stagingDirectoryName: String? = nil
     ) throws {
-        var pending = defaults.dictionary(forKey: pendingDownloadsKey) as? [String: [String: String]] ?? [:]
+        var pending = loadPendingMetadata() ?? [:]
         var entry = [
             "repoID": model.repoID,
             "fileName": model.fileName,
@@ -669,20 +727,30 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
             entry["stagingDirectoryName"] = stagingDirectoryName
         }
         pending[model.id] = entry
-        defaults.set(pending, forKey: pendingDownloadsKey)
+        try writePendingMetadata(pending)
     }
 
     // internal: required by BackgroundDownloadManager+URLSessionDelegate.swift
     internal func removePendingDownload(id: String) {
-        var pending = defaults.dictionary(forKey: pendingDownloadsKey) as? [String: [String: String]] ?? [:]
+        var pending = loadPendingMetadata() ?? [:]
         pending.removeValue(forKey: id)
-        defaults.set(pending, forKey: pendingDownloadsKey)
+        do {
+            try writePendingMetadata(pending)
+        } catch {
+            Log.download.error("Failed to remove pending download for \(id): \(error.localizedDescription)")
+        }
+        // Remove the resume-data file for this ID now that the download is done.
+        try? FileManager.default.removeItem(at: resumeDataFileURL(for: id))
     }
 
     @MainActor private func restorePendingDownloads() {
-        guard let pending = defaults.dictionary(forKey: pendingDownloadsKey) as? [String: [String: String]] else {
-            return
-        }
+        migrateFromUserDefaults()
+
+        guard let pending = loadPendingMetadata() else { return }
+
+        // Collect all known IDs so we can delete orphaned resume-data files below.
+        let knownIDs = Set(pending.keys)
+        deleteOrphanedResumeDataFiles(knownIDs: knownIDs)
 
         for (id, info) in pending {
             // Only restore if we don't already have a state for this download.
@@ -729,6 +797,73 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
                 }
             }
             Log.download.info("Restored pending download state for \(id)")
+        }
+    }
+
+    // MARK: - Cleanup Sweep
+
+    /// Deletes resume-data files for download IDs not present in the current pending-metadata
+    /// list. These orphans accumulate when a download crashes without the normal teardown path.
+    private func deleteOrphanedResumeDataFiles(knownIDs: Set<String>) {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: persistenceDirectory,
+            includingPropertiesForKeys: nil,
+            options: .skipsHiddenFiles
+        ) else { return }
+
+        for fileURL in contents where fileURL.lastPathComponent.hasPrefix("resume-") && fileURL.pathExtension == "bin" {
+            let filename = fileURL.deletingPathExtension().lastPathComponent   // "resume-<encoded-id>"
+            let encodedID = String(filename.dropFirst("resume-".count))
+            let decodedID = encodedID.removingPercentEncoding ?? encodedID
+            if !knownIDs.contains(decodedID) {
+                do {
+                    try FileManager.default.removeItem(at: fileURL)
+                    Log.download.info("Removed orphaned resume-data file: \(fileURL.lastPathComponent)")
+                } catch {
+                    Log.download.error("Failed to remove orphaned resume-data file \(fileURL.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    // MARK: - One-time UserDefaults Migration
+
+    /// Migrates resume data and pending-download metadata from the legacy UserDefaults
+    /// storage to the new file-based persistence, then deletes the old keys.
+    ///
+    /// Runs once on first launch after the upgrade. Subsequent launches skip it because
+    /// the old keys are no longer present.
+    private func migrateFromUserDefaults() {
+        let defaults = UserDefaults.standard
+        let pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
+
+        // Migrate pending metadata — only when the new file doesn't already exist.
+        if !FileManager.default.fileExists(atPath: pendingMetadataFileURL.path),
+           let legacy = defaults.dictionary(forKey: pendingKey) as? [String: [String: String]],
+           !legacy.isEmpty {
+            do {
+                try writePendingMetadata(legacy)
+                Log.download.info("Migrated \(legacy.count) pending-download(s) from UserDefaults to file")
+            } catch {
+                Log.download.error("Failed to migrate pending downloads from UserDefaults: \(error.localizedDescription)")
+            }
+        }
+        defaults.removeObject(forKey: pendingKey)
+
+        // Migrate any resume-data blobs stored under the legacy "resumeData.<id>" keys.
+        let allKeys = defaults.dictionaryRepresentation().keys
+        for key in allKeys where key.hasPrefix("resumeData.") {
+            let id = String(key.dropFirst("resumeData.".count))
+            if let data = defaults.data(forKey: key) {
+                do {
+                    try ensurePersistenceDirectory()
+                    try data.write(to: resumeDataFileURL(for: id), options: .atomic)
+                    Log.download.info("Migrated resume data for \(id) from UserDefaults to file")
+                } catch {
+                    Log.download.error("Failed to migrate resume data for \(id): \(error.localizedDescription)")
+                }
+            }
+            defaults.removeObject(forKey: key)
         }
     }
 }
