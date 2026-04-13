@@ -6,8 +6,8 @@ import BaseChatInference
 ///
 /// Centralises the stream lifecycle, task management, exponential backoff retry,
 /// SSE parsing, and thread-safe state management that OpenAI and Claude
-/// backends share. Subclasses provide API-specific request building, token
-/// extraction, and capability declarations.
+/// backends share. Concrete backends supply API-specific request building,
+/// capability declarations, and an ``SSEPayloadHandler`` for token extraction.
 ///
 /// Thread safety uses `NSLock` (via ``withStateLock(_:)``) rather than
 /// `@unchecked Sendable` on each subclass individually.
@@ -93,6 +93,13 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
 
     public let urlSession: URLSession
 
+    /// SSE payload handler that extracts tokens, usage, stream-end signals,
+    /// and errors from provider-specific JSON payloads.
+    ///
+    /// Injected at initialisation so the compiler enforces its presence — no
+    /// runtime crash for forgotten overrides.
+    public let payloadHandler: any SSEPayloadHandler
+
     /// The retry strategy used for HTTP connection failures. Defaults to
     /// ``ExponentialBackoffStrategy`` with standard settings. Inject a
     /// custom strategy for tests.
@@ -110,9 +117,18 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     /// - Parameters:
     ///   - defaultModelName: The default model identifier for this backend.
     ///   - urlSession: URLSession to use for network requests.
-    public init(defaultModelName: String, urlSession: URLSession) {
+    ///   - payloadHandler: Interprets provider-specific SSE JSON payloads.
+    ///     The compiler enforces this parameter, replacing the previous
+    ///     runtime `fatalError` for missing `extractToken` / `buildRequest`
+    ///     / `capabilities` overrides.
+    public init(
+        defaultModelName: String,
+        urlSession: URLSession,
+        payloadHandler: any SSEPayloadHandler
+    ) {
         self._modelName = defaultModelName
         self.urlSession = urlSession
+        self.payloadHandler = payloadHandler
     }
 
     // MARK: - Subclass Hooks
@@ -121,8 +137,12 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     open var backendName: String { "SSECloud" }
 
     /// The backend's capability declaration.
+    ///
+    /// Subclasses must override this property and return appropriate capabilities.
+    /// The base implementation traps with a clear message — see `payloadHandler`
+    /// for the recommended compile-time-enforced pattern.
     open var capabilities: BackendCapabilities {
-        fatalError("Subclasses must override capabilities")
+        fatalError("\(type(of: self)) must override `capabilities`")
     }
 
     /// Builds the URLRequest for a generation call.
@@ -134,14 +154,16 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> URLRequest {
-        fatalError("Subclasses must override buildRequest")
+        fatalError("\(type(of: self)) must override `buildRequest(prompt:systemPrompt:config:)`")
     }
 
     /// Extracts a text token from an SSE JSON payload.
     ///
-    /// Return `nil` if the payload does not contain a token.
+    /// The default implementation delegates to ``payloadHandler``.
+    /// Subclasses may override for additional processing, but providing a
+    /// custom ``SSEPayloadHandler`` at init is the preferred approach.
     open func extractToken(from payload: String) -> String? {
-        fatalError("Subclasses must override extractToken")
+        payloadHandler.extractToken(from: payload)
     }
 
     /// Extracts token usage from an SSE JSON payload.
@@ -149,22 +171,23 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     /// Return `nil` if the payload does not contain usage information.
     /// Either component can be `nil` for APIs that report usage in multiple events.
     open func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? {
-        nil
+        payloadHandler.extractUsage(from: payload)
     }
 
     /// Returns `true` if the payload signals end of stream.
     ///
-    /// Most APIs use `[DONE]` which SSEStreamParser handles automatically.
+    /// The default implementation delegates to ``payloadHandler``.
     /// Override for APIs with explicit stop events (e.g. Claude's `message_stop`).
     open func isStreamEnd(_ payload: String) -> Bool {
-        false
+        payloadHandler.isStreamEnd(payload)
     }
 
     /// Extracts an in-stream error from an SSE JSON payload.
     ///
+    /// The default implementation delegates to ``payloadHandler``.
     /// Override for APIs that report errors as SSE events (e.g. Claude).
     open func extractStreamError(from payload: String) -> Error? {
-        nil
+        payloadHandler.extractStreamError(from: payload)
     }
 
     /// Called by ``generate(prompt:systemPrompt:config:)`` to update usage state.
