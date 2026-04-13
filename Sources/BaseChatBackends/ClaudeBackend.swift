@@ -105,24 +105,6 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         return request
     }
 
-    // MARK: - SSE Payload Handling
-
-    public override func extractToken(from payload: String) -> String? {
-        Self.parseToken(from: payload)
-    }
-
-    public override func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? {
-        Self.parseUsage(from: payload)
-    }
-
-    public override func isStreamEnd(_ payload: String) -> Bool {
-        Self.parseIsStreamEnd(payload)
-    }
-
-    public override func extractStreamError(from payload: String) -> Error? {
-        Self.parseStreamError(from: payload)
-    }
-
     /// Claude reports usage split across `message_start` (prompt) and
     /// `message_delta` (completion), so we merge incrementally.
     public override func handleUsage(_ usage: (promptTokens: Int?, completionTokens: Int?)) {
