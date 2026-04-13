@@ -1,5 +1,5 @@
 import SwiftUI
-import BaseChatCore  // AppearanceMode is re-exported from BaseChatInference via BaseChatCore
+import BaseChatInference
 
 extension AppearanceMode {
     /// Maps to SwiftUI's `ColorScheme` for use with `.preferredColorScheme()`.

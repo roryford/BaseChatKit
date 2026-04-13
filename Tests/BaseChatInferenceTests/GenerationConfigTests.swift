@@ -21,11 +21,6 @@ final class GenerationConfigTests: XCTestCase {
         XCTAssertEqual(config.repeatPenalty, 1.1, accuracy: 0.001)
     }
 
-    func test_defaultInit_maxTokens() {
-        let config = GenerationConfig()
-        XCTAssertEqual(config.maxTokens, 512)
-    }
-
     func test_defaultInit_maxOutputTokens() {
         let config = GenerationConfig()
         XCTAssertEqual(config.maxOutputTokens, 2048)
@@ -38,23 +33,22 @@ final class GenerationConfigTests: XCTestCase {
             temperature: 1.2,
             topP: 0.95,
             repeatPenalty: 1.5,
-            maxTokens: 2048
+            maxOutputTokens: 2048
         )
 
         XCTAssertEqual(config.temperature, 1.2, accuracy: 0.001)
         XCTAssertEqual(config.topP, 0.95, accuracy: 0.001)
         XCTAssertEqual(config.repeatPenalty, 1.5, accuracy: 0.001)
-        XCTAssertEqual(config.maxTokens, 2048)
+        XCTAssertEqual(config.maxOutputTokens, 2048)
     }
 
     func test_customInit_partialOverride() {
-        let config = GenerationConfig(temperature: 0.0, maxTokens: 1024)
+        let config = GenerationConfig(temperature: 0.0, maxOutputTokens: 1024)
 
         XCTAssertEqual(config.temperature, 0.0, accuracy: 0.001)
         XCTAssertEqual(config.topP, 0.9, accuracy: 0.001, "Non-overridden topP should use default")
         XCTAssertEqual(config.repeatPenalty, 1.1, accuracy: 0.001, "Non-overridden repeatPenalty should use default")
-        XCTAssertEqual(config.maxTokens, 1024)
-        XCTAssertEqual(config.maxOutputTokens, 2048, "Non-overridden maxOutputTokens should use default")
+        XCTAssertEqual(config.maxOutputTokens, 1024, "maxOutputTokens should match provided value")
     }
 
     func test_customInit_maxOutputTokens_customValue() {
