@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "swift"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # ML deps are tightly coupled and must be updated together manually.
+      # mlx-swift-lm is pinned to a commit (not a tag) due to a bug in 2.31.x —
+      # revisit when ≥2.32.0 is tagged.
+      - dependency-name: "mlx-swift"
+      - dependency-name: "mlx-swift-lm"
+      - dependency-name: "swift-transformers"
+      - dependency-name: "llama.swift"
