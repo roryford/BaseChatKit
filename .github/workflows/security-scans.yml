@@ -61,7 +61,7 @@ jobs:
           fetch-depth: 0
 
       - name: Scan changed commits for leaked secrets
-        uses: trufflesecurity/trufflehog@v3.90.5
+        uses: trufflesecurity/trufflehog@v3.94.3
         with:
           # Keep signal high by failing only on verifiable active secrets.
           extra_args: --results=verified
