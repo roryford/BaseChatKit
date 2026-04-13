@@ -1,4 +1,5 @@
 import Foundation
+import BaseChatInference
 @preconcurrency import SwiftData
 
 /// The current BaseChatKit SwiftData schema.

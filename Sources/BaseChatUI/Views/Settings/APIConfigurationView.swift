@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import BaseChatCore
+import BaseChatInference
 
 /// Main settings view for managing cloud API endpoints.
 ///

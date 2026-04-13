@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Displays the active operational warnings from a `DiagnosticsService`.
 ///

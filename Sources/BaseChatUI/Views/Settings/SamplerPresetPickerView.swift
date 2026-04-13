@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import BaseChatCore
+import BaseChatInference
 
 /// Picker and management UI for sampler presets within GenerationSettingsView.
 public struct SamplerPresetPickerView: View {

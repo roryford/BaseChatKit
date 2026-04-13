@@ -1,5 +1,6 @@
 import XCTest
 import BaseChatCore
+import BaseChatInference
 @testable import BaseChatBackends
 
 /// Shared contract assertions that every InferenceBackend implementation must satisfy.

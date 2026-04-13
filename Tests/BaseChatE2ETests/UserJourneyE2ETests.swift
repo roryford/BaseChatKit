@@ -3,6 +3,7 @@ import Foundation
 import SwiftData
 @testable import BaseChatUI
 @testable import BaseChatCore
+import BaseChatInference
 import BaseChatTestSupport
 
 /// Day-one user journey E2E — exercises a full first-session experience end to

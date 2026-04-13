@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Renders an array of ``MessagePart`` values within a message bubble.
 ///

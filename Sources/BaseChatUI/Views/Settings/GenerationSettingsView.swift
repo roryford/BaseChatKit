@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// A settings sheet for configuring generation parameters.
 ///

@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// A view modifier that attaches a context menu to a message bubble.
 ///

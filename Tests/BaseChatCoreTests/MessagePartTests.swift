@@ -1,6 +1,7 @@
 import XCTest
 import SwiftData
 @testable import BaseChatCore
+import BaseChatInference
 import BaseChatTestSupport
 
 final class MessagePartTests: XCTestCase {

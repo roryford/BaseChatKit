@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Storage management sheet for viewing and deleting downloaded models.
 ///

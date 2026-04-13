@@ -1,5 +1,6 @@
 import Foundation
 import BaseChatCore
+import BaseChatInference
 
 // MARK: - ChatViewModel + Messages
 

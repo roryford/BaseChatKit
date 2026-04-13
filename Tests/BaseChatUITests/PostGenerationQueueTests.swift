@@ -1,5 +1,6 @@
 @preconcurrency import XCTest
 import BaseChatCore
+import BaseChatInference
 import BaseChatTestSupport
 
 /// Integration tests verifying post-generation queue behavior.

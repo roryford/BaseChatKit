@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 /// Shows device memory pressure and RAM usage as a compact indicator in the chat toolbar.
 ///
