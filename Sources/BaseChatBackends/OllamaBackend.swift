@@ -181,7 +181,12 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
                 if errorBodyData.count > 2048 { break }
             }
             let errorBody = String(decoding: errorBodyData, as: UTF8.self)
-            let message = Self.extractErrorMessage(from: errorBody) ?? "Unexpected server error (status \(statusCode))"
+            Log.network.debug("Ollama upstream error body: \(errorBody, privacy: .private)")
+            let host = self.baseURL?.host()
+            let message = CloudErrorSanitizer.sanitize(
+                Self.extractErrorMessage(from: errorBody),
+                host: host
+            )
             throw CloudBackendError.serverError(statusCode: statusCode, message: message)
         }
     }

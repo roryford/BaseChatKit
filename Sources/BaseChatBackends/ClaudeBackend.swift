@@ -135,9 +135,15 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             throw CloudBackendError.rateLimited(retryAfter: retryAfter)
         default:
             let errorBody = await Self.readErrorBody(from: bytes)
+            Log.network.debug("Claude upstream error body: \(errorBody, privacy: .private)")
+            let host = self.baseURL?.host()
+            let sanitized = CloudErrorSanitizer.sanitize(
+                extractErrorMessage(from: errorBody),
+                host: host
+            )
             throw CloudBackendError.serverError(
                 statusCode: statusCode,
-                message: extractErrorMessage(from: errorBody) ?? "Unknown error"
+                message: sanitized
             )
         }
     }
