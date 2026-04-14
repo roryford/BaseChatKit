@@ -32,6 +32,20 @@ struct CloudErrorSanitizerTests {
         #expect(out == msg)
     }
 
+    // Directly exercises the pairwise scan's empty and single-character
+    // boundary. `sanitize(_:host:)` early-returns on empty input today, but
+    // the scan expresses its upper bound as `scalars.count - 1` and would
+    // crash with `0..<-1` if a future reorder let empty input reach it.
+    @Test func test_containsHTMLTag_empty_returnsFalse() {
+        #expect(CloudErrorSanitizer.containsHTMLTag("") == false)
+    }
+
+    @Test func test_containsHTMLTag_singleChar_returnsFalse() {
+        // A bare `<` cannot be a tag opener — there is no next scalar to be
+        // an ASCII letter.
+        #expect(CloudErrorSanitizer.containsHTMLTag("<") == false)
+    }
+
     // MARK: - Length cap
 
     @Test func longMessage_isTruncatedTo256WithEllipsis() {
