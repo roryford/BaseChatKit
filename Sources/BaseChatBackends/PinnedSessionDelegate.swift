@@ -78,7 +78,7 @@ final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate 
         guard !_defaultPinsLoaded else { return }
         _defaultPinsLoaded = true
 
-        // Google Trust Services WE1 (intermediate �� shared by both hosts)
+        // Google Trust Services WE1 (intermediate — shared by both hosts)
         let gtsWE1 = "kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4="
         // GTS Root R4 (root CA — backup pin for rotation safety)
         let gtsRootR4 = "mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c="
