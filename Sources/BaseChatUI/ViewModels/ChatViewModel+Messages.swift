@@ -106,6 +106,10 @@ extension ChatViewModel {
             return
         }
 
+        // The edited message keeps the same UUID but now has different content,
+        // so its stale cache entry would be returned by updateContextEstimate().
+        tokenCountCache.removeValue(forKey: messageID)
+
         // Remove all messages after the edited one.
         let toRemove = Array(messages[(index + 1)...])
         messages.removeSubrange((index + 1)...)
