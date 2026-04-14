@@ -874,16 +874,42 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// or was force-killed between receiving the download and moving it into the
     /// models directory.
     ///
-    /// Only files that match the manager's own naming signature
-    /// (``tempFilePrefix`` + UUID + ``tempFileExtension``) are considered, so the
-    /// sweep cannot affect temp files written by other subsystems. Files younger
-    /// than ``staleTempFileAge`` are preserved — they may belong to an in-flight
-    /// download handed off from the system's background transfer service.
+    /// ### What the sweep deletes
+    /// A file in `FileManager.default.temporaryDirectory` is removed iff **all** of:
+    /// 1. Filename starts with ``tempFilePrefix`` (`"basechatkit-dl-"`).
+    /// 2. Extension equals ``tempFileExtension`` (`"download"`).
+    /// 3. It is a regular file (not a directory, symlink, or special file).
+    /// 4. Its modification date is older than ``staleTempFileAge`` (24 hours).
     ///
-    /// Designed to run on launch from ``reconnectBackgroundSession()``; callers
-    /// that need a one-shot bootstrap sweep (e.g. for hosts that do not use
-    /// `reconnectBackgroundSession`) can invoke it directly.
-    public static func cleanupStaleTempFiles(now: Date = Date()) {
+    /// ### What the sweep preserves
+    /// Any file missing even one of the four properties above. Notably:
+    /// - Temp files written by other subsystems (wrong prefix or extension).
+    /// - Files newer than 24 hours — these may belong to an in-flight download
+    ///   handed off from the system's background transfer service. The age gate
+    ///   is our only protection here: `URLSession` does not expose the paths of
+    ///   in-flight downloads, so we cannot cross-check against a live task list.
+    /// - Files whose attributes cannot be read (logged and skipped).
+    ///
+    /// ### Known limitation
+    /// A user who suspends a download, closes the app, and reopens it more than
+    /// 24 hours later may see the partial temp file swept. `URLSession` itself
+    /// retains the resume information independently, so the user can still retry
+    /// — the sweep only reclaims the orphaned on-disk blob. If this proves
+    /// noisy in practice, the follow-up is to serialize the active-task temp
+    /// path at write time and exclude those paths from the sweep.
+    ///
+    /// Runs on launch from ``reconnectBackgroundSession()``.
+    public static func cleanupStaleTempFiles() {
+        cleanupStaleTempFiles(now: Date())
+    }
+
+    /// Time-injectable companion to ``cleanupStaleTempFiles()`` used by tests.
+    ///
+    /// Kept `internal` so the time-injection seam does not appear in the public
+    /// API surface of the framework. Production callers should use the no-arg
+    /// overload above.
+    @discardableResult
+    internal static func cleanupStaleTempFiles(now: Date) -> (removed: Int, bytesReclaimed: Int64) {
         let tempDir = FileManager.default.temporaryDirectory
         let contents: [URL]
         do {
@@ -894,7 +920,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
             )
         } catch {
             Log.download.warning("Temp-file sweep skipped: could not list \(tempDir.path): \(error.localizedDescription)")
-            return
+            return (0, 0)
         }
 
         let threshold = now.addingTimeInterval(-staleTempFileAge)
@@ -928,9 +954,11 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
                 Log.download.warning("Failed to remove stale temp file \(name): \(error.localizedDescription)")
             }
         }
-        if removed > 0 {
-            Log.download.info("Temp-file sweep reclaimed \(removed) file(s), \(bytesReclaimed) byte(s)")
-        }
+        // Always log the outcome — a silent zero-count result is indistinguishable
+        // from a sweep that never ran when a user reports "my download vanished".
+        // The log line gives that trail without leaking sensitive paths.
+        Log.download.info("Temp-file sweep: reclaimed \(removed) file(s), \(bytesReclaimed) byte(s)")
+        return (removed, bytesReclaimed)
     }
 
     /// Deletes resume-data files for download IDs not present in the current pending-metadata

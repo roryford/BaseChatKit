@@ -122,6 +122,26 @@ final class DownloadTempCleanupTests: XCTestCase {
         )
     }
 
+    func test_cleanup_reportsReclaimCounts() throws {
+        // Observability: hosts that need to surface a "freed N MB" banner after
+        // a crash recovery should be able to read back what the sweep removed.
+        let payload = Data(repeating: 0x41, count: 4_096)
+        _ = try makeTempDownloadFile(age: 48 * 60 * 60, contents: payload)
+        _ = try makeTempDownloadFile(age: 48 * 60 * 60, contents: payload)
+        let forcedFuture = Date()
+
+        let result = BackgroundDownloadManager.cleanupStaleTempFiles(now: forcedFuture)
+
+        XCTAssertGreaterThanOrEqual(
+            result.removed, 2,
+            "Removed count must report at least the files this test seeded"
+        )
+        XCTAssertGreaterThanOrEqual(
+            result.bytesReclaimed, Int64(payload.count * 2),
+            "Reclaimed bytes must account for the files this test seeded"
+        )
+    }
+
     func test_cleanup_isIdempotent() throws {
         // Second run with no matching files should be a silent no-op.
         let freshURL = try makeTempDownloadFile(age: 60 * 60)
