@@ -129,24 +129,55 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     // timeout/2 partially addresses this by showing .stalled.
 
     /// Parses Ollama's NDJSON response format instead of SSE.
+    ///
+    /// Applies the same ``SSEStreamLimits`` caps as the SSE parser so a
+    /// hostile Ollama-compatible server cannot exhaust memory with oversized
+    /// lines, total volume, or an event flood.
     public override func parseResponseStream(
         bytes: URLSession.AsyncBytes,
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
     ) async throws {
+        let limits = effectiveSSEStreamLimits
         var lineBuffer = Data()
+        var totalBytes = 0
+        var rateWindowStart = ContinuousClock.now
+        var rateWindowCount = 0
+
+        func noteEventYielded() throws {
+            let now = ContinuousClock.now
+            if now - rateWindowStart >= .seconds(1) {
+                rateWindowStart = now
+                rateWindowCount = 1
+                return
+            }
+            rateWindowCount += 1
+            if rateWindowCount > limits.maxEventsPerSecond {
+                throw SSEStreamError.eventRateExceeded(rateWindowCount)
+            }
+        }
+
         for try await byte in bytes {
             if Task.isCancelled { break }
+
+            totalBytes += 1
+            if totalBytes > limits.maxTotalBytes {
+                throw SSEStreamError.streamTooLarge(totalBytes)
+            }
 
             if byte == UInt8(ascii: "\n") {
                 if !lineBuffer.isEmpty {
                     if let line = String(data: lineBuffer, encoding: .utf8),
                        let token = Self.extractToken(from: line) {
+                        try noteEventYielded()
                         continuation.yield(.token(token))
                     }
                     lineBuffer.removeAll(keepingCapacity: true)
                 }
             } else {
                 lineBuffer.append(byte)
+                if lineBuffer.count > limits.maxEventBytes {
+                    throw SSEStreamError.eventTooLarge(lineBuffer.count)
+                }
             }
         }
 
@@ -154,6 +185,7 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         if !lineBuffer.isEmpty,
            let line = String(data: lineBuffer, encoding: .utf8),
            let token = Self.extractToken(from: line) {
+            try noteEventYielded()
             continuation.yield(.token(token))
         }
     }
