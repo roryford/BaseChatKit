@@ -30,11 +30,18 @@ import Foundation
 ///
 /// The function is pure, idempotent, and safe to call on already-sanitised
 /// input.
-public enum CloudErrorSanitizer {
+///
+/// Access level is intentionally `package` rather than `public`: host apps
+/// should never need to invoke the sanitiser directly because
+/// ``SSECloudBackend/checkStatusCode(_:bytes:)`` already applies it before
+/// constructing every `serverError`. Sibling backend subclasses inside this
+/// SPM package can still reach it when they need to match that behaviour for
+/// their own status-code paths.
+enum CloudErrorSanitizer {
 
     /// Maximum length of the sanitised message in characters, including the
     /// trailing ellipsis when truncation applies.
-    public static let maxLength = 256
+    static let maxLength = 256
 
     /// Sanitises a raw upstream error string for UI surfacing.
     ///
@@ -45,7 +52,7 @@ public enum CloudErrorSanitizer {
     ///     unknown.
     /// - Returns: A safe, bounded string suitable for use as a
     ///   ``CloudBackendError/serverError(statusCode:message:)`` message.
-    public static func sanitize(_ raw: String?, host: String? = nil) -> String {
+    static func sanitize(_ raw: String?, host: String? = nil) -> String {
         guard let raw, !raw.isEmpty else {
             return genericServerError(host: host)
         }
