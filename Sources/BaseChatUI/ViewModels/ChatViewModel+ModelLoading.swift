@@ -31,6 +31,10 @@ extension ChatViewModel {
     public func unloadModel() {
         invalidatePendingLoadIntent(resetActivityPhase: true)
         inferenceService.unloadModel()
+        // Token counts are keyed by message UUID, which is reused across sessions.
+        // Dropping them here prevents counts computed with the previous model's
+        // tokenizer from being returned after a subsequent model swap.
+        invalidateTokenCaches()
     }
 
     /// Loads the currently selected local model into the inference backend.

@@ -386,14 +386,29 @@ public final class ChatViewModel {
     var isRestoringSession = false
 
     /// Cached per-message token counts keyed by message ID, to avoid recalculating all messages.
+    @ObservationIgnored
     var tokenCountCache: [UUID: Int] = [:]
 
     /// Reusable caching tokenizer that persists across generation cycles.
     /// Invalidated when the underlying backend tokenizer changes (i.e. model swap).
+    @ObservationIgnored
     private var _cachingTokenizer: CachingTokenizer?
     /// Identity of the backend tokenizer the cached instance wraps, or `nil` when
     /// using the heuristic fallback. Used to detect model swaps.
+    @ObservationIgnored
     private var _cachingTokenizerBaseID: ObjectIdentifier?
+
+    /// Drops every per-message token cache entry and the reusable caching tokenizer.
+    ///
+    /// Called whenever the backend tokenizer identity may change out from under us
+    /// (e.g. `unloadModel()`): message UUIDs are reused across sessions, so keeping
+    /// counts from the previous model's tokenizer risks returning stale values in
+    /// ``updateContextEstimate()`` after a later model swap.
+    func invalidateTokenCaches() {
+        tokenCountCache.removeAll()
+        _cachingTokenizer = nil
+        _cachingTokenizerBaseID = nil
+    }
 
     /// Returns a `CachingTokenizer` that persists across generation cycles,
     /// recreating it only when the underlying backend tokenizer changes.
