@@ -91,6 +91,131 @@ public struct DownloadableModel: Identifiable, Sendable, Hashable {
     }
 }
 
+// MARK: - File Name Validation
+
+/// Errors raised by ``DownloadableModel/validate(fileName:)``.
+///
+/// Kept `internal` deliberately: host apps should catch plain `Error` from
+/// `validate(fileName:)` and surface `localizedDescription`. Pinning the
+/// concrete cases as public API would freeze the category list and force
+/// downstream switches to change every time a new rejection rule is added.
+enum FileNameError: LocalizedError, Equatable {
+    case empty
+    /// `..` or `.` component — classic path traversal.
+    case pathTraversal
+    /// Backslash anywhere in the input. Never legitimate on Apple platforms.
+    case backslash
+    /// Empty path component — either a leading `/`, trailing `/`, or `//` in the middle.
+    case emptyComponent
+    /// The filename contains more than one `/`. Only a single namespace/name
+    /// split is legitimate for curated MLX snapshot filenames; `a/b/c` is not
+    /// a HuggingFace filename pattern BaseChatKit honours.
+    case tooManyComponents
+    /// Any component begins with `.` — hides the file and collides with
+    /// system metadata (`.DS_Store`, `.git`, etc.).
+    case hidden
+    case tooLong
+    case controlCharacter
+
+    var errorDescription: String? {
+        switch self {
+        case .empty:
+            return "Model filename is empty."
+        case .pathTraversal:
+            return "Model filename contains a path-traversal component (\".\" or \"..\")."
+        case .backslash:
+            return "Model filename contains a backslash, which is not a valid path separator on Apple platforms."
+        case .emptyComponent:
+            return "Model filename contains an empty path component (leading, trailing, or consecutive \"/\")."
+        case .tooManyComponents:
+            return "Model filename contains more than one \"/\"; only <namespace>/<name> is permitted."
+        case .hidden:
+            return "Model filename contains a component that starts with a dot, which is not permitted."
+        case .tooLong:
+            return "Model filename exceeds the 255-character limit."
+        case .controlCharacter:
+            return "Model filename contains control characters."
+        }
+    }
+}
+
+extension DownloadableModel {
+
+    /// Maximum permitted length for the entire filename string and each component.
+    ///
+    /// 255 is the POSIX `NAME_MAX` on HFS+/APFS; longer names cannot be written
+    /// to disk regardless of other checks.
+    static let maxFileNameLength = 255
+
+    /// Validates that a filename is safe to append to a base directory URL.
+    ///
+    /// This is a belt-and-suspenders check layered on top of the URL-standardized
+    /// `hasPrefix` guards used by `BackgroundDownloadManager` when moving files
+    /// into the models directory. The validator runs at the earliest point a
+    /// filename is accepted from external input (manifests, Hub search results)
+    /// so malformed input is rejected before it reaches any filesystem operation.
+    ///
+    /// ### Accepted shapes
+    ///
+    /// - `model.Q4_K_M.gguf` — a plain GGUF filename.
+    /// - `mlx-community/Phi-4-mini-instruct-4bit` — a single-slash namespace /
+    ///   repo pair used by curated MLX snapshot models.
+    ///
+    /// ### Rejected shapes
+    ///
+    /// - Empty or `>= 255` chars.
+    /// - Backslash anywhere (Windows-style or filesystem-confusion payloads).
+    /// - Any C0/C1 control character or DEL (can truncate at the C boundary).
+    /// - Any `..` or `.` component — classic path traversal.
+    /// - A leading, trailing, or consecutive `/` (empty component).
+    /// - More than one `/` — `a/b/c` is not a HuggingFace filename pattern we
+    ///   honour, so reject it rather than silently accepting a sub-path write.
+    /// - Any component that begins with `.` — hides the file and can collide
+    ///   with system metadata (`.DS_Store`, `.git`, …).
+    ///
+    /// - Parameter fileName: The untrusted filename string.
+    /// - Throws: A `FileNameError` (caught as `Error` by public callers)
+    ///   describing the first rule the input violates.
+    public static func validate(fileName: String) throws {
+        guard !fileName.isEmpty else { throw FileNameError.empty }
+        guard fileName.count < maxFileNameLength else { throw FileNameError.tooLong }
+        // Backslashes are never legitimate on Apple platforms and are always a
+        // sign of Windows-style traversal or filesystem confusion attacks.
+        guard !fileName.contains("\\") else { throw FileNameError.backslash }
+        // Reject null bytes, C0 controls (0x00–0x1F), DEL (0x7F), and the C1
+        // range (0x80–0x9F). Beyond obvious truncation hazards (null byte),
+        // C1 contains U+0085 NEXT LINE which renders invisibly and would
+        // confuse log output and shell tooling.
+        guard fileName.unicodeScalars.allSatisfy({ scalar in
+            let v = scalar.value
+            return v >= 0x20 && v != 0x7F && !(0x80...0x9F).contains(v)
+        }) else {
+            throw FileNameError.controlCharacter
+        }
+
+        // Inspect each forward-slash-separated segment. Legitimate MLX filenames
+        // contain one slash (namespace/name); traversal payloads contain "..".
+        // We classify components *before* counting them so that a deep payload
+        // like "../../etc/passwd" surfaces `.pathTraversal` (actionable) rather
+        // than `.tooManyComponents` (an architectural rejection).
+        let components = fileName.split(separator: "/", omittingEmptySubsequences: false)
+        for component in components {
+            guard component != ".." else { throw FileNameError.pathTraversal }
+            guard component != "." else { throw FileNameError.pathTraversal }
+        }
+        // More than two components = more than one slash = not a shape we honour.
+        guard components.count <= 2 else { throw FileNameError.tooManyComponents }
+        for component in components {
+            // Empty component means "//" or a leading/trailing "/" — always malformed.
+            guard !component.isEmpty else { throw FileNameError.emptyComponent }
+            // A leading dot on any component hides the file and can collide
+            // with system metadata (.DS_Store, .git, etc.).
+            guard !component.hasPrefix(".") else { throw FileNameError.hidden }
+            guard component.count < maxFileNameLength else { throw FileNameError.tooLong }
+        }
+    }
+}
+
 // MARK: - Grouped Models
 
 /// Groups multiple downloadable variants (quant levels) under one repo.

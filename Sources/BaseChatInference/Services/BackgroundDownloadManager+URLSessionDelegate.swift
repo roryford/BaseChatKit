@@ -44,10 +44,13 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
 
         // Copy the file to a safe temporary location before this method returns,
         // since the system deletes the file at `location` immediately after.
+        // The prefix + extension combination is the signature the launch-time
+        // sweep uses to reclaim files leaked by a prior crash.
         let tempURL: URL
         do {
             let tempDir = FileManager.default.temporaryDirectory
-            tempURL = tempDir.appendingPathComponent(UUID().uuidString + ".download")
+            let fileName = "\(BackgroundDownloadManager.tempFilePrefix)\(UUID().uuidString).\(BackgroundDownloadManager.tempFileExtension)"
+            tempURL = tempDir.appendingPathComponent(fileName)
             try FileManager.default.moveItem(at: location, to: tempURL)
         } catch {
             Log.download.error("Failed to preserve downloaded file: \(error.localizedDescription)")
