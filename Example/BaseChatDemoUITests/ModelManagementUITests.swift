@@ -14,7 +14,7 @@ final class ModelManagementUITests: XCTestCase {
     func testModelButtonOpensSheet() throws {
         openModelManagementSheet()
 
-        let selectTab = app.segmentedControls.buttons["Select"]
+        let selectTab = modelManagementTab("Select", app: app)
         XCTAssertTrue(selectTab.waitForExistence(timeout: 3), "Select tab should appear in model management sheet")
     }
 
@@ -24,9 +24,9 @@ final class ModelManagementUITests: XCTestCase {
         openModelManagementSheet()
 
         // Verify all three tabs exist
-        let selectTab = app.segmentedControls.buttons["Select"]
-        let downloadTab = app.segmentedControls.buttons["Download"]
-        let storageTab = app.segmentedControls.buttons["Storage"]
+        let selectTab = modelManagementTab("Select", app: app)
+        let downloadTab = modelManagementTab("Download", app: app)
+        let storageTab = modelManagementTab("Storage", app: app)
 
         XCTAssertTrue(selectTab.exists, "Select tab should exist")
         XCTAssertTrue(downloadTab.exists, "Download tab should exist")
@@ -122,7 +122,7 @@ final class ModelManagementUITests: XCTestCase {
     func testDownloadTabShowsRecommendations() throws {
         openModelManagementSheet()
 
-        app.segmentedControls.buttons["Download"].tap()
+        modelManagementTab("Download", app: app).tap()
         sleep(1)
 
         takeScreenshot(name: "Download-Tab-Content")
@@ -141,7 +141,7 @@ final class ModelManagementUITests: XCTestCase {
     func testDownloadTabSearchFieldIsInteractive() throws {
         openModelManagementSheet()
 
-        app.segmentedControls.buttons["Download"].tap()
+        modelManagementTab("Download", app: app).tap()
         sleep(1)
 
         let searchField = app.textFields["Search HuggingFace models"]
@@ -156,7 +156,7 @@ final class ModelManagementUITests: XCTestCase {
     func testDownloadButtonIsHittable() throws {
         openModelManagementSheet()
 
-        app.segmentedControls.buttons["Download"].tap()
+        modelManagementTab("Download", app: app).tap()
         sleep(1)
 
         // Look for download buttons (arrow.down.circle)
@@ -177,7 +177,7 @@ final class ModelManagementUITests: XCTestCase {
     func testStorageTabShowsOverview() throws {
         openModelManagementSheet()
 
-        app.segmentedControls.buttons["Storage"].tap()
+        modelManagementTab("Storage", app: app).tap()
         sleep(1)
 
         takeScreenshot(name: "Storage-Tab-Content")
@@ -210,9 +210,9 @@ final class ModelManagementUITests: XCTestCase {
         openModelManagementSheet()
 
         let controls = [
-            app.segmentedControls.buttons["Select"],
-            app.segmentedControls.buttons["Download"],
-            app.segmentedControls.buttons["Storage"],
+            modelManagementTab("Select", app: app),
+            modelManagementTab("Download", app: app),
+            modelManagementTab("Storage", app: app),
             app.buttons["Done"]
         ]
 
@@ -227,7 +227,7 @@ final class ModelManagementUITests: XCTestCase {
     private func openModelManagementSheet() {
         openModelManagementIfNeeded(app: app)
 
-        let selectTab = app.segmentedControls.buttons["Select"]
+        let selectTab = modelManagementTab("Select", app: app)
         guard selectTab.waitForExistence(timeout: 5) else {
             takeScreenshot(name: "Sidebar-No-Model-Button")
             XCTFail("Model management sheet did not open")

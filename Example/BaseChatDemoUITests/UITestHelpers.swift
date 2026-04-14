@@ -7,10 +7,22 @@ extension XCTestCase {
 
     /// Launches the demo app in deterministic UI-testing mode.
     @discardableResult
-    func launchDemoApp() -> XCUIApplication {
+    func launchDemoApp(file: StaticString = #filePath, line: UInt = #line) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments += ["--uitesting", "-ApplePersistenceIgnoreState", "YES"]
+        app.launchArguments += ["--uitesting"]
+        #if !os(macOS)
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+        #endif
         app.launch()
+        #if os(macOS)
+        app.activate()
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 5),
+            "BaseChatDemo should reach the foreground under macOS UI tests",
+            file: file,
+            line: line
+        )
+        #endif
         return app
     }
 
@@ -120,8 +132,8 @@ extension XCTestCase {
     }
 
     func openModelManagementIfNeeded(app: XCUIApplication) {
-        if app.segmentedControls["model-management-tab-picker"].exists
-            || app.segmentedControls.buttons["Select"].exists {
+        if app.descendants(matching: .any).matching(identifier: "model-management-tab-picker").firstMatch.exists
+            || modelManagementTab("Select", app: app).exists {
             return
         }
 
@@ -141,6 +153,28 @@ extension XCTestCase {
             candidate.tap()
             break
         }
+    }
+
+    func modelManagementTab(_ label: String, app: XCUIApplication) -> XCUIElement {
+        let labelMatch = NSPredicate(format: "label == %@", label)
+        let pickerTab = app
+            .descendants(matching: .any)
+            .matching(identifier: "model-management-tab-picker")
+            .firstMatch
+            .descendants(matching: .any)
+            .matching(labelMatch)
+            .firstMatch
+        let candidates = [
+            pickerTab,
+            app.segmentedControls.buttons[label],
+            app.buttons[label]
+        ]
+
+        for candidate in candidates where candidate.exists {
+            return candidate
+        }
+
+        return pickerTab
     }
 
     func advancedSettingsDisclosure(app: XCUIApplication) -> XCUIElement {

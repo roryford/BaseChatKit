@@ -33,6 +33,7 @@ struct DemoContentView: View {
         } detail: {
             ChatView(showModelManagement: $isModelManagementPresented)
                 .toolbar {
+                    #if os(iOS)
                     if horizontalSizeClass == .compact {
                         ToolbarItem(placement: .topBarLeading) {
                             Button {
@@ -44,6 +45,7 @@ struct DemoContentView: View {
                             .accessibilityIdentifier("show-sidebar-button")
                         }
                     }
+                    #endif
                 }
         }
         .sheet(isPresented: $isModelManagementPresented) {
