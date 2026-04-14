@@ -1,4 +1,8 @@
 @preconcurrency import XCTest
+#if canImport(AppKit)
+import AppKit
+#endif
+import SwiftUI
 @testable import BaseChatUI
 @testable import BaseChatCore
 @testable import BaseChatInference
@@ -50,6 +54,29 @@ final class ModelManagementSheetLogicTests: XCTestCase {
         XCTAssertEqual(cases.count, 3)
         XCTAssertEqual(cases, [.select, .download, .storage])
     }
+
+    #if canImport(AppKit)
+    // Regression guard for #378: a `NavigationStack { VStack { List } }` sheet
+    // collapses to zero height on native macOS without an explicit outer frame.
+    // Keep thresholds in lock-step with the `.frame(minWidth:minHeight:)` in
+    // `ModelManagementSheet` (currently 560 x 480) so a future refactor that
+    // drops the frame fails here rather than silently regressing the sheet.
+    func test_macOS_sheetHasStableMinimumLayoutForAllTabs() {
+        for tab in ModelManagementSheet.Tab.allCases {
+            let size = hostedSheetFittingSize(for: tab)
+            XCTAssertGreaterThanOrEqual(
+                size.width,
+                560,
+                "\(tab.rawValue) tab should reserve enough width for its content on macOS"
+            )
+            XCTAssertGreaterThanOrEqual(
+                size.height,
+                480,
+                "\(tab.rawValue) tab should reserve enough height for its content on macOS"
+            )
+        }
+    }
+    #endif
 
     // MARK: - Model selection state transitions
 
@@ -268,4 +295,19 @@ final class ModelManagementSheetLogicTests: XCTestCase {
         XCTAssertTrue(ModelCapabilityTier.balanced < .capable)
         XCTAssertTrue(ModelCapabilityTier.capable < .frontier)
     }
+
+    #if canImport(AppKit)
+    private func hostedSheetFittingSize(for tab: ModelManagementSheet.Tab) -> CGSize {
+        let (vm, _) = makeViewModelWithMock()
+        let controller = NSHostingController(
+            rootView: ModelManagementSheet(initialTab: tab)
+                .environment(vm)
+                .environment(ModelManagementViewModel())
+        )
+
+        _ = controller.view
+        controller.view.layoutSubtreeIfNeeded()
+        return controller.view.fittingSize
+    }
+    #endif
 }
