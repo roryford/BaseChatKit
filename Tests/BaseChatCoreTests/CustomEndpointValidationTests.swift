@@ -142,6 +142,32 @@ final class CustomEndpointValidationTests: XCTestCase {
         assertRejected("http://[::ffff:192.168.1.1]:80", reason: "IPv4-mapped RFC1918")
     }
 
+    // MARK: - Rejected: uppercase IPv6 hex
+
+    func test_rejects_ipv6LinkLocal_uppercaseHex() {
+        // URL.host() preserves original case for IPv6 literals. The classifier
+        // must lowercase before matching or FE80::1 would bypass the fe80::/10
+        // rule.
+        assertRejected("https://[FE80::1]", reason: "uppercase IPv6 link-local")
+    }
+
+    func test_rejects_ipv4MappedLoopback_uppercaseHex() {
+        assertRejected("https://[::FFFF:127.0.0.1]", reason: "uppercase IPv4-mapped loopback")
+    }
+
+    // MARK: - Rejected: trailing-dot FQDN bypass
+
+    func test_rejects_rfc1918_trailingDot() {
+        // `192.168.1.1.` resolves identically to `192.168.1.1` on every
+        // mainstream resolver. Without trailing-dot normalisation it would
+        // parse as a DNS name and slip through under HTTPS.
+        assertRejected("https://192.168.1.1.", reason: "RFC1918 with trailing dot")
+    }
+
+    func test_rejects_imds_trailingDot() {
+        assertRejected("https://169.254.169.254.", reason: "IMDS with trailing dot")
+    }
+
     // MARK: - Rejected: non-http schemes
 
     func test_rejects_fileScheme() {

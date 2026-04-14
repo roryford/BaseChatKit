@@ -334,7 +334,14 @@ public enum BaseChatSchemaV3: VersionedSchema {
         /// - `fe80::/10` (link-local)
         /// - `::ffff:0:0/96` (IPv4-mapped; would otherwise bypass the IPv4 filter)
         static func isDisallowedPrivateHost(_ url: URL) -> Bool {
-            guard let host = url.host()?.lowercased() else { return false }
+            guard let rawHost = url.host()?.lowercased() else { return false }
+
+            // FQDN form with a trailing dot (e.g. `192.168.1.1.`) resolves
+            // identically to the dotless form on every mainstream resolver, so
+            // treat it as equivalent for IP-literal classification. Without
+            // this, `https://192.168.1.1.` would bypass the private-range
+            // gate and reach a LAN host under HTTPS.
+            let host = rawHost.hasSuffix(".") ? String(rawHost.dropLast()) : rawHost
 
             if let octets = parseIPv4Literal(host) {
                 return isDisallowedIPv4(octets)
