@@ -208,4 +208,85 @@ final class DownloadableModelTests: XCTestCase {
 
         XCTAssertEqual(model.quantization, "Q4_K_M")
     }
+
+    func test_quantization_IQ2_XXS_extractedCorrectly() {
+        let model = DownloadableModel(
+            repoID: "bartowski/some-model-GGUF",
+            fileName: "m.IQ2_XXS.gguf",
+            displayName: "Some Model IQ2_XXS",
+            modelType: .gguf,
+            sizeBytes: 1_600_000_000
+        )
+
+        XCTAssertEqual(model.quantization, "IQ2_XXS")
+    }
+
+    func test_quantization_nilForUnknownTag() {
+        // Pattern requires the (Q|IQ|F|BF) prefix; arbitrary alphanumerics must not match.
+        let model = DownloadableModel(
+            repoID: "bartowski/some-model-GGUF",
+            fileName: "foo.X99.gguf",
+            displayName: "Foo",
+            modelType: .gguf,
+            sizeBytes: 1_000_000_000
+        )
+
+        XCTAssertNil(model.quantization, "Non-quant alphanumeric tags should not match")
+    }
+
+    // MARK: - ReDoS Hardening
+    //
+    // The quantization regex has a repeated `(?:_[A-Z0-9]+)` group. Before the fix this
+    // was unbounded (`*`) which — combined with the trailing literal `.` — enabled
+    // catastrophic backtracking on pathological input (many `_LETTERS` groups followed
+    // by a non-matching character before the final dot). The fix bounds the repetition
+    // to {0,5} and caps the input length to 128 chars so hostile filenames cannot
+    // stall the caller.
+
+    func test_quantization_pathologicalInput_completesQuickly_andReturnsNil() {
+        // ~1000 chars: "_AAAA" × 200 after the Q4 prefix, then a non-matching `X` before `.gguf`.
+        // With the original unbounded pattern this pegs the CPU; with the fix it is bounded.
+        let suffix = String(repeating: "_AAAA", count: 200)
+        let hostileName = "model_Q4" + suffix + "X.gguf"
+
+        let model = DownloadableModel(
+            repoID: "attacker/repo",
+            fileName: hostileName,
+            displayName: "Pathological",
+            modelType: .gguf,
+            sizeBytes: 1
+        )
+
+        let start = Date()
+        let result = model.quantization
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertLessThan(
+            elapsed, 0.05,
+            "Quantization extraction must complete in <50ms on hostile input (took \(elapsed)s)"
+        )
+        // Input is clipped to 128 chars; within that window there is no trailing `.`
+        // closing a Q-prefixed run, so the match must fail.
+        XCTAssertNil(result, "Pathological input must not yield a spurious quant tag")
+    }
+
+    func test_quantization_inputLongerThan128Chars_isClipped() {
+        // Place a valid-looking quant tag *after* the 128-char cutoff. Because we apply
+        // the regex to a prefix-bounded string, it must not be returned.
+        let padding = String(repeating: "a", count: 200)
+        let fileName = padding + "-Q4_K_M.gguf"
+
+        let model = DownloadableModel(
+            repoID: "attacker/repo",
+            fileName: fileName,
+            displayName: "Long",
+            modelType: .gguf,
+            sizeBytes: 1
+        )
+
+        XCTAssertNil(
+            model.quantization,
+            "Quant tags beyond the 128-char input cap must be ignored"
+        )
+    }
 }
