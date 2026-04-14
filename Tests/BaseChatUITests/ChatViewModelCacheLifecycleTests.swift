@@ -125,4 +125,81 @@ final class ChatViewModelCacheLifecycleTests: XCTestCase {
         XCTAssertGreaterThan(vm.contextUsedTokens, tokensBeforeEdit,
             "Context estimate must grow to reflect the longer edited content")
     }
+
+    // MARK: - Bug 3: struct tokenizer identity discrimination
+
+    /// When the backend vends a value-type (struct) tokenizer, the identity
+    /// discriminator in ``ChatViewModel/reusableCachingTokenizer`` must use
+    /// `type(of:) is AnyClass` — not `as? AnyObject`, which always succeeds on
+    /// protocol existentials and defeats the value-type fallback branch.
+    /// Verifies the computed property round-trips a struct tokenizer without
+    /// crashing and reuses the same cached instance on subsequent calls.
+    func test_reusableCachingTokenizer_stableIdentity_forStructTokenizer() async {
+        let backend = StructTokenizerVendorBackend()
+        let service = InferenceService(backend: backend, name: "StructVendor")
+        let vm = ChatViewModel(
+            inferenceService: service,
+            deviceCapability: DeviceCapabilityService(physicalMemory: 16 * oneGB),
+            modelStorage: ModelStorageService(),
+            memoryPressure: MemoryPressureHandler()
+        )
+        vm.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
+
+        // Precondition: the backend must actually vend a struct tokenizer, so we
+        // exercise the value-type branch of the identity discriminator.
+        let resolved = service.tokenizer
+        XCTAssertNotNil(resolved, "Fixture must vend a tokenizer")
+        if let resolved {
+            XCTAssertFalse(type(of: resolved) is AnyClass,
+                "Fixture must vend a value-type tokenizer to exercise the struct branch")
+        }
+
+        // Two consecutive accesses must return the same cached instance: if the
+        // identity discriminator boxes a struct into a fresh AnyObject each call,
+        // ObjectIdentifier differs every time, forcing a new CachingTokenizer on
+        // every access and defeating the whole cache.
+        let first = vm.reusableCachingTokenizer
+        let second = vm.reusableCachingTokenizer
+        XCTAssertTrue(first === second,
+            "reusableCachingTokenizer must return the same cached instance across calls when the backend tokenizer identity hasn't changed")
+    }
+}
+
+// MARK: - Test Fixtures
+
+/// Backend that vends a struct-based tokenizer. Exercises the value-type branch
+/// of the identity discriminator in ``ChatViewModel/reusableCachingTokenizer``.
+private struct StubStructTokenizer: TokenizerProvider {
+    func tokenCount(_ text: String) -> Int { max(1, text.count / 4) }
+}
+
+private final class StructTokenizerVendorBackend: InferenceBackend, TokenizerVendor, @unchecked Sendable {
+    var isModelLoaded: Bool = true
+    var isGenerating: Bool = false
+    var capabilities: BackendCapabilities = BackendCapabilities(
+        supportedParameters: [.temperature],
+        maxContextTokens: 2048,
+        requiresPromptTemplate: false,
+        supportsSystemPrompt: true
+    )
+
+    var tokenizer: any TokenizerProvider { StubStructTokenizer() }
+
+    func loadModel(from url: URL, contextSize: Int32) async throws {
+        isModelLoaded = true
+    }
+
+    func generate(
+        prompt: String,
+        systemPrompt: String?,
+        config: GenerationConfig
+    ) throws -> GenerationStream {
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in
+            continuation.finish()
+        }
+        return GenerationStream(stream)
+    }
+
+    func stopGeneration() { isGenerating = false }
+    func unloadModel() { isModelLoaded = false }
 }

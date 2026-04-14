@@ -416,8 +416,12 @@ public final class ChatViewModel {
         let backendTokenizer = inferenceService.tokenizer
         // Use ObjectIdentifier for reference-type tokenizers (e.g. LlamaBackend vends self),
         // fall back to type identity for value-type tokenizers (e.g. FoundationTokenizer).
+        // `as? AnyObject` on a protocol existential always succeeds (values auto-box),
+        // so discriminate on the metatype instead.
         let newBaseID: ObjectIdentifier? = backendTokenizer.map {
-            if let ref = $0 as? AnyObject { return ObjectIdentifier(ref) }
+            if type(of: $0) is AnyClass {
+                return ObjectIdentifier($0 as AnyObject)
+            }
             return ObjectIdentifier(type(of: $0))
         }
         if let existing = _cachingTokenizer, _cachingTokenizerBaseID == newBaseID {
