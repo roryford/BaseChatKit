@@ -119,4 +119,25 @@ final class BaseChatConfigurationTests: XCTestCase {
         XCTAssertTrue(features.showCloudAPIManagement)
         XCTAssertFalse(features.showUpgradeHint)
     }
+
+    // MARK: - File Protection
+
+    func test_defaultInit_fileProtectionClass_isCompleteUntilFirstUserAuth() {
+        let config = BaseChatConfiguration()
+        XCTAssertEqual(
+            config.fileProtectionClass,
+            .completeUntilFirstUserAuthentication,
+            "Default Data Protection class must stay at completeUntilFirstUserAuthentication — it balances at-rest protection with background-task compatibility"
+        )
+    }
+
+    func test_customInit_fileProtectionClass_canOptOut() {
+        let config = BaseChatConfiguration(fileProtectionClass: nil)
+        XCTAssertNil(config.fileProtectionClass)
+    }
+
+    func test_customInit_fileProtectionClass_canRaiseToComplete() {
+        let config = BaseChatConfiguration(fileProtectionClass: .complete)
+        XCTAssertEqual(config.fileProtectionClass, .complete)
+    }
 }
