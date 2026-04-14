@@ -137,6 +137,59 @@ final class PinnedSessionDelegateTests: XCTestCase {
         XCTAssertFalse(afterFirstLoad.isEmpty, "First call should have populated pins")
     }
 
+    // MARK: - CI Regression Guard
+    //
+    // These tests exist specifically to catch a future maintainer accidentally
+    // deleting or neutering `PinnedSessionDelegate.loadDefaultPins()`. The
+    // delegate fails-closed when required production hosts have no pins, so a
+    // well-intentioned "remove placeholder pin code" change would silently
+    // break every OpenAI and Anthropic request shipped by the framework.
+    //
+    // If either of these tests fails in CI, DO NOT weaken the assertion. The
+    // correct fix is to restore `loadDefaultPins()` (or replace its pin values
+    // with freshly rotated SPKI hashes — see the rotation procedure in the
+    // source doc comment).
+
+    func test_ciGuard_loadDefaultPins_shipsOpenAIPins() {
+        let savedPins = PinnedSessionDelegate.pinnedHosts
+        PinnedSessionDelegate.pinnedHosts = [:]
+        PinnedSessionDelegate.resetDefaultPinsForTesting()
+        defer {
+            PinnedSessionDelegate.pinnedHosts = savedPins
+            PinnedSessionDelegate.resetDefaultPinsForTesting()
+        }
+
+        PinnedSessionDelegate.loadDefaultPins()
+
+        let openAIPins = PinnedSessionDelegate.pinnedHosts["api.openai.com"]
+        XCTAssertNotNil(openAIPins,
+                        "loadDefaultPins() must populate api.openai.com or the delegate will fail-closed on every OpenAI request.")
+        XCTAssertEqual(openAIPins?.isEmpty, false,
+                       "api.openai.com pin set must be non-empty — empty sets fail-closed on required production hosts.")
+        XCTAssertGreaterThanOrEqual(openAIPins?.count ?? 0, 2,
+                                    "api.openai.com needs at least 2 pins (primary + backup) for rotation safety; losing the backup risks lockout during cert rotation.")
+    }
+
+    func test_ciGuard_loadDefaultPins_shipsAnthropicPins() {
+        let savedPins = PinnedSessionDelegate.pinnedHosts
+        PinnedSessionDelegate.pinnedHosts = [:]
+        PinnedSessionDelegate.resetDefaultPinsForTesting()
+        defer {
+            PinnedSessionDelegate.pinnedHosts = savedPins
+            PinnedSessionDelegate.resetDefaultPinsForTesting()
+        }
+
+        PinnedSessionDelegate.loadDefaultPins()
+
+        let anthropicPins = PinnedSessionDelegate.pinnedHosts["api.anthropic.com"]
+        XCTAssertNotNil(anthropicPins,
+                        "loadDefaultPins() must populate api.anthropic.com or the delegate will fail-closed on every Anthropic request.")
+        XCTAssertEqual(anthropicPins?.isEmpty, false,
+                       "api.anthropic.com pin set must be non-empty — empty sets fail-closed on required production hosts.")
+        XCTAssertGreaterThanOrEqual(anthropicPins?.count ?? 0, 2,
+                                    "api.anthropic.com needs at least 2 pins (primary + backup) for rotation safety; losing the backup risks lockout during cert rotation.")
+    }
+
     // MARK: - Non-ServerTrust Challenge
 
     func test_nonServerTrustChallenge_returnsDefaultHandling() async {
