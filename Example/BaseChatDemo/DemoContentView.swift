@@ -199,6 +199,9 @@ struct DemoContentView: View {
                 }
                 .accessibilityLabel("New Chat")
                 .accessibilityIdentifier("new-chat-button")
+                // Cmd+N is the system convention for "new document/item" on both
+                // macOS and iPadOS with a hardware keyboard.
+                .keyboardShortcut("n", modifiers: .command)
             }
         }
     }

@@ -9,6 +9,9 @@ import BaseChatInference
 public struct ChatView: View {
 
     @Environment(ChatViewModel.self) private var viewModel
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
 
@@ -48,6 +51,14 @@ public struct ChatView: View {
                 .accessibilityHidden(true)
 
             ChatInputBar()
+        }
+        // Cmd+Shift+M opens Model Management from anywhere in the chat view.
+        // The button must be in the view hierarchy (not toolbar) to be always active.
+        .background {
+            Button("") { showModelManagement = true }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .accessibilityHidden(true)
+                .opacity(0)
         }
         .navigationTitle("Chat")
         #if os(iOS)
@@ -93,14 +104,24 @@ public struct ChatView: View {
         } message: {
             Text("This will delete all messages in the current chat. This cannot be undone.")
         }
+        // On macOS, settings and export are presented as sheets from here because
+        // the toolbar buttons use `.popover` only on iOS (see button definitions below).
+        #if !os(iOS)
         .sheet(isPresented: $isSettingsPresented) {
             GenerationSettingsView()
         }
         .sheet(isPresented: $isExportPresented) {
             ChatExportSheet()
         }
+        #endif
+        // API configuration can be triggered from the error recovery button which has
+        // no natural popover anchor, so it uses a sheet on all platforms. On iPad the
+        // drag indicator makes it clear the sheet is dismissible.
         .sheet(isPresented: $showAPIConfiguration) {
             APIConfigurationView()
+                #if os(iOS)
+                .presentationDragIndicator(.visible)
+                #endif
         }
     }
 
@@ -319,6 +340,15 @@ public struct ChatView: View {
         }
         .disabled(viewModel.messages.isEmpty)
         .accessibilityLabel("Export chat")
+        #if os(iOS)
+        // On regular size class (iPad), anchor the export panel as a popover so
+        // the split-view context stays visible. On compact (iPhone), the popover
+        // automatically adapts to a sheet presentation.
+        .popover(isPresented: $isExportPresented) {
+            ChatExportSheet()
+                .frame(minWidth: 320, minHeight: 300)
+        }
+        #endif
     }
 
     private var deviceInfoButton: some View {
@@ -340,6 +370,15 @@ public struct ChatView: View {
         }
         .accessibilityLabel("Generation settings")
         .accessibilityIdentifier("chat-settings-button")
+        // Cmd+, is the system convention for Settings on both macOS and iPadOS
+        // with a hardware keyboard.
+        .keyboardShortcut(",", modifiers: .command)
+        #if os(iOS)
+        .popover(isPresented: $isSettingsPresented) {
+            GenerationSettingsView()
+                .frame(minWidth: 320, minHeight: 400)
+        }
+        #endif
     }
 
     private var clearChatButton: some View {
@@ -350,6 +389,8 @@ public struct ChatView: View {
         }
         .disabled(viewModel.messages.isEmpty)
         .accessibilityLabel("Clear chat")
+        // Cmd+Shift+K mirrors the "Clear" shortcut convention used in Xcode and Terminal.
+        .keyboardShortcut("k", modifiers: [.command, .shift])
     }
 
     // MARK: - Device Info Popover
