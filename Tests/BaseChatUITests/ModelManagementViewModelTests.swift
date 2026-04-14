@@ -282,7 +282,9 @@ final class ModelManagementViewModelTests: XCTestCase {
     // MARK: - Local Model Import
 
     func test_importModel_withGGUF_copiesFileIntoModelsDirectory() throws {
-        let vm = ModelManagementViewModel()
+        let isolated = makeIsolatedModelStorage()
+        defer { try? FileManager.default.removeItem(at: isolated.directory) }
+        let vm = ModelManagementViewModel(modelStorage: isolated.service)
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelImport-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -294,7 +296,6 @@ final class ModelManagementViewModelTests: XCTestCase {
 
         let imported = try vm.importModel(from: sourceURL)
         let importedURL = URL(fileURLWithPath: vm.modelsDirectoryPath).appendingPathComponent(fileName)
-        defer { try? FileManager.default.removeItem(at: importedURL) }
 
         XCTAssertEqual(imported.fileName, fileName)
         XCTAssertEqual(imported.modelType, .gguf)
@@ -302,7 +303,9 @@ final class ModelManagementViewModelTests: XCTestCase {
     }
 
     func test_importModel_withUnsupportedFile_throwsAndRemovesCopy() throws {
-        let vm = ModelManagementViewModel()
+        let isolated = makeIsolatedModelStorage()
+        defer { try? FileManager.default.removeItem(at: isolated.directory) }
+        let vm = ModelManagementViewModel(modelStorage: isolated.service)
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelImportUnsupported-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -327,8 +330,11 @@ final class ModelManagementViewModelTests: XCTestCase {
             var errorDescription: String? { "simulated deletion failure" }
         }
 
+        let isolated = makeIsolatedModelStorage()
+        defer { try? FileManager.default.removeItem(at: isolated.directory) }
         let diagnostics = DiagnosticsService()
         let vm = ModelManagementViewModel(
+            modelStorage: isolated.service,
             diagnostics: diagnostics,
             fileRemover: { _ in throw DeletionFailure() }
         )
@@ -355,14 +361,19 @@ final class ModelManagementViewModelTests: XCTestCase {
             XCTFail("Expected .modelFileDeletionFailed warning, got \(String(describing: diagnostics.warnings.first?.error))")
         }
 
-        // Clean up the leaked file — the stub fileRemover didn't touch it.
-        let importedURL = URL(fileURLWithPath: vm.modelsDirectoryPath).appendingPathComponent(fileName)
-        try? FileManager.default.removeItem(at: importedURL)
+        // The stub fileRemover didn't touch the imported file — but the
+        // scratch directory gets nuked in the deferred cleanup above, so we
+        // don't need a targeted removeItem here anymore.
     }
 
     func test_importModel_whenCleanupSucceeds_recordsNoWarning() throws {
+        let isolated = makeIsolatedModelStorage()
+        defer { try? FileManager.default.removeItem(at: isolated.directory) }
         let diagnostics = DiagnosticsService()
-        let vm = ModelManagementViewModel(diagnostics: diagnostics)
+        let vm = ModelManagementViewModel(
+            modelStorage: isolated.service,
+            diagnostics: diagnostics
+        )
 
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelImportWarningOK-\(UUID().uuidString)")

@@ -35,6 +35,38 @@ public func cleanupE2ETempDir(_ url: URL) {
     try? FileManager.default.removeItem(at: url)
 }
 
+// MARK: - Isolated Models Directory
+
+/// Returns a fresh per-test temporary directory suitable for use as a
+/// `ModelStorageService` base directory.
+///
+/// Every test that writes fake model files (GGUF placeholders, MLX folders,
+/// non-model garbage) must route those writes through an isolated directory
+/// — never the real `<Documents>/Models` path. Writing to the production
+/// path pollutes the developer's demo app and can cause the model scanner
+/// to surface stub files as if they were real models (see #379).
+///
+/// Use the returned URL when constructing `ModelStorageService(baseDirectory:)`
+/// or `makeIsolatedModelStorage()` — the caller is responsible for passing the
+/// same URL when cleanup needs to remove the directory in `tearDown`.
+public func makeIsolatedModelsDirectory() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("BaseChatModelsScratch-\(UUID().uuidString)", isDirectory: true)
+}
+
+/// Builds a `ModelStorageService` rooted at a fresh isolated temp directory
+/// and returns both so the test can clean up the directory in `tearDown`.
+///
+/// This is the canonical way for tests to exercise the storage service
+/// without touching the user's real `<Documents>/Models` path.
+public func makeIsolatedModelStorage(
+    fileManager: FileManager = .default
+) -> (service: ModelStorageService, directory: URL) {
+    let dir = makeIsolatedModelsDirectory()
+    let service = ModelStorageService(fileManager: fileManager, baseDirectory: dir)
+    return (service, dir)
+}
+
 /// Extracts a `CloudBackendError` from an error that may be wrapped in `RetryExhaustedError`.
 ///
 /// Retryable errors that exhaust all retry attempts arrive wrapped in

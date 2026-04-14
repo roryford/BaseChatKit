@@ -1,26 +1,38 @@
 import XCTest
+import BaseChatTestSupport
 @testable import BaseChatInference
 
 final class ModelStorageServiceTests: XCTestCase {
 
     private var service: ModelStorageService!
+    private var scratchDirectory: URL!
     private var createdURLs: [URL]!
 
     override func setUp() {
         super.setUp()
-        service = ModelStorageService()
+        // Route every filesystem write through a per-test scratch directory.
+        // Writing to the real `<Documents>/Models` path (the production
+        // default) leaks test artifacts into the demo app's model scanner
+        // and has historically accumulated GBs of junk on dev machines.
+        // See #379.
+        let isolated = makeIsolatedModelStorage()
+        service = isolated.service
+        scratchDirectory = isolated.directory
         createdURLs = []
 
-        // Ensure the shared Models directory exists so tests can write into it.
+        // Ensure the scratch Models directory exists so tests can write into it.
         try? service.ensureModelsDirectory()
     }
 
     override func tearDown() {
-        // Remove only the files/directories this test run created.
+        // Remove everything this test created — then nuke the whole scratch
+        // directory so even files the test forgot to track are cleaned up.
         for url in createdURLs {
             try? FileManager.default.removeItem(at: url)
         }
+        try? FileManager.default.removeItem(at: scratchDirectory)
         createdURLs = nil
+        scratchDirectory = nil
         service = nil
         super.tearDown()
     }
@@ -89,7 +101,10 @@ final class ModelStorageServiceTests: XCTestCase {
         let ggufURL = try createGgufFile()
 
         let models = service.discoverModels()
-        let match = models.first { $0.url == ggufURL }
+        // Match by filename — discoverModels returns standardised URLs which
+        // can differ from the write-time URL by symlink resolution
+        // (`/var/folders/…` ↔ `/private/var/folders/…`) on macOS temp paths.
+        let match = models.first { $0.fileName == ggufURL.lastPathComponent }
 
         XCTAssertNotNil(match, "Should discover the GGUF file")
         XCTAssertEqual(match?.modelType, .gguf)
@@ -110,7 +125,7 @@ final class ModelStorageServiceTests: XCTestCase {
         let nonModelURL = try createNonModelFile()
 
         let models = service.discoverModels()
-        let match = models.first { $0.url == nonModelURL }
+        let match = models.first { $0.fileName == nonModelURL.lastPathComponent }
 
         XCTAssertNil(match, "Non-model files should not be discovered")
     }
@@ -182,7 +197,7 @@ final class ModelStorageServiceTests: XCTestCase {
         let ggufURL = try createGgufFile()
 
         let models = service.discoverModels()
-        let model = try XCTUnwrap(models.first { $0.url == ggufURL })
+        let model = try XCTUnwrap(models.first { $0.fileName == ggufURL.lastPathComponent })
 
         try service.deleteModel(model)
 

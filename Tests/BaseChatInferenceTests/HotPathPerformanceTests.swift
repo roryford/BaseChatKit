@@ -1,4 +1,5 @@
 import XCTest
+import BaseChatTestSupport
 @testable import BaseChatInference
 
 final class HotPathPerformanceTests: XCTestCase {
@@ -68,11 +69,17 @@ final class HotPathPerformanceTests: XCTestCase {
     // MARK: - ModelStorageService.discoverModels (populated directory)
 
     private var service: ModelStorageService!
+    private var scratchDirectory: URL!
     private var createdURLs: [URL] = []
 
     override func setUp() {
         super.setUp()
-        service = ModelStorageService()
+        // Isolate perf fixtures from the user's real Documents/Models path.
+        // `measure { }` runs the closure many times, so leaks here compound
+        // quickly — see #379.
+        let isolated = makeIsolatedModelStorage()
+        service = isolated.service
+        scratchDirectory = isolated.directory
         createdURLs = []
     }
 
@@ -80,7 +87,9 @@ final class HotPathPerformanceTests: XCTestCase {
         for url in createdURLs {
             try? FileManager.default.removeItem(at: url)
         }
+        try? FileManager.default.removeItem(at: scratchDirectory)
         createdURLs = []
+        scratchDirectory = nil
         service = nil
         super.tearDown()
     }
