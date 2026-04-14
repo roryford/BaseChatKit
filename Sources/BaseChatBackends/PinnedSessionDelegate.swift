@@ -25,12 +25,23 @@ final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate 
     ///   openssl dgst -sha256 -binary | base64
     /// ```
     ///
-    /// These pins are intentionally left empty and must be populated with actual
-    /// SPKI hashes before enabling pinning in production.
+    /// Default pins are populated lazily by `loadDefaultPins()` on first access.
+    /// Today that function ships two SPKI hashes — the Google Trust Services WE1
+    /// intermediate CA and its issuing GTS Root R4 — and applies them to both
+    /// `api.openai.com` and `api.anthropic.com` because both providers sit
+    /// behind Google Trust Services. Pinning the intermediate (plus the root as
+    /// a backup) rather than the leaf keeps the pin set stable across routine
+    /// leaf-certificate renewals: pins only need to change when a provider
+    /// rotates its signing infrastructure.
     ///
     /// `api.openai.com` and `api.anthropic.com` are treated as required pinned
     /// production hosts: missing or empty pin sets fail closed.
     /// Unknown custom hosts continue to use default trust when no pins are set.
+    ///
+    /// Host apps that need to override or extend the shipped pin set (e.g.
+    /// pointing a provider at a private gateway with its own CA) can write
+    /// directly to `pinnedHosts` before any network requests are issued; values
+    /// set by the host app are preserved by `loadDefaultPins()`.
     // NSLock guards concurrent reads/writes from multiple URLSession delegate
     // callback threads, which can arrive on arbitrary background threads.
     private static let _pinnedHostsLock = NSLock()
@@ -67,7 +78,7 @@ final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate 
         guard !_defaultPinsLoaded else { return }
         _defaultPinsLoaded = true
 
-        // Google Trust Services WE1 (intermediate �� shared by both hosts)
+        // Google Trust Services WE1 (intermediate — shared by both hosts)
         let gtsWE1 = "kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4="
         // GTS Root R4 (root CA — backup pin for rotation safety)
         let gtsRootR4 = "mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c="
