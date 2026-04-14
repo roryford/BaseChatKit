@@ -41,16 +41,34 @@ public struct BaseChatConfiguration: Sendable {
     /// simplify the interface or lock down functionality for specific deployments.
     public var features: Features
 
+    /// Data Protection class applied to the SwiftData store on iOS/tvOS/watchOS.
+    ///
+    /// Defaults to `.completeUntilFirstUserAuthentication` — the store is sealed
+    /// until the user unlocks the device once after reboot, then remains
+    /// accessible until the next reboot. This is the right balance for a chat
+    /// app: sensitive data is protected at rest, but background tasks (silent
+    /// pushes, downloads resumed after app termination) continue to work.
+    ///
+    /// Set to `.complete` for the strongest protection (file is sealed whenever
+    /// the device is locked) — note this breaks background reads while locked.
+    /// Set to `nil` to opt out entirely (not recommended; the OS default applies).
+    ///
+    /// This value is ignored on macOS and Mac Catalyst, where at-rest protection
+    /// is handled by FileVault. It is also ignored for in-memory SwiftData stores.
+    public var fileProtectionClass: FileProtectionType?
+
     public init(
         appName: String = "BaseChatKit",
         bundleIdentifier: String = "com.basechatkit",
         modelsDirectoryName: String = "Models",
-        features: Features = Features()
+        features: Features = Features(),
+        fileProtectionClass: FileProtectionType? = .completeUntilFirstUserAuthentication
     ) {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
         self.modelsDirectoryName = modelsDirectoryName
         self.features = features
+        self.fileProtectionClass = fileProtectionClass
     }
 
     // MARK: - Derived identifiers

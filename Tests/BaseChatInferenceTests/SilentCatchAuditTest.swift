@@ -61,6 +61,13 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatInference/Services/GGUFMetadataReader.swift:guard let handle = try? FileHandle(forReadingFrom: url) else { return false }",
         "BaseChatInference/Services/ModelStorageService.swift:guard let contents = try? fileManager.contentsOfDirectory(",
 
+        // BaseChatCore
+        // File-protection hardening: enumerating the store directory to locate
+        // SQLite WAL sidecars is best-effort. If the directory read fails
+        // (permissions race, parent unmounted), we skip sidecar protection and
+        // the main store is still protected — the error is not actionable.
+        "BaseChatCore/ModelContainerFactory.swift:guard let entries = try? fm.contentsOfDirectory(atPath: directory.path) else {",
+
         // BaseChatBackends
         "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
