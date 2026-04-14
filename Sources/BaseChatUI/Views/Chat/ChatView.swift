@@ -370,10 +370,11 @@ public struct ChatView: View {
         }
         .accessibilityLabel("Generation settings")
         .accessibilityIdentifier("chat-settings-button")
-        // Cmd+, is the system convention for Settings on both macOS and iPadOS
-        // with a hardware keyboard.
-        .keyboardShortcut(",", modifiers: .command)
         #if os(iOS)
+        // Cmd+, is the iPadOS convention for settings with a hardware keyboard.
+        // Omitted on macOS to avoid conflicting with any host app's Settings scene
+        // (which also claims Cmd+,).
+        .keyboardShortcut(",", modifiers: .command)
         .popover(isPresented: $isSettingsPresented) {
             GenerationSettingsView()
                 .frame(minWidth: 320, minHeight: 400)
