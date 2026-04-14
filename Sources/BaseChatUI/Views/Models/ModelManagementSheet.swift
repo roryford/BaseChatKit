@@ -60,8 +60,9 @@ public struct ModelManagementSheet: View {
             VStack(spacing: 0) {
                 tabPickerBar
                 tabContent
-                    .frame(maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle(selectedTab.rawValue)
             .toolbar {
                 doneToolbarItem
@@ -82,7 +83,11 @@ public struct ModelManagementSheet: View {
         .presentationDetents(horizontalSizeClass == .regular ? [.medium, .large] : [.large])
         .presentationDragIndicator(.visible)
         #else
-        .presentationDetents([.large])
+        // macOS sheets don't honor `.presentationDetents` and don't get a
+        // useful intrinsic size from a `NavigationStack { VStack { List } }`
+        // tree — without an explicit frame, the inner List collapses to zero
+        // height and every tab renders blank below the picker. See #378.
+        .frame(minWidth: 560, idealWidth: 720, minHeight: 480, idealHeight: 640)
         #endif
         .onAppear {
             if !availableTabs.contains(selectedTab) {
