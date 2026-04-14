@@ -11,13 +11,19 @@ final class ChatViewModelTests: XCTestCase {
 
     private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
 
+    /// Per-test isolated Models directory. Every ViewModel built inside a
+    /// test shares the same directory so `refreshModels()` sees fixtures
+    /// the test wrote. The directory is nuked in `tearDown` so nothing
+    /// leaks into the user's real `<Documents>/Models` path (see #379).
+    private nonisolated(unsafe) var scratchModelsDirectory: URL!
+
     /// Convenience to build a view model with controllable device memory.
     /// Uses a default InferenceService (no backend loaded).
     private func makeViewModel(ramGB: UInt64 = 16) -> ChatViewModel {
         ChatViewModel(
             inferenceService: InferenceService(),
             deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: ModelStorageService(baseDirectory: scratchModelsDirectory),
             memoryPressure: MemoryPressureHandler()
         )
     }
@@ -32,7 +38,7 @@ final class ChatViewModelTests: XCTestCase {
         let vm = ChatViewModel(
             inferenceService: service,
             deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: ModelStorageService(baseDirectory: scratchModelsDirectory),
             memoryPressure: MemoryPressureHandler()
         )
         // Set an active session so sendMessage/regenerate/edit don't bail out.
@@ -40,13 +46,14 @@ final class ChatViewModelTests: XCTestCase {
         return (vm, mock)
     }
 
-    /// The models directory used by a default `ModelStorageService`.
+    /// The scratch directory backing every `ModelStorageService` built in
+    /// this test — exposed here so `createFakeGGUF` writes the fixture to
+    /// the same place the ViewModel scans.
     private var modelsDirectory: URL {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return documents.appendingPathComponent("Models", isDirectory: true)
+        scratchModelsDirectory
     }
 
-    /// Creates a fake .gguf file in the models directory and returns its URL.
+    /// Creates a fake .gguf file in the scratch models directory and returns its URL.
     @discardableResult
     private func createFakeGGUF(named fileName: String, sizeBytes: Int = 1024) throws -> URL {
         try FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
@@ -64,12 +71,21 @@ final class ChatViewModelTests: XCTestCase {
     /// Removes all .gguf files from the models directory created during the test.
     private nonisolated(unsafe) var createdFiles: [URL] = []
 
+    override func setUp() {
+        super.setUp()
+        scratchModelsDirectory = makeIsolatedModelsDirectory()
+    }
+
     override func tearDown() async throws {
         try await super.tearDown()
         for url in createdFiles {
             removeFile(at: url)
         }
         createdFiles.removeAll()
+        if let dir = scratchModelsDirectory {
+            try? FileManager.default.removeItem(at: dir)
+        }
+        scratchModelsDirectory = nil
     }
 
     // MARK: - test_init_defaultState
@@ -319,9 +335,13 @@ final class ChatViewModelTests: XCTestCase {
         let vm = makeViewModel()
 
         XCTAssertFalse(vm.modelsDirectoryPath.isEmpty, "modelsDirectoryPath should not be empty")
-        XCTAssertTrue(
-            vm.modelsDirectoryPath.contains("Models"),
-            "modelsDirectoryPath should contain 'Models', got: \(vm.modelsDirectoryPath)"
+        // When a custom `baseDirectory:` is passed to ModelStorageService the
+        // path is the exact custom URL (no trailing "Models" segment), so we
+        // verify only that it matches the scratch directory the test set up.
+        XCTAssertEqual(
+            vm.modelsDirectoryPath,
+            scratchModelsDirectory.path,
+            "modelsDirectoryPath should be the scratch directory, got: \(vm.modelsDirectoryPath)"
         )
     }
 
