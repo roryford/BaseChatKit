@@ -37,9 +37,16 @@ public struct DownloadableModel: Identifiable, Sendable, Hashable {
     public var quantization: String? {
         guard modelType == .gguf else { return nil }
         // Match common GGUF quant patterns: Q4_K_M, Q8_0, IQ2_XS, F16, etc.
-        let pattern = #"[_\-\.]((?:Q|IQ|F|BF)\d+(?:_[A-Z0-9]+)*)\."#
-        guard let range = fileName.range(of: pattern, options: .regularExpression) else { return nil }
-        let match = fileName[range].dropFirst().dropLast() // strip leading separator and trailing dot
+        // Bound the trailing `_SEGMENT` repetition to {0,5}: real quant tags top out at
+        // two suffix components (e.g. Q4_K_M, IQ2_XXS); five is generous and prevents
+        // catastrophic backtracking on crafted filenames like `_Q4_AAA_AAA..._AAAX.gguf`.
+        let pattern = #"[_\-\.]((?:Q|IQ|F|BF)\d+(?:_[A-Z0-9]+){0,5})\."#
+        // Cap input length before regex evaluation. Any legitimate HuggingFace filename
+        // fits well under 128 characters; longer input is assumed hostile and clipped
+        // to keep the regex engine in a bounded work envelope.
+        let boundedName = String(fileName.prefix(128))
+        guard let range = boundedName.range(of: pattern, options: .regularExpression) else { return nil }
+        let match = boundedName[range].dropFirst().dropLast() // strip leading separator and trailing dot
         return String(match)
     }
 
