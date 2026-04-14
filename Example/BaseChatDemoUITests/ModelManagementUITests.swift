@@ -301,6 +301,8 @@ final class ModelManagementUITests: XCTestCase {
     }
 
     func testSelectingGGUFModelProducesResponse() throws {
+        // FIXME: https://github.com/roryford/BaseChatKit/issues/377
+        throw XCTSkip("Disabled pending fix for https://github.com/roryford/BaseChatKit/issues/377 — XCUITest can't see the demo app's window on native macOS")
         try skipUnlessRealModelE2EEnabled()
         #if !arch(arm64)
         throw XCTSkip("GGUF backend (llama.cpp) requires Apple Silicon")
@@ -313,6 +315,8 @@ final class ModelManagementUITests: XCTestCase {
     }
 
     func testSelectingMLXModelProducesResponse() throws {
+        // FIXME: https://github.com/roryford/BaseChatKit/issues/377
+        throw XCTSkip("Disabled pending fix for https://github.com/roryford/BaseChatKit/issues/377 — XCUITest can't see the demo app's window on native macOS")
         try skipUnlessRealModelE2EEnabled()
         #if !arch(arm64)
         throw XCTSkip("MLX backend requires Apple Silicon")
@@ -325,6 +329,8 @@ final class ModelManagementUITests: XCTestCase {
     }
 
     func testSelectingFoundationModelProducesResponse() throws {
+        // FIXME: https://github.com/roryford/BaseChatKit/issues/377
+        throw XCTSkip("Disabled pending fix for https://github.com/roryford/BaseChatKit/issues/377 — XCUITest can't see the demo app's window on native macOS")
         try skipUnlessRealModelE2EEnabled()
 
         guard #available(macOS 26, iOS 26, *) else {
