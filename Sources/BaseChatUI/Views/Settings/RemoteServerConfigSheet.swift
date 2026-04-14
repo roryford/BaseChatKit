@@ -173,7 +173,10 @@ public struct RemoteServerConfigSheet: View {
                 try endpoint.setAPIKey(trimmedKey)
             } catch {
                 modelContext.delete(endpoint)
-                errorMessage = "Could not save API key to the Keychain: \(error.localizedDescription)"
+                // `KeychainError.localizedDescription` already reads as a
+                // complete sentence — don't prepend another "Could not save…"
+                // prefix and double the wording.
+                errorMessage = error.localizedDescription
                 return
             }
         }

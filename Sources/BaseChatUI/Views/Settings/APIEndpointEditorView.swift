@@ -162,7 +162,10 @@ public struct APIEndpointEditorView: View {
                 do {
                     try endpoint.setAPIKey(apiKey)
                 } catch {
-                    validationError = "Could not save API key to the Keychain: \(error.localizedDescription)"
+                    // `KeychainError.localizedDescription` already reads as a
+                    // complete sentence (e.g. "Couldn't store the API key in
+                    // the Keychain: The device appears to be locked…").
+                    validationError = error.localizedDescription
                     return
                 }
             }
@@ -181,7 +184,10 @@ public struct APIEndpointEditorView: View {
                     try newEndpoint.setAPIKey(apiKey)
                 } catch {
                     modelContext.delete(newEndpoint)
-                    validationError = "Could not save API key to the Keychain: \(error.localizedDescription)"
+                    // `KeychainError.localizedDescription` already reads as a
+                    // complete sentence (e.g. "Couldn't store the API key in
+                    // the Keychain: The device appears to be locked…").
+                    validationError = error.localizedDescription
                     return
                 }
             }

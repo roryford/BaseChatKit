@@ -5,12 +5,64 @@ import Security
 ///
 /// `retrieve(account:)` intentionally does **not** throw — a missing item is a
 /// normal state (represented by `nil`), not an error.
-public enum KeychainError: Error, Equatable {
+///
+/// Conforms to `LocalizedError` so `error.localizedDescription` returns a
+/// human-readable string suitable for presenting in a settings banner. Apps
+/// that need to branch on the raw `OSStatus` (e.g. to distinguish "device
+/// locked" from "entitlement missing") can read ``osStatus``.
+public enum KeychainError: Error, Equatable, LocalizedError {
     /// `SecItemAdd` / `SecItemUpdate` returned a non-success `OSStatus`.
     case storeFailed(OSStatus)
     /// `SecItemDelete` returned a non-success `OSStatus` (other than `errSecItemNotFound`,
     /// which is treated as success).
     case deleteFailed(OSStatus)
+
+    /// The underlying Keychain `OSStatus` that triggered the failure. Exposed
+    /// so callers can branch on specific codes without pattern-matching the
+    /// enum (e.g. `errSecInteractionNotAllowed` → "device is locked").
+    public var osStatus: OSStatus {
+        switch self {
+        case .storeFailed(let status), .deleteFailed(let status):
+            return status
+        }
+    }
+
+    public var errorDescription: String? {
+        let action: String
+        switch self {
+        case .storeFailed: action = "store"
+        case .deleteFailed: action = "delete"
+        }
+        return "Couldn't \(action) the API key in the Keychain: \(Self.message(for: osStatus)) (OSStatus \(osStatus))."
+    }
+
+    /// Maps common Keychain `OSStatus` codes to short, user-facing strings.
+    /// Unknown codes fall back to the generic `SecCopyErrorMessageString` if
+    /// available, else a placeholder — the raw code is always appended by
+    /// ``errorDescription`` so diagnostics are not lost.
+    private static func message(for status: OSStatus) -> String {
+        switch status {
+        case errSecInteractionNotAllowed:
+            return "The device appears to be locked. Unlock and try again"
+        case errSecAuthFailed:
+            return "Keychain authentication failed"
+        case errSecMissingEntitlement:
+            return "The app is missing the Keychain entitlement"
+        case errSecNotAvailable:
+            return "The Keychain is not available"
+        case errSecDuplicateItem:
+            return "A conflicting Keychain item already exists"
+        case errSecDecode:
+            return "The stored Keychain item could not be decoded"
+        case errSecUserCanceled:
+            return "The operation was cancelled"
+        default:
+            if let cf = SecCopyErrorMessageString(status, nil) {
+                return cf as String
+            }
+            return "Keychain rejected the request"
+        }
+    }
 }
 
 /// Secure storage for API keys using the system Keychain.

@@ -116,11 +116,38 @@ final class KeychainServiceTests: XCTestCase {
         XCTAssertNoThrow(try KeychainService.delete(account: account))
     }
 
-    // MARK: - KeychainError equatability
+    // MARK: - KeychainError surface
 
-    func test_keychainError_equatable() {
-        XCTAssertEqual(KeychainError.storeFailed(-25300), KeychainError.storeFailed(-25300))
-        XCTAssertNotEqual(KeychainError.storeFailed(-25300), KeychainError.storeFailed(-25299))
-        XCTAssertNotEqual(KeychainError.storeFailed(-25300), KeychainError.deleteFailed(-25300))
+    func test_keychainError_osStatus_exposesUnderlyingCode() {
+        XCTAssertEqual(KeychainError.storeFailed(-25300).osStatus, -25300)
+        XCTAssertEqual(KeychainError.deleteFailed(errSecAuthFailed).osStatus, errSecAuthFailed)
+    }
+
+    func test_keychainError_localizedDescription_mapsKnownStatuses() {
+        // `errSecInteractionNotAllowed` is the "device locked" case that UI
+        // needs to render helpfully — the user can act on it.
+        let locked = KeychainError.storeFailed(errSecInteractionNotAllowed)
+        let text = locked.localizedDescription
+        XCTAssertTrue(text.contains("locked"),
+                      "Expected locked-device guidance in the message, got: \(text)")
+        XCTAssertTrue(text.contains("\(errSecInteractionNotAllowed)"),
+                      "Expected raw OSStatus to be appended for diagnostics, got: \(text)")
+        XCTAssertTrue(text.contains("store") || text.contains("Store"),
+                      "Expected the action verb to be included, got: \(text)")
+
+        let deleteText = KeychainError.deleteFailed(errSecAuthFailed).localizedDescription
+        XCTAssertTrue(deleteText.contains("delete") || deleteText.contains("Delete"),
+                      "Expected delete-case description to mention the delete action, got: \(deleteText)")
+    }
+
+    func test_keychainError_localizedDescription_unknownStatus_stillHumanReadable() {
+        // Unknown status: we still want a non-empty, non-default message.
+        let err = KeychainError.storeFailed(-999_999)
+        let text = err.localizedDescription
+        XCTAssertFalse(text.isEmpty)
+        XCTAssertFalse(text.contains("KeychainError error"),
+                       "Expected LocalizedError override to suppress the default placeholder, got: \(text)")
+        XCTAssertTrue(text.contains("-999999") || text.contains("-999,999"),
+                      "Expected the raw OSStatus to be appended, got: \(text)")
     }
 }
