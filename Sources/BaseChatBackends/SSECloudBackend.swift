@@ -451,8 +451,13 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                 errorBody.append(Character(UnicodeScalar(byte)))
                 if errorBody.count > 2048 { break }
             }
-            let message = extractErrorMessage(from: errorBody)
-                ?? "Unexpected server error (status \(statusCode))"
+            let extracted = extractErrorMessage(from: errorBody)
+            // Raw body goes to os.Logger at .private so developers can still
+            // diagnose upstream issues via the Console / log archives; it never
+            // reaches the UI.
+            Log.network.debug("\(self.backendName, privacy: .public) upstream error body: \(errorBody, privacy: .private)")
+            let host = withStateLock { _baseURL?.host() }
+            let message = CloudErrorSanitizer.sanitize(extracted, host: host)
             throw CloudBackendError.serverError(statusCode: statusCode, message: message)
         }
     }
