@@ -325,11 +325,7 @@ extension XCTestCase {
     // unit-test usage — the timeouts are generous because real model loads can
     // take 10–30 seconds and generation can take another 30–120 seconds.
 
-    /// Finds the model row in the Select tab whose accessibility label contains
-    /// `needle` (case-insensitive). Returns `nil` if no matching row exists.
-    ///
-    /// Looks first at buttons (the real `ModelSelectionRow` is a Button), then
-    /// falls back to any element that exposes a matching label, since
+    /// Falls back through buttons / cells / otherElements because
     /// `accessibilityElement(children: .combine)` can flatten the row into a
     /// non-button element on some platforms.
     func findModelRow(in app: XCUIApplication, containing needle: String) -> XCUIElement? {
@@ -353,24 +349,14 @@ extension XCTestCase {
         return nil
     }
 
-    /// Waits until the chat input field is hittable AND enabled, indicating
-    /// that the selected model has finished loading and the UI is ready to
-    /// accept a prompt.
-    ///
-    /// Returns `true` when the input is ready, `false` if the timeout expires.
-    /// The default timeout is 60s — enough for a cold MLX or GGUF load on
-    /// Apple Silicon. Polls every 0.5s using `XCUIElement` queries (no sleep
-    /// inside a Task; this runs on the test thread).
-    @discardableResult
+    /// Default timeout is 60s — enough for a cold MLX or GGUF load on Apple
+    /// Silicon. The input transitions through "exists but disabled" while the
+    /// model loads, so we re-check `isEnabled && isHittable` each iteration.
     func waitForChatInputReady(app: XCUIApplication, timeout: TimeInterval = 60) -> Bool {
         let messageInput = app.textFields["Message input"]
         let deadline = Date().addingTimeInterval(timeout)
 
         while Date() < deadline {
-            // `waitForExistence` provides the timed wait without a manual sleep
-            // loop. We re-check enabled+hittable each iteration because the
-            // input transitions through "exists but disabled" while the model
-            // is still loading.
             if messageInput.waitForExistence(timeout: 1),
                messageInput.isEnabled,
                messageInput.isHittable {
@@ -381,14 +367,9 @@ extension XCTestCase {
         return false
     }
 
-    /// Sends a prompt through the real chat input and waits for any assistant
-    /// response text to appear in the chat. Returns `true` when streamed
-    /// content is observed, `false` if no response arrives before the timeout.
-    ///
-    /// The assertion is intentionally lenient: it only verifies that *some*
-    /// non-prompt assistant text appears, not the specific content. Real models
-    /// are non-deterministic.
-    @discardableResult
+    /// Verifies *some* non-empty content appears beyond the "Assistant said: "
+    /// accessibility prefix; specific content is not asserted because real
+    /// models are non-deterministic.
     func sendPromptAndAwaitResponse(
         app: XCUIApplication,
         prompt: String,
@@ -408,24 +389,13 @@ extension XCTestCase {
         }
         sendButton.tap()
 
-        // The user message bubble appears as a static text containing the
-        // prompt. The assistant bubble accessibility label is
-        // "Assistant said: <content>" — wait for any such element to exist.
         let assistantPredicate = NSPredicate(format: "label BEGINSWITH[c] 'Assistant said:'")
         let assistantBubble = app.otherElements.matching(assistantPredicate).firstMatch
 
-        if assistantBubble.waitForExistence(timeout: responseTimeout) {
-            // Confirm the bubble has streamed *some* content beyond the prefix.
-            let label = assistantBubble.label
-            return label.count > "Assistant said: ".count
+        guard assistantBubble.waitForExistence(timeout: responseTimeout) else {
+            return false
         }
 
-        // Fall back to scanning static texts: streaming assistant content can
-        // appear as plain Text elements depending on rendering path.
-        let staticPredicate = NSPredicate(
-            format: "label != %@ AND label.length > 0", prompt
-        )
-        let texts = app.staticTexts.matching(staticPredicate)
-        return texts.count > 0
+        return assistantBubble.label.count > "Assistant said: ".count
     }
 }
