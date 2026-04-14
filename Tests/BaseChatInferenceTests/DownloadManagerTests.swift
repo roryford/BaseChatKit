@@ -503,4 +503,83 @@ final class DownloadManagerTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - File Name Validation at Boundary
+
+    func test_startDownload_rejectsParentTraversalFileName() async {
+        // Build the struct directly — the validator must run at startDownload,
+        // not at DownloadableModel construction (existing init is non-throwing).
+        let malicious = DownloadableModel(
+            repoID: "attacker/repo",
+            fileName: "../../etc/passwd",
+            displayName: "Exploit",
+            modelType: .gguf,
+            sizeBytes: 1_024
+        )
+        let downloadURL = URL(string: "http://localhost/evil")!
+
+        do {
+            _ = try await manager.startDownload(malicious, downloadURL: downloadURL)
+            XCTFail("startDownload must reject a filename containing \"..\"")
+        } catch let error as FileNameError {
+            XCTAssertEqual(error, .pathTraversal)
+        } catch {
+            XCTFail("Expected FileNameError.pathTraversal, got: \(error)")
+        }
+
+        XCTAssertNil(
+            manager.activeDownloads[malicious.id],
+            "Rejected download must not leak into activeDownloads"
+        )
+    }
+
+    func test_startDownload_rejectsBackslashFileName() async {
+        let malicious = DownloadableModel(
+            repoID: "attacker/repo",
+            fileName: "foo\\bar.gguf",
+            displayName: "Exploit",
+            modelType: .gguf,
+            sizeBytes: 1_024
+        )
+        let downloadURL = URL(string: "http://localhost/evil")!
+
+        do {
+            _ = try await manager.startDownload(malicious, downloadURL: downloadURL)
+            XCTFail("startDownload must reject a filename containing a backslash")
+        } catch let error as FileNameError {
+            XCTAssertEqual(error, .pathSeparator)
+        } catch {
+            XCTFail("Expected FileNameError.pathSeparator, got: \(error)")
+        }
+    }
+
+    func test_startDownload_acceptsLegitimateMLXNamespacedName() async {
+        // Curated MLX models use "<namespace>/<name>" — validator must still accept.
+        // We don't actually complete the download here; we only assert that
+        // validation did not raise and that the state row was created. A real
+        // URLSession call would fail against `localhost` in unit tests, so we
+        // inspect state directly.
+        let legitimate = DownloadableModel(
+            repoID: "mlx-community/Phi-4-mini-instruct-4bit",
+            fileName: "mlx-community/Phi-4-mini-instruct-4bit",
+            displayName: "Phi-4 Mini",
+            modelType: .gguf, // use .gguf to avoid triggering snapshot staging side effects
+            sizeBytes: 1_024
+        )
+        let downloadURL = URL(string: "http://localhost/legit")!
+
+        do {
+            _ = try await manager.startDownload(legitimate, downloadURL: downloadURL)
+        } catch is FileNameError {
+            return XCTFail("Legit namespace/name filename must not be rejected by the validator")
+        } catch {
+            // Other errors (network, disk) are acceptable — we only care that the
+            // validator did not raise on a known-good input.
+        }
+
+        XCTAssertNotNil(
+            manager.activeDownloads[legitimate.id],
+            "Valid filename should reach activeDownloads tracking"
+        )
+    }
 }

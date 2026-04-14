@@ -91,6 +91,93 @@ public struct DownloadableModel: Identifiable, Sendable, Hashable {
     }
 }
 
+// MARK: - File Name Validation
+
+/// Errors raised by ``DownloadableModel/validate(fileName:)``.
+///
+/// These represent categories of unsafe filename inputs that could lead to a
+/// path-traversal write outside the models directory, hidden-file shenanigans,
+/// or name-collision attacks against shell tooling.
+public enum FileNameError: LocalizedError, Equatable {
+    case empty
+    case pathTraversal
+    case pathSeparator
+    case hidden
+    case tooLong
+    case controlCharacter
+
+    public var errorDescription: String? {
+        switch self {
+        case .empty:
+            return "Model filename is empty."
+        case .pathTraversal:
+            return "Model filename contains a path-traversal component (\"..\")."
+        case .pathSeparator:
+            return "Model filename contains an invalid path separator."
+        case .hidden:
+            return "Model filename starts with a dot, which is not permitted."
+        case .tooLong:
+            return "Model filename exceeds the 255-character limit."
+        case .controlCharacter:
+            return "Model filename contains control characters."
+        }
+    }
+}
+
+extension DownloadableModel {
+
+    /// Maximum permitted length for the entire filename string and each component.
+    ///
+    /// 255 is the POSIX `NAME_MAX` on HFS+/APFS; longer names cannot be written
+    /// to disk regardless of other checks.
+    static let maxFileNameLength = 255
+
+    /// Validates that a filename is safe to append to a base directory URL.
+    ///
+    /// This is a belt-and-suspenders check layered on top of the URL-standardized
+    /// `hasPrefix` guards used by `BackgroundDownloadManager` when moving files
+    /// into the models directory. The validator runs at the earliest point a
+    /// filename is accepted from external input (manifests, Hub search results)
+    /// so malformed input is rejected before it reaches any filesystem operation.
+    ///
+    /// MLX snapshot models legitimately use filenames of the form
+    /// `"mlx-community/Phi-4-mini-instruct-4bit"` — a single forward-slash between
+    /// namespace and repo name. The validator therefore inspects each path
+    /// component in isolation rather than rejecting slashes outright.
+    ///
+    /// - Parameter fileName: The untrusted filename string.
+    /// - Throws: ``FileNameError`` describing the first rule the input violates.
+    public static func validate(fileName: String) throws {
+        guard !fileName.isEmpty else { throw FileNameError.empty }
+        guard fileName.count < maxFileNameLength else { throw FileNameError.tooLong }
+        // Backslashes are never legitimate on Apple platforms and are always a
+        // sign of Windows-style traversal or filesystem confusion attacks.
+        guard !fileName.contains("\\") else { throw FileNameError.pathSeparator }
+        // Reject null bytes and other C0/C1 control characters plus DEL. These
+        // can truncate strings at the C boundary or confuse shell tooling.
+        guard fileName.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7F }) else {
+            throw FileNameError.controlCharacter
+        }
+
+        // Inspect each forward-slash-separated segment. Legitimate MLX filenames
+        // contain one slash (namespace/name); traversal payloads contain "..".
+        // Run this before the top-level leading-dot check so that inputs like
+        // "../../etc/passwd" surface the more descriptive `.pathTraversal`
+        // classification instead of `.hidden`.
+        let components = fileName.split(separator: "/", omittingEmptySubsequences: false)
+        for component in components {
+            // Empty component means "//" at a boundary — always malformed.
+            guard !component.isEmpty else { throw FileNameError.pathSeparator }
+            guard component != ".." else { throw FileNameError.pathTraversal }
+            guard component != "." else { throw FileNameError.pathTraversal }
+            // A leading dot on any component hides the file and can collide
+            // with system metadata (.DS_Store, .git, etc.).
+            guard !component.hasPrefix(".") else { throw FileNameError.hidden }
+            guard component.count < maxFileNameLength else { throw FileNameError.tooLong }
+        }
+    }
+}
+
 // MARK: - Grouped Models
 
 /// Groups multiple downloadable variants (quant levels) under one repo.

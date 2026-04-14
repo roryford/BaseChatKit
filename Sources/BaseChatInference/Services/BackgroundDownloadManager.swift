@@ -24,6 +24,25 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// Minimum free disk space buffer beyond the model size (500 MB).
     private static let diskSpaceBuffer: UInt64 = 500_000_000
 
+    /// Prefix applied to every temp file the manager creates in the process temp directory.
+    ///
+    /// Gives the launch-time sweep a safe fingerprint: only files the manager itself
+    /// would have written are considered for removal, so cleanup cannot touch
+    /// unrelated temp files produced by other subsystems.
+    internal static let tempFilePrefix = "basechatkit-dl-"
+
+    /// File extension used for temp files that hold the payload of an in-progress download.
+    internal static let tempFileExtension = "download"
+
+    /// Minimum age at which an orphaned temp file becomes eligible for cleanup.
+    ///
+    /// 24 hours is short enough to reclaim leaked files promptly after a crash
+    /// yet long enough that a background download suspended mid-transfer is not
+    /// deleted out from under itself. The launch sweep skips files newer than
+    /// this regardless of in-flight tracking, giving two independent layers of
+    /// protection against deleting an active download.
+    internal static let staleTempFileAge: TimeInterval = 24 * 60 * 60
+
     // MARK: - Observable State
 
     /// Active and recently completed downloads, keyed by `DownloadableModel.id`.
@@ -182,6 +201,10 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// Starts a background download using a resolved download plan.
     @MainActor @discardableResult
     public func startDownload(_ model: DownloadableModel, plan: ModelDownloadPlan) async throws -> DownloadState {
+        // Layered defence: the URL-standardized prefix check below already blocks
+        // path-traversal writes, but validating the filename at the boundary
+        // catches malformed input before any disk operation runs.
+        try DownloadableModel.validate(fileName: model.fileName)
         try await checkDiskSpace(requiredBytes: model.sizeBytes)
         try storageService.ensureModelsDirectory()
 
@@ -230,6 +253,18 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
             // Consume any stale resume data so it doesn't accumulate on disk.
             _ = consumeResumeData(for: id)
             await retryWithFreshDownload(model: model)
+            return
+        }
+
+        // Reject retries with a corrupted persisted filename — the metadata file lives
+        // in Caches and a malicious or damaged entry must not be allowed to escape the
+        // models directory on resume.
+        do {
+            try DownloadableModel.validate(fileName: fileName)
+        } catch {
+            Log.download.error("Refusing to retry \(id): persisted fileName failed validation: \(error.localizedDescription)")
+            activeDownloads[id]?.markFailed(error: "Download metadata is invalid; please re-add the model.")
+            removePendingDownload(id: id)
             return
         }
 
@@ -335,7 +370,9 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// Re-creates the background session to pick up any downloads that completed
     /// while the app was suspended or terminated.
     ///
-    /// Call this on app launch (e.g., from the `App` struct's `init`).
+    /// Call this on app launch (e.g., from the `App` struct's `init`). The call also
+    /// sweeps any stale temp-download files left behind by a prior process that
+    /// crashed or was force-killed between `moveItem` and the move-into-models-dir.
     @MainActor public func reconnectBackgroundSession() {
         Log.download.info("Reconnecting background session")
         // Simply accessing the lazy session property re-creates it, which causes
@@ -344,6 +381,13 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
         // Re-populate activeDownloads from persisted pending downloads.
         restorePendingDownloads()
+
+        // Reclaim disk from any temp files leaked by a prior crash. Runs on a
+        // detached task because the scan walks the process temp directory with
+        // filesystem calls that can block — keeping the main actor free.
+        Task.detached(priority: .utility) {
+            Self.cleanupStaleTempFiles()
+        }
     }
 
     // MARK: - Disk Space
@@ -771,6 +815,19 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
                   let displayName = info["displayName"],
                   let typeStr = info["modelType"] else { continue }
 
+            // Drop entries whose persisted filename fails validation rather than
+            // restoring them into UI state. A corrupted filename here would later
+            // be written to disk via startDownload / completeSnapshotFile and the
+            // URL-standardized prefix check would reject it — skip early so the
+            // stale entry is also pruned from the pending-downloads JSON.
+            do {
+                try DownloadableModel.validate(fileName: fileName)
+            } catch {
+                Log.download.warning("Dropping pending download \(id) with invalid fileName: \(error.localizedDescription)")
+                removePendingDownload(id: id)
+                continue
+            }
+
             let modelType: ModelType = typeStr == "gguf" ? .gguf : .mlx
             let model = DownloadableModel(
                 repoID: repoID,
@@ -812,6 +869,69 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     }
 
     // MARK: - Cleanup Sweep
+
+    /// Removes temp-download files left behind by a previous process that crashed
+    /// or was force-killed between receiving the download and moving it into the
+    /// models directory.
+    ///
+    /// Only files that match the manager's own naming signature
+    /// (``tempFilePrefix`` + UUID + ``tempFileExtension``) are considered, so the
+    /// sweep cannot affect temp files written by other subsystems. Files younger
+    /// than ``staleTempFileAge`` are preserved — they may belong to an in-flight
+    /// download handed off from the system's background transfer service.
+    ///
+    /// Designed to run on launch from ``reconnectBackgroundSession()``; callers
+    /// that need a one-shot bootstrap sweep (e.g. for hosts that do not use
+    /// `reconnectBackgroundSession`) can invoke it directly.
+    public static func cleanupStaleTempFiles(now: Date = Date()) {
+        let tempDir = FileManager.default.temporaryDirectory
+        let contents: [URL]
+        do {
+            contents = try FileManager.default.contentsOfDirectory(
+                at: tempDir,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            Log.download.warning("Temp-file sweep skipped: could not list \(tempDir.path): \(error.localizedDescription)")
+            return
+        }
+
+        let threshold = now.addingTimeInterval(-staleTempFileAge)
+        var removed = 0
+        var bytesReclaimed: Int64 = 0
+        for fileURL in contents {
+            // Filename signature check — only files we could have written.
+            let name = fileURL.lastPathComponent
+            guard name.hasPrefix(tempFilePrefix), fileURL.pathExtension == tempFileExtension else {
+                continue
+            }
+            let resourceKeys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
+            let values: URLResourceValues
+            do {
+                values = try fileURL.resourceValues(forKeys: resourceKeys)
+            } catch {
+                Log.download.warning("Temp-file sweep: failed to read attributes of \(name): \(error.localizedDescription)")
+                continue
+            }
+            guard values.isRegularFile == true,
+                  let modified = values.contentModificationDate else {
+                continue
+            }
+            guard modified < threshold else { continue }
+            let size = Int64(values.fileSize ?? 0)
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                removed += 1
+                bytesReclaimed += size
+            } catch {
+                Log.download.warning("Failed to remove stale temp file \(name): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 {
+            Log.download.info("Temp-file sweep reclaimed \(removed) file(s), \(bytesReclaimed) byte(s)")
+        }
+    }
 
     /// Deletes resume-data files for download IDs not present in the current pending-metadata
     /// list. These orphans accumulate when a download crashes without the normal teardown path.

@@ -299,4 +299,114 @@ final class DownloadableModelTests: XCTestCase {
             "Quant tags beyond the 128-char input cap must be ignored"
         )
     }
+    // MARK: - File Name Validator
+
+    func test_validate_acceptsPlainGGUFName() {
+        XCTAssertNoThrow(try DownloadableModel.validate(fileName: "model.gguf"))
+    }
+
+    func test_validate_acceptsDashedGGUFName() {
+        XCTAssertNoThrow(try DownloadableModel.validate(fileName: "mistral-7b-q4_k_m.gguf"))
+    }
+
+    func test_validate_acceptsDotSeparatedQuantName() {
+        XCTAssertNoThrow(try DownloadableModel.validate(fileName: "model.Q4_K_M.gguf"))
+    }
+
+    func test_validate_acceptsMLXNamespacedName() {
+        // Curated MLX models use this namespace/name form — it must remain legal.
+        XCTAssertNoThrow(
+            try DownloadableModel.validate(fileName: "mlx-community/Phi-4-mini-instruct-4bit")
+        )
+    }
+
+    func test_validate_rejectsEmpty() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "")) { error in
+            XCTAssertEqual(error as? FileNameError, .empty)
+        }
+    }
+
+    func test_validate_rejectsParentTraversal() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "../secret")) { error in
+            XCTAssertEqual(error as? FileNameError, .pathTraversal)
+        }
+    }
+
+    func test_validate_rejectsDeepTraversal() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "../../etc/passwd")) { error in
+            XCTAssertEqual(error as? FileNameError, .pathTraversal)
+        }
+    }
+
+    func test_validate_rejectsBackslashSeparator() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "foo\\bar.gguf")) { error in
+            XCTAssertEqual(error as? FileNameError, .pathSeparator)
+        }
+    }
+
+    func test_validate_rejectsDoubleForwardSlash() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "foo//bar.gguf")) { error in
+            XCTAssertEqual(error as? FileNameError, .pathSeparator)
+        }
+    }
+
+    func test_validate_rejectsLeadingDot() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: ".hidden")) { error in
+            XCTAssertEqual(error as? FileNameError, .hidden)
+        }
+    }
+
+    func test_validate_rejectsLeadingDotOnIntermediateComponent() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "safe/.hidden")) { error in
+            XCTAssertEqual(error as? FileNameError, .hidden)
+        }
+    }
+
+    func test_validate_rejectsNullByte() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "model\0.gguf")) { error in
+            XCTAssertEqual(error as? FileNameError, .controlCharacter)
+        }
+    }
+
+    func test_validate_rejectsControlCharacter() {
+        // Newline (0x0A) is a control character.
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "model\n.gguf")) { error in
+            XCTAssertEqual(error as? FileNameError, .controlCharacter)
+        }
+    }
+
+    func test_validate_rejectsDelCharacter() {
+        // DEL (0x7F) is outside the printable range.
+        let name = "model\u{007F}.gguf"
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: name)) { error in
+            XCTAssertEqual(error as? FileNameError, .controlCharacter)
+        }
+    }
+
+    func test_validate_rejectsOverlyLongName() {
+        let longName = String(repeating: "a", count: 300) + ".gguf"
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: longName)) { error in
+            XCTAssertEqual(error as? FileNameError, .tooLong)
+        }
+    }
+
+    func test_validate_rejectsSingleDotComponent() {
+        // "./model.gguf" collapses to "model.gguf" after standardization but
+        // should be rejected at validation time.
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "./model.gguf")) { error in
+            XCTAssertEqual(error as? FileNameError, .pathTraversal)
+        }
+    }
+
+    func test_validate_rejectsTrailingSlash() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "foo/")) { error in
+            XCTAssertEqual(error as? FileNameError, .pathSeparator)
+        }
+    }
+
+    func test_validate_rejectsLeadingSlash() {
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "/foo.gguf")) { error in
+            XCTAssertEqual(error as? FileNameError, .pathSeparator)
+        }
+    }
 }
