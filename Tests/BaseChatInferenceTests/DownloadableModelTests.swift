@@ -257,13 +257,23 @@ final class DownloadableModelTests: XCTestCase {
             sizeBytes: 1
         )
 
-        let start = Date()
+        // Monotonic clock instead of wall-clock `Date()` — the latter is subject
+        // to system clock adjustments which would give a spurious negative
+        // elapsed reading.
+        let start = DispatchTime.now()
         let result = model.quantization
-        let elapsed = Date().timeIntervalSince(start)
+        let elapsedNanos = DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds
+        let elapsed = Double(elapsedNanos) / 1_000_000_000
 
+        // Budget: 200ms. The fix makes this path return in microseconds; the
+        // unbounded pattern on the sabotage check blows through seconds. 200ms
+        // rather than 50ms gives slack for CI variance (10x billed macOS
+        // runners are noticeably slower than local) while still catching any
+        // regression that puts us anywhere near the original pathological
+        // profile.
         XCTAssertLessThan(
-            elapsed, 0.05,
-            "Quantization extraction must complete in <50ms on hostile input (took \(elapsed)s)"
+            elapsed, 0.2,
+            "Quantization extraction must complete in <200ms on hostile input (took \(elapsed)s)"
         )
         // Input is clipped to 128 chars; within that window there is no trailing `.`
         // closing a Q-prefixed run, so the match must fail.
