@@ -11,12 +11,13 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     // MARK: - Helpers
 
     private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
+    private var sandbox: TestModelStorageSandbox!
 
     private func makeViewModel(ramGB: UInt64 = 16) -> ChatViewModel {
         ChatViewModel(
             inferenceService: InferenceService(),
             deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: sandbox.storageService,
             memoryPressure: MemoryPressureHandler()
         )
     }
@@ -30,7 +31,7 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         let vm = ChatViewModel(
             inferenceService: service,
             deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: sandbox.storageService,
             memoryPressure: MemoryPressureHandler()
         )
         return (vm, mock)
@@ -45,12 +46,23 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         let vm = ChatViewModel(
             inferenceService: service,
             deviceCapability: DeviceCapabilityService(physicalMemory: 16 * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: sandbox.storageService,
             memoryPressure: MemoryPressureHandler()
         )
         let persistence = MockPersistenceProvider()
         vm.configure(persistence: persistence)
         return (vm, mock, persistence)
+    }
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        sandbox = try TestModelStorageSandbox(prefix: "ViewModelEdgeCaseTests")
+    }
+
+    override func tearDownWithError() throws {
+        sandbox.cleanup()
+        sandbox = nil
+        try super.tearDownWithError()
     }
 
     // MARK: - saveSettingsToSession

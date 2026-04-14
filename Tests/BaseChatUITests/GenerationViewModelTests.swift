@@ -10,6 +10,7 @@ final class ChatViewModelTests: XCTestCase {
     // MARK: - Helpers
 
     private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
+    private var sandbox: TestModelStorageSandbox!
 
     /// Convenience to build a view model with controllable device memory.
     /// Uses a default InferenceService (no backend loaded).
@@ -17,7 +18,7 @@ final class ChatViewModelTests: XCTestCase {
         ChatViewModel(
             inferenceService: InferenceService(),
             deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: sandbox.storageService,
             memoryPressure: MemoryPressureHandler()
         )
     }
@@ -32,7 +33,7 @@ final class ChatViewModelTests: XCTestCase {
         let vm = ChatViewModel(
             inferenceService: service,
             deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(),
+            modelStorage: sandbox.storageService,
             memoryPressure: MemoryPressureHandler()
         )
         // Set an active session so sendMessage/regenerate/edit don't bail out.
@@ -40,16 +41,14 @@ final class ChatViewModelTests: XCTestCase {
         return (vm, mock)
     }
 
-    /// The models directory used by a default `ModelStorageService`.
     private var modelsDirectory: URL {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return documents.appendingPathComponent("Models", isDirectory: true)
+        sandbox.modelsDirectory
     }
 
     /// Creates a fake .gguf file in the models directory and returns its URL.
     @discardableResult
     private func createFakeGGUF(named fileName: String, sizeBytes: Int = 1024) throws -> URL {
-        try FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
+        try sandbox.storageService.ensureModelsDirectory()
         let fileURL = modelsDirectory.appendingPathComponent(fileName)
         let data = Data(repeating: 0, count: sizeBytes)
         try data.write(to: fileURL)
@@ -64,12 +63,19 @@ final class ChatViewModelTests: XCTestCase {
     /// Removes all .gguf files from the models directory created during the test.
     private nonisolated(unsafe) var createdFiles: [URL] = []
 
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        sandbox = try TestModelStorageSandbox(prefix: "GenerationViewModelTests")
+    }
+
     override func tearDown() async throws {
-        try await super.tearDown()
         for url in createdFiles {
             removeFile(at: url)
         }
         createdFiles.removeAll()
+        sandbox.cleanup()
+        sandbox = nil
+        try await super.tearDown()
     }
 
     // MARK: - test_init_defaultState

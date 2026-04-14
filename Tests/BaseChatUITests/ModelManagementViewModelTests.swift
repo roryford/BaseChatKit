@@ -8,9 +8,11 @@ import BaseChatTestSupport
 final class ModelManagementViewModelTests: XCTestCase {
 
     private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
+    private var sandbox: TestModelStorageSandbox!
 
     override func setUp() async throws {
         try await super.setUp()
+        sandbox = try TestModelStorageSandbox(prefix: "ModelManagementViewModelTests")
         // Provide curated models for tests that depend on recommendations.
         // In production, the app populates CuratedModel.all at startup.
         CuratedModel.all = [
@@ -55,6 +57,8 @@ final class ModelManagementViewModelTests: XCTestCase {
 
     override func tearDown() async throws {
         CuratedModel.all = []
+        sandbox.cleanup()
+        sandbox = nil
         try await super.tearDown()
     }
 
@@ -282,7 +286,7 @@ final class ModelManagementViewModelTests: XCTestCase {
     // MARK: - Local Model Import
 
     func test_importModel_withGGUF_copiesFileIntoModelsDirectory() throws {
-        let vm = ModelManagementViewModel()
+        let vm = ModelManagementViewModel(modelStorage: sandbox.storageService)
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelImport-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -302,7 +306,7 @@ final class ModelManagementViewModelTests: XCTestCase {
     }
 
     func test_importModel_withUnsupportedFile_throwsAndRemovesCopy() throws {
-        let vm = ModelManagementViewModel()
+        let vm = ModelManagementViewModel(modelStorage: sandbox.storageService)
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelImportUnsupported-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -329,6 +333,7 @@ final class ModelManagementViewModelTests: XCTestCase {
 
         let diagnostics = DiagnosticsService()
         let vm = ModelManagementViewModel(
+            modelStorage: sandbox.storageService,
             diagnostics: diagnostics,
             fileRemover: { _ in throw DeletionFailure() }
         )
@@ -362,7 +367,10 @@ final class ModelManagementViewModelTests: XCTestCase {
 
     func test_importModel_whenCleanupSucceeds_recordsNoWarning() throws {
         let diagnostics = DiagnosticsService()
-        let vm = ModelManagementViewModel(diagnostics: diagnostics)
+        let vm = ModelManagementViewModel(
+            modelStorage: sandbox.storageService,
+            diagnostics: diagnostics
+        )
 
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelImportWarningOK-\(UUID().uuidString)")

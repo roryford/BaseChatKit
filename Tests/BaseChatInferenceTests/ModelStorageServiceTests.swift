@@ -1,28 +1,30 @@
 import XCTest
 @testable import BaseChatInference
+import BaseChatTestSupport
 
 final class ModelStorageServiceTests: XCTestCase {
 
     private var service: ModelStorageService!
     private var createdURLs: [URL]!
+    private var sandbox: TestModelStorageSandbox!
 
-    override func setUp() {
-        super.setUp()
-        service = ModelStorageService()
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        sandbox = try TestModelStorageSandbox(prefix: "ModelStorageServiceTests")
+        service = sandbox.storageService
         createdURLs = []
-
-        // Ensure the shared Models directory exists so tests can write into it.
-        try? service.ensureModelsDirectory()
+        try service.ensureModelsDirectory()
     }
 
-    override func tearDown() {
-        // Remove only the files/directories this test run created.
+    override func tearDownWithError() throws {
         for url in createdURLs {
             try? FileManager.default.removeItem(at: url)
         }
         createdURLs = nil
         service = nil
-        super.tearDown()
+        sandbox.cleanup()
+        sandbox = nil
+        try super.tearDownWithError()
     }
 
     // MARK: - Helpers
@@ -33,7 +35,8 @@ final class ModelStorageServiceTests: XCTestCase {
     private func createGgufFile(named prefix: String = "test", size: Int = 1024) throws -> URL {
         let fileName = "\(prefix)-\(UUID().uuidString).gguf"
         let url = service.modelsDirectory.appendingPathComponent(fileName)
-        let data = Data(repeating: 0xAA, count: size)
+        var data = Data(ggufMagic)
+        data.append(Data(repeating: 0xAA, count: max(size - data.count, 0)))
         try data.write(to: url)
         createdURLs.append(url)
         return url
@@ -47,7 +50,7 @@ final class ModelStorageServiceTests: XCTestCase {
         let url = service.modelsDirectory.appendingPathComponent(dirName)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
 
-        let configData = Data("{}".utf8)
+        let configData = Data(#"{"model_type":"llama"}"#.utf8)
         try configData.write(to: url.appendingPathComponent("config.json"))
 
         let weightsData = Data(repeating: 0xBB, count: weightsSize)
@@ -89,7 +92,7 @@ final class ModelStorageServiceTests: XCTestCase {
         let ggufURL = try createGgufFile()
 
         let models = service.discoverModels()
-        let match = models.first { $0.url == ggufURL }
+        let match = models.first { $0.fileName == ggufURL.lastPathComponent }
 
         XCTAssertNotNil(match, "Should discover the GGUF file")
         XCTAssertEqual(match?.modelType, .gguf)
@@ -116,23 +119,8 @@ final class ModelStorageServiceTests: XCTestCase {
     }
 
     func test_discoverModels_emptyDirectory_returnsEmpty() throws {
-        // Use a fresh service pointed at the real models directory.
-        // We can't guarantee the directory is truly empty (other tests may run),
-        // so instead verify that with no test files created, our test files aren't present.
-        // A more precise test: create a separate service with a temporary directory.
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("EmptyModelsTest-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        // discoverModels scans service.modelsDirectory, but we can verify that a directory
-        // with no model files returns nothing by checking none of our unique IDs appear.
-        // For a true empty-directory test, verify there are no models with our UUID prefix.
         let models = service.discoverModels()
-        let uniqueTag = UUID().uuidString
-        let match = models.first { $0.fileName.contains(uniqueTag) }
-
-        XCTAssertNil(match, "No models with the unique tag should be found")
+        XCTAssertTrue(models.isEmpty, "Empty isolated models directory should return no models")
     }
 
     func test_discoverModels_mixedFormats_findsBoth() throws {
@@ -182,7 +170,7 @@ final class ModelStorageServiceTests: XCTestCase {
         let ggufURL = try createGgufFile()
 
         let models = service.discoverModels()
-        let model = try XCTUnwrap(models.first { $0.url == ggufURL })
+        let model = try XCTUnwrap(models.first { $0.fileName == ggufURL.lastPathComponent })
 
         try service.deleteModel(model)
 

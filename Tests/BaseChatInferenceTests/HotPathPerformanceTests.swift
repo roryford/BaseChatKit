@@ -1,5 +1,6 @@
 import XCTest
 @testable import BaseChatInference
+import BaseChatTestSupport
 
 final class HotPathPerformanceTests: XCTestCase {
 
@@ -69,20 +70,24 @@ final class HotPathPerformanceTests: XCTestCase {
 
     private var service: ModelStorageService!
     private var createdURLs: [URL] = []
+    private var sandbox: TestModelStorageSandbox!
 
-    override func setUp() {
-        super.setUp()
-        service = ModelStorageService()
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        sandbox = try TestModelStorageSandbox(prefix: "HotPathPerformanceTests")
+        service = sandbox.storageService
         createdURLs = []
     }
 
-    override func tearDown() {
+    override func tearDownWithError() throws {
         for url in createdURLs {
             try? FileManager.default.removeItem(at: url)
         }
         createdURLs = []
         service = nil
-        super.tearDown()
+        sandbox.cleanup()
+        sandbox = nil
+        try super.tearDownWithError()
     }
 
     @discardableResult

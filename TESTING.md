@@ -614,6 +614,14 @@ After your test passes, temporarily break the code path being tested and confirm
 - **Test methods:** `test_{method}_{scenario}_{expected}` — e.g., `test_stopGeneration_midStream_preservesPartialContent`
 - **Placement:** Match the target that owns the code being tested. ViewModel tests go in `BaseChatUITests`, service tests in `BaseChatCoreTests`, backend tests in `BaseChatBackendsTests`.
 
+### Filesystem isolation
+
+Tests that touch `ModelStorageService`, call `refreshModels()`, or import/download local
+models must use an isolated models directory (for example `TestModelStorageSandbox`) rather
+than the default user Documents/Models location. If you need to clean up artifacts from
+older test runs, use `scripts/cleanup-test-model-artifacts.sh --dry-run` to inspect them
+and `--apply` to remove them.
+
 ### Framework choice
 
 - **Existing files:** Match whatever the file already uses (XCTest or Swift Testing)
