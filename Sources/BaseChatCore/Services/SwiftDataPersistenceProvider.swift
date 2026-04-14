@@ -14,6 +14,15 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
 
     public init(modelContext: ModelContext) {
         self.modelContext = modelContext
+
+        // Reap orphaned Keychain items once per provider instance. Runs
+        // synchronously because ModelContext is not Sendable and deferring
+        // into a Task would race against provider teardown (notably in tests
+        // that rebuild the container per-method). SecItemCopyMatching on the
+        // apikeys namespace completes in milliseconds — a boot-time cost we
+        // accept to guarantee no orphan can outlive its owning endpoint row.
+        // Gated by BaseChatConfiguration.keychainReaperEnabled.
+        BaseChatBootstrap.reapOrphanedKeychainItems(in: modelContext)
     }
 
     // MARK: - Sessions

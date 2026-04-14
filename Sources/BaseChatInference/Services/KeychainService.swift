@@ -168,4 +168,67 @@ public enum KeychainService {
         let suffix = String(key.suffix(3))
         return "\(prefix)...\(suffix)"
     }
+
+    // MARK: - Orphan reaping
+
+    /// Returns every account identifier stored in the framework's Keychain
+    /// service namespace.
+    ///
+    /// Returns an empty array when the namespace is empty or when Keychain
+    /// access is denied (e.g. sandboxed contexts missing the entitlement).
+    static func allAccounts() -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        if status == errSecItemNotFound {
+            return []
+        }
+        guard status == errSecSuccess else {
+            Log.security.warning("KeychainService.allAccounts SecItemCopyMatching failed with status \(status)")
+            return []
+        }
+        guard let items = result as? [[String: Any]] else {
+            return []
+        }
+
+        return items.compactMap { $0[kSecAttrAccount as String] as? String }
+    }
+
+    /// Removes every Keychain item in the framework's service namespace whose
+    /// account is not present in `validAccounts`. Returns the number of items
+    /// actually reaped.
+    ///
+    /// Failures on individual items are logged at `.warning` and do not halt
+    /// the sweep — a single bad row should not prevent the rest from being
+    /// reclaimed. Intended to be driven once at boot from ``BaseChatBootstrap``.
+    @discardableResult
+    public static func sweep(validAccounts: Set<String>) -> Int {
+        let stored = allAccounts()
+        guard !stored.isEmpty else {
+            Log.security.info("KeychainService.sweep: namespace empty, nothing to reap")
+            return 0
+        }
+
+        var reaped = 0
+        for account in stored where !validAccounts.contains(account) {
+            do {
+                try KeychainService.delete(account: account)
+                reaped += 1
+            } catch {
+                // Individual failure must not abort the sweep — keep reaping.
+                Log.security.warning("KeychainService.sweep: failed to delete orphaned account: \(error.localizedDescription, privacy: .public)")
+                continue
+            }
+        }
+
+        Log.security.info("KeychainService.sweep: reaped \(reaped) orphaned Keychain item(s) from \(stored.count) stored")
+        return reaped
+    }
 }

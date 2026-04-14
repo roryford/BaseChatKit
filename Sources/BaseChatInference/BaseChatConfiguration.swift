@@ -66,13 +66,22 @@ public struct BaseChatConfiguration: Sendable {
     /// untrusted servers can tighten these further.
     public var sseStreamLimits: SSEStreamLimits
 
+    /// When `true`, a boot-time sweep removes Keychain items whose owning
+    /// `APIEndpoint` row no longer exists — recovering storage from orphaned
+    /// credentials left behind by failed deletions or direct SwiftData wipes.
+    ///
+    /// Disable only for test harnesses that populate the framework's Keychain
+    /// namespace independently and don't want their fixtures reaped.
+    public var keychainReaperEnabled: Bool
+
     public init(
         appName: String = "BaseChatKit",
         bundleIdentifier: String = "com.basechatkit",
         modelsDirectoryName: String = "Models",
         features: Features = Features(),
         fileProtectionClass: FileProtectionType? = .completeUntilFirstUserAuthentication,
-        sseStreamLimits: SSEStreamLimits = .default
+        sseStreamLimits: SSEStreamLimits = .default,
+        keychainReaperEnabled: Bool = true
     ) {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
@@ -80,6 +89,7 @@ public struct BaseChatConfiguration: Sendable {
         self.features = features
         self.fileProtectionClass = fileProtectionClass
         self.sseStreamLimits = sseStreamLimits
+        self.keychainReaperEnabled = keychainReaperEnabled
     }
 
     // MARK: - Derived identifiers

@@ -15,4 +15,5 @@ public enum Log {
     public static var ui: Logger { Logger(subsystem: subsystem, category: "ui") }
     public static var network: Logger { Logger(subsystem: subsystem, category: "network") }
     public static var download: Logger { Logger(subsystem: subsystem, category: "download") }
+    public static var security: Logger { Logger(subsystem: subsystem, category: "security") }
 }
