@@ -8,6 +8,9 @@ public struct ModelManagementSheet: View {
     @Environment(ChatViewModel.self) private var chatViewModel
     @Environment(ModelManagementViewModel.self) private var managementViewModel
     @Environment(\.dismiss) private var dismiss
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     private var features: BaseChatConfiguration.Features { BaseChatConfiguration.shared.features }
     private let initialTab: Tab
@@ -73,7 +76,14 @@ public struct ModelManagementSheet: View {
                 }
             #endif
         }
+        #if os(iOS)
+        // On regular size class (iPad), allow a medium detent so the user can
+        // switch models while keeping the split-view context partially visible.
+        .presentationDetents(horizontalSizeClass == .regular ? [.medium, .large] : [.large])
+        .presentationDragIndicator(.visible)
+        #else
         .presentationDetents([.large])
+        #endif
         .onAppear {
             if !availableTabs.contains(selectedTab) {
                 selectedTab = .select
