@@ -29,6 +29,10 @@ Backends are registered as factories so BaseChatCore stays free of any direct ML
 
 - <doc:GettingStarted>
 
+### Security
+
+- <doc:SecurityModel>
+
 ### Configuration
 
 - ``BaseChatConfiguration``

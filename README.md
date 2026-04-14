@@ -336,6 +336,8 @@ Templates auto-detect from GGUF metadata when available. User content is sanitis
 
 ## Security
 
+See the [Security Model](Sources/BaseChatCore/BaseChatCore.docc/Articles/SecurityModel.md) DocC article for the full threat model, what BCK protects against, what remains your responsibility, and how to tune for stricter environments. A quick summary:
+
 - API keys stored in Keychain with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
 - Keys read just-in-time from Keychain, never held as stored properties
 - Certificate pinning support via `PinnedSessionDelegate` — configure `pinnedHosts` with SPKI SHA-256 hashes; `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing/empty, while localhost and custom hosts retain existing bypass/default-trust behavior
