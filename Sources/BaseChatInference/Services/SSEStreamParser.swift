@@ -15,9 +15,33 @@ import Foundation
 /// Defaults (``default``) are intentionally well above any realistic provider
 /// throughput — OpenAI, Anthropic, and Ollama all emit events far smaller
 /// than 1 MB and well under 5,000 events per second — so legitimate traffic is
-/// never throttled. Host apps can tune the limits globally via
-/// `BaseChatConfiguration.shared.sseStreamLimits` or per-backend by setting
-/// `SSECloudBackend.sseStreamLimits`.
+/// never throttled.
+///
+/// ## Tuning
+///
+/// Most apps never need to change these. Raise a cap only if you observe
+/// legitimate traffic failing — for example, a provider that ships a
+/// multi-megabyte tool-use result in a single event. Lower a cap when you
+/// point a backend at an untrusted endpoint and want to narrow the attack
+/// surface further.
+///
+/// ```swift
+/// // App-wide: applies to every SSECloudBackend at launch.
+/// BaseChatConfiguration.shared.sseStreamLimits = SSEStreamLimits(
+///     maxEventBytes: 500_000,
+///     maxTotalBytes: 10_000_000,
+///     maxEventsPerSecond: 2_000
+/// )
+///
+/// // Per backend: leaves OpenAI/Anthropic at defaults while tightening an
+/// // untrusted CustomEndpoint.
+/// let backend = OpenAIBackend(endpoint: untrusted)
+/// backend.sseStreamLimits = SSEStreamLimits(
+///     maxEventBytes: 64_000,
+///     maxTotalBytes: 1_000_000,
+///     maxEventsPerSecond: 500
+/// )
+/// ```
 ///
 /// There is deliberately no "unlimited" option: bounded caps are the point.
 public struct SSEStreamLimits: Sendable, Equatable {
@@ -30,7 +54,12 @@ public struct SSEStreamLimits: Sendable, Equatable {
     /// bytes the parser consumes (including control and ignored lines).
     public var maxTotalBytes: Int
 
-    /// Maximum events the parser may yield within any one-second window.
+    /// Maximum events the parser may yield within a one-second rate window.
+    ///
+    /// The window is fixed (not sliding): it opens on the first event and
+    /// resets once at least one wall-clock second has elapsed. A burst that
+    /// exceeds this count within the active window finishes the stream with
+    /// ``SSEStreamError/eventRateExceeded(_:)``.
     public var maxEventsPerSecond: Int
 
     public init(
@@ -77,10 +106,6 @@ public enum SSEStreamError: Error, Equatable {
     /// within a single one-second window. The associated value is the event
     /// count observed in that window.
     case eventRateExceeded(Int)
-
-    /// The stream bytes were structurally unparseable (reserved for future
-    /// strict-mode use). Not currently thrown by the tolerant parser.
-    case malformed
 }
 
 /// Parses Server-Sent Events (SSE) from a byte stream.
@@ -139,9 +164,11 @@ package struct SSEStreamParser {
                 // Cumulative bytes consumed across the whole stream.
                 var totalBytes = 0
 
-                // Sliding one-second event-rate window. We keep things cheap
-                // by bucketing to integer seconds of the monotonic clock and
-                // resetting the count when the bucket changes.
+                // Fixed-window rate limiter: the window starts on the first
+                // event and resets to "now" whenever at least one second has
+                // elapsed. Cheaper than a true sliding window and tight enough
+                // for DoS defence — a burst above the cap still trips inside
+                // the active window, which is what matters.
                 var rateWindowStart = ContinuousClock.now
                 var rateWindowCount = 0
                 let maxRate = limits.maxEventsPerSecond
