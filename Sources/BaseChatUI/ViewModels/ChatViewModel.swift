@@ -381,6 +381,20 @@ public final class ChatViewModel {
     /// `inferenceService.modelLoadProgress` into ``activityPhase``. Tests may
     /// override this to a small value for deterministic timing.
     var progressBridgePollInterval: Duration = .milliseconds(50)
+
+    /// Minimum interval between published phase transitions for in-flight
+    /// model-load progress. Keeps steadily-progressing backends from
+    /// re-rendering every view observing ``activityPhase`` on every poll tick.
+    /// The first emission in a load cycle and the terminal (≥ 1.0) emission
+    /// always publish regardless of this window.
+    var progressBridgeMinTransitionInterval: Duration = .milliseconds(250)
+
+    /// Timestamp of the most recent published phase transition from
+    /// ``applyModelLoadProgress``. `nil` means the next progress change will
+    /// publish immediately (either because no progress has been published yet
+    /// in this load cycle or a fresh cycle just began).
+    @ObservationIgnored
+    var lastProgressTransitionInstant: ContinuousClock.Instant?
     var lastPressureLevel: MemoryPressureLevel = .nominal
     private var isSynchronizingSelection = false
     var isRestoringSession = false

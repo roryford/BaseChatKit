@@ -99,6 +99,7 @@ extension ChatViewModel {
     private func beginLoadUIState(generation: UInt64?) -> Bool {
         guard isCurrentLoadIntentGeneration(generation) else { return false }
         errorMessage = nil
+        lastProgressTransitionInstant = nil
         transitionPhase(to: .modelLoading(progress: inferenceService.modelLoadProgress))
         return true
     }
@@ -130,13 +131,27 @@ extension ChatViewModel {
         guard isCurrentLoadIntentGeneration(generation) else { return }
         guard case .modelLoading(let current) = activityPhase else { return }
         let snapshot = inferenceService.modelLoadProgress
-        if current != snapshot {
-            transitionPhase(to: .modelLoading(progress: snapshot))
+        guard current != snapshot else { return }
+
+        // Terminal progress (>= 1.0) and the first emission after a new load
+        // cycle bypass the throttle so the progress UI feels immediate at the
+        // start and lands cleanly at 100% before the phase flips to .idle.
+        let isTerminal = (snapshot ?? 0.0) >= 1.0
+        let now = ContinuousClock.now
+        if let last = lastProgressTransitionInstant,
+           !isTerminal,
+           now - last < progressBridgeMinTransitionInterval {
+            return
+        }
+
+        if transitionPhase(to: .modelLoading(progress: snapshot)) {
+            lastProgressTransitionInstant = now
         }
     }
 
     private func endLoadUIState(generation: UInt64?) {
         guard isCurrentLoadIntentGeneration(generation) else { return }
+        lastProgressTransitionInstant = nil
         if case .modelLoading = activityPhase {
             transitionPhase(to: .idle)
         }
