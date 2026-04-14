@@ -238,8 +238,8 @@ extension ClaudeBackendTests {
     func test_configure_keychainPath_loadModelSucceeds() async throws {
         let testAccount = "BaseChatKit.test.claude.\(UUID().uuidString)"
         // Claude's loadModel validates the API key, so we must store a real value.
-        KeychainService.store(key: "sk-ant-test-keychain-key", account: testAccount)
-        defer { KeychainService.delete(account: testAccount) }
+        try KeychainService.store(key: "sk-ant-test-keychain-key", account: testAccount)
+        defer { try? KeychainService.delete(account: testAccount) }
 
         let backend = ClaudeBackend()
         backend.configure(

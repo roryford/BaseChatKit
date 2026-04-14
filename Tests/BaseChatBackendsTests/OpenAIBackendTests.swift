@@ -249,8 +249,8 @@ extension OpenAIBackendTests {
 
     func test_configure_keychainPath_loadModelSucceeds() async throws {
         let testAccount = "BaseChatKit.test.openai.\(UUID().uuidString)"
-        KeychainService.store(key: "sk-test-keychain-key", account: testAccount)
-        defer { KeychainService.delete(account: testAccount) }
+        try KeychainService.store(key: "sk-test-keychain-key", account: testAccount)
+        defer { try? KeychainService.delete(account: testAccount) }
 
         let backend = OpenAIBackend()
         backend.configure(

@@ -375,7 +375,7 @@ final class CloudEndpointSelectionIntegrationTests: XCTestCase {
             modelName: "claude-sonnet-4-20250514"
         )
         // Ensure no key is stored.
-        KeychainService.delete(account: claudeEndpoint.keychainAccount)
+        try? KeychainService.delete(account: claudeEndpoint.keychainAccount)
 
         await claudeVM.loadCloudEndpoint(claudeEndpoint)
 

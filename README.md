@@ -285,8 +285,41 @@ let endpoint = APIEndpoint(
     baseURL: "https://api.openai.com",
     modelName: "gpt-4o-mini"
 )
-endpoint.setAPIKey("sk-...")  // Stored in Keychain
+do {
+    try endpoint.setAPIKey("sk-...")  // Stored in Keychain
+} catch {
+    // Surface `error.localizedDescription` in your settings UI — it already
+    // maps known Keychain statuses (locked device, missing entitlement, etc.)
+    // to a short user-facing sentence and appends the raw OSStatus for logs.
+}
 ```
+
+### Migrating from `Bool`-returning Keychain APIs
+
+`KeychainService.store` / `.delete` and `APIEndpoint.setAPIKey` / `.deleteAPIKey`
+used to return `Bool` and virtually no caller checked the result. They now
+throw a typed `KeychainError` so failures can't be silently discarded.
+
+```swift
+// Before
+if !KeychainService.store(key: key, account: id) { /* usually ignored */ }
+endpoint.setAPIKey("sk-...")
+endpoint.deleteAPIKey()
+
+// After
+try KeychainService.store(key: key, account: id)
+try endpoint.setAPIKey("sk-...")
+try endpoint.deleteAPIKey()
+
+// Cleanup paths where "already gone" is fine stay terse
+try? endpoint.deleteAPIKey()
+```
+
+Deleting a non-existent item is still non-throwing (`errSecItemNotFound` is
+treated as success), so `tearDown` / `deinit` cleanup can keep its `try?`
+idiom. For programmatic recovery, `KeychainError.osStatus` exposes the raw
+code and `localizedDescription` is already user-friendly — there is no need
+to pattern-match the enum for UI purposes.
 
 ## Prompt Templates
 

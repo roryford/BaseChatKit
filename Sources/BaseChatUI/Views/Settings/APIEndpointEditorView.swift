@@ -159,7 +159,15 @@ public struct APIEndpointEditorView: View {
             endpoint.modelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !apiKey.isEmpty {
-                endpoint.setAPIKey(apiKey)
+                do {
+                    try endpoint.setAPIKey(apiKey)
+                } catch {
+                    // `KeychainError.localizedDescription` already reads as a
+                    // complete sentence (e.g. "Couldn't store the API key in
+                    // the Keychain: The device appears to be locked…").
+                    validationError = error.localizedDescription
+                    return
+                }
             }
         } else {
             // Create new
@@ -172,7 +180,16 @@ public struct APIEndpointEditorView: View {
             modelContext.insert(newEndpoint)
 
             if !apiKey.isEmpty {
-                newEndpoint.setAPIKey(apiKey)
+                do {
+                    try newEndpoint.setAPIKey(apiKey)
+                } catch {
+                    modelContext.delete(newEndpoint)
+                    // `KeychainError.localizedDescription` already reads as a
+                    // complete sentence (e.g. "Couldn't store the API key in
+                    // the Keychain: The device appears to be locked…").
+                    validationError = error.localizedDescription
+                    return
+                }
             }
         }
 

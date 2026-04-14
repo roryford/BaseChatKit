@@ -169,7 +169,16 @@ public struct RemoteServerConfigSheet: View {
 
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedKey.isEmpty {
-            endpoint.setAPIKey(trimmedKey)
+            do {
+                try endpoint.setAPIKey(trimmedKey)
+            } catch {
+                modelContext.delete(endpoint)
+                // `KeychainError.localizedDescription` already reads as a
+                // complete sentence — don't prepend another "Could not save…"
+                // prefix and double the wording.
+                errorMessage = error.localizedDescription
+                return
+            }
         }
 
         do {
