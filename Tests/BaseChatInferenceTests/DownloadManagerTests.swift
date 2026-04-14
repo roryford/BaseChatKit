@@ -547,9 +547,9 @@ final class DownloadManagerTests: XCTestCase {
             _ = try await manager.startDownload(malicious, downloadURL: downloadURL)
             XCTFail("startDownload must reject a filename containing a backslash")
         } catch let error as FileNameError {
-            XCTAssertEqual(error, .pathSeparator)
+            XCTAssertEqual(error, .backslash)
         } catch {
-            XCTFail("Expected FileNameError.pathSeparator, got: \(error)")
+            XCTFail("Expected FileNameError.backslash, got: \(error)")
         }
     }
 

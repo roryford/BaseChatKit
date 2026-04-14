@@ -340,13 +340,32 @@ final class DownloadableModelTests: XCTestCase {
 
     func test_validate_rejectsBackslashSeparator() {
         XCTAssertThrowsError(try DownloadableModel.validate(fileName: "foo\\bar.gguf")) { error in
-            XCTAssertEqual(error as? FileNameError, .pathSeparator)
+            XCTAssertEqual(error as? FileNameError, .backslash)
         }
     }
 
     func test_validate_rejectsDoubleForwardSlash() {
         XCTAssertThrowsError(try DownloadableModel.validate(fileName: "foo//bar.gguf")) { error in
-            XCTAssertEqual(error as? FileNameError, .pathSeparator)
+            // "foo//bar.gguf" splits to ["foo", "", "bar.gguf"] — tooManyComponents fires first.
+            XCTAssertEqual(error as? FileNameError, .tooManyComponents)
+        }
+    }
+
+    func test_validate_rejectsDoubleForwardSlashInTwoComponentShape() {
+        // "foo//" has only two segments after split: ["foo", "", ""]? Actually three.
+        // Need a case where tooManyComponents doesn't trigger but emptyComponent does.
+        // That means exactly two segments with one empty: "/foo" or "foo/".
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "foo/")) { error in
+            XCTAssertEqual(error as? FileNameError, .emptyComponent)
+        }
+    }
+
+    func test_validate_rejectsMultiComponentPath() {
+        // Deeper sub-paths are not a HuggingFace filename pattern we honour.
+        XCTAssertThrowsError(
+            try DownloadableModel.validate(fileName: "user/repo/subdir/file.gguf")
+        ) { error in
+            XCTAssertEqual(error as? FileNameError, .tooManyComponents)
         }
     }
 
@@ -399,14 +418,79 @@ final class DownloadableModelTests: XCTestCase {
     }
 
     func test_validate_rejectsTrailingSlash() {
-        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "foo/")) { error in
-            XCTAssertEqual(error as? FileNameError, .pathSeparator)
+        // Remove duplication with test_validate_rejectsDoubleForwardSlashInTwoComponentShape:
+        // keep the classical trailing-slash assertion distinct and explicit.
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "repo/")) { error in
+            XCTAssertEqual(error as? FileNameError, .emptyComponent)
         }
     }
 
     func test_validate_rejectsLeadingSlash() {
         XCTAssertThrowsError(try DownloadableModel.validate(fileName: "/foo.gguf")) { error in
-            XCTAssertEqual(error as? FileNameError, .pathSeparator)
+            XCTAssertEqual(error as? FileNameError, .emptyComponent)
+        }
+    }
+
+    // MARK: - Error-description UX
+    //
+    // Host apps surface `localizedDescription` in banners / Xcode console. These
+    // assertions lock the copy so a new rejection rule cannot regress to an
+    // opaque message like "invalid path separator" with no indication of which
+    // sub-rule tripped.
+
+    func test_validate_errorDescriptions_areDistinctPerCase() {
+        let descriptions: [String?] = [
+            FileNameError.empty.errorDescription,
+            FileNameError.pathTraversal.errorDescription,
+            FileNameError.backslash.errorDescription,
+            FileNameError.emptyComponent.errorDescription,
+            FileNameError.tooManyComponents.errorDescription,
+            FileNameError.hidden.errorDescription,
+            FileNameError.tooLong.errorDescription,
+            FileNameError.controlCharacter.errorDescription,
+        ]
+        let unique = Set(descriptions.compactMap { $0 })
+        XCTAssertEqual(
+            unique.count, descriptions.count,
+            "Each FileNameError case must have a distinct localizedDescription"
+        )
+    }
+
+    // MARK: - Unicode Fuzz
+
+    func test_validate_acceptsNonASCIIButPrintableName() {
+        // Emoji and combining marks above U+001F should not themselves fail the
+        // control-character check. APFS will accept them and the URL prefix
+        // guard elsewhere handles escaping. (No filesystem actually *wants*
+        // these in filenames, but the validator's contract is path-safety, not
+        // aesthetics.)
+        XCTAssertNoThrow(try DownloadableModel.validate(fileName: "modèle-\u{1F600}.gguf"))
+        XCTAssertNoThrow(try DownloadableModel.validate(fileName: "café.gguf"))
+        // Non-ASCII digit: ARABIC-INDIC DIGIT FOUR (U+0664) is not a traversal token.
+        XCTAssertNoThrow(try DownloadableModel.validate(fileName: "model-\u{0664}.gguf"))
+    }
+
+    func test_validate_rejectsZeroWidthControlsInMixedScript() {
+        // U+0007 BELL: C0 control, inside a mixed-script filename.
+        let payload = "mödèl\u{0007}-Q4.gguf"
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: payload)) { error in
+            XCTAssertEqual(error as? FileNameError, .controlCharacter)
+        }
+    }
+
+    func test_validate_rejectsUnicodeLineSeparatorsAsControls() {
+        // U+0085 NEXT LINE is in the C1 control range (0x80–0x9F) which the
+        // validator rejects even though it renders invisibly.
+        let payload = "model\u{0085}.gguf"
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: payload)) { error in
+            XCTAssertEqual(error as? FileNameError, .controlCharacter)
+        }
+    }
+
+    func test_validate_rejectsUnicodeTabInAnyComponent() {
+        // U+0009 TAB — C0 control, occasionally survives clipboard round-trips.
+        XCTAssertThrowsError(try DownloadableModel.validate(fileName: "mlx-community/Phi\t-4")) { error in
+            XCTAssertEqual(error as? FileNameError, .controlCharacter)
         }
     }
 }
