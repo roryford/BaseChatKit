@@ -14,7 +14,7 @@ final class CustomEndpointValidationTests: XCTestCase {
     override func tearDown() {
         super.tearDown()
         for id in endpointIDs {
-            KeychainService.delete(account: id)
+            try? KeychainService.delete(account: id)
         }
         endpointIDs.removeAll()
     }
