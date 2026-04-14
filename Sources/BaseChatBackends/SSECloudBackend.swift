@@ -110,6 +110,22 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     /// `nil` disables idle detection (default).
     public var streamIdleTimeout: Duration?
 
+    /// Per-backend override for the SSE / NDJSON stream caps that defend
+    /// against hostile upstream servers. When `nil` (default), the value
+    /// from `BaseChatConfiguration.shared.sseStreamLimits` is used at
+    /// parse time.
+    ///
+    /// Set this to tune limits for a specific backend — for example, to
+    /// tighten bounds on an untrusted `CustomEndpoint` while leaving OpenAI
+    /// and Anthropic at the global defaults.
+    public var sseStreamLimits: SSEStreamLimits?
+
+    /// Resolved stream limits, preferring the per-backend override and
+    /// falling back to the global configuration.
+    public var effectiveSSEStreamLimits: SSEStreamLimits {
+        sseStreamLimits ?? BaseChatConfiguration.shared.sseStreamLimits
+    }
+
     // MARK: - Init
 
     /// Creates an SSE cloud backend.
@@ -378,7 +394,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         bytes: URLSession.AsyncBytes,
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
     ) async throws {
-        let tokenStream = SSEStreamParser.parse(bytes: bytes)
+        let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
         for try await payload in tokenStream {
             if Task.isCancelled { break }
 

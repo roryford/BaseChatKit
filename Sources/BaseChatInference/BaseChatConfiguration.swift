@@ -57,18 +57,29 @@ public struct BaseChatConfiguration: Sendable {
     /// is handled by FileVault. It is also ignored for in-memory SwiftData stores.
     public var fileProtectionClass: FileProtectionType?
 
+    /// Caps applied to SSE / NDJSON streaming from cloud backends. These
+    /// defend against hostile or misconfigured upstream servers that try to
+    /// exhaust client memory or starve the consumer. See ``SSEStreamLimits``.
+    ///
+    /// Defaults to ``SSEStreamLimits/default`` — well above any realistic
+    /// provider throughput. Host apps that point `CustomEndpoint.baseURL` at
+    /// untrusted servers can tighten these further.
+    public var sseStreamLimits: SSEStreamLimits
+
     public init(
         appName: String = "BaseChatKit",
         bundleIdentifier: String = "com.basechatkit",
         modelsDirectoryName: String = "Models",
         features: Features = Features(),
-        fileProtectionClass: FileProtectionType? = .completeUntilFirstUserAuthentication
+        fileProtectionClass: FileProtectionType? = .completeUntilFirstUserAuthentication,
+        sseStreamLimits: SSEStreamLimits = .default
     ) {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
         self.modelsDirectoryName = modelsDirectoryName
         self.features = features
         self.fileProtectionClass = fileProtectionClass
+        self.sseStreamLimits = sseStreamLimits
     }
 
     // MARK: - Derived identifiers
