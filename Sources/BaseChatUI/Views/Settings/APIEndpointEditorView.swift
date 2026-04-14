@@ -159,7 +159,12 @@ public struct APIEndpointEditorView: View {
             endpoint.modelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !apiKey.isEmpty {
-                endpoint.setAPIKey(apiKey)
+                do {
+                    try endpoint.setAPIKey(apiKey)
+                } catch {
+                    validationError = "Could not save API key to the Keychain: \(error.localizedDescription)"
+                    return
+                }
             }
         } else {
             // Create new
@@ -172,7 +177,13 @@ public struct APIEndpointEditorView: View {
             modelContext.insert(newEndpoint)
 
             if !apiKey.isEmpty {
-                newEndpoint.setAPIKey(apiKey)
+                do {
+                    try newEndpoint.setAPIKey(apiKey)
+                } catch {
+                    modelContext.delete(newEndpoint)
+                    validationError = "Could not save API key to the Keychain: \(error.localizedDescription)"
+                    return
+                }
             }
         }
 

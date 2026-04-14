@@ -99,7 +99,15 @@ public struct APIConfigurationView: View {
     }
 
     private func deleteEndpoint(_ endpoint: APIEndpoint) {
-        endpoint.deleteAPIKey()
+        // Best-effort Keychain cleanup: if the Keychain delete fails we still
+        // remove the SwiftData record, because leaving the endpoint in the UI
+        // with a dangling key is worse than a potential orphaned Keychain item.
+        // The failure is logged by KeychainService for diagnostics.
+        do {
+            try endpoint.deleteAPIKey()
+        } catch {
+            Log.persistence.warning("Failed to delete API key from Keychain: \(error.localizedDescription)")
+        }
         modelContext.delete(endpoint)
         do {
             try modelContext.save()

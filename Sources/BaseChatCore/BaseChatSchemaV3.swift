@@ -249,14 +249,21 @@ public enum BaseChatSchemaV3: VersionedSchema {
         }
 
         /// Stores an API key in the Keychain for this endpoint.
-        @discardableResult
-        public func setAPIKey(_ key: String) -> Bool {
-            KeychainService.store(key: key, account: keychainAccount)
+        ///
+        /// Throws `KeychainError.storeFailed` when the write is rejected
+        /// (locked device, entitlement mismatch, corrupted item). Surface the
+        /// error to the user — silently swallowing it leaves the impression
+        /// that the key was saved when it wasn't.
+        public func setAPIKey(_ key: String) throws {
+            try KeychainService.store(key: key, account: keychainAccount)
         }
 
         /// Deletes the API key from the Keychain.
-        public func deleteAPIKey() {
-            KeychainService.delete(account: keychainAccount)
+        ///
+        /// Throws `KeychainError.deleteFailed` on Keychain errors. A missing
+        /// item is not an error — callers can rely on this being idempotent.
+        public func deleteAPIKey() throws {
+            try KeychainService.delete(account: keychainAccount)
         }
 
         /// Validates the endpoint's URL structure.

@@ -285,7 +285,7 @@ let endpoint = APIEndpoint(
     baseURL: "https://api.openai.com",
     modelName: "gpt-4o-mini"
 )
-endpoint.setAPIKey("sk-...")  // Stored in Keychain
+try endpoint.setAPIKey("sk-...")  // Stored in Keychain; throws on failure
 ```
 
 ## Prompt Templates

@@ -11,7 +11,7 @@ final class APIEndpointTests: XCTestCase {
     override func tearDown() {
         super.tearDown()
         for id in endpointIDs {
-            KeychainService.delete(account: id)
+            try? KeychainService.delete(account: id)
         }
         endpointIDs.removeAll()
     }
@@ -87,12 +87,12 @@ final class APIEndpointTests: XCTestCase {
                       "isValid should pass for valid URL regardless of API key presence")
     }
 
-    func test_keychainService_replacesApiKeyProperty() {
+    func test_keychainService_replacesApiKeyProperty() throws {
         let endpoint = makeEndpoint(provider: .openAI, baseURL: "https://api.openai.com")
         XCTAssertNil(KeychainService.retrieve(account: endpoint.keychainAccount),
                      "No key stored yet")
 
-        endpoint.setAPIKey("sk-test-key")
+        try endpoint.setAPIKey("sk-test-key")
         XCTAssertEqual(KeychainService.retrieve(account: endpoint.keychainAccount), "sk-test-key",
                        "KeychainService.retrieve should replace the old .apiKey property")
     }
