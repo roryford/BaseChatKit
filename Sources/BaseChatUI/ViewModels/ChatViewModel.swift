@@ -410,6 +410,18 @@ public final class ChatViewModel {
         _cachingTokenizerBaseID = nil
     }
 
+    #if DEBUG
+    /// Test-only readback of the identity used to detect tokenizer changes in
+    /// ``reusableCachingTokenizer``. Lets whitebox tests assert that the
+    /// value-type / reference-type discriminator computes a stable ID per
+    /// metatype — required to distinguish the correct implementation from the
+    /// earlier `as? AnyObject` version, whose `_SwiftValue` boxing defeats any
+    /// external behavioural probe.
+    var _testOnly_cachingTokenizerBaseID: ObjectIdentifier? {
+        _cachingTokenizerBaseID
+    }
+    #endif
+
     /// Returns a `CachingTokenizer` that persists across generation cycles,
     /// recreating it only when the underlying backend tokenizer changes.
     var reusableCachingTokenizer: CachingTokenizer {
