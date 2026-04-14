@@ -242,4 +242,149 @@ final class ModelManagementUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    // MARK: - Real-Model E2E (opt-in, hardware-gated)
+    //
+    // These three tests prove that a real user can pick a model of each
+    // supported on-device type (GGUF / MLX / Apple Foundation) through the
+    // real UI and successfully generate a streamed response. They are
+    // opt-in via a sentinel file (`~/.basechatkit_real_e2e`) because:
+    //
+    //   1. They require ~4 GB of model files on disk under the demo app's
+    //      sandbox container (`~/Library/Containers/<app-id>/Data/Documents/Models`).
+    //   2. A cold MLX or GGUF load can take 10-30s and generation another
+    //      30-120s — too slow for a default developer test sweep.
+    //   3. CI runners do not have GPU/MLX/Metal acceleration nor Apple
+    //      Intelligence enabled.
+    //
+    // Prerequisites (one-time local setup on Apple Silicon):
+    //   1. Place model files in the demo app's sandbox Documents/Models:
+    //      - `Qwen_Qwen3-4B-Q4_K_M.gguf`           (for GGUF)
+    //      - `Llama-3.2-3B-Instruct-4bit/` dir     (for MLX)
+    //      (Apple Foundation Model needs no file.)
+    //   2. `touch ~/.basechatkit_real_e2e`
+    //   3. Native macOS runs require granting Accessibility permission to
+    //      `/Applications/Xcode.app` (or `Xcode-testmanagerd`) in
+    //      System Settings > Privacy & Security > Accessibility.
+    //
+    // Example run (native macOS):
+    //   scripts/example-ui-tests.sh test-without-building \
+    //     --destination 'platform=macOS,arch=arm64' \
+    //     -only-testing:BaseChatDemoUITests/ModelManagementUITests/testSelectingGGUFModelProducesResponse
+
+    /// Opt-in gate for real-model end-to-end tests.
+    ///
+    /// Uses two signals:
+    ///
+    /// 1. `CI` environment variable — automatically set by GitHub Actions and
+    ///    most other CI systems. When present (any non-empty value), we skip,
+    ///    because CI runners do not have the model files on disk nor the GPU
+    ///    to run them.
+    /// 2. Sentinel file at `~/.basechatkit_real_e2e` — developers opt in by
+    ///    creating this file (`touch ~/.basechatkit_real_e2e`). A sentinel file
+    ///    is used instead of an env var because `xcodebuild test` does not
+    ///    propagate arbitrary shell env vars into the XCUITest runner process
+    ///    on macOS/iOS, so env-var gates get silently skipped.
+    ///
+    /// Developers can also disable the gate by deleting the sentinel file.
+    private func skipUnlessRealModelE2EEnabled() throws {
+        let env = ProcessInfo.processInfo.environment
+        if let ci = env["CI"], !ci.isEmpty {
+            throw XCTSkip("Real-model E2E skipped in CI — requires ~4 GB on-disk models and Apple Silicon")
+        }
+
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let sentinel = (home as NSString).appendingPathComponent(".basechatkit_real_e2e")
+        guard FileManager.default.fileExists(atPath: sentinel) else {
+            throw XCTSkip("Real-model E2E opt-in: create ~/.basechatkit_real_e2e (touch ~/.basechatkit_real_e2e) to run this test locally. Requires ~4 GB on-disk models and Apple Silicon.")
+        }
+    }
+
+    func testSelectingGGUFModelProducesResponse() throws {
+        try skipUnlessRealModelE2EEnabled()
+        #if !arch(arm64)
+        throw XCTSkip("GGUF backend (llama.cpp) requires Apple Silicon")
+        #endif
+
+        runRealModelSelectionFlow(
+            modelLabelNeedle: "Qwen3-4B",
+            screenshotPrefix: "GGUF"
+        )
+    }
+
+    func testSelectingMLXModelProducesResponse() throws {
+        try skipUnlessRealModelE2EEnabled()
+        #if !arch(arm64)
+        throw XCTSkip("MLX backend requires Apple Silicon")
+        #endif
+
+        runRealModelSelectionFlow(
+            modelLabelNeedle: "Llama-3.2-3B",
+            screenshotPrefix: "MLX"
+        )
+    }
+
+    func testSelectingFoundationModelProducesResponse() throws {
+        try skipUnlessRealModelE2EEnabled()
+
+        guard #available(macOS 26, iOS 26, *) else {
+            throw XCTSkip("Apple Foundation Model requires macOS 26 / iOS 26")
+        }
+
+        runRealModelSelectionFlow(
+            modelLabelNeedle: "Foundation",
+            screenshotPrefix: "Foundation",
+            // Foundation Model loads near-instantly and streams quickly; tighter
+            // timeouts surface regressions faster than the MLX/GGUF defaults.
+            loadTimeout: 30,
+            responseTimeout: 60
+        )
+    }
+
+    /// Drives the full real-model E2E flow: open the sheet, tap the row
+    /// matching `modelLabelNeedle`, wait for the model to load, send a short
+    /// deterministic prompt, and assert that an assistant response streams in.
+    /// Captures screenshots at each milestone for debugging.
+    private func runRealModelSelectionFlow(
+        modelLabelNeedle: String,
+        screenshotPrefix: String,
+        loadTimeout: TimeInterval = 60,
+        responseTimeout: TimeInterval = 120
+    ) {
+        openModelManagementSheet()
+        takeScreenshot(name: "\(screenshotPrefix)-01-Sheet-Open")
+
+        guard let row = findModelRow(in: app, containing: modelLabelNeedle) else {
+            takeScreenshot(name: "\(screenshotPrefix)-FAIL-Row-Not-Found")
+            XCTFail("Could not find a model row containing '\(modelLabelNeedle)' on the Select tab. Make sure the model is present in the demo app's sandbox container.")
+            return
+        }
+
+        XCTAssertTrue(row.isHittable, "Row for '\(modelLabelNeedle)' must be hittable to select it")
+        row.tap()
+        takeScreenshot(name: "\(screenshotPrefix)-02-Row-Tapped")
+
+        // The sheet should auto-dismiss after selection. We don't gate the rest
+        // of the flow on this — what really matters is that the chat input
+        // becomes ready, which only happens once the backend has loaded.
+        let inputReady = waitForChatInputReady(app: app, timeout: loadTimeout)
+        takeScreenshot(name: "\(screenshotPrefix)-03-After-Load-Wait")
+        guard inputReady else {
+            XCTFail("Chat input never became ready within \(loadTimeout)s after selecting '\(modelLabelNeedle)' — model load likely failed")
+            return
+        }
+
+        let prompt = "Reply with one word: ready"
+        let gotResponse = sendPromptAndAwaitResponse(
+            app: app,
+            prompt: prompt,
+            responseTimeout: responseTimeout
+        )
+        takeScreenshot(name: "\(screenshotPrefix)-04-After-Send")
+
+        XCTAssertTrue(
+            gotResponse,
+            "Expected an assistant response to stream within \(responseTimeout)s for model '\(modelLabelNeedle)'"
+        )
+    }
 }
