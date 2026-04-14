@@ -161,8 +161,19 @@ enum CloudErrorSanitizer {
 
     /// Returns `true` when the string contains `<` directly followed by an
     /// ASCII letter, indicating an HTML tag opener.
-    private static func containsHTMLTag(_ s: String) -> Bool {
+    ///
+    /// The pairwise scan expresses its upper bound as `scalars.count - 1`, so
+    /// it must not be called with fewer than two scalars — with zero scalars
+    /// the range would trap as `0..<-1`. `sanitize(_:host:)` already early-
+    /// returns for empty input, but we guard here defensively because a
+    /// reorder upstream would otherwise be a crash rather than a logic bug.
+    ///
+    /// Exposed at `internal` so that unit tests can exercise the empty and
+    /// single-character edge cases without having to round-trip through
+    /// `sanitize(_:host:)`'s early returns.
+    static func containsHTMLTag(_ s: String) -> Bool {
         let scalars = Array(s.unicodeScalars)
+        guard scalars.count >= 2 else { return false }
         for i in 0..<(scalars.count - 1) where scalars[i].value == 0x3C { // '<'
             let next = scalars[i + 1].value
             let isLetter = (next >= 0x41 && next <= 0x5A) || (next >= 0x61 && next <= 0x7A)

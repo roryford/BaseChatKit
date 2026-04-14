@@ -15,6 +15,11 @@ final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate 
 
     // MARK: - Pin Sets
 
+    // NSLock guards concurrent reads/writes from multiple URLSession delegate
+    // callback threads, which can arrive on arbitrary background threads.
+    private static let _pinnedHostsLock = NSLock()
+    private nonisolated(unsafe) static var _pinnedHosts: [String: Set<String>] = [:]
+
     /// SPKI SHA-256 hashes for known API hosts.
     ///
     /// To generate a pin from a certificate:
@@ -42,11 +47,6 @@ final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate 
     /// pointing a provider at a private gateway with its own CA) can write
     /// directly to `pinnedHosts` before any network requests are issued; values
     /// set by the host app are preserved by `loadDefaultPins()`.
-    // NSLock guards concurrent reads/writes from multiple URLSession delegate
-    // callback threads, which can arrive on arbitrary background threads.
-    private static let _pinnedHostsLock = NSLock()
-    private nonisolated(unsafe) static var _pinnedHosts: [String: Set<String>] = [:]
-
     public static var pinnedHosts: [String: Set<String>] {
         get {
             _pinnedHostsLock.lock()
@@ -59,6 +59,10 @@ final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate 
             _pinnedHosts = newValue
         }
     }
+
+    // One-shot guard so `loadDefaultPins()` is idempotent across callers.
+    private nonisolated(unsafe) static var _defaultPinsLoaded = false
+
     /// Populates pin sets for known production hosts on first access.
     ///
     /// Pins target the intermediate CA (Google Trust Services WE1) and its
@@ -70,8 +74,6 @@ final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate 
     /// 1. Run the `openssl` pipeline from the doc comment above for each host.
     /// 2. Add the *new* intermediate/root pins to the set **before** removing old ones.
     /// 3. Ship the update. Once no connections use the old chain, remove stale pins.
-    private nonisolated(unsafe) static var _defaultPinsLoaded = false
-
     static func loadDefaultPins() {
         _pinnedHostsLock.lock()
         defer { _pinnedHostsLock.unlock() }
