@@ -266,7 +266,7 @@ public enum BaseChatSchemaV3: VersionedSchema {
             try KeychainService.delete(account: keychainAccount)
         }
 
-        /// Validates the endpoint's URL structure.
+        /// Validates the endpoint's URL structure and returns a typed result.
         ///
         /// This is a pure structural check — it does NOT verify whether an API key
         /// exists in the Keychain. Use `APIProvider.requiresAPIKey` and
@@ -275,38 +275,57 @@ public enum BaseChatSchemaV3: VersionedSchema {
         ///
         /// Security: rejects URLs that would let a malicious endpoint config pivot
         /// into the user's LAN or cloud metadata services (SSRF). See
-        /// ``APIEndpoint/isDisallowedPrivateHost(_:)`` for the blocked IP ranges.
-        /// Only `http`/`https` schemes are accepted. Non-HTTPS is permitted only for
-        /// the explicit loopback allowlist (`127.0.0.1`, `::1`, `localhost`).
-        public var isValid: Bool {
-            guard let url = URL(string: baseURL),
+        /// ``APIEndpoint/classifyDisallowedPrivateHost(_:)`` for the blocked IP
+        /// ranges. Only `http`/`https` schemes are accepted. Non-HTTPS is permitted
+        /// only for the explicit loopback allowlist (`127.0.0.1`, `::1`, `localhost`).
+        ///
+        /// Returns `.success` when the URL is well-formed, uses a supported scheme,
+        /// and does not target a reserved address class. Returns `.failure` with a
+        /// specific ``APIEndpointValidationReason`` so the UI can explain *why* an
+        /// endpoint is rejected instead of a generic label.
+        public func validate() -> Result<Void, APIEndpointValidationReason> {
+            let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                return .failure(.emptyURL)
+            }
+
+            guard let url = URL(string: trimmed),
                   let scheme = url.scheme?.lowercased(),
                   url.host() != nil else {
-                return false
+                return .failure(.malformedURL)
             }
 
             // Only http/https are valid. Reject file, ftp, data, javascript, etc.
             guard scheme == "http" || scheme == "https" else {
-                return false
+                return .failure(.unsupportedScheme(scheme))
             }
 
             // Loopback dev servers (e.g. Ollama, LM Studio) are allowed over plain HTTP.
             if Self.isLocalhost(url) {
-                return true
+                return .success(())
             }
 
             // Non-loopback must be HTTPS.
             if scheme != "https" {
-                return false
+                return .failure(.insecureScheme)
             }
 
             // Block SSRF into LAN / cloud metadata even when HTTPS is used. A
             // cert-pinned private-range target is still a private-range target.
-            if Self.isDisallowedPrivateHost(url) {
-                return false
+            if let reason = Self.classifyDisallowedPrivateHost(url) {
+                return .failure(reason)
             }
 
-            return true
+            return .success(())
+        }
+
+        /// Structural validity of the endpoint URL.
+        ///
+        /// Derived from ``validate()`` — prefer `validate()` when you need the
+        /// specific rejection reason to surface in UI.
+        public var isValid: Bool {
+            if case .success = validate() { return true }
+            return false
         }
 
         /// Checks if the URL points to a local server.
@@ -320,7 +339,8 @@ public enum BaseChatSchemaV3: VersionedSchema {
         }
 
         /// Classifies a URL's host as pointing at a private, link-local, or
-        /// otherwise reserved IP range.
+        /// otherwise reserved IP range, returning the specific rejection reason
+        /// (or `nil` if the host is acceptable).
         ///
         /// Only IP literals are inspected. DNS names are not resolved — validation
         /// is called synchronously from SwiftUI settings forms and must stay fast.
@@ -330,18 +350,18 @@ public enum BaseChatSchemaV3: VersionedSchema {
         /// deployment needs that guarantee.
         ///
         /// Blocked IPv4 ranges:
-        /// - `0.0.0.0/8` (non-routable "this host")
-        /// - `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC1918)
-        /// - `127.0.0.0/8` except `127.0.0.1` (alternate loopback encodings)
-        /// - `169.254.0.0/16` (link-local incl. AWS/GCP/Azure metadata at `169.254.169.254`)
-        /// - `224.0.0.0/4` (multicast) and `240.0.0.0/4` (reserved/future use)
+        /// - `0.0.0.0/8` (non-routable "this host") → `.multicastReserved`
+        /// - `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC1918) → `.privateHost`
+        /// - `127.0.0.0/8` except `127.0.0.1` (alternate loopback encodings) → `.multicastReserved`
+        /// - `169.254.0.0/16` (link-local incl. AWS/GCP/Azure metadata at `169.254.169.254`) → `.linkLocalHost`
+        /// - `224.0.0.0/4` (multicast), `240.0.0.0/4` (reserved / future use) → `.multicastReserved`
         ///
         /// Blocked IPv6 ranges:
-        /// - `fc00::/7` (unique local addresses)
-        /// - `fe80::/10` (link-local)
-        /// - `::ffff:0:0/96` (IPv4-mapped; would otherwise bypass the IPv4 filter)
-        static func isDisallowedPrivateHost(_ url: URL) -> Bool {
-            guard let rawHost = url.host()?.lowercased() else { return false }
+        /// - `fc00::/7` (unique local addresses) → `.ipv6UniqueLocal`
+        /// - `fe80::/10` (link-local) → `.linkLocalHost`
+        /// - `::ffff:0:0/96` (IPv4-mapped; would otherwise bypass the IPv4 filter) → `.ipv4MappedLoopback`
+        static func classifyDisallowedPrivateHost(_ url: URL) -> APIEndpointValidationReason? {
+            guard let rawHost = url.host()?.lowercased() else { return nil }
 
             // FQDN form with a trailing dot (e.g. `192.168.1.1.`) resolves
             // identically to the dotless form on every mainstream resolver, so
@@ -351,16 +371,16 @@ public enum BaseChatSchemaV3: VersionedSchema {
             let host = rawHost.hasSuffix(".") ? String(rawHost.dropLast()) : rawHost
 
             if let octets = parseIPv4Literal(host) {
-                return isDisallowedIPv4(octets)
+                return classifyIPv4(octets)
             }
 
             if let words = parseIPv6Literal(host) {
-                return isDisallowedIPv6(words)
+                return classifyIPv6(words)
             }
 
-            // DNS names reach here. Do not resolve synchronously — return false
+            // DNS names reach here. Do not resolve synchronously — return nil
             // and rely on the HTTPS-required rule plus any higher-layer mitigation.
-            return false
+            return nil
         }
 
         // MARK: IPv4
@@ -385,30 +405,30 @@ public enum BaseChatSchemaV3: VersionedSchema {
             return octets
         }
 
-        private static func isDisallowedIPv4(_ octets: [UInt8]) -> Bool {
+        private static func classifyIPv4(_ octets: [UInt8]) -> APIEndpointValidationReason? {
             let a = octets[0]
             let b = octets[1]
 
-            // 0.0.0.0/8 — "this host" / any-address
-            if a == 0 { return true }
             // 10.0.0.0/8 — RFC1918
-            if a == 10 { return true }
+            if a == 10 { return .privateHost }
+            // 172.16.0.0/12 — RFC1918
+            if a == 172 && (16...31).contains(b) { return .privateHost }
+            // 192.168.0.0/16 — RFC1918
+            if a == 192 && b == 168 { return .privateHost }
+            // 169.254.0.0/16 — link-local (AWS/GCP/Azure IMDS sits here)
+            if a == 169 && b == 254 { return .linkLocalHost }
+            // 0.0.0.0/8 — "this host" / any-address
+            if a == 0 { return .multicastReserved }
             // 127.0.0.0/8 — loopback; the exact 127.0.0.1 is approved by
             // isLocalhost before this helper is called, so any 127.x.x.x
             // reaching here is an alternate loopback encoding.
-            if a == 127 { return true }
-            // 169.254.0.0/16 — link-local (AWS/GCP/Azure IMDS sits here)
-            if a == 169 && b == 254 { return true }
-            // 172.16.0.0/12 — RFC1918
-            if a == 172 && (16...31).contains(b) { return true }
-            // 192.168.0.0/16 — RFC1918
-            if a == 192 && b == 168 { return true }
+            if a == 127 { return .multicastReserved }
             // 224.0.0.0/4 — multicast
-            if (224...239).contains(a) { return true }
+            if (224...239).contains(a) { return .multicastReserved }
             // 240.0.0.0/4 — reserved / future use (includes 255.255.255.255 broadcast)
-            if a >= 240 { return true }
+            if a >= 240 { return .multicastReserved }
 
-            return false
+            return nil
         }
 
         // MARK: IPv6
@@ -465,20 +485,20 @@ public enum BaseChatSchemaV3: VersionedSchema {
             }
         }
 
-        private static func isDisallowedIPv6(_ words: [UInt16]) -> Bool {
-            guard words.count == 8 else { return false }
+        private static func classifyIPv6(_ words: [UInt16]) -> APIEndpointValidationReason? {
+            guard words.count == 8 else { return nil }
 
             // fc00::/7 — unique local addresses (first 7 bits are 1111110).
-            if (words[0] & 0xfe00) == 0xfc00 { return true }
+            if (words[0] & 0xfe00) == 0xfc00 { return .ipv6UniqueLocal }
             // fe80::/10 — link-local (first 10 bits are 1111111010).
-            if (words[0] & 0xffc0) == 0xfe80 { return true }
+            if (words[0] & 0xffc0) == 0xfe80 { return .linkLocalHost }
             // ::ffff:0:0/96 — IPv4-mapped IPv6. Reject so mapped loopback /
             // mapped RFC1918 can't bypass the IPv4 filter.
             let isIPv4Mapped = words[0] == 0 && words[1] == 0 && words[2] == 0
                 && words[3] == 0 && words[4] == 0 && words[5] == 0xffff
-            if isIPv4Mapped { return true }
+            if isIPv4Mapped { return .ipv4MappedLoopback }
 
-            return false
+            return nil
         }
     }
 
