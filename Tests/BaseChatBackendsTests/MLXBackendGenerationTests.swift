@@ -2,6 +2,7 @@
 import XCTest
 import MLXLMCommon
 import BaseChatCore
+import BaseChatInference
 import BaseChatTestSupport
 @testable import BaseChatBackends
 
