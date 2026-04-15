@@ -177,7 +177,10 @@ public enum HardwareRequirements {
     /// Scans common model directories for a loadable `.gguf` file.
     ///
     /// Searches the same `Documents/Models/` locations as `findMLXModelDirectory`.
-    /// Returns the URL of the first `.gguf` file found, or `nil`.
+    /// Returns the URL of the first regular `.gguf` file >= 50 MB — the size
+    /// gate filters out test fixtures (typically a few hundred bytes to a few
+    /// MB) while staying well below any real quantized model. Directories
+    /// that happen to be named with a `.gguf` extension are also rejected.
     public static func findGGUFModel() -> URL? {
         let fm = FileManager.default
         var searchDirs: [URL] = []
@@ -214,8 +217,15 @@ public enum HardwareRequirements {
             ) else { continue }
 
             for candidate in contents where candidate.pathExtension.lowercased() == "gguf" {
-                let values = try? candidate.resourceValues(forKeys: [.fileSizeKey])
-                if let size = values?.fileSize, Int64(size) >= minimumModelSize {
+                // Directories named with a `.gguf` extension would otherwise
+                // pass the path-extension filter and fail to load; require
+                // `isRegularFile` explicitly.
+                let values = try? candidate.resourceValues(
+                    forKeys: [.isRegularFileKey, .fileSizeKey]
+                )
+                if values?.isRegularFile == true,
+                   let size = values?.fileSize,
+                   Int64(size) >= minimumModelSize {
                     return candidate
                 }
             }

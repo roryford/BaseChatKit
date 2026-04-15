@@ -312,7 +312,12 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> GenerationStream {
-        guard isModelLoaded, let context, let vocab, model != nil else {
+        // The Task body re-reads context under stateLock below to avoid the
+        // use-after-free window between here and `self.generationTask = task`
+        // install. We only need to verify model is loaded up front — the
+        // captured pointers are accessed through the re-read, not these
+        // outer locals.
+        guard isModelLoaded, context != nil, vocab != nil, model != nil else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
         guard !withStateLock({ isGenerating }) else {
@@ -325,15 +330,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
         Self.logger.debug("Llama generate started")
 
-        // Clear KV cache at the start so state from any prior run (including one
-        // terminated by stopGeneration) can't collide with this run's positions.
-        // Context is guaranteed non-nil here by the guard above, so there's no
-        // unload-race exposure that the old tail clear was trying to avoid.
-        if let memory = llama_get_memory(context) {
-            llama_memory_clear(memory, false)
-        }
-
-        // Tokenize prompt
+        // Tokenize prompt (pure vocab lookup — doesn't touch context KV state)
         let tokens = tokenize(prompt, addBos: true)
         guard !tokens.isEmpty else {
             withStateLock { isGenerating = false }
@@ -345,6 +342,14 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: GenerationEvent.self)
         let generationStream = GenerationStream(stream)
 
+        // Hold stateLock across Task creation AND generationTask assignment
+        // (see install block below). The Task body's first action is a
+        // stateLock re-read, which blocks until we release. That guarantees
+        // the Task body cannot observe `self.generationTask == nil` when its
+        // re-read runs — so unloadModel() always either sees the installed
+        // task (and awaits it) or runs entirely before the task's re-read
+        // (and nils `self.context`, causing the task to bail).
+        stateLock.lock()
         let task = Task { [weak self, generationStream] in
             guard let self else {
                 continuation.finish()
@@ -354,6 +359,33 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             defer {
                 self.withStateLock { self.isGenerating = false }
                 Self.logger.debug("Llama generate finished")
+            }
+
+            // Re-acquire context and vocab under stateLock so we serialize
+            // with unloadModel(). The parent installs `generationTask = task`
+            // under stateLock below before releasing; that guarantees either:
+            //   (a) unloadModel() ran first → `self.context` is nil → we bail
+            //       cleanly without touching any freed pointer, or
+            //   (b) the parent installed generationTask first → unloadModel()
+            //       now observes the task and awaits it before calling
+            //       llama_free / llama_model_free on the captured pointers.
+            // Performing all context-touching work (KV clear, decode, sample)
+            // inside this task keeps it under the lifecycle that
+            // unloadModel() already knows how to wait for.
+            let pointers = self.withStateLock { () -> (OpaquePointer, OpaquePointer)? in
+                guard let ctx = self.context, let voc = self.vocab else { return nil }
+                return (ctx, voc)
+            }
+            guard let (context, vocab) = pointers else {
+                continuation.finish()
+                return
+            }
+
+            // Clear KV cache at the start so state from any prior run (including
+            // one terminated by stopGeneration) can't collide with this run's
+            // positions.
+            if let memory = llama_get_memory(context) {
+                llama_memory_clear(memory, false)
             }
 
             // Set up sampler chain
@@ -446,7 +478,13 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             continuation.finish()
         }
 
+        // Assignment and unlock complete the critical section opened above.
+        // unloadModel() will now observe `generationTask` whenever it beats
+        // the task body to the lock — or, if unloadModel() ran fully before
+        // we acquired the lock, the task body's re-read will see nil context
+        // and bail out without touching freed pointers.
         self.generationTask = task
+        stateLock.unlock()
 
         continuation.onTermination = { @Sendable _ in
             task.cancel()

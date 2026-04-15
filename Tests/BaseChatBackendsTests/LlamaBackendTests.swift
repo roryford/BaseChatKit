@@ -232,8 +232,10 @@ final class LlamaBackendTests: XCTestCase {
         for try await _ in stream1.events { }
 
         // The backend flips `isGenerating` to false inside the task's `defer`
-        // block, which may run a tick after the stream finishes. Poll briefly.
-        for _ in 0..<50 where backend.isGenerating {
+        // block, which may run a tick after the stream finishes. Poll until
+        // a deadline so slower hardware or larger GGUFs don't flake.
+        let waitDeadline = ContinuousClock.now + .seconds(2)
+        while backend.isGenerating && ContinuousClock.now < waitDeadline {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertFalse(backend.isGenerating)
