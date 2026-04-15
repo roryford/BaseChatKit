@@ -55,9 +55,23 @@ jobs:
 
           # Verify at least one prose entry exists (bold title followed by em dash)
           if ! echo "$newest_section" | grep -qE '^\*\*[^*]+\*\* —'; then
+            # Find the first candidate prose line so the author can see exactly
+            # what tripped the regex. Common mistakes: period inside the bold
+            # (**Title.** prose), colon after the bold (**Title**: prose), or
+            # a hyphen/en-dash instead of the required em-dash "—".
+            offending_line=$(echo "$newest_section" | grep -m1 -E '^\*\*' || true)
+
             echo ""
             echo "::error::No prose-style entries found in the newest changelog section."
             echo "::error::Each entry should start with: **Bold title** — Description..."
+            echo "::error::The separator must be an em-dash (—), not a period, colon, or hyphen."
+            echo "::error::"
+            echo "::error::Expected format:  **Bold title** — Description of the change..."
+            if [ -n "$offending_line" ]; then
+              echo "::error::Found:            $offending_line"
+            else
+              echo "::error::Found:            (no line starting with ** in the newest section)"
+            fi
             exit 1
           fi
 
