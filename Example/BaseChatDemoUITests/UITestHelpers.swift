@@ -30,28 +30,48 @@ extension XCTestCase {
 
     /// Shows the sidebar if the "Show Sidebar" button is visible (e.g. on iPad or compact layout).
     func showSidebarIfNeeded(app: XCUIApplication) {
-        if app.staticTexts["Chats"].exists {
+        if isSidebarVisible(app: app) {
             return
         }
 
+        // On iPhone compact, NavigationSplitView launches in detail-only mode
+        // and the sidebar toggle button's accessibility frame reaches past the
+        // window's left edge, so `.tap()` on it can deliver an event that
+        // never lands on screen. Try a right-edge coordinate tap as a first
+        // fallback, then a full-width edge swipe as a last resort.
         let sidebarButtons = [
             app.buttons["show-sidebar-button"],
             app.buttons["Show Sidebar"]
         ]
-        for sidebarButton in sidebarButtons where sidebarButton.waitForExistence(timeout: 2) && sidebarButton.isHittable {
-            sidebarButton.tap()
-            if app.staticTexts["Chats"].waitForExistence(timeout: 2)
-                || app.buttons["new-chat-button"].waitForExistence(timeout: 2)
-                || firstSessionRow(app: app).waitForExistence(timeout: 2) {
-                return
+        for sidebarButton in sidebarButtons where sidebarButton.waitForExistence(timeout: 2) {
+            if sidebarButton.isHittable {
+                sidebarButton.tap()
+                if waitForSidebar(app: app) { return }
             }
+
+            sidebarButton.coordinate(withNormalizedOffset: CGVector(dx: 1.0, dy: 0.5)).tap()
+            if waitForSidebar(app: app) { return }
         }
 
+        app.swipeRight()
+        if waitForSidebar(app: app) { return }
+
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: end)
-        _ = app.staticTexts["Chats"].waitForExistence(timeout: 2)
-            || app.buttons["new-chat-button"].waitForExistence(timeout: 2)
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        _ = waitForSidebar(app: app)
+    }
+
+    private func isSidebarVisible(app: XCUIApplication) -> Bool {
+        app.staticTexts["Chats"].exists
+            || app.buttons["new-chat-button"].exists
+            || firstSessionRow(app: app).exists
+    }
+
+    private func waitForSidebar(app: XCUIApplication, timeout: TimeInterval = 2) -> Bool {
+        app.staticTexts["Chats"].waitForExistence(timeout: timeout)
+            || app.buttons["new-chat-button"].waitForExistence(timeout: timeout)
+            || firstSessionRow(app: app).waitForExistence(timeout: timeout)
     }
 
     // MARK: - Chat Detail

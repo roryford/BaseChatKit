@@ -82,6 +82,10 @@ final class SessionManagementUITests: XCTestCase {
 
         newChatButton.tap()
 
+        // On compact, creating a session activates it and collapses to the
+        // detail column, so reveal the sidebar again before counting rows.
+        showSidebarIfNeeded(app: app)
+
         // Wait for the new session to appear
         let cellsAfterPredicate = NSPredicate(format: "count > %d", cellsBefore)
         let cellsQuery = app.cells
@@ -108,9 +112,12 @@ final class SessionManagementUITests: XCTestCase {
             return
         }
 
-        // Create a second session if needed
+        // Create a second session if needed. On compact, the tap activates the
+        // new session and collapses to the detail column, so re-reveal the
+        // sidebar before checking the row count.
         if app.cells.count < 2 {
             newChatButton.tap()
+            showSidebarIfNeeded(app: app)
             _ = app.cells.element(boundBy: 1).waitForExistence(timeout: 3)
         }
 
