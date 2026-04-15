@@ -175,6 +175,45 @@ final class LlamaBackendTests: XCTestCase {
         XCTAssertFalse(backend.isGenerating)
     }
 
+    func test_unloadAndWait_onCleanBackend_returnsQuickly() async {
+        // With nothing loaded, unloadAndWait() must still return without hanging
+        // because the cleanup task is never scheduled.
+        let backend = LlamaBackend()
+        let start = Date()
+        await backend.unloadAndWait()
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertLessThan(elapsed, 1.0,
+                          "unloadAndWait() on a clean backend must return promptly (got \(elapsed * 1000)ms)")
+        XCTAssertFalse(backend.isModelLoaded)
+        XCTAssertFalse(backend.isGenerating)
+    }
+
+    func test_unloadAndWait_isIdempotent() async {
+        // Back-to-back calls must not crash and must leave the backend unloaded.
+        let backend = LlamaBackend()
+        await backend.unloadAndWait()
+        await backend.unloadAndWait()
+        XCTAssertFalse(backend.isModelLoaded)
+        XCTAssertFalse(backend.isGenerating)
+    }
+
+    func test_unloadAndWait_afterFailedLoad_clearsState() async {
+        // unloadAndWait() must clear state identically to unloadModel(), and must
+        // also drain any pending cleanup task before returning. Sabotaging the
+        // implementation to skip the unloadModel() call would leave isModelLoaded
+        // or isGenerating in a stale state if the failed load had set them.
+        let backend = LlamaBackend()
+        let fakeURL = URL(fileURLWithPath: "/nonexistent/model.gguf")
+
+        try? await backend.loadModel(from: fakeURL, contextSize: 2048)
+        await backend.unloadAndWait()
+
+        XCTAssertFalse(backend.isModelLoaded,
+                       "isModelLoaded must be false after unloadAndWait()")
+        XCTAssertFalse(backend.isGenerating,
+                       "isGenerating must be false after unloadAndWait()")
+    }
+
     // MARK: - Stop Generation
 
     func test_stopGeneration_whenNotGenerating_isNoOp() {

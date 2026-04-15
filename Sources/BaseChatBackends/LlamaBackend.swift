@@ -511,6 +511,25 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
     }
 
+    /// Schedules the same tear-down as `unloadModel()` and awaits completion of
+    /// the detached cleanup task that frees the llama.cpp context and model.
+    ///
+    /// Use this before process exit or between back-to-back load cycles when
+    /// deterministic teardown matters. Production code that drops the backend
+    /// and immediately exits can keep calling fire-and-forget `unloadModel()` —
+    /// but tests, programmatic reload loops, and anywhere Metal's `MTLDevice`
+    /// deinit might race with `llama_free` should await this method instead.
+    ///
+    /// Without this, Metal's device tear-down can trip
+    /// `ggml-metal-device.m:612: GGML_ASSERT([rsets->data count] == 0) failed`
+    /// when the context still holds command-buffer resource sets at exit, which
+    /// aborts the process with SIGABRT (swift-test exit code 1 even on a green
+    /// suite). See issue #391.
+    public func unloadAndWait() async {
+        unloadModel()
+        await waitForPendingCleanup()
+    }
+
     // MARK: - Tokenization Helpers
 
     private func waitForPendingCleanup() async {
