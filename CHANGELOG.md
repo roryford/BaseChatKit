@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.1](https://github.com/roryford/BaseChatKit/compare/v0.8.0...v0.8.1) (2026-04-15)
+
+**macOS Model Management sheet and UI test reliability.** Host apps running BaseChatKit on native macOS 26 were seeing the Model Management sheet open with blank content under every tab — Select, Download, and Storage — leaving model selection and downloads unreachable from the demo app. The underlying cause was a SwiftUI layout interaction: a `NavigationStack`/`VStack`/`List` tree inside a macOS sheet has no intrinsic size, so the tab content collapsed to zero height. An explicit minimum frame on the macOS sheet now gives the content stable room to lay out; iOS and iPad are unchanged because they size via `.presentationDetents`. This release also restores macOS demo UI test visibility (the app stayed backgrounded under XCUITest so tests could only see the menu bar) and fixes three flaky iPhone compact session-management tests where the shared sidebar-reveal helper was tapping at an off-screen centroid.
+
+### Bug Fixes
+
+* **ui:** render Model Management sheet tab content on macOS ([#378](https://github.com/roryford/BaseChatKit/issues/378)) ([#381](https://github.com/roryford/BaseChatKit/issues/381)) ([17aa3af](https://github.com/roryford/BaseChatKit/commit/17aa3afc29c70ed0f25d3ba09e4f6a1d201869ab))
+* **ui:** guard macOS demo toolbar and regression-test sheet layout ([#384](https://github.com/roryford/BaseChatKit/issues/384)) ([eca970d](https://github.com/roryford/BaseChatKit/commit/eca970dda22e9de81a55ae974add1688e83c4ef5))
+* **test:** restore macOS demo UI test visibility ([#377](https://github.com/roryford/BaseChatKit/issues/377)) ([#386](https://github.com/roryford/BaseChatKit/pull/386)) ([29e2230](https://github.com/roryford/BaseChatKit/commit/29e223028f1e52f1b87cf5bb406009dac1959fb7))
+* **test:** reveal sidebar reliably on iPhone compact ([#388](https://github.com/roryford/BaseChatKit/pull/388)) ([a7b3a73](https://github.com/roryford/BaseChatKit/commit/a7b3a736c91b6a1eebf63957b10e4830c898007b))
+
 ## [0.8.0](https://github.com/roryford/BaseChatKit/compare/v0.7.8...v0.8.0) (2026-04-14)
 
 **Security hardening pass** — twelve defensive changes across transport, credentials, at-rest data, streaming, and downloads, driven by a framework-wide security architect review. Integrators of BaseChatKit now inherit a measurably tighter default posture: the surface area that a malicious custom endpoint or a tampered download can reach is smaller, errors fail closed where they should, and the public API tells integrators what went wrong instead of silently degrading.
