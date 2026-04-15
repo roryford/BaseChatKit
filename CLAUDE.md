@@ -130,6 +130,14 @@ Release Please auto-creates a release PR after `feat:` or `fix:` merges. The aut
 5. Merge the release PR
 6. Verify the GitHub release notes match (edit with `gh release edit` if needed)
 
+**Format gotcha — the `changelog-lint` CI check is strict.** The first prose line must match `^\*\*[^*]+\*\* — ` (bold title, space, em-dash `—`, space, prose). It's easy to mentally resolve the em-dash as "punctuation after the title" and reach for a period or colon — those fail the lint.
+
+```
+Correct: **Bold title** — prose goes here…
+Wrong:   **Bold title.** prose goes here…   (period inside bold → fails lint)
+Wrong:   **Bold title**: prose goes here…   (colon instead of em-dash → fails lint)
+```
+
 For `feat:` and `fix:` PRs, write the changelog prose in the `## Release Note` section of the PR body at PR creation time, when context is fresh. This is the source material for step 3.
 
 ## PR workflow
