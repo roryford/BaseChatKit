@@ -184,6 +184,81 @@ final class LlamaBackendTests: XCTestCase {
         XCTAssertFalse(backend.isGenerating)
     }
 
+    // MARK: - Regression: Stop Then Regenerate (issue #390)
+
+    /// Regression test for #390: calling `stopGeneration()` used to leave
+    /// the KV cache populated with the prior run's tokens, so the next
+    /// `generate()` failed with `InferenceError.inferenceFailure("Failed to decode prompt")`.
+    ///
+    /// The fix clears the KV cache at the start of `generate()` rather than
+    /// conditionally at the end. This test requires a real GGUF model on
+    /// disk because the bug is in llama.cpp's decode path — it cannot be
+    /// reproduced with a mock.
+    func test_stopGeneration_thenGenerate_succeeds_regression390() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip(
+                "No GGUF model found on disk. Place a `.gguf` file in ~/Documents/Models/ to run this regression test."
+            )
+        }
+
+        let backend = LlamaBackend()
+        defer { backend.unloadModel() }
+
+        try await backend.loadModel(from: modelURL, contextSize: 512)
+        XCTAssertTrue(backend.isModelLoaded)
+
+        // First generation — kick it off, then stop it mid-stream.
+        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 128)
+        let stream1 = try backend.generate(
+            prompt: "Reply with a long story about a cat.",
+            systemPrompt: nil,
+            config: config
+        )
+
+        // Consume a few tokens to ensure generation has actually started
+        // (and the KV cache has been populated) before we stop.
+        var tokenCount = 0
+        for try await event in stream1.events {
+            if case .token = event {
+                tokenCount += 1
+                if tokenCount >= 3 { break }
+            }
+        }
+        XCTAssertGreaterThan(tokenCount, 0, "Expected at least one token before stopping")
+
+        backend.stopGeneration()
+
+        // Drain the stream so isGenerating flips back to false.
+        for try await _ in stream1.events { }
+
+        // The backend flips `isGenerating` to false inside the task's `defer`
+        // block, which may run a tick after the stream finishes. Poll briefly.
+        for _ in 0..<50 where backend.isGenerating {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(backend.isGenerating)
+
+        // Second generation on the same loaded model. Before the fix, this
+        // would throw `InferenceError.inferenceFailure("Failed to decode prompt")`
+        // because the KV cache still held positions from run 1.
+        let stream2 = try backend.generate(
+            prompt: "Say hello.",
+            systemPrompt: nil,
+            config: GenerationConfig(temperature: 0.3, maxOutputTokens: 16)
+        )
+
+        var secondRunTokenCount = 0
+        for try await event in stream2.events {
+            if case .token = event {
+                secondRunTokenCount += 1
+            }
+        }
+
+        XCTAssertGreaterThan(secondRunTokenCount, 0,
+                             "Second generation after stopGeneration() must produce tokens — "
+                             + "if this fails, the KV cache wasn't cleared between runs (#390)")
+    }
+
     // MARK: - Multiple Init/Deinit Cycles
 
     func test_multipleInitDeinit_doesNotCrash() {

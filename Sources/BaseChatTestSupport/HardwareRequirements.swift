@@ -172,6 +172,58 @@ public enum HardwareRequirements {
         return nil
     }
 
+    // MARK: - GGUF Models
+
+    /// Scans common model directories for a loadable `.gguf` file.
+    ///
+    /// Searches the same `Documents/Models/` locations as `findMLXModelDirectory`.
+    /// Returns the URL of the first `.gguf` file found, or `nil`.
+    public static func findGGUFModel() -> URL? {
+        let fm = FileManager.default
+        var searchDirs: [URL] = []
+
+        if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
+            searchDirs.append(docs.appendingPathComponent("Models", isDirectory: true))
+        }
+
+        if let library = fm.urls(for: .libraryDirectory, in: .userDomainMask).first {
+            let containersDir = library.appendingPathComponent("Containers", isDirectory: true)
+            if let containers = try? fm.contentsOfDirectory(
+                at: containersDir,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for container in containers {
+                    let modelsDir = container
+                        .appendingPathComponent("Data/Documents/Models", isDirectory: true)
+                    searchDirs.append(modelsDir)
+                }
+            }
+        }
+
+        // Scan each directory (non-recursively) for a `.gguf` file large enough
+        // to be a real model. Test fixtures elsewhere in these directories can
+        // be as small as a few hundred bytes or a few MB, so require at least
+        // 50 MB — well below any real quantized model and well above any fixture.
+        let minimumModelSize: Int64 = 50 * 1024 * 1024
+        for dir in searchDirs {
+            guard let contents = try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for candidate in contents where candidate.pathExtension.lowercased() == "gguf" {
+                let values = try? candidate.resourceValues(forKeys: [.fileSizeKey])
+                if let size = values?.fileSize, Int64(size) >= minimumModelSize {
+                    return candidate
+                }
+            }
+        }
+
+        return nil
+    }
+
     /// Checks whether a directory looks like a loadable local MLX snapshot.
     ///
     /// A directory must contain:

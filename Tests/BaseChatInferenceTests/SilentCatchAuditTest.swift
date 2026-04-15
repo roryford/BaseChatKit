@@ -95,6 +95,7 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatTestSupport/HardwareRequirements.swift:if let containers = try? fm.contentsOfDirectory(",
         "BaseChatTestSupport/HardwareRequirements.swift:guard let contents = try? fm.contentsOfDirectory(",
         "BaseChatTestSupport/HardwareRequirements.swift:guard let files = try? fileManager.contentsOfDirectory(",
+        "BaseChatTestSupport/HardwareRequirements.swift:let values = try? candidate.resourceValues(forKeys: [.fileSizeKey])",
 
         // Empty `catch { }` blocks. These are best-effort reads whose
         // partial result is still useful; swallowing the error is

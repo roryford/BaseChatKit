@@ -325,6 +325,14 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
         Self.logger.debug("Llama generate started")
 
+        // Clear KV cache at the start so state from any prior run (including one
+        // terminated by stopGeneration) can't collide with this run's positions.
+        // Context is guaranteed non-nil here by the guard above, so there's no
+        // unload-race exposure that the old tail clear was trying to avoid.
+        if let memory = llama_get_memory(context) {
+            llama_memory_clear(memory, false)
+        }
+
         // Tokenize prompt
         let tokens = tokenize(prompt, addBos: true)
         guard !tokens.isEmpty else {
@@ -434,11 +442,6 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             }
 
             await MainActor.run { generationStream.setPhase(.done) }
-
-            // Clear KV cache for next generation (skip if cancelled/unloaded)
-            if !self.withStateLock({ self.cancelled }), let memory = llama_get_memory(context) {
-                llama_memory_clear(memory, false)
-            }
 
             continuation.finish()
         }
