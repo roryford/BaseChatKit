@@ -301,11 +301,6 @@ final class ModelManagementUITests: XCTestCase {
     }
 
     func testSelectingGGUFModelProducesResponse() throws {
-        // FIXME: https://github.com/roryford/BaseChatKit/issues/377
-        // XCTSkipIf(true, ...) (rather than `throw XCTSkip`) keeps the body
-        // below reachable so the compiler keeps type-checking it against
-        // helper changes; remove this guard when #377 is fixed.
-        try XCTSkipIf(true, "Disabled pending fix for #377 — restoration requires native macOS with on-disk models, not iOS Simulator")
         try skipUnlessRealModelE2EEnabled()
         #if !arch(arm64)
         throw XCTSkip("GGUF backend (llama.cpp) requires Apple Silicon")
@@ -318,8 +313,6 @@ final class ModelManagementUITests: XCTestCase {
     }
 
     func testSelectingMLXModelProducesResponse() throws {
-        // FIXME: https://github.com/roryford/BaseChatKit/issues/377
-        try XCTSkipIf(true, "Disabled pending fix for #377 — restoration requires native macOS with on-disk models, not iOS Simulator")
         try skipUnlessRealModelE2EEnabled()
         #if !arch(arm64)
         throw XCTSkip("MLX backend requires Apple Silicon")
@@ -332,8 +325,6 @@ final class ModelManagementUITests: XCTestCase {
     }
 
     func testSelectingFoundationModelProducesResponse() throws {
-        // FIXME: https://github.com/roryford/BaseChatKit/issues/377
-        try XCTSkipIf(true, "Disabled pending fix for #377 — restoration requires native macOS, not iOS Simulator")
         try skipUnlessRealModelE2EEnabled()
 
         guard #available(macOS 26, iOS 26, *) else {
