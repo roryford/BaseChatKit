@@ -316,4 +316,86 @@ extension XCTestCase {
             topCoordinate.press(forDuration: 0.05, thenDragTo: bottomCoordinate)
         }
     }
+
+    // MARK: - Real-Model E2E Helpers
+    //
+    // These helpers support hardware-gated end-to-end tests that load real
+    // on-disk models (GGUF / MLX / Apple Foundation) through the real UI and
+    // verify that a streamed response actually appears. They are NOT meant for
+    // unit-test usage — the timeouts are generous because real model loads can
+    // take 10–30 seconds and generation can take another 30–120 seconds.
+
+    /// Falls back through buttons / cells / otherElements because
+    /// `accessibilityElement(children: .combine)` can flatten the row into a
+    /// non-button element on some platforms.
+    func findModelRow(in app: XCUIApplication, containing needle: String) -> XCUIElement? {
+        let predicate = NSPredicate(format: "label CONTAINS[c] %@", needle)
+
+        let buttonMatch = app.buttons.matching(predicate).firstMatch
+        if buttonMatch.waitForExistence(timeout: 5) {
+            return buttonMatch
+        }
+
+        let cellMatch = app.cells.matching(predicate).firstMatch
+        if cellMatch.exists {
+            return cellMatch
+        }
+
+        let otherMatch = app.otherElements.matching(predicate).firstMatch
+        if otherMatch.exists {
+            return otherMatch
+        }
+
+        return nil
+    }
+
+    /// Default timeout is 60s — enough for a cold MLX or GGUF load on Apple
+    /// Silicon. The input transitions through "exists but disabled" while the
+    /// model loads, so we re-check `isEnabled && isHittable` each iteration.
+    func waitForChatInputReady(app: XCUIApplication, timeout: TimeInterval = 60) -> Bool {
+        let messageInput = app.textFields["Message input"]
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            if messageInput.waitForExistence(timeout: 1),
+               messageInput.isEnabled,
+               messageInput.isHittable {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    /// Verifies *some* non-empty content appears beyond the "Assistant said: "
+    /// accessibility prefix; specific content is not asserted because real
+    /// models are non-deterministic.
+    func sendPromptAndAwaitResponse(
+        app: XCUIApplication,
+        prompt: String,
+        responseTimeout: TimeInterval = 120
+    ) -> Bool {
+        let messageInput = app.textFields["Message input"]
+        guard messageInput.waitForExistence(timeout: 5), messageInput.isHittable else {
+            return false
+        }
+
+        messageInput.tap()
+        messageInput.typeText(prompt)
+
+        let sendButton = app.buttons["Send message"]
+        guard sendButton.waitForExistence(timeout: 5), sendButton.isEnabled else {
+            return false
+        }
+        sendButton.tap()
+
+        let assistantPredicate = NSPredicate(format: "label BEGINSWITH[c] 'Assistant said:'")
+        let assistantBubble = app.otherElements.matching(assistantPredicate).firstMatch
+
+        guard assistantBubble.waitForExistence(timeout: responseTimeout) else {
+            return false
+        }
+
+        return assistantBubble.label.count > "Assistant said: ".count
+    }
 }
