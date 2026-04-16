@@ -226,6 +226,32 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
     }
 
+    /// Returns the maximum context size (in tokens) that is safe to allocate given
+    /// the memory available to this process.
+    ///
+    /// On iOS/iPadOS, `os_proc_available_memory()` returns the per-app jetsam budget —
+    /// the number of bytes the process can allocate before the system kills it. This is
+    /// typically ~3 GB on an 8 GB iPad, regardless of how much physical RAM exists.
+    /// Using physical memory here would produce a meaningless cap (e.g., 128 000 on
+    /// every modern device) and defeat the purpose of the guard.
+    ///
+    /// On macOS there is no per-app jetsam limit, so physical memory is the right ceiling.
+    ///
+    /// 1 token ≈ 8 KB of KV cache; the result is clamped to 128 000 as an absolute ceiling.
+    static func computeRamSafeCap() -> Int32 {
+        let kvBytesPerToken: Int64 = 8_192  // 8 KB/token — matches DeviceCapabilityService
+        #if os(iOS) || os(tvOS) || os(watchOS)
+        let available = os_proc_available_memory()
+        // os_proc_available_memory() can return 0 or negative in edge cases (simulator boot);
+        // fall through to the physical-memory path if that happens.
+        if available > 0 {
+            return Int32(min(Int64(128_000), Int64(available) / kvBytesPerToken))
+        }
+        #endif
+        let physical = Int64(ProcessInfo.processInfo.physicalMemory)
+        return Int32(min(Int64(128_000), physical / kvBytesPerToken))
+    }
+
     private static func initializeModel(
         at url: URL,
         requestedContextSize: Int32,
@@ -275,17 +301,59 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         // Respect the model's actual training context length — hard-capping at 8192
         // prevents long-context models (32K–128K) from using their full window.
         let trainedContextLength = Int32(llama_model_n_ctx_train(rawModel))
-        // Device-safe cap: 1 token ≈ 8 KB of KV cache (2 KB per layer element × 4 bytes);
-        // physicalMemory / 8 192 gives the token count that would exhaust all RAM,
-        // clamped to 128 000 as an absolute ceiling.
-        let availableRAM = Int64(ProcessInfo.processInfo.physicalMemory)
-        let ramSafeCap = Int32(min(Int64(128_000), availableRAM / (2 * 1024 * 4)))
+        // On iOS the per-app jetsam limit is a fraction of physical RAM (~3 GB on an 8 GB
+        // iPad), so we derive the cap from os_proc_available_memory() rather than total
+        // physical memory. On macOS there is no per-app cap, so physical memory is used.
+        // 1 token ≈ 8 KB of KV cache; clamped to 128 000 as an absolute ceiling.
+        let ramSafeCap = Self.computeRamSafeCap()
         let effectiveContextSize = min(requestedContextSize, trainedContextLength, ramSafeCap)
-        ctxParams.n_ctx = UInt32(effectiveContextSize)
         ctxParams.n_threads = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
         ctxParams.n_threads_batch = ctxParams.n_threads
 
-        guard let ctx = llama_init_from_model(rawModel, ctxParams) else {
+        Self.logger.info(
+            "LlamaBackend: RAM-safe cap = \(ramSafeCap) tokens (effective = \(effectiveContextSize))"
+        )
+
+        // Retry with progressively halved context on init failure.
+        //
+        // When llama_init_from_model returns nil, the most common cause is a failed
+        // KV-cache allocation. Halving the context reduces KV memory by 50% per attempt.
+        // We retry up to 2 additional times (3 total), stopping at a floor of 1 024 tokens.
+        //
+        // Caveat: on iOS, a jetsam SIGKILL fires before llama_init_from_model returns,
+        // so this retry only helps for clean-nil cases (macOS allocation failure, or iOS
+        // near-threshold failures that return nil rather than being killed). It is
+        // defense-in-depth, not a guarantee against jetsam.
+        var n_ctx = effectiveContextSize
+        let contextFloor: Int32 = 1024
+        let maxAttempts = 3
+        var contextHandle: LlamaContextHandle?
+        for attempt in 1...maxAttempts {
+            ctxParams.n_ctx = UInt32(n_ctx)
+            if let ctx = llama_init_from_model(rawModel, ctxParams) {
+                if attempt > 1 {
+                    Self.logger.info(
+                        "LlamaBackend: context init succeeded on attempt \(attempt) with \(n_ctx) tokens"
+                    )
+                }
+                contextHandle = LlamaContextHandle(
+                    context: ctx,
+                    vocab: llama_model_get_vocab(rawModel)
+                )
+                break
+            }
+            let nextCtx = max(n_ctx / 2, contextFloor)
+            if nextCtx == n_ctx {
+                // Already at the floor and still failing; stop.
+                break
+            }
+            Self.logger.warning(
+                "LlamaBackend: llama_init_from_model failed at \(n_ctx) tokens (attempt \(attempt)/\(maxAttempts)); retrying with \(nextCtx)"
+            )
+            n_ctx = nextCtx
+        }
+
+        guard let contextHandle else {
             // modelHandle goes out of scope here → llama_model_free called automatically
             throw InferenceError.modelLoadFailed(underlying: NSError(
                 domain: "LlamaBackend",
@@ -294,14 +362,11 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             ))
         }
 
-        let contextHandle = LlamaContextHandle(
-            context: ctx,
-            vocab: llama_model_get_vocab(rawModel)
-        )
+        // n_ctx reflects the context size that was successfully allocated.
         return LoadedResources(
             model: modelHandle,
             context: contextHandle,
-            effectiveContextSize: effectiveContextSize
+            effectiveContextSize: n_ctx
         )
     }
 

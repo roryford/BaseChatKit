@@ -7,6 +7,24 @@ final class DeviceCapabilityServiceTests: XCTestCase {
 
     private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
 
+    /// Compute what safeContextSize should produce for a given set of inputs,
+    /// mirroring the formula in DeviceCapabilityService so tests stay coupled
+    /// to the spec, not a specific constant layout.
+    private func expectedSafeContext(
+        availableBytes: UInt64,
+        detectedLength: Int?,
+        absoluteCeiling: Int = 128_000,
+        unknownDefault: Int = 8_192,
+        kvBytesPerToken: UInt64 = 8_192,
+        headroomFraction: Double = 0.40
+    ) -> Int32 {
+        let kvBudget = UInt64(Double(availableBytes) * (1.0 - headroomFraction))
+        let memoryCeiling = Int(kvBudget / kvBytesPerToken)
+        let trainedCeiling = detectedLength ?? unknownDefault
+        let result = min(memoryCeiling, trainedCeiling, absoluteCeiling)
+        return Int32(max(1, result))
+    }
+
     private func makeService(ramGB: UInt64) -> DeviceCapabilityService {
         DeviceCapabilityService(physicalMemory: ramGB * oneGB)
     }
@@ -67,6 +85,95 @@ final class DeviceCapabilityServiceTests: XCTestCase {
         let description = service.deviceDescription
         XCTAssertTrue(description.contains("16 GB RAM"),
                       "Expected '16 GB RAM' in description, got: \(description)")
+    }
+
+    // MARK: - safeContextSize
+
+    func test_safeContextSize_clampsBelowDetectedLength() {
+        // When available memory yields a ceiling below the model's trained length,
+        // the memory ceiling wins — not the trained length.
+        //
+        // 1 GB available × 60% KV budget = 614 MB → 614 MB / 8 KB = ~75 000 tokens
+        // Trained length = 128 000 → clamped to ~75 000.
+        let available = oneGB
+        let result = DeviceCapabilityService.safeContextSize(
+            for: 128_000,
+            availableMemoryBytes: available
+        )
+        let expected = expectedSafeContext(availableBytes: available, detectedLength: 128_000)
+        XCTAssertEqual(result, expected,
+                       "Should clamp to memory ceiling when model context exceeds available-memory budget")
+        XCTAssertLessThan(result, 128_000,
+                          "Result must be less than the model's trained length when memory is the bottleneck")
+    }
+
+    func test_safeContextSize_respectsModelTrainedContext() {
+        // When available memory is abundant (64 GB), the trained context length is the binding constraint.
+        let abundant: UInt64 = 64 * oneGB
+        let trained = 4096
+        let result = DeviceCapabilityService.safeContextSize(
+            for: trained,
+            availableMemoryBytes: abundant
+        )
+        XCTAssertEqual(result, Int32(trained),
+                       "When memory is abundant, the model's trained context length must be the ceiling")
+    }
+
+    func test_safeContextSize_fallbackWhenDetectedContextIsNil() {
+        // When detectedContextLength is nil, the helper should use the 8 192 default,
+        // not the old 2 048 that ChatViewModel previously used.
+        //
+        // With 64 GB available (abundant), the result should equal the default (8 192).
+        let abundant: UInt64 = 64 * oneGB
+        let result = DeviceCapabilityService.safeContextSize(
+            for: nil,
+            availableMemoryBytes: abundant
+        )
+        XCTAssertEqual(result, 8_192,
+                       "Nil detectedContextLength must fall back to the 8 192 default, not 2 048")
+    }
+
+    func test_safeContextSize_neverExceedsAbsoluteCeiling() {
+        // Even with unlimited memory and a trained context of 1 000 000, the result
+        // is capped at 128 000.
+        let unlimited: UInt64 = 512 * oneGB
+        let result = DeviceCapabilityService.safeContextSize(
+            for: 1_000_000,
+            availableMemoryBytes: unlimited
+        )
+        XCTAssertLessThanOrEqual(result, 128_000,
+                                 "safeContextSize must never exceed the 128 000 absolute ceiling")
+    }
+
+    func test_safeContextSize_respectsAvailableMemory() {
+        // With 512 MB available (simulating extreme iOS memory pressure), the result
+        // must be far below the model's 128 000 trained length.
+        //
+        // 512 MB × 60% KV budget = 307 MB → 307 MB / 8 KB ≈ 39 321 tokens.
+        let halfGB: UInt64 = oneGB / 2
+        let result = DeviceCapabilityService.safeContextSize(
+            for: 128_000,
+            availableMemoryBytes: halfGB
+        )
+        let expected = expectedSafeContext(availableBytes: halfGB, detectedLength: 128_000)
+        XCTAssertEqual(result, expected,
+                       "Should apply memory ceiling from available bytes, not physical RAM")
+
+        // Sabotage check: if we removed the memory ceiling and returned just the trained
+        // context, the result would be 128 000. Verify the actual result is less.
+        XCTAssertLessThan(result, 128_000,
+                          "512 MB budget should constrain context well below 128 000 tokens")
+    }
+
+    func test_safeContextSize_floorsAtOne_whenAvailableMemoryIsNearZero() {
+        // Pathological case: essentially no memory available — result should be 1, not 0 or negative.
+        let nearZero: UInt64 = 1000
+        let result = DeviceCapabilityService.safeContextSize(
+            for: 128_000,
+            availableMemoryBytes: nearZero
+        )
+        XCTAssertGreaterThanOrEqual(result, 1,
+                                    "safeContextSize must floor at 1 even in near-zero memory conditions")
     }
 
     // MARK: - ModelSizeRecommendation.maxModelBytes
