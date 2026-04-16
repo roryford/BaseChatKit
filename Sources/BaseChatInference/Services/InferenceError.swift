@@ -8,6 +8,11 @@ public enum InferenceError: LocalizedError {
     case memoryInsufficient(required: UInt64, available: UInt64)
     case alreadyGenerating
     case generationError(String)
+    /// Thrown by backends when `prompt_tokens + maxOutputTokens` exceeds the
+    /// loaded model's effective context window. Surfaced up front so callers
+    /// can trim history or reduce `maxOutputTokens` instead of seeing an
+    /// opaque decode failure mid-stream once the KV cache runs out.
+    case contextExhausted(promptTokens: Int, maxOutputTokens: Int, contextSize: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -25,6 +30,8 @@ public enum InferenceError: LocalizedError {
             return "Cannot start generation while another generation is in progress"
         case .generationError(let message):
             return "Generation error: \(message)"
+        case .contextExhausted(let promptTokens, let maxOutputTokens, let contextSize):
+            return "Prompt (\(promptTokens) tokens) plus requested output (\(maxOutputTokens) tokens) exceeds context window (\(contextSize) tokens)."
         }
     }
 
@@ -38,7 +45,7 @@ public enum InferenceError: LocalizedError {
         case .alreadyGenerating:
             return true
         case .modelNotFound, .modelLoadFailed, .inferenceFailure,
-             .memoryInsufficient, .generationError:
+             .memoryInsufficient, .generationError, .contextExhausted:
             return false
         }
     }

@@ -493,20 +493,31 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             throw InferenceError.alreadyGenerating
         }
 
+        // Tokenize up front (pure vocab lookup — doesn't touch context KV
+        // state) so we can preflight prompt + output against the context
+        // window before flipping `isGenerating`. If we failed this check
+        // after the flip, callers who retry on `.contextExhausted` would see
+        // an unnecessary `.alreadyGenerating` on the next call.
+        let tokens = tokenize(prompt, addBos: true)
+        guard !tokens.isEmpty else {
+            throw InferenceError.inferenceFailure("Failed to tokenize prompt")
+        }
+
+        let maxTokens = config.maxOutputTokens ?? 2048
+        let contextSize = Int(withStateLock { _effectiveContextSize })
+        guard tokens.count + maxTokens <= contextSize else {
+            throw InferenceError.contextExhausted(
+                promptTokens: tokens.count,
+                maxOutputTokens: maxTokens,
+                contextSize: contextSize
+            )
+        }
+
         withStateLock {
             isGenerating = true
             cancelled = false
         }
         Self.logger.debug("Llama generate started")
-
-        // Tokenize prompt (pure vocab lookup — doesn't touch context KV state)
-        let tokens = tokenize(prompt, addBos: true)
-        guard !tokens.isEmpty else {
-            withStateLock { isGenerating = false }
-            throw InferenceError.inferenceFailure("Failed to tokenize prompt")
-        }
-
-        let maxTokens = config.maxOutputTokens ?? 2048
 
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: GenerationEvent.self)
         let generationStream = GenerationStream(stream)
