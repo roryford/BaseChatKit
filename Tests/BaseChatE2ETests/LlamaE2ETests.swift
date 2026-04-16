@@ -205,7 +205,7 @@ final class LlamaE2ETests: XCTestCase {
         // both conditions at once — load a dedicated backend at 4096.
         let modelURL = try XCTUnwrap(HardwareRequirements.findGGUFModel())
         let dedicatedBackend = LlamaBackend()
-        defer { dedicatedBackend.unloadModel() }
+        addTeardownBlock { await dedicatedBackend.unloadAndWait() }
         try await dedicatedBackend.loadModel(from: modelURL, contextSize: 4096)
 
         // ~2 500 tokens of repeated text — comfortably above the 2 048 n_batch
@@ -232,7 +232,7 @@ final class LlamaE2ETests: XCTestCase {
     func test_realInference_preflight_throwsContextExhausted() async throws {
         let modelURL = try XCTUnwrap(HardwareRequirements.findGGUFModel())
         let dedicatedBackend = LlamaBackend()
-        defer { dedicatedBackend.unloadModel() }
+        addTeardownBlock { await dedicatedBackend.unloadAndWait() }
         try await dedicatedBackend.loadModel(from: modelURL, contextSize: 2048)
 
         // ~1 800-token prompt plus a 1 000-token max output blows the
