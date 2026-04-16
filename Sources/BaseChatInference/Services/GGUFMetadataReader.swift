@@ -359,6 +359,10 @@ struct GGUFMetadataReader {
     ) -> String? {
         guard key.hasSuffix(suffix) else { return nil }
         let prefix = String(key.dropLast(suffix.count))
+        // GGUF architecture names are single identifiers (llama, phi, gemma, …).
+        // Reject multi-component prefixes so keys like `general.custom.context_length`
+        // don't poison inferredArchitecture with "general.custom".
+        guard !prefix.isEmpty, !prefix.contains(".") else { return nil }
         guard expectedArchitecture == nil || expectedArchitecture == prefix else {
             return nil
         }

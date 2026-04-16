@@ -139,24 +139,24 @@ final class LlamaBackendTests: XCTestCase {
     func test_contextSize_capLogic_ramSafeCapCalculation() {
         // Validates computeRamSafeCap() — the RAM-safe cap helper used in initializeModel.
         //
-        // On macOS (where CI runs), the cap is derived from physical memory divided by the
-        // effective KV bytes/token estimate. Use a guaranteed-large override so the result
-        // tightens even on very high-RAM developer machines where 128 KB/token still hits
-        // the 128K absolute ceiling.
-        let legacyCap = LlamaBackend.computeRamSafeCap(
-            kvBytesPerToken: Int64(GGUFKVCacheEstimator.legacyFallbackBytesPerToken)
-        )
-        let tighteningEstimate = max(
-            Int64(131_072),
-            Int64(ProcessInfo.processInfo.physicalMemory / 64_000) + 1
-        )
-        let ramSafeCap = LlamaBackend.computeRamSafeCap(kvBytesPerToken: tighteningEstimate)
+        // The cap is `min(128_000, memoryAvailable / kvBytesPerToken)`. To keep the
+        // monotonicity assertion meaningful on arbitrarily large hosts, we derive
+        // `largeEstimate` from physical RAM so the result lands strictly below the
+        // 128K absolute ceiling regardless of how much memory the CI runner has.
+        let legacyEstimate: Int64 = Int64(GGUFKVCacheEstimator.legacyFallbackBytesPerToken)
+        let physical = Int64(ProcessInfo.processInfo.physicalMemory)
+        // Guarantees physical / largeEstimate < 64_000 → sub-ceiling on any host.
+        let largeEstimate = max(Int64(131_072), physical / 64_000 + 1)
+
+        let legacyCap = LlamaBackend.computeRamSafeCap(kvBytesPerToken: legacyEstimate)
+        let ramSafeCap = LlamaBackend.computeRamSafeCap(kvBytesPerToken: largeEstimate)
+
         XCTAssertGreaterThan(ramSafeCap, 0,
                              "RAM-safe cap must be positive; formula may have underflowed")
         XCTAssertLessThanOrEqual(ramSafeCap, 128_000,
-                                  "RAM-safe cap must not exceed the absolute maximum of 128_000")
+                                 "RAM-safe cap must not exceed the absolute maximum of 128_000")
         XCTAssertLessThan(ramSafeCap, legacyCap,
-                          "A realistic KV estimate should clamp harder than the legacy 8 KB heuristic")
+                          "A larger per-token KV estimate must clamp harder than a smaller one")
         // A small requested size still wins when it is the smallest of the three values.
         let requested = Int32(512)
         let effective = min(requested, Int32(32_000), ramSafeCap)

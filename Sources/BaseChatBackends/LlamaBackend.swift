@@ -326,6 +326,9 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         return Int(rawValue)
     }
 
+    /// Looks up a short scalar/identifier metadata value (architecture name, integer-as-string).
+    /// Not suitable for long values like chat templates — the 4 KB cap silently returns `nil`
+    /// when the value is larger.
     private static func modelMetadataString(for model: OpaquePointer, key: String) -> String? {
         var bufferSize = 64
 
@@ -406,7 +409,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         // iPad), so we derive the cap from os_proc_available_memory() rather than total
         // physical memory. On macOS there is no per-app cap, so physical memory is used.
         let kvBytesPerToken = Self.computeKVBytesPerToken(for: rawModel)
-        let ramSafeCap = Self.computeRamSafeCap(for: rawModel, kvBytesPerToken: kvBytesPerToken)
+        let ramSafeCap = Self.computeRamSafeCap(kvBytesPerToken: kvBytesPerToken)
         let effectiveContextSize = min(requestedContextSize, trainedContextLength, ramSafeCap)
         ctxParams.n_threads = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
         ctxParams.n_threads_batch = ctxParams.n_threads
