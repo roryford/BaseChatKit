@@ -54,12 +54,16 @@ public final class DeviceCapabilityService: Sendable {
     /// is a fraction of physical RAM, so we must budget from available memory, not physical.
     private static let kvHeadroomFraction: Double = 0.40
 
-    /// Conservative KV-cache cost per context token in bytes.
+    /// Conservative-but-imprecise KV-cache cost per context token in bytes.
     ///
-    /// Derived from llama.cpp's own estimate: 2 KV elements per layer at 4 bytes each
-    /// (fp16), multiplied by ~32 transformer layers for a typical 7B model ≈ 256 KB/token.
-    /// Rounding up to 8 KB/token accounts for additional working buffers and variance
-    /// across model architectures. This matches the constant used in `LlamaBackend`.
+    /// This value (8 KB/token) is preserved from the legacy `LlamaBackend` RAM-safe
+    /// cap and is deliberately much smaller than the real KV cost on modern models —
+    /// a 7B GQA model, for example, uses ~128 KB/token at fp16. The intent here is
+    /// only a coarse jetsam-avoidance heuristic, not a faithful KV estimate.
+    ///
+    /// Proper per-architecture KV math — using `llama_model_n_layer`,
+    /// `llama_model_n_embd_k_gqa`, and the active quantization — is tracked as
+    /// follow-up work (see issue for per-architecture KV calculation).
     private static let kvBytesPerToken: UInt64 = 8_192
 
     /// Absolute maximum context tokens we will ever request, regardless of model or device.
