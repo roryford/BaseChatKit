@@ -193,5 +193,32 @@ final class LlamaE2ETests: XCTestCase {
         XCTAssertTrue(backend.capabilities.supportsSystemPrompt)
         XCTAssertTrue(backend.capabilities.requiresPromptTemplate)
     }
+
+    func test_realModel_architecturalClamp_isTighterThanLegacyHeuristic() throws {
+        let model = try XCTUnwrap(ModelInfo(ggufURL: modelURL))
+        let trainedContext = try XCTUnwrap(model.detectedContextLength)
+        let estimatedKVBytesPerToken = try XCTUnwrap(model.estimatedKVBytesPerToken)
+        let availableMemory = DeviceCapabilityService.queryAvailableMemory()
+
+        let architecturalClamp = DeviceCapabilityService.safeContextSize(
+            for: trainedContext,
+            availableMemoryBytes: availableMemory,
+            estimatedKVBytesPerToken: estimatedKVBytesPerToken
+        )
+        let legacyClamp = DeviceCapabilityService.safeContextSize(
+            for: trainedContext,
+            availableMemoryBytes: availableMemory,
+            estimatedKVBytesPerToken: GGUFKVCacheEstimator.legacyFallbackBytesPerToken
+        )
+
+        if architecturalClamp == legacyClamp {
+            throw XCTSkip(
+                "Selected GGUF fixture does not expose a tighter architectural clamp on this device"
+            )
+        }
+
+        XCTAssertLessThan(architecturalClamp, legacyClamp,
+                          "Real 7B-class GGUFs should clamp below the legacy 8 KB/token heuristic")
+    }
 }
 #endif

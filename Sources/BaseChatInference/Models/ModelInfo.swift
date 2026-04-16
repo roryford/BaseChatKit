@@ -29,6 +29,8 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
     public var modelArchitecture: String?
     /// The raw Jinja chat template string from `tokenizer.chat_template`, if present.
     public var chatTemplateRaw: String?
+    /// Best-effort KV-cache bytes-per-token estimate derived from GGUF metadata.
+    public var estimatedKVBytesPerToken: UInt64?
 
     // MARK: - Capability
 
@@ -100,6 +102,7 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
             self.detectedContextLength = metadata.contextLength
             self.modelArchitecture = metadata.generalArchitecture
             self.chatTemplateRaw = metadata.chatTemplate
+            self.estimatedKVBytesPerToken = GGUFKVCacheEstimator.estimateBytesPerToken(from: metadata)
         }
 
         // Static tier estimate; may be upgraded by a benchmark result later.
@@ -175,6 +178,7 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         detectedContextLength: Int? = nil,
         modelArchitecture: String? = nil,
         chatTemplateRaw: String? = nil,
+        estimatedKVBytesPerToken: UInt64? = nil,
         capabilityTier: ModelCapabilityTier? = nil,
         benchmarkResult: ModelBenchmarkResult? = nil
     ) {
@@ -188,6 +192,7 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         self.detectedContextLength = detectedContextLength
         self.modelArchitecture = modelArchitecture
         self.chatTemplateRaw = chatTemplateRaw
+        self.estimatedKVBytesPerToken = estimatedKVBytesPerToken
         self.capabilityTier = capabilityTier
         self.benchmarkResult = benchmarkResult
     }

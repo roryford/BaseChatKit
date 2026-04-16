@@ -77,6 +77,33 @@ final class GGUFMetadataReaderTests: XCTestCase {
         XCTAssertEqual(metadata.fileType, 7)
     }
 
+    func test_readMetadata_validV3Header_extractsKVCacheParameters() throws {
+        let data = makeGGUFV3Header(metadata: [
+            makeStringKV(key: "general.architecture", value: "llama"),
+            makeUInt32KV(key: "llama.block_count", value: 32),
+            makeUInt32KV(key: "llama.embedding_length", value: 4096),
+            makeUInt32KV(key: "llama.attention.head_count", value: 32),
+            makeUInt32KV(key: "llama.attention.head_count_kv", value: 8),
+            makeUInt32KV(key: "llama.attention.key_length", value: 128),
+            makeUInt32KV(key: "llama.attention.value_length", value: 128)
+        ])
+        let url = try writeTempFile(named: "kv-params.gguf", data: data)
+
+        let metadata = try GGUFMetadataReader.readMetadata(from: url)
+
+        XCTAssertEqual(
+            metadata.kvCacheParameters,
+            GGUFKVCacheParameters(
+                blockCount: 32,
+                embeddingLength: 4096,
+                attentionHeadCount: 32,
+                attentionHeadCountKV: 8,
+                attentionKeyLength: 128,
+                attentionValueLength: 128
+            )
+        )
+    }
+
     func test_readMetadata_validV3Header_multipleKeys() throws {
         let data = makeGGUFV3Header(metadata: [
             makeStringKV(key: "general.name", value: "MyLlama"),

@@ -209,7 +209,8 @@ extension ChatViewModel {
             // (the per-app budget) and physical memory on macOS, then applies a 60% KV
             // budget after reserving 40% headroom for model weights and runtime.
             let contextSize = DeviceCapabilityService.safeContextSize(
-                for: model.detectedContextLength
+                for: model.detectedContextLength,
+                estimatedKVBytesPerToken: model.estimatedKVBytesPerToken
             )
             try await inferenceService.loadModel(from: model, contextSize: contextSize)
         } catch is CancellationError {
