@@ -187,6 +187,41 @@ final class LlamaE2ETests: XCTestCase {
         XCTAssertFalse(response.isEmpty, "Should still generate some output")
     }
 
+    // MARK: - Long-prompt regressions
+
+    /// Regression for the n_batch chunking fix: prompts longer than llama.cpp's
+    /// default `n_batch` (2 048 tokens) used to trip
+    /// `GGML_ASSERT(n_tokens_all <= cparams.n_batch)` in `llama-context.cpp`,
+    /// aborting the process. The fix strides the prompt decode in
+    /// `llama_n_batch`-sized chunks so any prompt that fits the context window
+    /// runs cleanly.
+    func test_realInference_longPrompt_exceedsNBatch_doesNotCrash() async throws {
+        // ~2 500 tokens of repeated text — comfortably above the 2 048 default
+        // n_batch but well under the shared backend's 2 048 context? The shared
+        // backend is loaded at contextSize: 2048. We need the prompt > n_batch
+        // (2048) and prompt + maxOutputTokens <= contextSize. The shared
+        // fixture loads at 2048, so this test alone can't both exceed n_batch
+        // *and* fit the context. Load a dedicated backend at a higher context.
+        let modelURL = try XCTUnwrap(HardwareRequirements.findGGUFModel())
+        let dedicatedBackend = LlamaBackend()
+        defer { dedicatedBackend.unloadModel() }
+        try await dedicatedBackend.loadModel(from: modelURL, contextSize: 4096)
+
+        let longInput = String(repeating: "The quick brown fox jumps over the lazy dog. ", count: 250)
+        let formattedPrompt = PromptTemplate.chatML.format(
+            messages: [(role: "user", content: longInput)],
+            systemPrompt: nil
+        )
+        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 32)
+        let stream = try dedicatedBackend.generate(
+            prompt: formattedPrompt,
+            systemPrompt: nil,
+            config: config
+        )
+        let response = try await collectTokens(stream)
+        XCTAssertFalse(response.isEmpty, "Long prompts that span multiple n_batch chunks should generate a response")
+    }
+
     func test_backendCapabilities() {
         XCTAssertTrue(backend.capabilities.supportsStreaming)
         XCTAssertFalse(backend.capabilities.isRemote)
