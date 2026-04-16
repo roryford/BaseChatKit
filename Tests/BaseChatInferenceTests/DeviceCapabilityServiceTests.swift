@@ -165,6 +165,30 @@ final class DeviceCapabilityServiceTests: XCTestCase {
                           "512 MB budget should constrain context well below 128 000 tokens")
     }
 
+    func test_safeContextSize_usesArchitecturalKVEstimateWhenProvided() {
+        let available = oneGB
+        let architecturalEstimate: UInt64 = 131_072
+
+        let result = DeviceCapabilityService.safeContextSize(
+            for: 128_000,
+            availableMemoryBytes: available,
+            estimatedKVBytesPerToken: architecturalEstimate
+        )
+        let expected = expectedSafeContext(
+            availableBytes: available,
+            detectedLength: 128_000,
+            kvBytesPerToken: architecturalEstimate
+        )
+        let legacy = DeviceCapabilityService.safeContextSize(
+            for: 128_000,
+            availableMemoryBytes: available
+        )
+
+        XCTAssertEqual(result, expected)
+        XCTAssertLessThan(result, legacy,
+                          "A realistic GGUF KV estimate should tighten the clamp versus the legacy 8 KB heuristic")
+    }
+
     func test_safeContextSize_floorsAtOne_whenAvailableMemoryIsNearZero() {
         // Pathological case: essentially no memory available — result should be 1, not 0 or negative.
         let nearZero: UInt64 = 1000

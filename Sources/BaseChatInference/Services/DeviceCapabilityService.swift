@@ -54,17 +54,9 @@ public final class DeviceCapabilityService: Sendable {
     /// is a fraction of physical RAM, so we must budget from available memory, not physical.
     private static let kvHeadroomFraction: Double = 0.40
 
-    /// Conservative-but-imprecise KV-cache cost per context token in bytes.
-    ///
-    /// This value (8 KB/token) is preserved from the legacy `LlamaBackend` RAM-safe
-    /// cap and is deliberately much smaller than the real KV cost on modern models —
-    /// a 7B GQA model, for example, uses ~128 KB/token at fp16. The intent here is
-    /// only a coarse jetsam-avoidance heuristic, not a faithful KV estimate.
-    ///
-    /// Proper per-architecture KV math — using `llama_model_n_layer`,
-    /// `llama_model_n_embd_k_gqa`, and the active quantization — is tracked as
-    /// follow-up work (see issue for per-architecture KV calculation).
-    private static let kvBytesPerToken: UInt64 = 8_192
+    /// Legacy fallback used when GGUF metadata is missing the architectural fields
+    /// required for a more realistic KV-cache estimate.
+    private static let legacyFallbackKVBytesPerToken = GGUFKVCacheEstimator.legacyFallbackBytesPerToken
 
     /// Absolute maximum context tokens we will ever request, regardless of model or device.
     private static let absoluteContextCeiling: Int = 128_000
@@ -102,17 +94,23 @@ public final class DeviceCapabilityService: Sendable {
     ///     Pass `nil` when unknown — the method falls back to `unknownContextDefault` (8 192).
     ///   - availableMemoryBytes: Available memory in bytes. When `nil`, the method queries
     ///     the system itself — useful for injection in tests.
+    ///   - estimatedKVBytesPerToken: Best-effort per-token KV estimate. Pass a GGUF-derived
+    ///     value when available; otherwise the helper falls back to the legacy 8 KB heuristic.
     /// - Returns: A safe `Int32` context token count.
     public static func safeContextSize(
         for detectedContextLength: Int?,
-        availableMemoryBytes: UInt64? = nil
+        availableMemoryBytes: UInt64? = nil,
+        estimatedKVBytesPerToken: UInt64? = nil
     ) -> Int32 {
         let available = availableMemoryBytes ?? Self.queryAvailableMemory()
+        let kvBytesPerToken = estimatedKVBytesPerToken
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? legacyFallbackKVBytesPerToken
 
         // Reserve 40% for model weights + runtime; KV cache gets the rest.
         let kvBudgetBytes = UInt64(Double(available) * (1.0 - kvHeadroomFraction))
 
-        // Derive token ceiling: kvBudgetBytes / 8 KB per token.
+        // Derive token ceiling from the per-token KV estimate.
         let memoryCeiling = Int(kvBudgetBytes / kvBytesPerToken)
 
         // Clamp to the model's trained length (never exceed what it was designed for).

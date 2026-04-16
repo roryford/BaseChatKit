@@ -11,19 +11,22 @@ struct GGUFMetadata: Sendable, Equatable {
     let contextLength: Int?
     let chatTemplate: String?
     let fileType: Int?
+    let kvCacheParameters: GGUFKVCacheParameters?
 
     init(
         generalName: String?,
         generalArchitecture: String?,
         contextLength: Int?,
         chatTemplate: String?,
-        fileType: Int?
+        fileType: Int?,
+        kvCacheParameters: GGUFKVCacheParameters? = nil
     ) {
         self.generalName = generalName
         self.generalArchitecture = generalArchitecture
         self.contextLength = contextLength
         self.chatTemplate = chatTemplate
         self.fileType = fileType
+        self.kvCacheParameters = kvCacheParameters
     }
 }
 
@@ -120,6 +123,13 @@ struct GGUFMetadataReader {
             var contextLength: Int?
             var chatTemplate: String?
             var fileType: Int?
+            var inferredArchitecture: String?
+            var blockCount: Int?
+            var embeddingLength: Int?
+            var attentionHeadCount: Int?
+            var attentionHeadCountKV: Int?
+            var attentionKeyLength: Int?
+            var attentionValueLength: Int?
 
             // Iterate KV pairs
             for _ in 0..<metadataCount {
@@ -133,23 +143,68 @@ struct GGUFMetadataReader {
 
                 case "general.architecture":
                     generalArchitecture = try readStringValue(type: valueTypeRaw, from: handle)
+                    if inferredArchitecture == nil {
+                        inferredArchitecture = generalArchitecture
+                    }
 
                 case "general.file_type":
-                    fileType = try readUInt32Value(type: valueTypeRaw, from: handle)
+                    fileType = try readIntegerValue(type: valueTypeRaw, from: handle)
 
                 case "tokenizer.chat_template":
                     chatTemplate = try readStringValue(type: valueTypeRaw, from: handle)
 
                 default:
-                    // Check for {arch}.context_length dynamically
-                    if key.hasSuffix(".context_length") {
-                        let prefix = String(key.dropLast(".context_length".count))
-                        let isArchMatch = generalArchitecture.map { $0 == prefix } ?? true
-                        if isArchMatch && contextLength == nil {
-                            contextLength = try readUInt32Value(type: valueTypeRaw, from: handle)
-                        } else {
-                            try skipValue(type: valueTypeRaw, from: handle)
-                        }
+                    let activeArchitecture = generalArchitecture ?? inferredArchitecture
+
+                    if let prefix = matchingArchitecturePrefix(
+                        for: key,
+                        suffix: ".context_length",
+                        expectedArchitecture: activeArchitecture
+                    ) {
+                        inferredArchitecture = inferredArchitecture ?? prefix
+                        contextLength = try readIntegerValue(type: valueTypeRaw, from: handle)
+                    } else if let prefix = matchingArchitecturePrefix(
+                        for: key,
+                        suffix: ".block_count",
+                        expectedArchitecture: activeArchitecture
+                    ) {
+                        inferredArchitecture = inferredArchitecture ?? prefix
+                        blockCount = try readIntegerValue(type: valueTypeRaw, from: handle)
+                    } else if let prefix = matchingArchitecturePrefix(
+                        for: key,
+                        suffix: ".embedding_length",
+                        expectedArchitecture: activeArchitecture
+                    ) {
+                        inferredArchitecture = inferredArchitecture ?? prefix
+                        embeddingLength = try readIntegerValue(type: valueTypeRaw, from: handle)
+                    } else if let prefix = matchingArchitecturePrefix(
+                        for: key,
+                        suffix: ".attention.head_count",
+                        expectedArchitecture: activeArchitecture
+                    ) {
+                        inferredArchitecture = inferredArchitecture ?? prefix
+                        attentionHeadCount = try readIntegerValue(type: valueTypeRaw, from: handle)
+                    } else if let prefix = matchingArchitecturePrefix(
+                        for: key,
+                        suffix: ".attention.head_count_kv",
+                        expectedArchitecture: activeArchitecture
+                    ) {
+                        inferredArchitecture = inferredArchitecture ?? prefix
+                        attentionHeadCountKV = try readIntegerValue(type: valueTypeRaw, from: handle)
+                    } else if let prefix = matchingArchitecturePrefix(
+                        for: key,
+                        suffix: ".attention.key_length",
+                        expectedArchitecture: activeArchitecture
+                    ) {
+                        inferredArchitecture = inferredArchitecture ?? prefix
+                        attentionKeyLength = try readIntegerValue(type: valueTypeRaw, from: handle)
+                    } else if let prefix = matchingArchitecturePrefix(
+                        for: key,
+                        suffix: ".attention.value_length",
+                        expectedArchitecture: activeArchitecture
+                    ) {
+                        inferredArchitecture = inferredArchitecture ?? prefix
+                        attentionValueLength = try readIntegerValue(type: valueTypeRaw, from: handle)
                     } else {
                         try skipValue(type: valueTypeRaw, from: handle)
                     }
@@ -165,7 +220,15 @@ struct GGUFMetadataReader {
                 generalArchitecture: generalArchitecture,
                 contextLength: contextLength,
                 chatTemplate: chatTemplate,
-                fileType: fileType
+                fileType: fileType,
+                kvCacheParameters: GGUFKVCacheParameters(
+                    blockCount: blockCount,
+                    embeddingLength: embeddingLength,
+                    attentionHeadCount: attentionHeadCount,
+                    attentionHeadCountKV: attentionHeadCountKV,
+                    attentionKeyLength: attentionKeyLength,
+                    attentionValueLength: attentionValueLength
+                )
             )
         }
     }
@@ -272,13 +335,34 @@ struct GGUFMetadataReader {
         return try readString(from: handle)
     }
 
-    /// Reads a value expected to be a UINT32, returning it as Int. Throws if wrong type.
-    private static func readUInt32Value(type: UInt32, from handle: FileHandle) throws -> Int? {
-        guard type == ValueType.uint32.rawValue else {
+    /// Reads a scalar integer value, accepting signed or unsigned 32/64-bit GGUF integers.
+    private static func readIntegerValue(type: UInt32, from handle: FileHandle) throws -> Int? {
+        switch ValueType(rawValue: type) {
+        case .uint32:
+            return Int(try readUInt32(from: handle))
+        case .int32:
+            return Int(try readInt32(from: handle))
+        case .uint64:
+            return Int(try readUInt64(from: handle))
+        case .int64:
+            return Int(try readInt64(from: handle))
+        default:
             try skipValue(type: type, from: handle)
             return nil
         }
-        return Int(try readUInt32(from: handle))
+    }
+
+    private static func matchingArchitecturePrefix(
+        for key: String,
+        suffix: String,
+        expectedArchitecture: String?
+    ) -> String? {
+        guard key.hasSuffix(suffix) else { return nil }
+        let prefix = String(key.dropLast(suffix.count))
+        guard expectedArchitecture == nil || expectedArchitecture == prefix else {
+            return nil
+        }
+        return prefix
     }
 
     // MARK: - Value Skipping

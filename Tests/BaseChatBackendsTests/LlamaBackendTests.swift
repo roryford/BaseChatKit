@@ -139,18 +139,42 @@ final class LlamaBackendTests: XCTestCase {
     func test_contextSize_capLogic_ramSafeCapCalculation() {
         // Validates computeRamSafeCap() — the RAM-safe cap helper used in initializeModel.
         //
-        // On macOS (where CI runs), the cap is derived from physical memory / 8 192.
-        // On any modern Apple Silicon Mac this must be positive and ≤ 128 000.
-        let ramSafeCap = LlamaBackend.computeRamSafeCap()
+        // On macOS (where CI runs), the cap is derived from physical memory divided by the
+        // effective KV bytes/token estimate. Use a guaranteed-large override so the result
+        // tightens even on very high-RAM developer machines where 128 KB/token still hits
+        // the 128K absolute ceiling.
+        let legacyCap = LlamaBackend.computeRamSafeCap(
+            kvBytesPerToken: Int64(GGUFKVCacheEstimator.legacyFallbackBytesPerToken)
+        )
+        let tighteningEstimate = max(
+            Int64(131_072),
+            Int64(ProcessInfo.processInfo.physicalMemory / 64_000) + 1
+        )
+        let ramSafeCap = LlamaBackend.computeRamSafeCap(kvBytesPerToken: tighteningEstimate)
         XCTAssertGreaterThan(ramSafeCap, 0,
                              "RAM-safe cap must be positive; formula may have underflowed")
         XCTAssertLessThanOrEqual(ramSafeCap, 128_000,
-                                 "RAM-safe cap must not exceed the absolute maximum of 128_000")
+                                  "RAM-safe cap must not exceed the absolute maximum of 128_000")
+        XCTAssertLessThan(ramSafeCap, legacyCap,
+                          "A realistic KV estimate should clamp harder than the legacy 8 KB heuristic")
         // A small requested size still wins when it is the smallest of the three values.
         let requested = Int32(512)
         let effective = min(requested, Int32(32_000), ramSafeCap)
         XCTAssertEqual(effective, requested,
                        "Requested context size should win when it is the smallest of the three values")
+    }
+
+    func test_computeKVBytesPerToken_fromParameters_matchesLlama7BGQAMath() {
+        let estimate = LlamaBackend.computeKVBytesPerToken(
+            from: GGUFKVCacheParameters(
+                blockCount: 32,
+                embeddingLength: 4096,
+                attentionHeadCount: 32,
+                attentionHeadCountKV: 8
+            )
+        )
+
+        XCTAssertEqual(estimate, 131_072)
     }
 
     // MARK: - Retry context-halving progression

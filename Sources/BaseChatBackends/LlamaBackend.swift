@@ -226,6 +226,30 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
     }
 
+    static func computeKVBytesPerToken(
+        from parameters: GGUFKVCacheParameters,
+        bytesPerElement: Int64 = Int64(GGUFKVCacheEstimator.defaultBytesPerElement)
+    ) -> Int64? {
+        guard bytesPerElement > 0,
+              let estimate = GGUFKVCacheEstimator.estimateBytesPerToken(
+                from: parameters,
+                bytesPerElement: UInt64(bytesPerElement)
+              ) else {
+            return nil
+        }
+        return Int64(estimate)
+    }
+
+    static func computeKVBytesPerToken(
+        for model: OpaquePointer,
+        bytesPerElement: Int64 = Int64(GGUFKVCacheEstimator.defaultBytesPerElement)
+    ) -> Int64? {
+        computeKVBytesPerToken(
+            from: kvCacheParameters(for: model),
+            bytesPerElement: bytesPerElement
+        )
+    }
+
     /// Returns the maximum context size (in tokens) that is safe to allocate given
     /// the memory available to this process.
     ///
@@ -237,9 +261,18 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     ///
     /// On macOS there is no per-app jetsam limit, so physical memory is the right ceiling.
     ///
-    /// 1 token ≈ 8 KB of KV cache; the result is clamped to 128 000 as an absolute ceiling.
-    static func computeRamSafeCap() -> Int32 {
-        let kvBytesPerToken: Int64 = 8_192  // 8 KB/token — matches DeviceCapabilityService
+    /// The loaded model's KV geometry is preferred when available; otherwise the legacy
+    /// 8 KB/token fallback is used. The result is clamped to 128 000 as an absolute ceiling.
+    static func computeRamSafeCap(
+        for model: OpaquePointer? = nil,
+        kvBytesPerToken: Int64? = nil
+    ) -> Int32 {
+        let kvBytesPerToken = max(
+            1,
+            kvBytesPerToken
+                ?? model.flatMap { Self.computeKVBytesPerToken(for: $0) }
+                ?? Int64(GGUFKVCacheEstimator.legacyFallbackBytesPerToken)
+        )
         #if os(iOS) || os(tvOS) || os(watchOS)
         let available = os_proc_available_memory()
         // os_proc_available_memory() can return 0 or negative in edge cases (simulator boot);
@@ -250,6 +283,74 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         #endif
         let physical = Int64(ProcessInfo.processInfo.physicalMemory)
         return Int32(min(Int64(128_000), physical / kvBytesPerToken))
+    }
+
+    private static func kvCacheParameters(for model: OpaquePointer) -> GGUFKVCacheParameters {
+        let architecture = modelMetadataString(for: model, key: "general.architecture")
+        let attentionHeadCount = modelMetadataInteger(
+            for: model,
+            key: architecture.map { "\($0).attention.head_count" }
+        ) ?? positive(llama_model_n_head(model))
+
+        return GGUFKVCacheParameters(
+            blockCount: modelMetadataInteger(
+                for: model,
+                key: architecture.map { "\($0).block_count" }
+            ) ?? positive(llama_model_n_layer(model)),
+            embeddingLength: modelMetadataInteger(
+                for: model,
+                key: architecture.map { "\($0).embedding_length" }
+            ) ?? positive(llama_model_n_embd(model)),
+            attentionHeadCount: attentionHeadCount,
+            attentionHeadCountKV: modelMetadataInteger(
+                for: model,
+                key: architecture.map { "\($0).attention.head_count_kv" }
+            ) ?? positive(llama_model_n_head_kv(model)) ?? attentionHeadCount,
+            attentionKeyLength: modelMetadataInteger(
+                for: model,
+                key: architecture.map { "\($0).attention.key_length" }
+            ),
+            attentionValueLength: modelMetadataInteger(
+                for: model,
+                key: architecture.map { "\($0).attention.value_length" }
+            )
+        )
+    }
+
+    private static func modelMetadataInteger(for model: OpaquePointer, key: String?) -> Int? {
+        guard let key,
+              let rawValue = modelMetadataString(for: model, key: key)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return nil
+        }
+        return Int(rawValue)
+    }
+
+    private static func modelMetadataString(for model: OpaquePointer, key: String) -> String? {
+        var bufferSize = 64
+
+        while bufferSize <= 4096 {
+            var buffer = [CChar](repeating: 0, count: bufferSize)
+            let requiredLength = buffer.withUnsafeMutableBufferPointer { pointer in
+                key.withCString { keyPointer in
+                    llama_model_meta_val_str(model, keyPointer, pointer.baseAddress, pointer.count)
+                }
+            }
+
+            guard requiredLength >= 0 else { return nil }
+            if Int(requiredLength) < buffer.count {
+                return String(cString: buffer)
+            }
+
+            bufferSize = Int(requiredLength) + 1
+        }
+
+        return nil
+    }
+
+    private static func positive(_ value: Int32) -> Int? {
+        guard value > 0 else { return nil }
+        return Int(value)
     }
 
     private static func initializeModel(
@@ -304,14 +405,14 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         // On iOS the per-app jetsam limit is a fraction of physical RAM (~3 GB on an 8 GB
         // iPad), so we derive the cap from os_proc_available_memory() rather than total
         // physical memory. On macOS there is no per-app cap, so physical memory is used.
-        // 1 token ≈ 8 KB of KV cache; clamped to 128 000 as an absolute ceiling.
-        let ramSafeCap = Self.computeRamSafeCap()
+        let kvBytesPerToken = Self.computeKVBytesPerToken(for: rawModel)
+        let ramSafeCap = Self.computeRamSafeCap(for: rawModel, kvBytesPerToken: kvBytesPerToken)
         let effectiveContextSize = min(requestedContextSize, trainedContextLength, ramSafeCap)
         ctxParams.n_threads = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
         ctxParams.n_threads_batch = ctxParams.n_threads
 
         Self.logger.info(
-            "LlamaBackend: RAM-safe cap = \(ramSafeCap) tokens (effective = \(effectiveContextSize))"
+            "LlamaBackend: RAM-safe cap = \(ramSafeCap) tokens (kvBytesPerToken = \(kvBytesPerToken ?? Int64(GGUFKVCacheEstimator.legacyFallbackBytesPerToken)), effective = \(effectiveContextSize))"
         )
 
         // Retry with progressively halved context on init failure.
