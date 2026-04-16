@@ -141,9 +141,12 @@ final class LlamaE2ETests: XCTestCase {
     }
 
     func test_realInference_stopGeneration() async throws {
+        // Shared backend is loaded at contextSize: 2048; maxOutputTokens must
+        // leave room for the formatted prompt (≈47 tokens) or the new
+        // context-exhaustion preflight will reject the request.
         let config = GenerationConfig(
             temperature: 0.7,
-            maxOutputTokens: 2048
+            maxOutputTokens: 1024
         )
 
         let formattedPrompt = PromptTemplate.chatML.format(
@@ -185,6 +188,70 @@ final class LlamaE2ETests: XCTestCase {
         // but the exact token count depends on the tokenizer so we just
         // assert something came back.
         XCTAssertFalse(response.isEmpty, "Should still generate some output")
+    }
+
+    // MARK: - Long-prompt regressions
+
+    /// Regression for the n_batch chunking fix: prompts longer than llama.cpp's
+    /// default `n_batch` (2 048 tokens) used to trip
+    /// `GGML_ASSERT(n_tokens_all <= cparams.n_batch)` in `llama-context.cpp`,
+    /// aborting the process. The fix strides the prompt decode in
+    /// `llama_n_batch`-sized chunks so any prompt that fits the context window
+    /// runs cleanly.
+    func test_realInference_longPrompt_exceedsNBatch_doesNotCrash() async throws {
+        // We need a prompt that exceeds n_batch (llama.cpp default 2 048) and
+        // still fits in the context window with room for `maxOutputTokens`.
+        // The shared backend is loaded at contextSize: 2048, so it can't hold
+        // both conditions at once — load a dedicated backend at 4096.
+        let modelURL = try XCTUnwrap(HardwareRequirements.findGGUFModel())
+        let dedicatedBackend = LlamaBackend()
+        addTeardownBlock { await dedicatedBackend.unloadAndWait() }
+        try await dedicatedBackend.loadModel(from: modelURL, contextSize: 4096)
+
+        // ~2 500 tokens of repeated text — comfortably above the 2 048 n_batch
+        // boundary so the prompt decode must span multiple chunks.
+        let longInput = String(repeating: "The quick brown fox jumps over the lazy dog. ", count: 250)
+        let formattedPrompt = PromptTemplate.chatML.format(
+            messages: [(role: "user", content: longInput)],
+            systemPrompt: nil
+        )
+        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 32)
+        let stream = try dedicatedBackend.generate(
+            prompt: formattedPrompt,
+            systemPrompt: nil,
+            config: config
+        )
+        let response = try await collectTokens(stream)
+        XCTAssertFalse(response.isEmpty, "Long prompts that span multiple n_batch chunks should generate a response")
+    }
+
+    /// Regression for the context-exhaustion preflight: `generate()` must
+    /// reject `prompt_tokens + maxOutputTokens > contextSize` up front with a
+    /// typed `InferenceError.contextExhausted` instead of failing opaquely
+    /// inside the llama.cpp decode loop when the KV cache runs out.
+    func test_realInference_preflight_throwsContextExhausted() async throws {
+        let modelURL = try XCTUnwrap(HardwareRequirements.findGGUFModel())
+        let dedicatedBackend = LlamaBackend()
+        addTeardownBlock { await dedicatedBackend.unloadAndWait() }
+        try await dedicatedBackend.loadModel(from: modelURL, contextSize: 2048)
+
+        // ~1 800-token prompt plus a 1 000-token max output blows the
+        // 2 048-token context window.
+        let longInput = String(repeating: "token ", count: 1800)
+        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 1000)
+        let formatted = PromptTemplate.chatML.format(
+            messages: [(role: "user", content: longInput)],
+            systemPrompt: nil
+        )
+
+        XCTAssertThrowsError(
+            try dedicatedBackend.generate(prompt: formatted, systemPrompt: nil, config: config)
+        ) { error in
+            guard case InferenceError.contextExhausted = error else {
+                XCTFail("Expected .contextExhausted, got \(error)")
+                return
+            }
+        }
     }
 
     func test_backendCapabilities() {

@@ -493,20 +493,31 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             throw InferenceError.alreadyGenerating
         }
 
+        // Tokenize up front (pure vocab lookup — doesn't touch context KV
+        // state) so we can preflight prompt + output against the context
+        // window before flipping `isGenerating`. If we failed this check
+        // after the flip, callers who retry on `.contextExhausted` would see
+        // an unnecessary `.alreadyGenerating` on the next call.
+        let tokens = tokenize(prompt, addBos: true)
+        guard !tokens.isEmpty else {
+            throw InferenceError.inferenceFailure("Failed to tokenize prompt")
+        }
+
+        let maxTokens = config.maxOutputTokens ?? 2048
+        let contextSize = Int(withStateLock { _effectiveContextSize })
+        guard tokens.count + maxTokens <= contextSize else {
+            throw InferenceError.contextExhausted(
+                promptTokens: tokens.count,
+                maxOutputTokens: maxTokens,
+                contextSize: contextSize
+            )
+        }
+
         withStateLock {
             isGenerating = true
             cancelled = false
         }
         Self.logger.debug("Llama generate started")
-
-        // Tokenize prompt (pure vocab lookup — doesn't touch context KV state)
-        let tokens = tokenize(prompt, addBos: true)
-        guard !tokens.isEmpty else {
-            withStateLock { isGenerating = false }
-            throw InferenceError.inferenceFailure("Failed to tokenize prompt")
-        }
-
-        let maxTokens = config.maxOutputTokens ?? 2048
 
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: GenerationEvent.self)
         let generationStream = GenerationStream(stream)
@@ -550,6 +561,14 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 return
             }
 
+            // `n_batch` caps how many tokens can flow through a single
+            // `llama_decode` call. llama.cpp asserts
+            // `GGML_ASSERT(n_tokens_all <= cparams.n_batch)` in
+            // `llama-context.cpp`, so prompts longer than this must be decoded
+            // in chunks. We never set `n_batch` on `ctxParams`, so it inherits
+            // llama.cpp's default (2048 at the time of writing).
+            let batchSize = max(1, Int(llama_n_batch(context)))
+
             // Clear KV cache at the start so state from any prior run (including
             // one terminated by stopGeneration) can't collide with this run's
             // positions.
@@ -583,34 +602,76 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
             llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 0...UInt32.max)))
 
-            // Create batch and process prompt
-            var batch = llama_batch_init(Int32(tokens.count), 0, 1)
-            defer { llama_batch_free(batch) }
+            // Process prompt in `n_batch`-sized chunks. A single `llama_decode`
+            // call cannot exceed `n_batch` tokens, so we stride through the
+            // prompt and decode each chunk separately. Only the last token of
+            // the final chunk has `logits = 1` — that's the one we sample from
+            // to kick off generation.
+            var promptDecodeFailed = false
+            var promptPos = 0
+            while promptPos < tokens.count {
+                if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
 
-            for (i, token) in tokens.enumerated() {
-                batch.token[i] = token
-                batch.pos[i] = Int32(i)
-                batch.n_seq_id[i] = 1
-                batch.seq_id[i]?[0] = 0
-                batch.logits[i] = (i == tokens.count - 1) ? 1 : 0
+                let chunkSize = min(batchSize, tokens.count - promptPos)
+                let isLastChunk = (promptPos + chunkSize) == tokens.count
+
+                var promptBatch = llama_batch_init(Int32(chunkSize), 0, 1)
+                for i in 0..<chunkSize {
+                    promptBatch.token[i] = tokens[promptPos + i]
+                    promptBatch.pos[i] = Int32(promptPos + i)
+                    promptBatch.n_seq_id[i] = 1
+                    promptBatch.seq_id[i]?[0] = 0
+                    promptBatch.logits[i] = (isLastChunk && i == chunkSize - 1) ? 1 : 0
+                }
+                promptBatch.n_tokens = Int32(chunkSize)
+
+                let decodeResult = llama_decode(context, promptBatch)
+                llama_batch_free(promptBatch)
+
+                if decodeResult != 0 {
+                    promptDecodeFailed = true
+                    break
+                }
+
+                promptPos += chunkSize
             }
-            batch.n_tokens = Int32(tokens.count)
 
-            if llama_decode(context, batch) != 0 {
+            if promptDecodeFailed {
                 await MainActor.run { generationStream.setPhase(.failed("Failed to decode prompt")) }
                 continuation.finish(throwing: InferenceError.inferenceFailure("Failed to decode prompt"))
                 return
             }
 
-            // Generation loop
-            var nCur = Int(batch.n_tokens)
+            // Honour cancellation that fired mid-prompt before entering the
+            // generation loop.
+            if Task.isCancelled || self.withStateLock({ self.cancelled }) {
+                await MainActor.run { generationStream.setPhase(.done) }
+                continuation.finish()
+                return
+            }
+
+            // Generation loop uses a fresh 1-capacity batch — the prompt loop
+            // allocated and freed a batch per chunk, so there's nothing to
+            // reuse here.
+            var genBatch = llama_batch_init(1, 0, 1)
+            defer { llama_batch_free(genBatch) }
+
+            // The chunked prompt loop placed tokens at positions
+            // [0, tokens.count - 1]; the next decoded token goes at
+            // `tokens.count`.
+            var nCur = tokens.count
             var invalidUTF8: [CChar] = []
             var isFirstToken = true
 
-            for _ in 0..<maxTokens {
+            for iteration in 0..<maxTokens {
                 if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
 
-                let token = llama_sampler_sample(sampler, context, batch.n_tokens - 1)
+                // First iteration samples from the final prompt chunk's logits,
+                // which llama.cpp exposes at index -1 ("last available").
+                // Subsequent iterations sample from the 1-token gen batch
+                // decoded at the end of the previous iteration, at index 0.
+                let logitIndex: Int32 = iteration == 0 ? -1 : 0
+                let token = llama_sampler_sample(sampler, context, logitIndex)
 
                 if llama_vocab_is_eog(vocab, token) { break }
 
@@ -624,18 +685,18 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 }
 
                 // Prepare next batch
-                batch.n_tokens = 0
-                batch.token[0] = token
-                batch.pos[0] = Int32(nCur)
-                batch.n_seq_id[0] = 1
-                batch.seq_id[0]?[0] = 0
-                batch.logits[0] = 1
-                batch.n_tokens = 1
+                genBatch.n_tokens = 0
+                genBatch.token[0] = token
+                genBatch.pos[0] = Int32(nCur)
+                genBatch.n_seq_id[0] = 1
+                genBatch.seq_id[0]?[0] = 0
+                genBatch.logits[0] = 1
+                genBatch.n_tokens = 1
                 nCur += 1
 
                 if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
 
-                if llama_decode(context, batch) != 0 {
+                if llama_decode(context, genBatch) != 0 {
                     await MainActor.run { generationStream.setPhase(.failed("Decode failed during generation")) }
                     continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
                     return
