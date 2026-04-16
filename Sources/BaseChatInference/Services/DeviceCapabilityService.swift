@@ -1,4 +1,5 @@
 import Foundation
+import MachO
 
 // MARK: - Model Size Recommendation
 
@@ -45,6 +46,28 @@ public final class DeviceCapabilityService: Sendable {
     /// 70% leaves headroom for the OS, the app itself, and other background work.
     private static let maxMemoryFraction: Double = 0.70
 
+    /// Fraction of available memory to reserve for model weights and runtime overhead.
+    /// 40% headroom leaves 60% for the KV cache allocation.
+    ///
+    /// This is intentionally conservative: the KV cache for a 128K context at 8 KB/token
+    /// is ~1 GB, and model weights easily occupy 2–5 GB. On iPad the per-app jetsam limit
+    /// is a fraction of physical RAM, so we must budget from available memory, not physical.
+    private static let kvHeadroomFraction: Double = 0.40
+
+    /// Conservative KV-cache cost per context token in bytes.
+    ///
+    /// Derived from llama.cpp's own estimate: 2 KV elements per layer at 4 bytes each
+    /// (fp16), multiplied by ~32 transformer layers for a typical 7B model ≈ 256 KB/token.
+    /// Rounding up to 8 KB/token accounts for additional working buffers and variance
+    /// across model architectures. This matches the constant used in `LlamaBackend`.
+    private static let kvBytesPerToken: UInt64 = 8_192
+
+    /// Absolute maximum context tokens we will ever request, regardless of model or device.
+    private static let absoluteContextCeiling: Int = 128_000
+
+    /// Fallback default context size when the model's trained length is unknown.
+    private static let unknownContextDefault: Int = 8_192
+
     /// Total physical RAM on this device, in bytes.
     public let physicalMemory: UInt64
 
@@ -61,6 +84,60 @@ public final class DeviceCapabilityService: Sendable {
     }
 
     // MARK: - Public API
+
+    /// Computes a safe GGUF context size for this device, clamped to both the model's
+    /// trained context length and a memory-derived ceiling.
+    ///
+    /// On iOS, available memory is read from `os_proc_available_memory()` — the per-app
+    /// jetsam budget — rather than physical RAM, which is meaningless as a per-app limit.
+    /// On macOS the jetsam budget does not exist, so physical memory is used (consistent
+    /// with the existing LlamaBackend behaviour on that platform).
+    ///
+    /// - Parameters:
+    ///   - detectedContextLength: The model's trained context length, if known from GGUF metadata.
+    ///     Pass `nil` when unknown — the method falls back to `unknownContextDefault` (8 192).
+    ///   - availableMemoryBytes: Available memory in bytes. When `nil`, the method queries
+    ///     the system itself — useful for injection in tests.
+    /// - Returns: A safe `Int32` context token count.
+    public static func safeContextSize(
+        for detectedContextLength: Int?,
+        availableMemoryBytes: UInt64? = nil
+    ) -> Int32 {
+        let available = availableMemoryBytes ?? Self.queryAvailableMemory()
+
+        // Reserve 40% for model weights + runtime; KV cache gets the rest.
+        let kvBudgetBytes = UInt64(Double(available) * (1.0 - kvHeadroomFraction))
+
+        // Derive token ceiling: kvBudgetBytes / 8 KB per token.
+        let memoryCeiling = Int(kvBudgetBytes / kvBytesPerToken)
+
+        // Clamp to the model's trained length (never exceed what it was designed for).
+        let trainedCeiling = detectedContextLength ?? unknownContextDefault
+
+        let result = min(memoryCeiling, trainedCeiling, absoluteContextCeiling)
+
+        // Floor at 1 to avoid passing a nonsensical value to llama.cpp, even in
+        // pathological low-memory scenarios where available memory is near zero.
+        return Int32(max(1, result))
+    }
+
+    /// Returns the number of bytes available for allocation by this process.
+    ///
+    /// On iOS/tvOS/watchOS, `os_proc_available_memory()` returns the per-app jetsam budget.
+    /// On macOS, physical memory is used as an upper bound (macOS has no per-app jetsam limit).
+    public static func queryAvailableMemory() -> UInt64 {
+        #if os(iOS) || os(tvOS) || os(watchOS)
+        let available = os_proc_available_memory()
+        // os_proc_available_memory() can return 0 or a negative value in edge cases
+        // (e.g., during simulator startup); fall back to physical memory in that case.
+        if available > 0 {
+            return UInt64(available)
+        }
+        return ProcessInfo.processInfo.physicalMemory
+        #else
+        return ProcessInfo.processInfo.physicalMemory
+        #endif
+    }
 
     /// Returns `true` if the device has enough RAM to load a model of the given size.
     ///

@@ -202,7 +202,15 @@ extension ChatViewModel {
         }
 
         do {
-            let contextSize: Int32 = Int32(model.detectedContextLength ?? 2048)
+            // Derive a memory-safe context size rather than blindly using the model's
+            // trained length. A 128K GGUF loaded at full context on an 8 GB iPad consumes
+            // ~1 GB of KV cache, which can push the process over its jetsam limit.
+            // DeviceCapabilityService.safeContextSize uses os_proc_available_memory() on iOS
+            // (the per-app budget) and physical memory on macOS, then applies a 60% KV
+            // budget after reserving 40% headroom for model weights and runtime.
+            let contextSize = DeviceCapabilityService.safeContextSize(
+                for: model.detectedContextLength
+            )
             try await inferenceService.loadModel(from: model, contextSize: contextSize)
         } catch is CancellationError {
             return
