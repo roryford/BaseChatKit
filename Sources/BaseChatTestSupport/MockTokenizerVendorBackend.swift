@@ -23,7 +23,7 @@ public final class MockTokenizerVendorBackend: InferenceBackend,
     )
     public var tokensToYield: [String] = ["Hello", " world"]
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         isModelLoaded = true
     }
 

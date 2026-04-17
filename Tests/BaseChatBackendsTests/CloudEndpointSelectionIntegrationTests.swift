@@ -482,8 +482,8 @@ private final class ConfiguringOpenAICloudBackend: InferenceBackend,
         backend.configure(baseURL: baseURL, keychainAccount: keychainAccount, modelName: modelName)
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
-        try await backend.loadModel(from: url, contextSize: contextSize)
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
+        try await backend.loadModel(from: url, plan: plan)
 
         guard probeOnLoad else { return }
         let stream = try backend.generate(
@@ -530,8 +530,8 @@ private final class ConfiguringClaudeCloudBackend: InferenceBackend,
         backend.configure(baseURL: baseURL, keychainAccount: keychainAccount, modelName: modelName)
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
-        try await backend.loadModel(from: url, contextSize: contextSize)
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
+        try await backend.loadModel(from: url, plan: plan)
     }
 
     func generate(

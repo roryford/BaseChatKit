@@ -83,9 +83,20 @@ public final class InferenceService {
 
     // MARK: - Memory Gate
 
+    @available(*, deprecated, message: "Set InferenceService.denyPolicy directly; MemoryGate will be removed in the next release")
     public var memoryGate: MemoryGate? {
         get { lifecycle.memoryGate }
         set { lifecycle.memoryGate = newValue }
+    }
+
+    // MARK: - Deny Policy
+
+    /// Policy applied when a ``ModelLoadPlan`` returns a ``ModelLoadPlan/Verdict/deny``
+    /// verdict. Defaults to ``LoadDenyPolicy/platformDefault`` (iOS: `.throwError`,
+    /// macOS: `.warnOnly`). Custom hooks receive the full plan so they can inspect
+    /// `reasons` before deciding whether to proceed.
+    public var denyPolicy: LoadDenyPolicy = .platformDefault {
+        didSet { lifecycle.denyPolicy = denyPolicy }
     }
 
     // MARK: - Backend Registration

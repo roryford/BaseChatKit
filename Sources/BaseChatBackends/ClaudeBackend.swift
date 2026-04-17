@@ -46,7 +46,8 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
 
     // MARK: - Model Lifecycle
 
-    public override func loadModel(from url: URL, contextSize: Int32) async throws {
+    // Plan is informational for cloud backends.
+    public override func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         guard baseURL != nil else {
             throw CloudBackendError.invalidURL("No base URL configured")
         }

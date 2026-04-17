@@ -106,7 +106,7 @@ final class FoundationBackendUnitTests: XCTestCase {
         try XCTSkipUnless(FoundationBackend.isAvailable, "Apple Intelligence not available on this device")
 
         let url = URL(fileURLWithPath: "/dev/null") // ignored by FoundationBackend
-        try await backend.loadModel(from: url, contextSize: 4096)
+        try await backend.loadModel(from: url, plan: .testStub(effectiveContextSize: 4096))
         XCTAssertTrue(backend.isModelLoaded, "Precondition: loadModel() should set isModelLoaded")
 
         backend.resetConversation()
@@ -190,7 +190,7 @@ final class FoundationBackendUnitTests: XCTestCase {
         )
 
         let url = URL(fileURLWithPath: "/dev/null")
-        try await backend.loadModel(from: url, contextSize: 4096)
+        try await backend.loadModel(from: url, plan: .testStub(effectiveContextSize: 4096))
         XCTAssertTrue(backend.isModelLoaded, "Precondition: loadModel should succeed")
 
         // If the probe session were retained, generate() with systemPrompt == nil
@@ -217,7 +217,7 @@ final class FoundationBackendUnitTests: XCTestCase {
         )
 
         let url = URL(fileURLWithPath: "/dev/null")
-        try await backend.loadModel(from: url, contextSize: 4096)
+        try await backend.loadModel(from: url, plan: .testStub(effectiveContextSize: 4096))
         XCTAssertTrue(backend.isModelLoaded, "Precondition")
 
         // Start and immediately stop a generation to simulate mid-stream cancel.
@@ -274,7 +274,7 @@ final class FoundationBackendUnitTests: XCTestCase {
         try XCTSkipUnless(FoundationBackend.isAvailable, "Apple Intelligence not available on this device")
 
         let url = URL(fileURLWithPath: "/dev/null")
-        try await backend.loadModel(from: url, contextSize: 4096)
+        try await backend.loadModel(from: url, plan: .testStub(effectiveContextSize: 4096))
         XCTAssertTrue(backend.isModelLoaded)
 
         backend.resetConversation()

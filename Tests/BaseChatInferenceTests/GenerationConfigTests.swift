@@ -71,7 +71,7 @@ final class GenerationConfigTests: XCTestCase {
 
     func test_mockBackend_capturesMaxOutputTokens() async throws {
         let backend = MockInferenceBackend()
-        try await backend.loadModel(from: URL(string: "file:///mock")!, contextSize: 512)
+        try await backend.loadModel(from: URL(string: "file:///mock")!, plan: .testStub(effectiveContextSize: 512))
 
         let config = GenerationConfig(maxOutputTokens: 1024)
         let stream = try backend.generate(prompt: "test", systemPrompt: nil, config: config)

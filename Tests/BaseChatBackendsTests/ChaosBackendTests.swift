@@ -31,7 +31,7 @@ final class ChaosBackendTests: XCTestCase {
 
     func test_noneMode_yieldsEverything() async throws {
         let backend = ChaosBackend(mode: .none, tokensToYield: allTokens)
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         let (tokens, error) = await collect(backend)
         XCTAssertNil(error)
         XCTAssertEqual(tokens, allTokens)
@@ -39,7 +39,7 @@ final class ChaosBackendTests: XCTestCase {
 
     func test_dropMidStream_truncatesWithoutThrowing() async throws {
         let backend = ChaosBackend(mode: .dropMidStream(afterTokens: 2), tokensToYield: allTokens)
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         let (tokens, error) = await collect(backend)
         XCTAssertNil(error, "dropMidStream must silently finish, not throw")
         XCTAssertEqual(tokens, ["a", "b"])
@@ -48,7 +48,7 @@ final class ChaosBackendTests: XCTestCase {
     func test_slowFirstToken_delaysBeforeFirstEvent() async throws {
         let delay: Duration = .milliseconds(50)
         let backend = ChaosBackend(mode: .slowFirstToken(delay: delay), tokensToYield: allTokens)
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
 
         let clock = ContinuousClock()
         let start = clock.now
@@ -69,7 +69,7 @@ final class ChaosBackendTests: XCTestCase {
             mode: .burstThenStall(burstSize: 2, stallDuration: stall),
             tokensToYield: allTokens
         )
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
 
         let clock = ContinuousClock()
         let start = clock.now
@@ -86,7 +86,7 @@ final class ChaosBackendTests: XCTestCase {
 
     func test_networkError_throwsAfterPartialStream() async throws {
         let backend = ChaosBackend(mode: .networkError(afterTokens: 3), tokensToYield: allTokens)
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         let (tokens, error) = await collect(backend)
         XCTAssertEqual(tokens, ["a", "b", "c"])
         XCTAssertNotNil(error, "networkError must surface an error on the stream")

@@ -15,7 +15,7 @@ import BaseChatInference
 ///     apiKey: "sk-...",
 ///     modelName: "gpt-4o-mini"
 /// )
-/// try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+/// try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
 /// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
@@ -58,7 +58,8 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
 
     // MARK: - Model Lifecycle
 
-    public override func loadModel(from url: URL, contextSize: Int32) async throws {
+    // Plan is informational for cloud backends.
+    public override func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         guard baseURL != nil else {
             throw CloudBackendError.invalidURL(
                 "No base URL configured. Call configure(baseURL:apiKey:modelName:) first."

@@ -38,7 +38,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
     /// Two 429 responses followed by a 200 with valid SSE data.
     /// The backend should retry through the 429s and yield tokens from the final response.
     func test_retries429ThenSucceeds() async throws {
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         let completionsURL = baseURL.appendingPathComponent("v1/chat/completions")
 
@@ -78,7 +78,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
 
     /// All attempts return 429. The backend should exhaust retries and throw rateLimited.
     func test_exhaustsRetriesAndThrows() async throws {
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         let completionsURL = baseURL.appendingPathComponent("v1/chat/completions")
 
@@ -119,7 +119,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
 
     /// A 401 should not be retried — it should propagate as authenticationFailed immediately.
     func test_nonRetryableErrorDoesNotRetry() async throws {
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         let completionsURL = baseURL.appendingPathComponent("v1/chat/completions")
 
@@ -154,7 +154,7 @@ final class RetryPolicyIntegrationTests: XCTestCase {
 
     /// Verifies that backoff timing approximately matches the Retry-After header value.
     func test_retryAfterHeaderInfluencesTiming() async throws {
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         let completionsURL = baseURL.appendingPathComponent("v1/chat/completions")
         let successChunk = Data("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n".utf8)

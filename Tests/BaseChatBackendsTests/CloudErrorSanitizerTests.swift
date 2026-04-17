@@ -179,7 +179,7 @@ struct CloudErrorSanitizerE2ETests {
     }
 
     private func loadBackend(_ backend: OpenAIBackend) async throws {
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
     }
 
     @Test func htmlErrorBody_surfacedAsGenericServerError() async throws {

@@ -47,7 +47,7 @@ final class ClaudeBackendTests: XCTestCase {
         )
 
         do {
-            try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+            try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
             XCTFail("Should throw missingAPIKey when no API key is configured")
         } catch {
             guard let error = extractCloudError(error) else { XCTFail("Expected CloudBackendError, got \(error)"); return }
@@ -68,7 +68,7 @@ final class ClaudeBackendTests: XCTestCase {
             apiKey: "sk-ant-test-key",
             modelName: "claude-sonnet-4-20250514"
         )
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
         XCTAssertTrue(backend.isModelLoaded)
     }
 
@@ -79,7 +79,7 @@ final class ClaudeBackendTests: XCTestCase {
             apiKey: "sk-ant-test-key",
             modelName: "claude-sonnet-4-20250514"
         )
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
         XCTAssertTrue(backend.isModelLoaded)
 
         backend.unloadModel()
@@ -145,7 +145,7 @@ extension ClaudeBackendTests {
         let backend = ClaudeBackend(urlSession: session)
         let url = URL(string: "https://claude-history-\(UUID().uuidString).test")!
         backend.configure(baseURL: url, apiKey: "sk-ant-test", modelName: "claude-sonnet-4-20250514")
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         backend.setConversationHistory([
             (role: "user", content: "What is 2+2?"),
@@ -202,7 +202,7 @@ extension ClaudeBackendTests {
         let backend = ClaudeBackend(urlSession: session)
         let url = URL(string: "https://claude-cancel-\(UUID().uuidString).test")!
         backend.configure(baseURL: url, apiKey: "sk-ant-test", modelName: "claude-sonnet-4-20250514")
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         var chunks: [Data] = (0..<20).map { i in
             Data("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"tok\(i)\"}}\n\n".utf8)
@@ -247,7 +247,7 @@ extension ClaudeBackendTests {
             keychainAccount: testAccount,
             modelName: "claude-sonnet-4-20250514"
         )
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
         XCTAssertTrue(backend.isModelLoaded)
     }
 }

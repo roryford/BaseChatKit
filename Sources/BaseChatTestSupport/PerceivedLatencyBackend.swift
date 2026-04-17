@@ -81,7 +81,7 @@ public final class PerceivedLatencyBackend: InferenceBackend, @unchecked Sendabl
         cancelGeneration(markModelUnloaded: false)
     }
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         let needsColdStart = withStateLock { !_hasPaidColdStart }
         if needsColdStart {
             try await Task.sleep(for: coldStartDelay)

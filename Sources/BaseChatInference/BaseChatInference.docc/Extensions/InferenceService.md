@@ -13,10 +13,12 @@
 
 ### Loading Models
 
-- ``loadModel(from:type:contextSize:)``
+- ``loadModel(from:contextSize:)``
+- ``loadModel(from:plan:)``
 - ``loadCloudBackend(from:)``
 - ``unloadModel()``
 - ``resetConversation()``
+- ``denyPolicy``
 
 ### Generation
 

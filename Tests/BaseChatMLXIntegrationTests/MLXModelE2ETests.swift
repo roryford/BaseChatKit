@@ -43,7 +43,7 @@ final class MLXModelE2ETests: XCTestCase {
         modelURL = mlxDir
 
         backend = MLXBackend()
-        try await backend.loadModel(from: modelURL, contextSize: 2048)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 2048))
 
         XCTAssertTrue(backend.isModelLoaded, "Backend should report model as loaded")
     }
@@ -152,7 +152,7 @@ final class MLXModelE2ETests: XCTestCase {
         backend.unloadModel()
         XCTAssertFalse(backend.isModelLoaded)
 
-        try await backend.loadModel(from: modelURL, contextSize: 2048)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 2048))
         XCTAssertTrue(backend.isModelLoaded)
 
         let response = try await generate(prompt: "Say hi.")

@@ -39,7 +39,7 @@ struct ClaudeBackendSSETests {
     }
 
     private func loadBackend(_ backend: ClaudeBackend) async throws {
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
     }
 
     // MARK: - Successful Streaming
@@ -275,7 +275,7 @@ struct OpenAIBackendSSETests {
     }
 
     private func loadBackend(_ backend: OpenAIBackend) async throws {
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
     }
 
     // MARK: - Successful Streaming

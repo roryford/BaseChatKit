@@ -29,7 +29,7 @@ final class InferenceServiceQueueTests: XCTestCase {
         var generateCallCount = 0
         var stopCallCount = 0
 
-        func loadModel(from url: URL, contextSize: Int32) async throws {
+        func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
             isModelLoaded = true
         }
 

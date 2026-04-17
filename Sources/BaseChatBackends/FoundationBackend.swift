@@ -8,7 +8,7 @@ import BaseChatInference
 ///
 /// Uses Apple's built-in language model via the FoundationModels framework.
 /// Unlike other backends, this does not load external model files — the model
-/// is provided by the system. The `loadModel(from:contextSize:)` URL parameter
+/// is provided by the system. The `loadModel(from:plan:)` URL parameter
 /// is ignored; it simply creates a new session and verifies availability.
 ///
 /// Requires iOS 26+ / macOS 26+.
@@ -79,7 +79,10 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Model Lifecycle
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
+        assert(plan.verdict != .deny,
+               "ModelLoadPlan was denied; callers must check verdict before invoking backend")
+        // Plan is informational for Foundation — the system owns all memory.
         unloadModel()
 
         guard SystemLanguageModel.default.availability == .available else {

@@ -67,7 +67,7 @@ public struct GenerationConfig: Sendable {
 /// ## Thread Safety
 ///
 /// `InferenceService` is `@MainActor`-isolated and calls backend methods
-/// from that context, but `loadModel(from:contextSize:)` is dispatched via
+/// from that context, but `loadModel(from:plan:)` is dispatched via
 /// `Task.detached` to avoid blocking the main thread during heavy I/O.
 /// This means backend methods can be called from **any** thread.
 ///
@@ -88,12 +88,18 @@ public protocol InferenceBackend: AnyObject, Sendable {
     /// What this backend supports (parameters, context size, prompt templates).
     var capabilities: BackendCapabilities { get }
 
-    /// Loads a model from the given URL.
+    /// Loads a model from the given URL, consuming a precomputed ``ModelLoadPlan``.
     ///
     /// - For GGUF backends, `url` points to a single `.gguf` file.
     /// - For MLX backends, `url` points to a directory containing
     ///   `config.json` + `.safetensors` weights.
-    func loadModel(from url: URL, contextSize: Int32) async throws
+    /// - For cloud backends, `url` is the configured base URL and the plan is
+    ///   informational — cloud providers enforce their own limits server-side.
+    ///
+    /// The plan carries the authoritative effective context size and verdict.
+    /// Callers must check `plan.verdict != .deny` before invoking this method;
+    /// conformers may rely on that precondition.
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws
 
     /// Generates a response from a prompt, streaming events as they are produced.
     /// Errors during generation are thrown into the stream.
@@ -132,20 +138,4 @@ public protocol InferenceBackend: AnyObject, Sendable {
 
 extension InferenceBackend {
     public func resetConversation() {}
-}
-
-public extension InferenceBackend {
-    /// Load a model using a precomputed ``ModelLoadPlan``.
-    ///
-    /// Default implementation delegates to ``loadModel(from:contextSize:)`` using
-    /// `plan.effectiveContextSize`. Backends that care about the plan's richer
-    /// information (memory strategy, verdict reasons) should override.
-    ///
-    /// - Precondition: `plan.verdict != .deny`. Callers must check verdict first;
-    ///   invoking this with a denied plan is a programming error.
-    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
-        assert(plan.verdict != .deny,
-               "ModelLoadPlan was denied; callers must check verdict before invoking backend")
-        try await loadModel(from: url, contextSize: Int32(plan.effectiveContextSize))
-    }
 }

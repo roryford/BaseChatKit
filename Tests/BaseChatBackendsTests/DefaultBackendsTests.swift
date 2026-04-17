@@ -99,7 +99,7 @@ final class DefaultBackendsTests: XCTestCase {
         )
 
         do {
-            try await service.loadModel(from: fakeModel, contextSize: 2048)
+            try await service.loadModel(from: fakeModel, plan: .testStub(effectiveContextSize: 2048))
             XCTFail("Should throw for nonexistent GGUF file")
         } catch {
             // Expected — the factory created a LlamaBackend which failed to load

@@ -93,7 +93,7 @@ public final class ChaosBackend: InferenceBackend, @unchecked Sendable {
         cancelGeneration(markModelUnloaded: false)
     }
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         withStateLock { _isModelLoaded = true }
     }
 

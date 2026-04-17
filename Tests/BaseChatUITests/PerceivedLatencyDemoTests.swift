@@ -38,7 +38,7 @@ final class PerceivedLatencyDemoTests: XCTestCase {
         // InferenceService(backend:name:) treats the supplied backend as
         // already loaded, so we must preload the backend too or generate()
         // will throw its own "No model loaded" guard.
-        try await backend.loadModel(from: URL(fileURLWithPath: "/tmp/fake"), contextSize: 512)
+        try await backend.loadModel(from: URL(fileURLWithPath: "/tmp/fake"), plan: .testStub(effectiveContextSize: 512))
 
         let service = InferenceService(backend: backend, name: "PerceivedLatency")
         vm = ChatViewModel(inferenceService: service)

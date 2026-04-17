@@ -267,8 +267,12 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     /// Sets `isModelLoaded` to `true`.
     ///
     /// Subclasses override to add validation (e.g. checking API key existence)
-    /// but should call `super.loadModel(from:contextSize:)` or set the flag directly.
-    open func loadModel(from url: URL, contextSize: Int32) async throws {
+    /// but should call `super.loadModel(from:plan:)` or set the flag directly.
+    ///
+    /// Plan is informational for cloud backends — the plan's
+    /// `effectiveContextSize` is **not** propagated into any request payload
+    /// (e.g. as `max_tokens`). Cloud providers enforce their own limits.
+    open func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         guard withStateLock({ _baseURL }) != nil else {
             throw CloudBackendError.invalidURL(
                 "No base URL configured. Call configure(baseURL:...) first."

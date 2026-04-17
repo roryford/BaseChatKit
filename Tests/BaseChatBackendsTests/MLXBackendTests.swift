@@ -64,7 +64,7 @@ final class MLXBackendTests: XCTestCase {
         let b = MLXBackend()
         let badURL = URL(fileURLWithPath: "/nonexistent-mlx-model-\(UUID().uuidString)")
         do {
-            try await b.loadModel(from: badURL, contextSize: 512)
+            try await b.loadModel(from: badURL, plan: .testStub(effectiveContextSize: 512))
             XCTFail("Should throw for invalid model directory")
         } catch {
             XCTAssertFalse(b.isModelLoaded)

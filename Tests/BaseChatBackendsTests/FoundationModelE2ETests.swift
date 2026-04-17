@@ -54,7 +54,7 @@ final class FoundationModelE2ETests: XCTestCase {
         // Load the Foundation model
         let foundationModel = ModelInfo.builtInFoundation
         vm.selectedModel = foundationModel
-        try await inferenceService.loadModel(from: foundationModel, contextSize: 4096)
+        try await inferenceService.loadModel(from: foundationModel, plan: .systemManaged(requestedContextSize: 4096))
     }
 
     override func tearDown() {

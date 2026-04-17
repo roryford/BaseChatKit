@@ -334,7 +334,7 @@ private final class ControlledLoadBackend: InferenceBackend,
         await gate.releaseFailure(error)
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         await gate.markStarted()
 
         switch await gate.waitForRelease() {

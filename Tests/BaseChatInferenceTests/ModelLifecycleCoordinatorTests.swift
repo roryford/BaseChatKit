@@ -485,7 +485,7 @@ private final class GatedLoadBackend: InferenceBackend, @unchecked Sendable {
     func releaseSuccess() async { await gate.releaseSuccess() }
     func releaseFailure(_ error: any Error & Sendable) async { await gate.releaseFailure(error) }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         await gate.markStarted()
         switch await gate.waitForRelease() {
         case .success:
