@@ -45,7 +45,7 @@ private func makeCompatBackend(modelName: String) -> (OpenAIBackend, URL) {
 }
 
 private func loadBackend(_ backend: OpenAIBackend) async throws {
-    try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+    try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 }
 
 /// Extracts the HTTP body from a captured request, handling both httpBody and httpBodyStream.

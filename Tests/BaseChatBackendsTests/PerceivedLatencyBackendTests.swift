@@ -21,7 +21,7 @@ final class PerceivedLatencyBackendTests: XCTestCase {
             interTokenJitter: .milliseconds(1)...(.milliseconds(1)),
             tokensToYield: ["a", "b", "c"]
         )
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
 
         let clock = ContinuousClock()
         let start = clock.now
@@ -53,13 +53,13 @@ final class PerceivedLatencyBackendTests: XCTestCase {
 
         let clock = ContinuousClock()
         let firstLoadStart = clock.now
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         let firstLoadElapsed = firstLoadStart.duration(to: clock.now)
         XCTAssertGreaterThanOrEqual(firstLoadElapsed, coldStart)
 
         // Second load should be fast — cold start already paid.
         let secondLoadStart = clock.now
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         let secondLoadElapsed = secondLoadStart.duration(to: clock.now)
         XCTAssertLessThan(
             secondLoadElapsed, coldStart,
@@ -74,7 +74,7 @@ final class PerceivedLatencyBackendTests: XCTestCase {
             interTokenJitter: .milliseconds(1)...(.milliseconds(3)),
             tokensToYield: ["Hello", ", ", "world", "!"]
         )
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         let stream = try backend.generate(prompt: "x", systemPrompt: nil, config: GenerationConfig())
 
         var collected: [String] = []
@@ -91,7 +91,7 @@ final class PerceivedLatencyBackendTests: XCTestCase {
             interTokenJitter: .milliseconds(50)...(.milliseconds(50)),
             tokensToYield: Array(repeating: "x", count: 50)
         )
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
 
         let stream = try backend.generate(prompt: "x", systemPrompt: nil, config: GenerationConfig())
         var count = 0

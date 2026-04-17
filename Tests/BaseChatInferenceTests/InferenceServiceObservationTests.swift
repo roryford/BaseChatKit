@@ -162,7 +162,7 @@ private final class GatedBackend: InferenceBackend, @unchecked Sendable {
 
     private var activeContinuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation?
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         isModelLoaded = true
     }
 
@@ -207,7 +207,7 @@ private final class GatedLoadBackend: InferenceBackend, @unchecked Sendable {
     func waitUntilLoadStarted() async { await gate.waitUntilStarted() }
     func releaseLoad() async { await gate.release() }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         await gate.markStarted()
         await gate.waitForRelease()
         isModelLoaded = true

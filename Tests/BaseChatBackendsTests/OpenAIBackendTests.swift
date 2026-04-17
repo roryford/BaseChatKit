@@ -40,7 +40,7 @@ final class OpenAIBackendTests: XCTestCase {
     func test_loadModel_withoutConfiguration_throws() async {
         let backend = OpenAIBackend()
         do {
-            try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+            try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
             XCTFail("Should throw when no base URL is configured")
         } catch {
             // Expected — no baseURL configured
@@ -54,7 +54,7 @@ final class OpenAIBackendTests: XCTestCase {
             apiKey: "sk-test",
             modelName: "gpt-4o-mini"
         )
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
         XCTAssertTrue(backend.isModelLoaded)
     }
 
@@ -65,7 +65,7 @@ final class OpenAIBackendTests: XCTestCase {
             apiKey: "sk-test",
             modelName: "gpt-4o-mini"
         )
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
         XCTAssertTrue(backend.isModelLoaded)
 
         backend.unloadModel()
@@ -87,7 +87,7 @@ final class OpenAIBackendTests: XCTestCase {
             apiKey: "sk-test",
             modelName: "gpt-4o-mini"
         )
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         // stopGeneration should be safe to call even when not generating
         backend.stopGeneration()
@@ -159,7 +159,7 @@ extension OpenAIBackendTests {
         let backend = OpenAIBackend(urlSession: session)
         let url = URL(string: "https://openai-history-\(UUID().uuidString).test")!
         backend.configure(baseURL: url, apiKey: "sk-test", modelName: "gpt-4o-mini")
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         backend.setConversationHistory([
             (role: "user", content: "What is 2+2?"),
@@ -214,7 +214,7 @@ extension OpenAIBackendTests {
         let backend = OpenAIBackend(urlSession: session)
         let url = URL(string: "https://openai-cancel-\(UUID().uuidString).test")!
         backend.configure(baseURL: url, apiKey: "sk-test", modelName: "gpt-4o-mini")
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 
         var chunks: [Data] = (0..<20).map { i in
             Data("data: {\"choices\":[{\"delta\":{\"content\":\"tok\(i)\"}}]}\n\n".utf8)
@@ -258,7 +258,7 @@ extension OpenAIBackendTests {
             keychainAccount: testAccount,
             modelName: "gpt-4o-mini"
         )
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
         XCTAssertTrue(backend.isModelLoaded)
     }
 }

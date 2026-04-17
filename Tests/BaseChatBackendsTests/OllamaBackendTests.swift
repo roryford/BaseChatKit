@@ -36,7 +36,7 @@ struct OllamaBackendTests {
     }
 
     private func loadBackend(_ backend: OllamaBackend) async throws {
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
     }
 
     // MARK: - Init & State
@@ -50,7 +50,7 @@ struct OllamaBackendTests {
     @Test func loadModel_withoutConfigure_throws() async {
         let backend = OllamaBackend()
         do {
-            try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+            try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
             Issue.record("Expected throw when no base URL configured")
         } catch {
             // expected

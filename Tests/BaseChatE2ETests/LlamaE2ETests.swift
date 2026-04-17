@@ -49,7 +49,7 @@ final class LlamaE2ETests: XCTestCase {
         if Self.sharedBackend == nil {
             let fresh = LlamaBackend()
             do {
-                try await fresh.loadModel(from: url, contextSize: 2048)
+                try await fresh.loadModel(from: url, plan: .testStub(effectiveContextSize: 2048))
                 Self.sharedBackend = fresh
                 Self.sharedModelURL = url
             } catch {
@@ -206,7 +206,7 @@ final class LlamaE2ETests: XCTestCase {
         let modelURL = try XCTUnwrap(HardwareRequirements.findGGUFModel())
         let dedicatedBackend = LlamaBackend()
         addTeardownBlock { await dedicatedBackend.unloadAndWait() }
-        try await dedicatedBackend.loadModel(from: modelURL, contextSize: 4096)
+        try await dedicatedBackend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 4096))
 
         // ~2 500 tokens of repeated text — comfortably above the 2 048 n_batch
         // boundary so the prompt decode must span multiple chunks.
@@ -233,7 +233,7 @@ final class LlamaE2ETests: XCTestCase {
         let modelURL = try XCTUnwrap(HardwareRequirements.findGGUFModel())
         let dedicatedBackend = LlamaBackend()
         addTeardownBlock { await dedicatedBackend.unloadAndWait() }
-        try await dedicatedBackend.loadModel(from: modelURL, contextSize: 2048)
+        try await dedicatedBackend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 2048))
 
         // ~1 800-token prompt plus a 1 000-token max output blows the
         // 2 048-token context window.

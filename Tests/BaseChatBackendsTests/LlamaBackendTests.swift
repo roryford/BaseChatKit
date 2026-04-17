@@ -60,7 +60,7 @@ final class LlamaBackendTests: XCTestCase {
         let fakeURL = URL(fileURLWithPath: "/nonexistent/model.gguf")
 
         do {
-            try await backend.loadModel(from: fakeURL, contextSize: 2048)
+            try await backend.loadModel(from: fakeURL, plan: .testStub(effectiveContextSize: 2048))
             XCTFail("Should throw when model file doesn't exist")
         } catch let error as InferenceError {
             if case .modelLoadFailed = error {
@@ -100,7 +100,7 @@ final class LlamaBackendTests: XCTestCase {
 
     private func backend(_ url: URL) async throws {
         let b = LlamaBackend()
-        try await b.loadModel(from: url, contextSize: 2048)
+        try await b.loadModel(from: url, plan: .testStub(effectiveContextSize: 2048))
     }
 
     // MARK: - Generate Without Model
@@ -156,7 +156,7 @@ final class LlamaBackendTests: XCTestCase {
         let backend = LlamaBackend()
         let fakeURL = URL(fileURLWithPath: "/nonexistent/model.gguf")
 
-        try? await backend.loadModel(from: fakeURL, contextSize: 2048)
+        try? await backend.loadModel(from: fakeURL, plan: .testStub(effectiveContextSize: 2048))
         backend.unloadModel()
 
         XCTAssertFalse(backend.isModelLoaded)
@@ -193,7 +193,7 @@ final class LlamaBackendTests: XCTestCase {
         let backend = LlamaBackend()
         let fakeURL = URL(fileURLWithPath: "/nonexistent/model.gguf")
 
-        try? await backend.loadModel(from: fakeURL, contextSize: 2048)
+        try? await backend.loadModel(from: fakeURL, plan: .testStub(effectiveContextSize: 2048))
         await backend.unloadAndWait()
 
         XCTAssertFalse(backend.isModelLoaded,
@@ -231,7 +231,7 @@ final class LlamaBackendTests: XCTestCase {
         let backend = LlamaBackend()
         defer { backend.unloadModel() }
 
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         XCTAssertTrue(backend.isModelLoaded)
 
         // First generation — kick it off, then stop it mid-stream.

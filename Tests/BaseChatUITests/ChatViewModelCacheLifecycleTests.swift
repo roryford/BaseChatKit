@@ -257,7 +257,7 @@ private final class StructTokenizerVendorBackend: InferenceBackend, TokenizerVen
 
     var tokenizer: any TokenizerProvider { StubStructTokenizer() }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         isModelLoaded = true
     }
 
@@ -299,7 +299,7 @@ private final class SwitchableStructTokenizerVendorBackend: InferenceBackend, To
         useSecondVariant ? AlternateStubStructTokenizer() : StubStructTokenizer()
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         isModelLoaded = true
     }
 

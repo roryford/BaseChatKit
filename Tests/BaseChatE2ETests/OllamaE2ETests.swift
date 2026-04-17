@@ -36,7 +36,7 @@ final class OllamaE2ETests: XCTestCase {
             baseURL: URL(string: "http://localhost:11434")!,
             modelName: modelName
         )
-        try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
     }
 
     override func tearDown() async throws {

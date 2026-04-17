@@ -44,7 +44,7 @@ struct DownloadValidateLoadGenerateE2ETests {
         backend.tokensToYield = ["Once", " upon", " a", " time"]
 
         #expect(!backend.isModelLoaded)
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         #expect(backend.isModelLoaded)
         #expect(backend.loadModelCallCount == 1)
 
@@ -104,7 +104,7 @@ struct DownloadValidateLoadGenerateE2ETests {
         let backend = MockInferenceBackend()
         backend.tokensToYield = ["The", " answer", " is", " 42"]
 
-        try await backend.loadModel(from: mlxDir, contextSize: 512)
+        try await backend.loadModel(from: mlxDir, plan: .testStub(effectiveContextSize: 512))
         #expect(backend.isModelLoaded)
 
         let output = try await collectTokens(backend.generate(
@@ -131,7 +131,7 @@ struct DownloadValidateLoadGenerateE2ETests {
         let backend = MockInferenceBackend()
         backend.tokensToYield = ["Done"]
 
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
         #expect(backend.isModelLoaded)
 
         let output = try await collectTokens(backend.generate(
@@ -172,7 +172,7 @@ struct DownloadValidateLoadGenerateE2ETests {
         for cycle in 0..<3 {
             backend.tokensToYield = ["Cycle", " \(cycle)"]
 
-            try await backend.loadModel(from: modelURL, contextSize: 512)
+            try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
             #expect(backend.isModelLoaded)
 
             let output = try await collectTokens(backend.generate(

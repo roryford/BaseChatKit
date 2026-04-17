@@ -778,7 +778,7 @@ private final class MockConversationHistoryBackend: InferenceBackend,
         receivedHistory = messages
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {}
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {}
 
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
         let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
@@ -805,7 +805,7 @@ private final class MockTokenUsageBackend: InferenceBackend,
     var stubbedUsage: (promptTokens: Int, completionTokens: Int)?
     var lastUsage: (promptTokens: Int, completionTokens: Int)? { stubbedUsage }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {}
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {}
 
     func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
         let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in continuation.finish() }
@@ -838,7 +838,7 @@ private final class MockCloudURLModelBackend: InferenceBackend,
         configuredModelName = modelName
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         loadModelCallCount += 1
         isModelLoaded = true
         didConfigureBeforeLoad = (configuredBaseURL != nil && configuredModelName != nil)
@@ -878,7 +878,7 @@ private final class MockCloudKeychainBackend: InferenceBackend,
         configuredModelName = modelName
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         isModelLoaded = true
         didConfigureBeforeLoad = (
             configuredBaseURL != nil
@@ -1000,7 +1000,7 @@ private final class ControlledLoadBackend: InferenceBackend,
         await gate.releaseFailure(error)
     }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         loadModelCallCount += 1
         loadModelCalledOnMainThread = pthread_main_np() != 0
         await gate.markStarted()

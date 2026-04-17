@@ -352,7 +352,7 @@ private final class ProgressReportingBackend: InferenceBackend,
     func releaseLoadSuccess() async { await gate.releaseSuccess() }
     func releaseLoadFailure(_ error: any Error & Sendable) async { await gate.releaseFailure(error) }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         await gate.markStarted()
         switch await gate.waitForRelease() {
         case .success:
@@ -414,7 +414,7 @@ private final class ProgressReportingCloudBackend: InferenceBackend,
     func waitUntilLoadStarted() async { await gate.waitUntilStarted() }
     func releaseLoadSuccess() async { await gate.releaseSuccess() }
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         await gate.markStarted()
         switch await gate.waitForRelease() {
         case .success:

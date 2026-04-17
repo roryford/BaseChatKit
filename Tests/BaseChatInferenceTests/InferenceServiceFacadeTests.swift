@@ -144,7 +144,7 @@ private final class GatedBackend: InferenceBackend, @unchecked Sendable {
 
     private var activeContinuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation?
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         isModelLoaded = true
     }
 

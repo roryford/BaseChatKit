@@ -34,7 +34,7 @@ final class LoadProgressReportingContractTests: XCTestCase {
             await collector.record(value)
         }
 
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
 
         let count = await collector.callCount
         XCTAssertGreaterThan(count, 0, "Handler must be called at least once during loadModel")
@@ -50,7 +50,7 @@ final class LoadProgressReportingContractTests: XCTestCase {
             await collector.record(value)
         }
 
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
 
         let received = await collector.values
         XCTAssertFalse(received.isEmpty, "At least one progress value must be delivered")
@@ -70,7 +70,7 @@ final class LoadProgressReportingContractTests: XCTestCase {
         backend.setLoadProgressHandler { value in await collector.record(value) }
         backend.setLoadProgressHandler(nil)
 
-        try await backend.loadModel(from: modelURL, contextSize: 512)
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
 
         let count = await collector.callCount
         XCTAssertEqual(count, 0,

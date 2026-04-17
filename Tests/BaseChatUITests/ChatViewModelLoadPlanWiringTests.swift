@@ -202,11 +202,11 @@ private final class RecordingBackend: InferenceBackend, @unchecked Sendable {
         supportsSystemPrompt: true
     )
 
-    func loadModel(from url: URL, contextSize: Int32) async throws {
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         withLock {
             _loadCallCount += 1
             _lastURL = url
-            _lastContextSize = contextSize
+            _lastContextSize = Int32(plan.effectiveContextSize)
             _isModelLoaded = true
         }
     }
