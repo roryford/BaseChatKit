@@ -1,0 +1,326 @@
+import Foundation
+
+/// Stage 1 of the llama.cpp load-path refactor.
+///
+/// `ModelLoadPlan` unifies the memory / context decisions that today live in two
+/// separate places: `DeviceCapabilityService.safeContextSize(...)` (context clamp)
+/// and `MemoryGate.check(...)` (fit verdict). This additive type captures both in a
+/// single value so later stages (UI wiring, backend consumption, protocol flip) have
+/// a stable surface to code against.
+///
+/// This file is intentionally side-effect-free: no backends, UI, or persistence
+/// layers consume it yet. Stages 2+ will wire it in.
+public struct ModelLoadPlan: Sendable {
+
+    /// The raw inputs a plan was computed from. Captured on the plan so callers can
+    /// log, diff, or re-evaluate with different parameters without re-querying state.
+    public struct Inputs: Sendable, Equatable {
+        public let modelFileSize: UInt64
+        public let memoryStrategy: MemoryStrategy
+        public let requestedContextSize: Int
+        public let trainedContextLength: Int?
+        public let kvBytesPerToken: UInt64
+        public let availableMemoryBytes: UInt64
+        public let physicalMemoryBytes: UInt64
+        public let absoluteContextCeiling: Int
+        public let headroomFraction: Double
+
+        public init(
+            modelFileSize: UInt64,
+            memoryStrategy: MemoryStrategy,
+            requestedContextSize: Int,
+            trainedContextLength: Int?,
+            kvBytesPerToken: UInt64,
+            availableMemoryBytes: UInt64,
+            physicalMemoryBytes: UInt64,
+            absoluteContextCeiling: Int,
+            headroomFraction: Double
+        ) {
+            self.modelFileSize = modelFileSize
+            self.memoryStrategy = memoryStrategy
+            self.requestedContextSize = requestedContextSize
+            self.trainedContextLength = trainedContextLength
+            self.kvBytesPerToken = kvBytesPerToken
+            self.availableMemoryBytes = availableMemoryBytes
+            self.physicalMemoryBytes = physicalMemoryBytes
+            self.absoluteContextCeiling = absoluteContextCeiling
+            self.headroomFraction = headroomFraction
+        }
+    }
+
+    /// The decision produced from an `Inputs`. Decoupled from `Inputs` so UI code can
+    /// show the verdict summary without re-carrying every input field.
+    public struct Outcome: Sendable, Equatable {
+        public let effectiveContextSize: Int
+        public let estimatedResidentBytes: UInt64
+        public let estimatedKVBytes: UInt64
+        public let totalEstimatedBytes: UInt64
+        public let verdict: Verdict
+        /// Info-only reasons (clamps) may appear even when `verdict == .allow`.
+        public let reasons: [Reason]
+
+        public init(
+            effectiveContextSize: Int,
+            estimatedResidentBytes: UInt64,
+            estimatedKVBytes: UInt64,
+            totalEstimatedBytes: UInt64,
+            verdict: Verdict,
+            reasons: [Reason]
+        ) {
+            self.effectiveContextSize = effectiveContextSize
+            self.estimatedResidentBytes = estimatedResidentBytes
+            self.estimatedKVBytes = estimatedKVBytes
+            self.totalEstimatedBytes = totalEstimatedBytes
+            self.verdict = verdict
+            self.reasons = reasons
+        }
+    }
+
+    public let inputs: Inputs
+    public let outcome: Outcome
+
+    public init(inputs: Inputs, outcome: Outcome) {
+        self.inputs = inputs
+        self.outcome = outcome
+    }
+
+    // MARK: - Convenience pass-throughs
+
+    public var effectiveContextSize: Int { outcome.effectiveContextSize }
+    public var verdict: Verdict { outcome.verdict }
+    public var reasons: [Reason] { outcome.reasons }
+
+    // MARK: - Verdict / Reason
+
+    public enum Verdict: Sendable, Equatable {
+        /// Safe to proceed.
+        case allow
+        /// Tight fit — may work but risks swapping / pressure.
+        case warn
+        /// Insufficient memory — loading will likely fail.
+        case deny
+    }
+
+    public enum Reason: Sendable, Equatable {
+        case insufficientResident(required: UInt64, available: UInt64)
+        case insufficientKVCache(required: UInt64, available: UInt64)
+        /// Info-only: requested context exceeded the model's trained length, clamped.
+        case trainedContextExceeded(requested: Int, trained: Int)
+        /// Info-only: requested context exceeded the absolute ceiling, clamped.
+        case absoluteCeilingReached(requested: Int, ceiling: Int)
+        /// Info-only: requested context exceeded what memory allows, clamped.
+        case memoryCeilingReached(requested: Int, ceiling: Int)
+    }
+
+    // MARK: - Environment
+
+    /// Injects system-memory queries so tests (and callers that want to evaluate
+    /// hypothetical devices) can avoid hitting the real OS.
+    public struct Environment: Sendable {
+        public let availableMemoryBytes: @Sendable () -> UInt64
+        public let physicalMemoryBytes: UInt64
+
+        public init(
+            availableMemoryBytes: @escaping @Sendable () -> UInt64,
+            physicalMemoryBytes: UInt64
+        ) {
+            self.availableMemoryBytes = availableMemoryBytes
+            self.physicalMemoryBytes = physicalMemoryBytes
+        }
+
+        /// Real-device environment backed by `DeviceCapabilityService.queryAvailableMemory`
+        /// and `ProcessInfo.physicalMemory`.
+        public static let current: Environment = Environment(
+            availableMemoryBytes: { DeviceCapabilityService.queryAvailableMemory() },
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory
+        )
+    }
+
+    // MARK: - Computation
+
+    /// Primary entry point. All state must be pre-materialised on the `Inputs`.
+    public static func compute(inputs: Inputs) -> ModelLoadPlan {
+        let strategy = inputs.memoryStrategy
+        let available = inputs.availableMemoryBytes
+        let headroom = inputs.headroomFraction
+
+        // Resident budget: full weights for .resident, a mmap-style fraction for .mappable.
+        // .external keeps the legacy behaviour of "no local weight memory" — 0 resident.
+        let residentBudget: UInt64
+        switch strategy {
+        case .resident:
+            residentBudget = inputs.modelFileSize
+        case .mappable:
+            // Matches the legacy MemoryGate mappable heuristic: min(fileSize/4, 1 GB).
+            let oneGB: UInt64 = 1_073_741_824
+            residentBudget = min(inputs.modelFileSize / 4, oneGB)
+        case .external:
+            residentBudget = 0
+        }
+
+        // KV budget: what's left of available memory after the resident reserve, minus
+        // the caller-specified headroom fraction. Saturating subtraction so we never
+        // underflow UInt64 when resident > available * (1 - headroom).
+        let reserveAfterHeadroom = UInt64(Double(available) * (1.0 - headroom))
+        let kvBudget: UInt64 = reserveAfterHeadroom > residentBudget
+            ? reserveAfterHeadroom - residentBudget
+            : 0
+
+        // Memory-derived token ceiling. Guarding against div-by-zero when the caller
+        // passed kvBytesPerToken == 0 (shouldn't happen in practice, but cheap to be safe).
+        let memoryCeiling: Int = inputs.kvBytesPerToken == 0
+            ? Int.max
+            : Int(kvBudget / inputs.kvBytesPerToken)
+
+        // Walk the ceilings in turn, recording a `Reason` each time a tighter bound wins.
+        // `effective` tracks the winning value; we re-check against `requestedContextSize`
+        // for the "clamped" comparison so reasons report what the user asked for, not the
+        // already-reduced interim value.
+        var reasons: [Reason] = []
+        var effective = inputs.requestedContextSize
+
+        let trainedCeiling = inputs.trainedContextLength
+        if let trained = trainedCeiling, trained < effective {
+            reasons.append(.trainedContextExceeded(
+                requested: inputs.requestedContextSize,
+                trained: trained
+            ))
+            effective = trained
+        }
+
+        if inputs.absoluteContextCeiling < effective {
+            reasons.append(.absoluteCeilingReached(
+                requested: inputs.requestedContextSize,
+                ceiling: inputs.absoluteContextCeiling
+            ))
+            effective = inputs.absoluteContextCeiling
+        }
+
+        if memoryCeiling < effective {
+            reasons.append(.memoryCeilingReached(
+                requested: inputs.requestedContextSize,
+                ceiling: memoryCeiling
+            ))
+            effective = memoryCeiling
+        }
+
+        // Never pass 0 / negative to llama.cpp, even in pathological near-zero memory.
+        let effectiveContextSize = max(1, effective)
+
+        let estimatedKV = UInt64(effectiveContextSize) * inputs.kvBytesPerToken
+        let total = residentBudget &+ estimatedKV  // residentBudget is already bounded
+
+        // Verdict thresholds mirror the legacy MemoryGate for continuity.
+        let allowThreshold = UInt64(Double(available) * 0.85)
+        let verdict: Verdict
+        var finalReasons = reasons
+        if total <= allowThreshold {
+            verdict = .allow
+        } else if total <= available {
+            verdict = .warn
+        } else {
+            verdict = .deny
+            if residentBudget > available {
+                finalReasons.append(.insufficientResident(
+                    required: residentBudget,
+                    available: available
+                ))
+            } else {
+                finalReasons.append(.insufficientKVCache(
+                    required: total,
+                    available: available
+                ))
+            }
+        }
+
+        let outcome = Outcome(
+            effectiveContextSize: effectiveContextSize,
+            estimatedResidentBytes: residentBudget,
+            estimatedKVBytes: estimatedKV,
+            totalEstimatedBytes: total,
+            verdict: verdict,
+            reasons: finalReasons
+        )
+        return ModelLoadPlan(inputs: inputs, outcome: outcome)
+    }
+
+    /// Ergonomic factory for a real `ModelInfo`. Fills in architectural KV estimates
+    /// from the model when present, otherwise uses the legacy 8 KB/token fallback.
+    public static func compute(
+        for model: ModelInfo,
+        requestedContextSize: Int,
+        strategy: MemoryStrategy,
+        environment: Environment = .current,
+        absoluteContextCeiling: Int = 128_000,
+        headroomFraction: Double = 0.40
+    ) -> ModelLoadPlan {
+        let kvBytesPerToken = (model.estimatedKVBytesPerToken ?? 0) > 0
+            ? model.estimatedKVBytesPerToken!
+            : GGUFKVCacheEstimator.legacyFallbackBytesPerToken
+
+        let inputs = Inputs(
+            modelFileSize: model.fileSize,
+            memoryStrategy: strategy,
+            requestedContextSize: requestedContextSize,
+            trainedContextLength: model.detectedContextLength,
+            kvBytesPerToken: kvBytesPerToken,
+            availableMemoryBytes: environment.availableMemoryBytes(),
+            physicalMemoryBytes: environment.physicalMemoryBytes,
+            absoluteContextCeiling: absoluteContextCeiling,
+            headroomFraction: headroomFraction
+        )
+        return compute(inputs: inputs)
+    }
+
+    /// For system-managed backends (Apple Foundation Models) where memory is owned
+    /// by the OS and there's nothing to estimate. Always allows with stub fields.
+    public static func systemManaged(requestedContextSize: Int) -> ModelLoadPlan {
+        let effective = max(1, requestedContextSize)
+        let inputs = Inputs(
+            modelFileSize: 0,
+            memoryStrategy: .external,
+            requestedContextSize: requestedContextSize,
+            trainedContextLength: nil,
+            kvBytesPerToken: 0,
+            availableMemoryBytes: 0,
+            physicalMemoryBytes: 0,
+            absoluteContextCeiling: 0,
+            headroomFraction: 0
+        )
+        let outcome = Outcome(
+            effectiveContextSize: effective,
+            estimatedResidentBytes: 0,
+            estimatedKVBytes: 0,
+            totalEstimatedBytes: 0,
+            verdict: .allow,
+            reasons: []
+        )
+        return ModelLoadPlan(inputs: inputs, outcome: outcome)
+    }
+
+    /// For cloud backends with no local KV cache. `effectiveContextSize` is purely
+    /// informational — cloud providers enforce their own limits server-side.
+    public static func cloud(requestedContextSize: Int = 0) -> ModelLoadPlan {
+        let effective = max(1, requestedContextSize)
+        let inputs = Inputs(
+            modelFileSize: 0,
+            memoryStrategy: .external,
+            requestedContextSize: requestedContextSize,
+            trainedContextLength: nil,
+            kvBytesPerToken: 0,
+            availableMemoryBytes: 0,
+            physicalMemoryBytes: 0,
+            absoluteContextCeiling: 0,
+            headroomFraction: 0
+        )
+        let outcome = Outcome(
+            effectiveContextSize: effective,
+            estimatedResidentBytes: 0,
+            estimatedKVBytes: 0,
+            totalEstimatedBytes: 0,
+            verdict: .allow,
+            reasons: []
+        )
+        return ModelLoadPlan(inputs: inputs, outcome: outcome)
+    }
+}
