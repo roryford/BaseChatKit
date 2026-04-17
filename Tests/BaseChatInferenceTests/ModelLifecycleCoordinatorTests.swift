@@ -109,6 +109,7 @@ final class ModelLifecycleCoordinatorTests: XCTestCase {
     /// and either commit or block on the gated backend.
     func test_planLoad_deniedPlan_throwsMemoryInsufficient() async throws {
         let (coordinator, backend) = makeCoordinatorAndGate()
+        coordinator.denyPolicy = .throwError   // pin policy — platformDefault is .warnOnly on macOS and would downgrade .deny to proceed, hanging the GatedLoadBackend
         let modelInfo = makeModelInfo()
 
         // Synthesize a plan whose inputs force a deny verdict.
