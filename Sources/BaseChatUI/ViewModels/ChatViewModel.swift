@@ -34,6 +34,11 @@ public final class ChatViewModel {
     let modelStorage: ModelStorageService
     let memoryPressure: MemoryPressureHandler
 
+    /// Test-only seam: overrides the system-memory source used by `ModelLoadPlan`
+    /// when deciding whether a local model load should proceed. Production code
+    /// leaves this at `.current`; tests assign a deterministic environment.
+    var loadPlanEnvironment: ModelLoadPlan.Environment = .current
+
     // MARK: - Persistence
 
     let sessionController: SessionController
