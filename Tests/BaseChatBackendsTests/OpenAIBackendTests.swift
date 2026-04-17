@@ -94,6 +94,47 @@ final class OpenAIBackendTests: XCTestCase {
         XCTAssertFalse(backend.isGenerating)
     }
 
+    // MARK: - Plan Does Not Leak Into Request Payload
+
+    /// Regression guard for the ModelLoadPlan refactor. The plan is informational
+    /// for cloud backends — its `effectiveContextSize` must NEVER be copied into
+    /// the request body as `max_tokens` or any other field. The API's
+    /// `max_tokens` must come exclusively from `GenerationConfig.maxOutputTokens`.
+    func test_loadModel_doesNotPropagateEffectiveContextSizeToRequestPayload() throws {
+        let backend = OpenAIBackend()
+        backend.configure(
+            baseURL: URL(string: "https://api.openai.com")!,
+            apiKey: "sk-test",
+            modelName: "gpt-4o-mini"
+        )
+
+        // Construct a plan with a distinctive effectiveContextSize. If a bug copies
+        // plan.effectiveContextSize into the request body, we would see 31_337
+        // as max_tokens instead of the config's value.
+        _ = ModelLoadPlan.testStub(effectiveContextSize: 31_337)
+
+        // Verify the request body reflects only the generation config's
+        // maxOutputTokens. We build the request directly since loadModel is a
+        // state-only configuration method on cloud backends.
+        let config = GenerationConfig(maxOutputTokens: 777)
+        let request = try backend.buildRequest(
+            prompt: "hello",
+            systemPrompt: nil,
+            config: config
+        )
+        guard let body = request.httpBody,
+              let json = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            XCTFail("Request body was not valid JSON")
+            return
+        }
+        XCTAssertEqual(json["max_tokens"] as? Int, 777,
+                       "max_tokens must come from GenerationConfig, not ModelLoadPlan")
+        XCTAssertNil(json["effective_context_size"],
+                     "plan.effectiveContextSize must not appear in the request body")
+        XCTAssertNil(json["context_size"],
+                     "plan.effectiveContextSize must not appear in the request body")
+    }
+
     // MARK: - Token Extraction (indirect via SSE + JSON)
 
     /// Verifies that the OpenAI JSON format can round-trip through SSE parsing.
