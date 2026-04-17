@@ -80,7 +80,12 @@ let service = InferenceService()
 let modelURL = URL.documentsDirectory
     .appending(path: "Models/llama-3.2-3b-instruct.Q4_K_M.gguf")
 let model = ModelInfo(ggufURL: modelURL)!
-try await service.loadModel(from: model, contextSize: 4096)
+let plan = ModelLoadPlan.compute(
+    for: model,
+    requestedContextSize: 4096,
+    strategy: .resident
+)
+try await service.loadModel(from: model, plan: plan)
 
 // Generate a response
 let stream = try service.generate(

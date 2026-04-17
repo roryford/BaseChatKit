@@ -13,7 +13,6 @@
 
 ### Loading Models
 
-- ``loadModel(from:contextSize:)``
 - ``loadModel(from:plan:)``
 - ``loadCloudBackend(from:)``
 - ``unloadModel()``
@@ -40,7 +39,3 @@
 ### Tokenization
 
 - ``tokenizer``
-
-### Memory Management
-
-- ``memoryGate``

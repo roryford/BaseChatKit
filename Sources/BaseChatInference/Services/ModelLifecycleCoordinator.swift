@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Owns backend registration, model loading/unloading, the `LoadRequestToken`
-/// lifecycle, progress reporting, memory gating, and capability/compatibility queries.
+/// lifecycle, progress reporting, deny-policy enforcement, and capability/compatibility queries.
 ///
 /// This is an internal implementation detail of `BaseChatInference`.
 /// `InferenceService` delegates all lifecycle operations to this coordinator
@@ -20,10 +20,6 @@ final class ModelLifecycleCoordinator {
     // MARK: - Backend
 
     private(set) var backend: (any InferenceBackend)?
-
-    // MARK: - Memory Gate
-
-    var memoryGate: MemoryGate?
 
     // MARK: - Deny Policy
 
@@ -129,28 +125,17 @@ final class ModelLifecycleCoordinator {
         // then delegate to the shared implementation. Sourcing the strategy from
         // the backend (rather than from `modelType`) preserves pre-plan behaviour
         // for callers that register backends with non-default strategies.
-        //
-        // When a `MemoryGate` is installed, its `availableMemoryBytes` closure is
-        // used as the plan's environment so that tests and custom gates continue
-        // to control what the plan sees as "available". Stage 5 will drop the gate
-        // entirely in favour of `ModelLoadPlan.Environment` directly.
         let plan: ModelLoadPlan
         if newBackend.capabilities.memoryStrategy == .external {
             // `.external` backends own their own memory (Foundation Models / cloud);
-            // the plan is always-allow, matching the legacy MemoryGate behaviour.
+            // the plan is always-allow.
             plan = ModelLoadPlan.systemManaged(requestedContextSize: Int(contextSize))
         } else {
-            let environment: ModelLoadPlan.Environment = memoryGate.map { gate in
-                ModelLoadPlan.Environment(
-                    availableMemoryBytes: gate.availableMemoryBytes,
-                    physicalMemoryBytes: gate.physicalMemoryBytes
-                )
-            } ?? .current
             plan = ModelLoadPlan.compute(
                 for: modelInfo,
                 requestedContextSize: Int(contextSize),
                 strategy: newBackend.capabilities.memoryStrategy,
-                environment: environment
+                environment: .current
             )
         }
         try await performLoad(modelInfo: modelInfo, plan: plan, backend: newBackend)
@@ -180,13 +165,12 @@ final class ModelLifecycleCoordinator {
         backend newBackend: any InferenceBackend
     ) async throws {
         // Pre-flight memory check based on the plan's verdict. On `.deny`, apply
-        // the coordinator's `denyPolicy` — the three-way `LoadDenyPolicy` replaces
-        // the old `MemoryGate.DenyBehavior` knob and exposes the full plan to
-        // custom hooks. Stage 5 will drop `MemoryGate` entirely.
+        // the coordinator's `denyPolicy` — the three-way `LoadDenyPolicy` exposes
+        // the full plan to custom hooks.
         //
-        // On `.warn`/`.deny` (when policy chooses to proceed) we downgrade the
-        // plan's verdict to `.warn` before dispatching to the backend so the
-        // backend's `plan.verdict != .deny` precondition holds.
+        // On `.deny` (when policy chooses to proceed) we downgrade the plan's
+        // verdict to `.warn` before dispatching to the backend so the backend's
+        // `plan.verdict != .deny` precondition holds.
         var effectivePlan = plan
         switch plan.verdict {
         case .allow:

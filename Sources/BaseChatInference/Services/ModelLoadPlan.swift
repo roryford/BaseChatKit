@@ -1,15 +1,11 @@
 import Foundation
 
-/// Stage 1 of the llama.cpp load-path refactor.
+/// Unified pre-load decision for a model.
 ///
-/// `ModelLoadPlan` unifies the memory / context decisions that today live in two
-/// separate places: `DeviceCapabilityService.safeContextSize(...)` (context clamp)
-/// and `MemoryGate.check(...)` (fit verdict). This additive type captures both in a
-/// single value so later stages (UI wiring, backend consumption, protocol flip) have
-/// a stable surface to code against.
-///
-/// This file is intentionally side-effect-free: no backends, UI, or persistence
-/// layers consume it yet. Stages 2+ will wire it in.
+/// Captures the context-clamp and memory-fit decisions in a single value. Backends
+/// consume a plan directly via `InferenceBackend.loadModel(from:plan:)`; UI builds
+/// one via `ModelLoadPlan.compute(for:requestedContextSize:strategy:)` so every
+/// load path sees the same authoritative context and verdict.
 public struct ModelLoadPlan: Sendable {
 
     /// The raw inputs a plan was computed from. Captured on the plan so callers can
@@ -151,7 +147,8 @@ public struct ModelLoadPlan: Sendable {
         case .resident:
             residentBudget = inputs.modelFileSize
         case .mappable:
-            // Matches the legacy MemoryGate mappable heuristic: min(fileSize/4, 1 GB).
+            // Mappable heuristic: min(fileSize/4, 1 GB). mmap-backed loads only need
+            // a fraction of the file resident in RAM for active working pages.
             let oneGB: UInt64 = 1_073_741_824
             residentBudget = min(inputs.modelFileSize / 4, oneGB)
         case .external:
@@ -210,7 +207,7 @@ public struct ModelLoadPlan: Sendable {
         let estimatedKV = UInt64(effectiveContextSize) * inputs.kvBytesPerToken
         let total = residentBudget &+ estimatedKV  // residentBudget is already bounded
 
-        // Verdict thresholds mirror the legacy MemoryGate for continuity.
+        // Verdict thresholds: allow ≤85% of available, warn up to 100%, deny above.
         let allowThreshold = UInt64(Double(available) * 0.85)
         let verdict: Verdict
         var finalReasons = reasons

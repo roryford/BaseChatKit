@@ -103,7 +103,7 @@ final class InferenceServiceFacadeTests: XCTestCase {
         _ = service.lastTokenUsage
         _ = service.tokenizer
         _ = service.selectedPromptTemplate
-        _ = service.memoryGate
+        _ = service.denyPolicy
 
         // Capability queries
         _ = service.compatibility(for: .gguf)

@@ -81,14 +81,6 @@ public final class InferenceService {
 
     public var capabilities: BackendCapabilities? { lifecycle.capabilities }
 
-    // MARK: - Memory Gate
-
-    @available(*, deprecated, message: "Set InferenceService.denyPolicy directly; MemoryGate will be removed in the next release")
-    public var memoryGate: MemoryGate? {
-        get { lifecycle.memoryGate }
-        set { lifecycle.memoryGate = newValue }
-    }
-
     // MARK: - Deny Policy
 
     /// Policy applied when a ``ModelLoadPlan`` returns a ``ModelLoadPlan/Verdict/deny``
@@ -123,6 +115,7 @@ public final class InferenceService {
     ///
     /// If another load request starts before this call completes, this request is
     /// treated as stale and its completion is suppressed.
+    @available(*, deprecated, message: "Use loadModel(from:plan:); build the plan with ModelLoadPlan.compute(for:requestedContextSize:strategy:)")
     public func loadModel(
         from modelInfo: ModelInfo,
         contextSize: Int32 = 2048
