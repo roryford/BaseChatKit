@@ -234,10 +234,7 @@ extension ChatViewModel {
         }
 
         do {
-            try await inferenceService.loadModel(
-                from: model,
-                contextSize: Int32(plan.effectiveContextSize)
-            )
+            try await inferenceService.loadModel(from: model, plan: plan)
         } catch is CancellationError {
             return
         } catch {

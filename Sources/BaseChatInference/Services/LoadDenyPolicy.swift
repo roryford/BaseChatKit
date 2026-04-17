@@ -2,8 +2,8 @@ import Foundation
 
 /// Policy applied when a ``ModelLoadPlan`` produces a ``ModelLoadPlan/Verdict/deny`` verdict.
 ///
-/// Replaces the two-way ``MemoryGate/DenyBehavior`` with a typed three-way policy
-/// that gives custom hooks full access to the plan (including `reasons`).
+/// Three-way policy giving custom hooks full access to the plan (including `reasons`)
+/// before deciding whether a load should proceed or fail.
 public enum LoadDenyPolicy: Sendable {
     /// Throw ``InferenceError/memoryInsufficient``. iOS default — the app is jetsam-bound
     /// and unsafe loads should fail fast.

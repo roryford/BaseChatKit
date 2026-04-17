@@ -507,10 +507,6 @@ public final class ChatViewModel {
         self.memoryPressure = memoryPressure
         self.sessionController = SessionController(selectedPromptTemplate: inferenceService.selectedPromptTemplate)
 
-        if inferenceService.memoryGate == nil {
-            inferenceService.memoryGate = MemoryGate()
-        }
-
         let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
         self.isFirstRun = !UserDefaults.standard.bool(forKey: firstRunKey)
     }
