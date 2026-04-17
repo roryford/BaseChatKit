@@ -189,7 +189,10 @@ final class ModelSelectionE2ETests {
         let mockRef = mock
         let storage = ModelStorageService(baseDirectory: modelsDir)
 
-        // 1 MB of RAM — far too small for any real model.
+        // Stage 2: fit checks route through `ModelLoadPlan`, which consults
+        // `availableMemoryBytes` from an injected environment. The legacy
+        // `DeviceCapabilityService(physicalMemory:)` knob no longer influences
+        // load admission at the UI layer — pin the plan environment directly.
         let tinyDevice = DeviceCapabilityService(physicalMemory: 1_000_000)
         let restrictedService = InferenceService()
         restrictedService.registerBackendFactory { _ in mockRef }
@@ -197,6 +200,10 @@ final class ModelSelectionE2ETests {
             inferenceService: restrictedService,
             deviceCapability: tinyDevice,
             modelStorage: storage
+        )
+        restrictedVM.loadPlanEnvironment = ModelLoadPlan.Environment(
+            availableMemoryBytes: { 1_000_000 },  // 1 MB
+            physicalMemoryBytes: 1_000_000
         )
 
         let bigModel = ModelInfo(
@@ -213,7 +220,7 @@ final class ModelSelectionE2ETests {
         #expect(restrictedVM.errorMessage != nil)
         #expect(!restrictedVM.isModelLoaded)
 
-        // Sabotage: with enough RAM, the load should proceed.
+        // Sabotage: with enough RAM the plan allows and the load should proceed.
         let largeDevice = DeviceCapabilityService(physicalMemory: 32 * 1024 * 1024 * 1024)
         let permissiveService = InferenceService()
         permissiveService.registerBackendFactory { _ in mockRef }
@@ -221,6 +228,10 @@ final class ModelSelectionE2ETests {
             inferenceService: permissiveService,
             deviceCapability: largeDevice,
             modelStorage: storage
+        )
+        permissiveVM.loadPlanEnvironment = ModelLoadPlan.Environment(
+            availableMemoryBytes: { 32 * 1024 * 1024 * 1024 },
+            physicalMemoryBytes: 32 * 1024 * 1024 * 1024
         )
         permissiveVM.selectedModel = bigModel
         await permissiveVM.loadSelectedModel()

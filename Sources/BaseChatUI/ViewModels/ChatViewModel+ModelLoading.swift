@@ -174,15 +174,47 @@ extension ChatViewModel {
     private func loadLocalModel(_ model: ModelInfo, generation: UInt64?) async {
         guard isCurrentLoadIntentGeneration(generation) else { return }
 
-        if model.modelType != .foundation {
-            guard deviceCapability.canLoadModel(estimatedMemoryBytes: model.fileSize) else {
-                let ramGB = deviceCapability.physicalMemory / (1024 * 1024 * 1024)
-                setLoadErrorIfCurrent(
-                    "This model (\(model.fileSizeFormatted)) may be too large for this device (\(ramGB) GB RAM). Try a smaller quantisation.",
-                    generation: generation
-                )
-                return
-            }
+        // Stage 2: unified load plan. `ModelLoadPlan` fuses the legacy
+        // `DeviceCapabilityService.canLoadModel(...)` fit check and the
+        // `DeviceCapabilityService.safeContextSize(...)` context clamp into a single
+        // decision so backends see a consistent verdict + context pair. The
+        // legacy helpers are still in place for Stage 5 removal — the UI no
+        // longer calls them.
+        let requestedContext = model.detectedContextLength ?? 8_192
+        let plan: ModelLoadPlan
+        switch model.modelType {
+        case .foundation:
+            // Foundation models are system-managed: no weight or KV math applies.
+            plan = ModelLoadPlan.systemManaged(requestedContextSize: requestedContext)
+        case .gguf:
+            plan = ModelLoadPlan.compute(
+                for: model,
+                requestedContextSize: requestedContext,
+                strategy: .mappable,
+                environment: loadPlanEnvironment
+            )
+        case .mlx:
+            plan = ModelLoadPlan.compute(
+                for: model,
+                requestedContextSize: requestedContext,
+                strategy: .resident,
+                environment: loadPlanEnvironment
+            )
+        }
+
+        switch plan.verdict {
+        case .deny:
+            setLoadErrorIfCurrent(
+                loadPlanDenyMessage(for: plan, model: model),
+                generation: generation
+            )
+            return
+        case .warn:
+            Log.inference.warning(
+                "Proceeding with tight-fit model load: \(model.name) — \(String(describing: plan.reasons))"
+            )
+        case .allow:
+            break
         }
 
         // Auto-detect prompt template from GGUF metadata before loading.
@@ -202,22 +234,41 @@ extension ChatViewModel {
         }
 
         do {
-            // Derive a memory-safe context size rather than blindly using the model's
-            // trained length. A 128K GGUF loaded at full context on an 8 GB iPad consumes
-            // ~1 GB of KV cache, which can push the process over its jetsam limit.
-            // DeviceCapabilityService.safeContextSize uses os_proc_available_memory() on iOS
-            // (the per-app budget) and physical memory on macOS, then applies a 60% KV
-            // budget after reserving 40% headroom for model weights and runtime.
-            let contextSize = DeviceCapabilityService.safeContextSize(
-                for: model.detectedContextLength,
-                estimatedKVBytesPerToken: model.estimatedKVBytesPerToken
+            try await inferenceService.loadModel(
+                from: model,
+                contextSize: Int32(plan.effectiveContextSize)
             )
-            try await inferenceService.loadModel(from: model, contextSize: contextSize)
         } catch is CancellationError {
             return
         } catch {
             setLoadErrorIfCurrent("Failed to load model: \(error.localizedDescription)", generation: generation)
         }
+    }
+
+    /// Translates a denied plan's primary `Reason` into a user-visible message.
+    ///
+    /// Picks the first `.insufficientResident` or `.insufficientKVCache` as the
+    /// primary reason; clamp reasons (info-only) are not surfaced. Falls back to
+    /// the legacy shape when no primary reason is present.
+    private func loadPlanDenyMessage(for plan: ModelLoadPlan, model: ModelInfo) -> String {
+        let primary = plan.reasons.first { reason in
+            switch reason {
+            case .insufficientResident, .insufficientKVCache: return true
+            default: return false
+            }
+        }
+        switch primary {
+        case .insufficientResident(let required, let available):
+            return "This model (\(Self.formatBytes(required))) is too large for available memory (\(Self.formatBytes(available))). Try a smaller quantisation."
+        case .insufficientKVCache(let required, let available):
+            return "Model weights fit, but the requested context window doesn't (\(Self.formatBytes(required)) needed vs \(Self.formatBytes(available)) available). Try reducing the context size or closing other apps."
+        default:
+            return "This model (\(model.fileSizeFormatted)) may be too large for this device. Try a smaller quantisation."
+        }
+    }
+
+    private static func formatBytes(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
     private func loadCloudEndpointInternal(_ endpoint: APIEndpoint, generation: UInt64?) async {

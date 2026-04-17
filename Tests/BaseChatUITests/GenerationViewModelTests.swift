@@ -155,9 +155,15 @@ final class ChatViewModelTests: XCTestCase {
     // MARK: - test_loadSelectedModel_modelTooLarge_setsError
 
     func test_loadSelectedModel_modelTooLarge_setsError() async {
-        // 4 GB device with a 4 GB model.
-        // Budget: 4 * 0.70 = 2.8 GB. Model + KV: 4 * 1.20 = 4.8 GB. Should fail.
+        // 4 GB device with a 4 GB model. Stage 2 routes fit checks through
+        // `ModelLoadPlan`, which reads `availableMemoryBytes` from an injected
+        // environment — pin it low so the plan denies deterministically on any
+        // host (the real CI box has far more RAM than the model's weights).
         let vm = makeViewModel(ramGB: 4)
+        vm.loadPlanEnvironment = ModelLoadPlan.Environment(
+            availableMemoryBytes: { 512 * 1024 * 1024 },  // 512 MB available
+            physicalMemoryBytes: 4 * oneGB
+        )
 
         let largeModel = ModelInfo(
             name: "huge-model",
