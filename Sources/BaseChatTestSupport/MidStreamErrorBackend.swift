@@ -30,7 +30,7 @@ public final class MidStreamErrorBackend: InferenceBackend, @unchecked Sendable 
         self.errorToThrow = errorToThrow
     }
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         isModelLoaded = true
     }
 

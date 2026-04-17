@@ -15,7 +15,7 @@ import BaseChatInference
 /// ```swift
 /// let backend = OllamaBackend()
 /// backend.configure(baseURL: URL(string: "http://localhost:11434")!, modelName: "llama3.2")
-/// try await backend.loadModel(from: URL(string: "unused:")!, contextSize: 0)
+/// try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
 /// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
@@ -61,7 +61,8 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
 
     // MARK: - Model Lifecycle
 
-    public override func loadModel(from url: URL, contextSize: Int32) async throws {
+    // Plan is informational for cloud backends.
+    public override func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         guard baseURL != nil else {
             throw CloudBackendError.invalidURL(
                 "No base URL configured. Call configure(baseURL:modelName:) first."

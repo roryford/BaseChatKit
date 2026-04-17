@@ -52,7 +52,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         self.capabilities = capabilities
     }
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         loadModelCallCount += 1
         loadModelCalledOnMainThread = pthread_main_np() != 0
         if let error = shouldThrowOnLoad { throw error }

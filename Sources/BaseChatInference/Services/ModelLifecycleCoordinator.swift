@@ -25,6 +25,13 @@ final class ModelLifecycleCoordinator {
 
     var memoryGate: MemoryGate?
 
+    // MARK: - Deny Policy
+
+    /// Policy applied when a ``ModelLoadPlan`` returns a `.deny` verdict.
+    /// Mirrors the facade's `InferenceService.denyPolicy`; written by the facade's
+    /// `didSet` so tests and custom gates can swap it before each load.
+    var denyPolicy: LoadDenyPolicy = .platformDefault
+
     // MARK: - Prompt Template
 
     var selectedPromptTemplate: PromptTemplate = .chatML
@@ -172,14 +179,14 @@ final class ModelLifecycleCoordinator {
         plan: ModelLoadPlan,
         backend newBackend: any InferenceBackend
     ) async throws {
-        // Pre-flight memory check based on the plan's verdict. Stage 5 deletes
-        // the MemoryGate reference entirely; for now we consult `denyBehavior`
-        // on the gate if one is installed so existing warn-only callers retain
-        // their semantics.
+        // Pre-flight memory check based on the plan's verdict. On `.deny`, apply
+        // the coordinator's `denyPolicy` — the three-way `LoadDenyPolicy` replaces
+        // the old `MemoryGate.DenyBehavior` knob and exposes the full plan to
+        // custom hooks. Stage 5 will drop `MemoryGate` entirely.
         //
-        // Downgrade the plan to `.warn` when the caller chose warnOnly — doing
-        // so keeps the backend's `plan.verdict != .deny` precondition satisfied
-        // when we force a load through against the gate's advice.
+        // On `.warn`/`.deny` (when policy chooses to proceed) we downgrade the
+        // plan's verdict to `.warn` before dispatching to the backend so the
+        // backend's `plan.verdict != .deny` precondition holds.
         var effectivePlan = plan
         switch plan.verdict {
         case .allow:
@@ -191,21 +198,16 @@ final class ModelLifecycleCoordinator {
         case .deny:
             let required = plan.outcome.totalEstimatedBytes
             let available = plan.inputs.availableMemoryBytes
-            if let gate = memoryGate, gate.denyBehavior == .warnOnly {
-                Log.inference.warning("Memory insufficient (plan): ~\(required / 1_048_576) MB needed, \(available / 1_048_576) MB available. Proceeding (may swap).")
-                effectivePlan = ModelLoadPlan(
-                    inputs: plan.inputs,
-                    outcome: ModelLoadPlan.Outcome(
-                        effectiveContextSize: plan.outcome.effectiveContextSize,
-                        estimatedResidentBytes: plan.outcome.estimatedResidentBytes,
-                        estimatedKVBytes: plan.outcome.estimatedKVBytes,
-                        totalEstimatedBytes: plan.outcome.totalEstimatedBytes,
-                        verdict: .warn,
-                        reasons: plan.outcome.reasons
-                    )
-                )
-            } else {
+            switch denyPolicy {
+            case .throwError:
                 throw InferenceError.memoryInsufficient(required: required, available: available)
+            case .warnOnly:
+                Log.inference.warning("Memory insufficient (plan): ~\(required / 1_048_576) MB needed, \(available / 1_048_576) MB available. Proceeding (may swap).")
+                effectivePlan = downgradeDenyToWarn(plan)
+            case .custom(let handler):
+                // Handler chooses: throw to reject, return to proceed.
+                try handler(plan)
+                effectivePlan = downgradeDenyToWarn(plan)
             }
         }
 
@@ -286,8 +288,9 @@ final class ModelLifecycleCoordinator {
         installProgressHandler(on: newBackend, for: request)
         do {
             let backendURL = url
+            let cloudPlan = ModelLoadPlan.cloud()
             try await Task.detached(priority: .userInitiated) {
-                try await newBackend.loadModel(from: backendURL, contextSize: 0)
+                try await newBackend.loadModel(from: backendURL, plan: cloudPlan)
             }.value
         } catch {
             (newBackend as? LoadProgressReporting)?.setLoadProgressHandler(nil)
@@ -361,6 +364,23 @@ final class ModelLifecycleCoordinator {
     }
 
     // MARK: - Backend Selection (Private)
+
+    /// Returns a new plan with its verdict rewritten to `.warn` while preserving
+    /// every other field. Used when the deny policy chooses to proceed despite
+    /// `.deny`, so the backend's `plan.verdict != .deny` precondition holds.
+    private func downgradeDenyToWarn(_ plan: ModelLoadPlan) -> ModelLoadPlan {
+        ModelLoadPlan(
+            inputs: plan.inputs,
+            outcome: ModelLoadPlan.Outcome(
+                effectiveContextSize: plan.outcome.effectiveContextSize,
+                estimatedResidentBytes: plan.outcome.estimatedResidentBytes,
+                estimatedKVBytes: plan.outcome.estimatedKVBytes,
+                totalEstimatedBytes: plan.outcome.totalEstimatedBytes,
+                verdict: .warn,
+                reasons: plan.outcome.reasons
+            )
+        )
+    }
 
     private func createBackend(for modelType: ModelType) -> (any InferenceBackend)? {
         for factory in backendFactories {

@@ -98,7 +98,12 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Model Lifecycle
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
+        assert(plan.verdict != .deny,
+               "ModelLoadPlan was denied; callers must check verdict before invoking backend")
+        // MLX reads context sizing from the model container; `plan` is informational
+        // here and kept for consistency with the protocol. Future work could honour
+        // `plan.effectiveContextSize` to cap generation length.
         unloadModel()
 
         let progressHandler = withStateLock { _loadProgressHandler }

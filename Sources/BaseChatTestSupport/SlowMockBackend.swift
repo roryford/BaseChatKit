@@ -56,7 +56,7 @@ public final class SlowMockBackend: InferenceBackend, @unchecked Sendable {
         delayPerToken = .milliseconds(delayMilliseconds)
     }
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         withStateLock { _isModelLoaded = true }
     }
 

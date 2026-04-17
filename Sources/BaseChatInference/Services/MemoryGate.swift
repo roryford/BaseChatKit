@@ -55,6 +55,7 @@ public struct MemoryGate: Sendable {
     }
 
     /// Checks whether a model of the given file size can be loaded with the given memory strategy.
+    @available(*, deprecated, message: "Use ModelLoadPlan.compute and InferenceService.denyPolicy")
     public func check(
         modelFileSize: UInt64,
         strategy: MemoryStrategy

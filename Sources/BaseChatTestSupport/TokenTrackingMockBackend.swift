@@ -33,7 +33,7 @@ public final class TokenTrackingMockBackend: InferenceBackend, TokenUsageProvide
 
     public init() {}
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         isModelLoaded = true
     }
 

@@ -119,31 +119,6 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Model Lifecycle
 
-    /// Stage 3 shim: legacy contextSize-taking entry point. Builds a minimal plan
-    /// and delegates to ``loadModel(from:plan:)``. Stage 4 removes this method;
-    /// the protocol flip promotes the plan-taking method to the sole requirement.
-    ///
-    /// Because this shim has no ``ModelInfo`` to consult, it does not perform
-    /// memory-aware clamping — it trusts the requested context and lets the
-    /// plan-taking implementation pass it straight to llama.cpp. Callers that
-    /// want real memory gating should build a plan via ``ModelLoadPlan.compute``
-    /// and call ``loadModel(from:plan:)`` directly.
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
-        let inputs = ModelLoadPlan.Inputs(
-            modelFileSize: 0,
-            memoryStrategy: .mappable,
-            requestedContextSize: Int(contextSize),
-            trainedContextLength: nil,
-            kvBytesPerToken: 0,
-            availableMemoryBytes: UInt64.max,
-            physicalMemoryBytes: UInt64.max,
-            absoluteContextCeiling: 128_000,
-            headroomFraction: 0.40
-        )
-        let plan = ModelLoadPlan.compute(inputs: inputs)
-        try await loadModel(from: url, plan: plan)
-    }
-
     /// Plan-aware model load. The plan's ``ModelLoadPlan/effectiveContextSize``
     /// is authoritative — no clamping happens inside llama.cpp's initializer.
     ///

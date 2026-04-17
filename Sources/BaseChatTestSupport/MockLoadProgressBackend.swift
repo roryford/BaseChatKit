@@ -49,7 +49,7 @@ public final class MockLoadProgressBackend: InferenceBackend, LoadProgressReport
 
     // MARK: - InferenceBackend methods
 
-    public func loadModel(from url: URL, contextSize: Int32) async throws {
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
         let handler = lock.withLock { _handler }
         deliveredValues = []
         for value in progressValuesToEmit {
