@@ -118,30 +118,94 @@ final class ModelLifecycleCoordinator {
             )
         }
 
-        // Pre-flight memory check
-        if let gate = memoryGate {
-            let verdict = gate.check(
-                modelFileSize: modelInfo.fileSize,
-                strategy: newBackend.capabilities.memoryStrategy
+        // Legacy path: build a plan using the backend's declared memory strategy,
+        // then delegate to the shared implementation. Sourcing the strategy from
+        // the backend (rather than from `modelType`) preserves pre-plan behaviour
+        // for callers that register backends with non-default strategies.
+        //
+        // When a `MemoryGate` is installed, its `availableMemoryBytes` closure is
+        // used as the plan's environment so that tests and custom gates continue
+        // to control what the plan sees as "available". Stage 5 will drop the gate
+        // entirely in favour of `ModelLoadPlan.Environment` directly.
+        let plan: ModelLoadPlan
+        if newBackend.capabilities.memoryStrategy == .external {
+            // `.external` backends own their own memory (Foundation Models / cloud);
+            // the plan is always-allow, matching the legacy MemoryGate behaviour.
+            plan = ModelLoadPlan.systemManaged(requestedContextSize: Int(contextSize))
+        } else {
+            let environment: ModelLoadPlan.Environment = memoryGate.map { gate in
+                ModelLoadPlan.Environment(
+                    availableMemoryBytes: gate.availableMemoryBytes,
+                    physicalMemoryBytes: gate.physicalMemoryBytes
+                )
+            } ?? .current
+            plan = ModelLoadPlan.compute(
+                for: modelInfo,
+                requestedContextSize: Int(contextSize),
+                strategy: newBackend.capabilities.memoryStrategy,
+                environment: environment
             )
-            switch verdict {
-            case .allow:
-                break
-            case .warn(let estimated, let available):
-                let estMB = estimated / 1_048_576
-                let availMB = available / 1_048_576
-                Log.inference.warning("Memory warning: model needs ~\(estMB) MB, \(availMB) MB available")
-            case .deny(let estimated, let available):
-                switch gate.denyBehavior {
-                case .throwError:
-                    throw InferenceError.memoryInsufficient(
-                        required: estimated, available: available
+        }
+        try await performLoad(modelInfo: modelInfo, plan: plan, backend: newBackend)
+    }
+
+    func loadModel(
+        from modelInfo: ModelInfo,
+        plan: ModelLoadPlan
+    ) async throws {
+        unloadModel()
+
+        guard let newBackend = createBackend(for: modelInfo.modelType) else {
+            throw InferenceError.inferenceFailure(
+                "No registered backend can handle model type \(modelInfo.modelType). "
+                + "Register a BackendFactory before loading models."
+            )
+        }
+
+        try await performLoad(modelInfo: modelInfo, plan: plan, backend: newBackend)
+    }
+
+    /// Shared implementation for the two `loadModel` overloads. Assumes the caller
+    /// has already created the backend and built the plan.
+    private func performLoad(
+        modelInfo: ModelInfo,
+        plan: ModelLoadPlan,
+        backend newBackend: any InferenceBackend
+    ) async throws {
+        // Pre-flight memory check based on the plan's verdict. Stage 5 deletes
+        // the MemoryGate reference entirely; for now we consult `denyBehavior`
+        // on the gate if one is installed so existing warn-only callers retain
+        // their semantics.
+        //
+        // Downgrade the plan to `.warn` when the caller chose warnOnly — doing
+        // so keeps the backend's `plan.verdict != .deny` precondition satisfied
+        // when we force a load through against the gate's advice.
+        var effectivePlan = plan
+        switch plan.verdict {
+        case .allow:
+            break
+        case .warn:
+            let estMB = plan.outcome.totalEstimatedBytes / 1_048_576
+            let availMB = plan.inputs.availableMemoryBytes / 1_048_576
+            Log.inference.warning("Memory warning (plan): needs ~\(estMB) MB, \(availMB) MB available")
+        case .deny:
+            let required = plan.outcome.totalEstimatedBytes
+            let available = plan.inputs.availableMemoryBytes
+            if let gate = memoryGate, gate.denyBehavior == .warnOnly {
+                Log.inference.warning("Memory insufficient (plan): ~\(required / 1_048_576) MB needed, \(available / 1_048_576) MB available. Proceeding (may swap).")
+                effectivePlan = ModelLoadPlan(
+                    inputs: plan.inputs,
+                    outcome: ModelLoadPlan.Outcome(
+                        effectiveContextSize: plan.outcome.effectiveContextSize,
+                        estimatedResidentBytes: plan.outcome.estimatedResidentBytes,
+                        estimatedKVBytes: plan.outcome.estimatedKVBytes,
+                        totalEstimatedBytes: plan.outcome.totalEstimatedBytes,
+                        verdict: .warn,
+                        reasons: plan.outcome.reasons
                     )
-                case .warnOnly:
-                    let estMB = estimated / 1_048_576
-                    let availMB = available / 1_048_576
-                    Log.inference.warning("Memory insufficient: model needs ~\(estMB) MB, \(availMB) MB available. Proceeding (may swap).")
-                }
+                )
+            } else {
+                throw InferenceError.memoryInsufficient(required: required, available: available)
             }
         }
 
@@ -154,8 +218,9 @@ final class ModelLifecycleCoordinator {
         installProgressHandler(on: newBackend, for: request)
         do {
             let url = modelInfo.url
+            let dispatchPlan = effectivePlan
             try await Task.detached(priority: .userInitiated) {
-                try await newBackend.loadModel(from: url, contextSize: contextSize)
+                try await newBackend.loadModel(from: url, plan: dispatchPlan)
             }.value
         } catch {
             (newBackend as? LoadProgressReporting)?.setLoadProgressHandler(nil)

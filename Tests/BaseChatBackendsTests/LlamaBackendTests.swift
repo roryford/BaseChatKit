@@ -136,83 +136,13 @@ final class LlamaBackendTests: XCTestCase {
                         + "spinning on the calling thread would freeze the UI")
     }
 
-    func test_contextSize_capLogic_ramSafeCapCalculation() {
-        // Validates computeRamSafeCap() — the RAM-safe cap helper used in initializeModel.
-        //
-        // The cap is `min(128_000, memoryAvailable / kvBytesPerToken)`. To keep the
-        // monotonicity assertion meaningful on arbitrarily large hosts, we derive
-        // `largeEstimate` from physical RAM so the result lands strictly below the
-        // 128K absolute ceiling regardless of how much memory the CI runner has.
-        let legacyEstimate: Int64 = Int64(GGUFKVCacheEstimator.legacyFallbackBytesPerToken)
-        let physical = Int64(ProcessInfo.processInfo.physicalMemory)
-        // Guarantees physical / largeEstimate < 64_000 → sub-ceiling on any host.
-        let largeEstimate = max(Int64(131_072), physical / 64_000 + 1)
-
-        let legacyCap = LlamaBackend.computeRamSafeCap(kvBytesPerToken: legacyEstimate)
-        let ramSafeCap = LlamaBackend.computeRamSafeCap(kvBytesPerToken: largeEstimate)
-
-        XCTAssertGreaterThan(ramSafeCap, 0,
-                             "RAM-safe cap must be positive; formula may have underflowed")
-        XCTAssertLessThanOrEqual(ramSafeCap, 128_000,
-                                 "RAM-safe cap must not exceed the absolute maximum of 128_000")
-        XCTAssertLessThan(ramSafeCap, legacyCap,
-                          "A larger per-token KV estimate must clamp harder than a smaller one")
-        // A small requested size still wins when it is the smallest of the three values.
-        let requested = Int32(512)
-        let effective = min(requested, Int32(32_000), ramSafeCap)
-        XCTAssertEqual(effective, requested,
-                       "Requested context size should win when it is the smallest of the three values")
-    }
-
-    func test_computeKVBytesPerToken_fromParameters_matchesLlama7BGQAMath() {
-        let estimate = LlamaBackend.computeKVBytesPerToken(
-            from: GGUFKVCacheParameters(
-                blockCount: 32,
-                embeddingLength: 4096,
-                attentionHeadCount: 32,
-                attentionHeadCountKV: 8
-            )
-        )
-
-        XCTAssertEqual(estimate, 131_072)
-    }
-
-    // MARK: - Retry context-halving progression
-
-    func test_retryContextHalving_progressionStopsAtFloor() {
-        // Validates the halve-until-floor logic used in initializeModel's retry loop.
-        // This is a pure-logic test — no C API is called.
-        //
-        // Starting at 8 192 with floor 1 024, halving produces:
-        //   8 192 → 4 096 → 2 048 → 1 024 (floor reached — further halving is clamped)
-        // Running 6 iterations is enough to prove the sequence stops at 1 024.
-        let floor: Int32 = 1024
-        var n_ctx: Int32 = 8192
-        var sequence: [Int32] = [n_ctx]
-        for _ in 1..<6 {
-            let next = max(n_ctx / 2, floor)
-            if next == n_ctx { break }
-            n_ctx = next
-            sequence.append(n_ctx)
-        }
-        XCTAssertEqual(sequence, [8192, 4096, 2048, 1024],
-                       "Retry sequence must halve from 8192 down to the floor (1024) and stop there")
-
-        // Sabotage check: with floor = 0 the sequence is NOT clamped at 1024, so it
-        // continues past that value. Verifying that sequenceNoFloor is strictly longer
-        // than the floored sequence proves the floor guard is doing real work.
-        var n_ctxNoFloor: Int32 = 8192
-        var sequenceNoFloor: [Int32] = [n_ctxNoFloor]
-        for _ in 1..<6 {
-            let next = max(n_ctxNoFloor / 2, 0)
-            if next == n_ctxNoFloor { break }   // prevents infinite loop at 0
-            n_ctxNoFloor = next
-            sequenceNoFloor.append(n_ctxNoFloor)
-        }
-        // With floor=0 we expect [8192, 4096, 2048, 1024, 512, 256] — longer than [8192, 4096, 2048, 1024].
-        XCTAssertGreaterThan(sequenceNoFloor.count, sequence.count,
-                             "Removing the floor must produce a longer sequence — proves the floor guard actually terminates halving")
-    }
+    // Note: context-clamp logic and KV bytes-per-token computation moved from
+    // LlamaBackend into `ModelLoadPlan` / `GGUFKVCacheEstimator` in Stage 3 of
+    // the load-path refactor. The tests that previously exercised
+    // `computeRamSafeCap` / `computeKVBytesPerToken` here were superseded by
+    // `ModelLoadPlanTests` and `ModelLoadPlanParityTests` in
+    // `BaseChatInferenceTests`. The retry-on-nil halving loop was deleted
+    // outright — the plan is authoritative, so there is no fallback to test.
 
     func test_unloadModel_fromCleanState_isNoOp() {
         let backend = LlamaBackend()
@@ -365,6 +295,100 @@ final class LlamaBackendTests: XCTestCase {
             let backend = LlamaBackend()
             backend.unloadModel()
         }
+    }
+
+    // MARK: - Plan-Taking loadModel
+
+    /// The plan's `effectiveContextSize` must be honoured verbatim — no clamping,
+    /// no RAM-safe cap, no trained-context re-check. Prove it by passing a plan
+    /// with a very small context (1 024) and asserting the backend reports it.
+    ///
+    /// Sabotage check: if `initializeModel` hardcoded `n_ctx = 2048` regardless
+    /// of the plan, `backend.capabilities.maxContextTokens` would be 2 048 and
+    /// this assertion would fail.
+    func test_loadModel_fromPlan_passesEffectiveContextSizeToCContext() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip(
+                "No GGUF model found on disk. Place a `.gguf` file in ~/Documents/Models/ to run this test."
+            )
+        }
+
+        let backend = LlamaBackend()
+        addTeardownBlock { await backend.unloadAndWait() }
+
+        let requested = 1024
+        let inputs = ModelLoadPlan.Inputs(
+            modelFileSize: 0,
+            memoryStrategy: .mappable,
+            requestedContextSize: requested,
+            trainedContextLength: nil,
+            kvBytesPerToken: 0,
+            availableMemoryBytes: UInt64.max,
+            physicalMemoryBytes: UInt64.max,
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+        XCTAssertEqual(plan.effectiveContextSize, requested,
+                       "Plan must pass through the requested context when no ceilings bind")
+
+        try await backend.loadModel(from: modelURL, plan: plan)
+        XCTAssertTrue(backend.isModelLoaded)
+        XCTAssertEqual(backend.capabilities.maxContextTokens, Int32(requested),
+                       "Backend must honour the plan's effectiveContextSize verbatim — "
+                       + "a mismatch means the plan was not authoritative")
+    }
+
+    /// Regression test for #398/#411: when the plan clamps the context to a
+    /// smaller value than requested (the normal memory-gated path), the C API
+    /// must allocate the clamped size, not the requested size. This is the
+    /// named regression for the ggml_metal_host_malloc crash: before the plan,
+    /// the backend would attempt the full requested context and crash.
+    ///
+    /// The assertion here is indirect — we cannot inspect ggml_metal_host_malloc
+    /// error output from a unit test without OSLogStore plumbing — but load
+    /// success at a plan-clamped size confirms the new path respects the clamp.
+    ///
+    /// Sabotage check: if the backend ignored the plan and used `requested`,
+    /// the load would attempt a larger allocation than we requested and either
+    /// succeed (invalidating the test's premise) or crash (failing the test).
+    /// A non-throwing load at the clamped size is what we want to see.
+    func test_loadModel_fromPlan_clampRespected_noMetalHostMallocFailure() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip(
+                "No GGUF model found on disk. Place a `.gguf` file in ~/Documents/Models/ to run this regression test."
+            )
+        }
+
+        // Build a plan with a generous request but a tight memory budget so the
+        // plan's memoryCeiling clamps `effectiveContextSize` well below the
+        // request. The inputs are synthetic — we don't need the real file size
+        // because `mappable` strategy uses a fraction.
+        let inputs = ModelLoadPlan.Inputs(
+            modelFileSize: 1_073_741_824,  // 1 GB, mappable ⇒ 256 MB resident reserve
+            memoryStrategy: .mappable,
+            requestedContextSize: 65_536,
+            trainedContextLength: nil,
+            kvBytesPerToken: 131_072,      // ~128 KB/tok (large; forces aggressive clamp)
+            availableMemoryBytes: 2_147_483_648,  // 2 GB available
+            physicalMemoryBytes: 8_589_934_592,   // 8 GB physical
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+        XCTAssertLessThan(plan.effectiveContextSize, inputs.requestedContextSize,
+                          "Test setup requires the plan to clamp — inputs must force a memory ceiling")
+        XCTAssertNotEqual(plan.verdict, .deny,
+                          "Test setup requires a plan that is safe to load (not denied)")
+
+        let backend = LlamaBackend()
+        addTeardownBlock { await backend.unloadAndWait() }
+
+        try await backend.loadModel(from: modelURL, plan: plan)
+        XCTAssertTrue(backend.isModelLoaded,
+                      "Load at plan-clamped context size must succeed; a failure here would "
+                      + "indicate the backend allocated more than the plan authorized")
+        XCTAssertEqual(backend.capabilities.maxContextTokens, Int32(plan.effectiveContextSize))
     }
 
     // MARK: - TokenizerVendor

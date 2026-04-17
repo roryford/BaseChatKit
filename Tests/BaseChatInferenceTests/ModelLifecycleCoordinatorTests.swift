@@ -75,6 +75,75 @@ final class ModelLifecycleCoordinatorTests: XCTestCase {
                        "activeBackendName must reflect the backend that committed the load")
     }
 
+    // MARK: - 1b. Plan-taking overload commits identically
+
+    /// The plan-taking overload must drive the same commit lifecycle as the
+    /// legacy contextSize overload. This verifies Stage 3's refactor didn't
+    /// break the delegation path.
+    ///
+    /// Sabotage: changing `loadModel(from:plan:)` to skip `commitLoadIfCurrent`
+    /// would leave `isModelLoaded = false` and fail the assertion below.
+    func test_planLoad_commitsIdentically() async throws {
+        let (coordinator, backend) = makeCoordinatorAndGate()
+        let modelInfo = makeModelInfo()
+        let plan = ModelLoadPlan.compute(
+            for: modelInfo,
+            requestedContextSize: 2048,
+            strategy: .mappable
+        )
+
+        let task = Task { try await coordinator.loadModel(from: modelInfo, plan: plan) }
+        await backend.waitUntilLoadStarted()
+        await backend.releaseSuccess()
+        try await task.value
+
+        XCTAssertTrue(coordinator.isModelLoaded,
+                      "Plan-taking overload must flip isModelLoaded on successful commit")
+        XCTAssertEqual(coordinator.activeBackendName, "llama.cpp")
+    }
+
+    /// A plan with `verdict == .deny` must throw `memoryInsufficient` before
+    /// ever dispatching to the backend — no load task should start.
+    ///
+    /// Sabotage: deleting the `.deny` throw branch would let the load proceed
+    /// and either commit or block on the gated backend.
+    func test_planLoad_deniedPlan_throwsMemoryInsufficient() async throws {
+        let (coordinator, backend) = makeCoordinatorAndGate()
+        let modelInfo = makeModelInfo()
+
+        // Synthesize a plan whose inputs force a deny verdict.
+        let denied = ModelLoadPlan.compute(inputs: ModelLoadPlan.Inputs(
+            modelFileSize: 64 * 1_073_741_824,   // 64 GB model
+            memoryStrategy: .resident,
+            requestedContextSize: 4096,
+            trainedContextLength: nil,
+            kvBytesPerToken: 8_192,
+            availableMemoryBytes: 1_073_741_824, // 1 GB available — model won't fit
+            physicalMemoryBytes: 1_073_741_824,
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40
+        ))
+        XCTAssertEqual(denied.verdict, .deny,
+                       "Test setup: crafted inputs must produce a deny verdict")
+
+        do {
+            try await coordinator.loadModel(from: modelInfo, plan: denied)
+            XCTFail("Denied plan must throw before calling into the backend")
+        } catch let error as InferenceError {
+            if case .memoryInsufficient = error {
+                // Expected
+            } else {
+                XCTFail("Expected memoryInsufficient, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+
+        XCTAssertFalse(coordinator.isModelLoaded)
+        // Backend must not have been invoked.
+        XCTAssertFalse(backend.isModelLoaded)
+    }
+
     // MARK: - 2. Stale load suppressed
 
     /// When request B supersedes request A (B starts after A), A's completion
