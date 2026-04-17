@@ -44,7 +44,12 @@ final class MemoryGateInferenceServiceTests: XCTestCase {
             XCTFail("Expected memoryInsufficient error")
         } catch let error as InferenceError {
             if case .memoryInsufficient(let required, let available) = error {
-                XCTAssertEqual(required, 4_000_000_000)
+                // Post-ModelLoadPlan: the `required` value is the plan's total estimated
+                // footprint (resident + KV), not just the raw file size. For a resident
+                // strategy with no architectural KV hint, the total is fileSize + an
+                // estimate based on the legacy fallback KV bytes-per-token.
+                XCTAssertGreaterThanOrEqual(required, 4_000_000_000,
+                                            "required must at least cover the model file size")
                 XCTAssertEqual(available, 500_000_000)
             } else {
                 XCTFail("Expected memoryInsufficient, got \(error)")

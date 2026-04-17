@@ -119,7 +119,40 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Model Lifecycle
 
+    /// Stage 3 shim: legacy contextSize-taking entry point. Builds a minimal plan
+    /// and delegates to ``loadModel(from:plan:)``. Stage 4 removes this method;
+    /// the protocol flip promotes the plan-taking method to the sole requirement.
+    ///
+    /// Because this shim has no ``ModelInfo`` to consult, it does not perform
+    /// memory-aware clamping — it trusts the requested context and lets the
+    /// plan-taking implementation pass it straight to llama.cpp. Callers that
+    /// want real memory gating should build a plan via ``ModelLoadPlan.compute``
+    /// and call ``loadModel(from:plan:)`` directly.
     public func loadModel(from url: URL, contextSize: Int32) async throws {
+        let inputs = ModelLoadPlan.Inputs(
+            modelFileSize: 0,
+            memoryStrategy: .mappable,
+            requestedContextSize: Int(contextSize),
+            trainedContextLength: nil,
+            kvBytesPerToken: 0,
+            availableMemoryBytes: UInt64.max,
+            physicalMemoryBytes: UInt64.max,
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+        try await loadModel(from: url, plan: plan)
+    }
+
+    /// Plan-aware model load. The plan's ``ModelLoadPlan/effectiveContextSize``
+    /// is authoritative — no clamping happens inside llama.cpp's initializer.
+    ///
+    /// - Precondition: `plan.verdict != .deny`. Callers must check the verdict
+    ///   before invoking; the backend assumes the plan is allow/warn.
+    public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
+        assert(plan.verdict != .deny,
+               "ModelLoadPlan was denied; callers must check verdict before invoking backend")
+
         unloadModel()
         await waitForPendingCleanup()
 
@@ -135,9 +168,10 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         // InferenceService.applyLoadProgress(_:for:) drops values whose request
         // token no longer matches the active loading phase.
         let capturedHandler = withStateLock { _loadProgressHandler }
+        let effectiveContextSize = Int32(plan.effectiveContextSize)
 
         let loadedResources = try await Task.detached(priority: .userInitiated) { [self] in
-            return try self.serializedModelLoad(at: url, contextSize: contextSize, progressHandler: capturedHandler)
+            return try self.serializedModelLoad(at: url, effectiveContextSize: effectiveContextSize, progressHandler: capturedHandler)
         }.value
 
         let didCommit = withStateLock {
@@ -167,12 +201,12 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// in a synchronous context (required by Swift 6.3 strict concurrency).
     private func serializedModelLoad(
         at url: URL,
-        contextSize: Int32,
+        effectiveContextSize: Int32,
         progressHandler: (@Sendable (Double) async -> Void)?
     ) throws -> LoadedResources {
         loadSerializationLock.lock()
         defer { loadSerializationLock.unlock() }
-        return try Self.initializeModel(at: url, requestedContextSize: contextSize, progressHandler: progressHandler)
+        return try Self.initializeModel(at: url, effectiveContextSize: effectiveContextSize, progressHandler: progressHandler)
     }
 
     private struct LoadedResources: @unchecked Sendable {
@@ -226,139 +260,9 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
     }
 
-    static func computeKVBytesPerToken(
-        from parameters: GGUFKVCacheParameters,
-        bytesPerElement: Int64 = Int64(GGUFKVCacheEstimator.defaultBytesPerElement)
-    ) -> Int64? {
-        guard bytesPerElement > 0,
-              let estimate = GGUFKVCacheEstimator.estimateBytesPerToken(
-                from: parameters,
-                bytesPerElement: UInt64(bytesPerElement)
-              ) else {
-            return nil
-        }
-        return Int64(estimate)
-    }
-
-    static func computeKVBytesPerToken(
-        for model: OpaquePointer,
-        bytesPerElement: Int64 = Int64(GGUFKVCacheEstimator.defaultBytesPerElement)
-    ) -> Int64? {
-        computeKVBytesPerToken(
-            from: kvCacheParameters(for: model),
-            bytesPerElement: bytesPerElement
-        )
-    }
-
-    /// Returns the maximum context size (in tokens) that is safe to allocate given
-    /// the memory available to this process.
-    ///
-    /// On iOS/iPadOS, `os_proc_available_memory()` returns the per-app jetsam budget —
-    /// the number of bytes the process can allocate before the system kills it. This is
-    /// typically ~3 GB on an 8 GB iPad, regardless of how much physical RAM exists.
-    /// Using physical memory here would produce a meaningless cap (e.g., 128 000 on
-    /// every modern device) and defeat the purpose of the guard.
-    ///
-    /// On macOS there is no per-app jetsam limit, so physical memory is the right ceiling.
-    ///
-    /// The loaded model's KV geometry is preferred when available; otherwise the legacy
-    /// 8 KB/token fallback is used. The result is clamped to 128 000 as an absolute ceiling.
-    static func computeRamSafeCap(
-        for model: OpaquePointer? = nil,
-        kvBytesPerToken: Int64? = nil
-    ) -> Int32 {
-        let kvBytesPerToken = max(
-            1,
-            kvBytesPerToken
-                ?? model.flatMap { Self.computeKVBytesPerToken(for: $0) }
-                ?? Int64(GGUFKVCacheEstimator.legacyFallbackBytesPerToken)
-        )
-        #if os(iOS) || os(tvOS) || os(watchOS)
-        let available = os_proc_available_memory()
-        // os_proc_available_memory() can return 0 or negative in edge cases (simulator boot);
-        // fall through to the physical-memory path if that happens.
-        if available > 0 {
-            return Int32(min(Int64(128_000), Int64(available) / kvBytesPerToken))
-        }
-        #endif
-        let physical = Int64(ProcessInfo.processInfo.physicalMemory)
-        return Int32(min(Int64(128_000), physical / kvBytesPerToken))
-    }
-
-    private static func kvCacheParameters(for model: OpaquePointer) -> GGUFKVCacheParameters {
-        let architecture = modelMetadataString(for: model, key: "general.architecture")
-        let attentionHeadCount = modelMetadataInteger(
-            for: model,
-            key: architecture.map { "\($0).attention.head_count" }
-        ) ?? positive(llama_model_n_head(model))
-
-        return GGUFKVCacheParameters(
-            blockCount: modelMetadataInteger(
-                for: model,
-                key: architecture.map { "\($0).block_count" }
-            ) ?? positive(llama_model_n_layer(model)),
-            embeddingLength: modelMetadataInteger(
-                for: model,
-                key: architecture.map { "\($0).embedding_length" }
-            ) ?? positive(llama_model_n_embd(model)),
-            attentionHeadCount: attentionHeadCount,
-            attentionHeadCountKV: modelMetadataInteger(
-                for: model,
-                key: architecture.map { "\($0).attention.head_count_kv" }
-            ) ?? positive(llama_model_n_head_kv(model)) ?? attentionHeadCount,
-            attentionKeyLength: modelMetadataInteger(
-                for: model,
-                key: architecture.map { "\($0).attention.key_length" }
-            ),
-            attentionValueLength: modelMetadataInteger(
-                for: model,
-                key: architecture.map { "\($0).attention.value_length" }
-            )
-        )
-    }
-
-    private static func modelMetadataInteger(for model: OpaquePointer, key: String?) -> Int? {
-        guard let key,
-              let rawValue = modelMetadataString(for: model, key: key)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) else {
-            return nil
-        }
-        return Int(rawValue)
-    }
-
-    /// Looks up a short scalar/identifier metadata value (architecture name, integer-as-string).
-    /// Not suitable for long values like chat templates — the 4 KB cap silently returns `nil`
-    /// when the value is larger.
-    private static func modelMetadataString(for model: OpaquePointer, key: String) -> String? {
-        var bufferSize = 64
-
-        while bufferSize <= 4096 {
-            var buffer = [CChar](repeating: 0, count: bufferSize)
-            let requiredLength = buffer.withUnsafeMutableBufferPointer { pointer in
-                key.withCString { keyPointer in
-                    llama_model_meta_val_str(model, keyPointer, pointer.baseAddress, pointer.count)
-                }
-            }
-
-            guard requiredLength >= 0 else { return nil }
-            if Int(requiredLength) < buffer.count {
-                return String(cString: buffer)
-            }
-
-            bufferSize = Int(requiredLength) + 1
-        }
-
-        return nil
-    }
-
-    private static func positive(_ value: Int32) -> Int? {
-        guard value > 0 else { return nil }
-        return Int(value)
-    }
-
     private static func initializeModel(
         at url: URL,
-        requestedContextSize: Int32,
+        effectiveContextSize: Int32,
         progressHandler: (@Sendable (Double) async -> Void)? = nil
     ) throws -> LoadedResources {
         var modelParams = llama_model_default_params()
@@ -402,75 +306,41 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         let modelHandle = LlamaModelHandle(rawModel)
 
         var ctxParams = llama_context_default_params()
-        // Respect the model's actual training context length — hard-capping at 8192
-        // prevents long-context models (32K–128K) from using their full window.
-        let trainedContextLength = Int32(llama_model_n_ctx_train(rawModel))
-        // On iOS the per-app jetsam limit is a fraction of physical RAM (~3 GB on an 8 GB
-        // iPad), so we derive the cap from os_proc_available_memory() rather than total
-        // physical memory. On macOS there is no per-app cap, so physical memory is used.
-        let kvBytesPerToken = Self.computeKVBytesPerToken(for: rawModel)
-        let ramSafeCap = Self.computeRamSafeCap(kvBytesPerToken: kvBytesPerToken)
-        let effectiveContextSize = min(requestedContextSize, trainedContextLength, ramSafeCap)
+        ctxParams.n_ctx = UInt32(effectiveContextSize)
         ctxParams.n_threads = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
         ctxParams.n_threads_batch = ctxParams.n_threads
 
         Self.logger.info(
-            "LlamaBackend: RAM-safe cap = \(ramSafeCap) tokens (kvBytesPerToken = \(kvBytesPerToken ?? Int64(GGUFKVCacheEstimator.legacyFallbackBytesPerToken)), effective = \(effectiveContextSize))"
+            "LlamaBackend: initializing context at \(effectiveContextSize) tokens (plan-authoritative)"
         )
 
-        // Retry with progressively halved context on init failure.
-        //
-        // When llama_init_from_model returns nil, the most common cause is a failed
-        // KV-cache allocation. Halving the context reduces KV memory by 50% per attempt.
-        // We retry up to 2 additional times (3 total), stopping at a floor of 1 024 tokens.
-        //
-        // Caveat: on iOS, a jetsam SIGKILL fires before llama_init_from_model returns,
-        // so this retry only helps for clean-nil cases (macOS allocation failure, or iOS
-        // near-threshold failures that return nil rather than being killed). It is
-        // defense-in-depth, not a guarantee against jetsam.
-        var n_ctx = effectiveContextSize
-        let contextFloor: Int32 = 1024
-        let maxAttempts = 3
-        var contextHandle: LlamaContextHandle?
-        for attempt in 1...maxAttempts {
-            ctxParams.n_ctx = UInt32(n_ctx)
-            if let ctx = llama_init_from_model(rawModel, ctxParams) {
-                if attempt > 1 {
-                    Self.logger.info(
-                        "LlamaBackend: context init succeeded on attempt \(attempt) with \(n_ctx) tokens"
-                    )
-                }
-                contextHandle = LlamaContextHandle(
-                    context: ctx,
-                    vocab: llama_model_get_vocab(rawModel)
-                )
-                break
-            }
-            let nextCtx = max(n_ctx / 2, contextFloor)
-            if nextCtx == n_ctx {
-                // Already at the floor and still failing; stop.
-                break
-            }
-            Self.logger.warning(
-                "LlamaBackend: llama_init_from_model failed at \(n_ctx) tokens (attempt \(attempt)/\(maxAttempts)); retrying with \(nextCtx)"
-            )
-            n_ctx = nextCtx
-        }
-
-        guard let contextHandle else {
+        // Single attempt. The plan is authoritative — it has already clamped the
+        // context to a memory-safe value. If llama_init_from_model still returns
+        // nil at this size, we surface a typed error so the caller can request a
+        // smaller plan rather than silently allocating half of what was asked for.
+        guard let ctx = llama_init_from_model(rawModel, ctxParams) else {
             // modelHandle goes out of scope here → llama_model_free called automatically
             throw InferenceError.modelLoadFailed(underlying: NSError(
                 domain: "LlamaBackend",
                 code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to create llama context"]
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Failed to create llama context at \(effectiveContextSize) tokens. "
+                        + "The memory estimate did not account for an allocator failure at this size. "
+                        + "Retry with a smaller requested context size.",
+                ]
             ))
         }
 
-        // n_ctx reflects the context size that was successfully allocated.
+        let contextHandle = LlamaContextHandle(
+            context: ctx,
+            vocab: llama_model_get_vocab(rawModel)
+        )
+
         return LoadedResources(
             model: modelHandle,
             context: contextHandle,
-            effectiveContextSize: n_ctx
+            effectiveContextSize: effectiveContextSize
         )
     }
 

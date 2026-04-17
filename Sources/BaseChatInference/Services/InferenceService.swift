@@ -118,7 +118,25 @@ public final class InferenceService {
     ) async throws {
         ensureProviderWired()
         generation.stopGeneration()
+        // Delegation without a plan: the coordinator picks the backend first and
+        // then builds a plan using the backend's declared memory strategy. This
+        // preserves the legacy behaviour where `MemoryStrategy` was sourced from
+        // `backend.capabilities.memoryStrategy`.
         try await lifecycle.loadModel(from: modelInfo, contextSize: contextSize)
+    }
+
+    /// Loads a model using a precomputed ``ModelLoadPlan``.
+    ///
+    /// Prefer this over ``loadModel(from:contextSize:)`` when the caller has already
+    /// produced a plan (for example via the UI load flow). The plan carries the
+    /// authoritative effective context size and memory verdict.
+    public func loadModel(
+        from modelInfo: ModelInfo,
+        plan: ModelLoadPlan
+    ) async throws {
+        ensureProviderWired()
+        generation.stopGeneration()
+        try await lifecycle.loadModel(from: modelInfo, plan: plan)
     }
 
     /// Loads a cloud API backend from an `APIEndpointRecord` configuration.

@@ -133,3 +133,19 @@ public protocol InferenceBackend: AnyObject, Sendable {
 extension InferenceBackend {
     public func resetConversation() {}
 }
+
+public extension InferenceBackend {
+    /// Load a model using a precomputed ``ModelLoadPlan``.
+    ///
+    /// Default implementation delegates to ``loadModel(from:contextSize:)`` using
+    /// `plan.effectiveContextSize`. Backends that care about the plan's richer
+    /// information (memory strategy, verdict reasons) should override.
+    ///
+    /// - Precondition: `plan.verdict != .deny`. Callers must check verdict first;
+    ///   invoking this with a denied plan is a programming error.
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
+        assert(plan.verdict != .deny,
+               "ModelLoadPlan was denied; callers must check verdict before invoking backend")
+        try await loadModel(from: url, contextSize: Int32(plan.effectiveContextSize))
+    }
+}
