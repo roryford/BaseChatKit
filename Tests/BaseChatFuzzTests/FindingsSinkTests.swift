@@ -56,7 +56,7 @@ final class FindingsSinkTests: XCTestCase {
     func test_recordRun_writesRecordAndReproForSingleFinding() async throws {
         let sink = FindingsSink(outputDir: tempDir)
         let finding = makeFinding()
-        await sink.recordRun(makeRecord(), findings: [finding])
+        await sink.recordRun(makeRecord(modelId: "qwen-test"), findings: [finding])
 
         let dir = tempDir
             .appendingPathComponent("findings")
@@ -67,7 +67,17 @@ final class FindingsSinkTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("summary.txt").path))
 
         let repro = try String(contentsOf: dir.appendingPathComponent("repro.sh"), encoding: .utf8)
-        XCTAssertTrue(repro.contains("--replay \(finding.hash)"))
+        let executableLines = repro
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        XCTAssertFalse(
+            executableLines.contains(where: { $0.contains("--replay") }),
+            "--replay is not implemented; recipe must use direct seed/model/--single"
+        )
+        XCTAssertTrue(repro.contains("--seed 0"))
+        XCTAssertTrue(repro.contains("--model qwen-test"))
+        XCTAssertTrue(repro.contains("--single"))
     }
 
     func test_recordRun_dedupesIdenticalFindings_andProducesOneDirectory() async throws {
@@ -101,19 +111,20 @@ final class FindingsSinkTests: XCTestCase {
         XCTAssertTrue(entries.contains(b.hash))
     }
 
-    func test_indexMarkdown_isRegeneratedAndContainsHashAndReplayCommand() async throws {
+    func test_indexMarkdown_isRegeneratedAndContainsHashAndReproCommand() async throws {
         let sink = FindingsSink(outputDir: tempDir)
         let finding = makeFinding(trigger: "indexable-trigger")
-        await sink.recordRun(makeRecord(), findings: [finding])
+        await sink.recordRun(makeRecord(modelId: "indexed-model"), findings: [finding])
 
         let indexURL = tempDir.appendingPathComponent("INDEX.md")
         XCTAssertTrue(FileManager.default.fileExists(atPath: indexURL.path))
         let md = try String(contentsOf: indexURL, encoding: .utf8)
         XCTAssertTrue(md.contains("`\(finding.hash)`"))
-        XCTAssertTrue(md.contains("swift run fuzz-chat -- --replay \(finding.hash)"))
+        XCTAssertFalse(md.contains("--replay"), "--replay is not implemented")
+        XCTAssertTrue(md.contains("swift run fuzz-chat --seed 0 --model indexed-model --single"))
         XCTAssertTrue(md.contains("1 total runs"))
 
-        await sink.recordRun(makeRecord(), findings: [finding])
+        await sink.recordRun(makeRecord(modelId: "indexed-model"), findings: [finding])
         let md2 = try String(contentsOf: indexURL, encoding: .utf8)
         XCTAssertTrue(md2.contains("2 total runs"), "INDEX.md must regenerate on every flush")
     }
@@ -122,11 +133,34 @@ final class FindingsSinkTests: XCTestCase {
         let first = FindingsSink(outputDir: tempDir)
         let finding = makeFinding(trigger: "persisted")
         await first.recordRun(makeRecord(), findings: [finding])
+        await first.noteEmptyRun()
+        await first.noteEmptyRun()
 
         let second = FindingsSink(outputDir: tempDir)
         let snap = await second.snapshot()
         XCTAssertEqual(snap.findings.count, 1)
         XCTAssertEqual(snap.findings.first?.hash, finding.hash)
+        XCTAssertEqual(snap.totalRuns, 3, "totalRuns must persist across sink instances")
+    }
+
+    func test_recordRun_doesNotOverwriteFirstSeenRecord() async throws {
+        let sink = FindingsSink(outputDir: tempDir)
+        let finding = makeFinding(trigger: "stable-trigger")
+        let firstRecord = makeRecord(modelId: "first-run")
+        await sink.recordRun(firstRecord, findings: [finding])
+
+        let secondRecord = makeRecord(modelId: "second-run")
+        await sink.recordRun(secondRecord, findings: [finding])
+
+        let recordURL = tempDir
+            .appendingPathComponent("findings")
+            .appendingPathComponent("det")
+            .appendingPathComponent(finding.hash)
+            .appendingPathComponent("record.json")
+        let data = try Data(contentsOf: recordURL)
+        let decoded = try JSONDecoder().decode(RunRecord.self, from: data)
+        XCTAssertEqual(decoded.runId, firstRecord.runId, "first-seen record.json must not be overwritten on subsequent hits")
+        XCTAssertEqual(decoded.model.id, "first-run")
     }
 
     func test_noteEmptyRun_writesIndexEvenWithoutFindings() async throws {
