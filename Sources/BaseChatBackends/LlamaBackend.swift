@@ -367,8 +367,14 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             )
         }
 
-        cancelled.store(false, ordering: .sequentiallyConsistent)
+        // Reset the cancellation flag and flip isGenerating atomically under the
+        // same lock that stopGeneration() holds when it touches generationTask.
+        // Keeping both writes inside a single critical section means a concurrent
+        // stopGeneration() call that races this startup cannot observe a window
+        // where cancelled == false but isGenerating == false (not yet set), which
+        // would let it skip the task cancel and leave the loop running uncancelled.
         withStateLock {
+            cancelled.store(false, ordering: .sequentiallyConsistent)
             isGenerating = true
         }
         Self.logger.debug("Llama generate started")
@@ -580,13 +586,19 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     // MARK: - Control
 
     public func stopGeneration() {
-        // Atomic store is safe to call from any thread/actor (including the main
-        // actor from a UI button tap, or a MemoryPressureHandler callback from an
-        // arbitrary thread for #415). No lock needed — the decode loop reads this
-        // flag with `.sequentiallyConsistent` ordering on every iteration.
+        // Set the atomic flag first so the decode loop can break on its very next
+        // iteration check — even before the lock is acquired below.
         cancelled.store(true, ordering: .sequentiallyConsistent)
-        generationTask?.cancel()
-        generationTask = nil
+        // Capture and nil-out generationTask under stateLock. generationTask is
+        // a mutable var guarded by stateLock everywhere else (generate() assigns
+        // it under the lock, unloadModel() captures it under the lock). Accessing
+        // it here without the lock would be a data race under TSan.
+        let taskToCancel = withStateLock {
+            let t = generationTask
+            generationTask = nil
+            return t
+        }
+        taskToCancel?.cancel()
     }
 
     public func unloadModel() {
