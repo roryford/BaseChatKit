@@ -1,7 +1,7 @@
 import Foundation
 
 /// Sampling and generation parameters shared across all inference backends.
-public struct GenerationConfig: Sendable {
+public struct GenerationConfig: Sendable, Codable {
     public var temperature: Float
     public var topP: Float
     public var repeatPenalty: Float
@@ -17,6 +17,19 @@ public struct GenerationConfig: Sendable {
     /// `nil` means no explicit limit beyond the backend's own defaults.
     public var maxOutputTokens: Int?
 
+    /// Tool definitions made available to the model for this generation request.
+    ///
+    /// Only honoured by backends that set ``BackendCapabilities/supportsToolCalling``
+    /// to `true`.  Backends that do not support tool calling silently ignore this
+    /// field.  Defaults to an empty array (no tools).
+    public var tools: [ToolDefinition]
+
+    /// Controls which tool, if any, the backend is allowed to call.
+    ///
+    /// Only honoured when ``tools`` is non-empty and the backend supports tool
+    /// calling.  Defaults to ``ToolChoice/auto``.
+    public var toolChoice: ToolChoice
+
     @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:) instead.")
     public init(
         temperature: Float = 0.7,
@@ -25,7 +38,9 @@ public struct GenerationConfig: Sendable {
         maxTokens: Int32,
         topK: Int32? = nil,
         typicalP: Float? = nil,
-        maxOutputTokens: Int? = 2048
+        maxOutputTokens: Int? = 2048,
+        tools: [ToolDefinition] = [],
+        toolChoice: ToolChoice = .auto
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -34,6 +49,8 @@ public struct GenerationConfig: Sendable {
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens
+        self.tools = tools
+        self.toolChoice = toolChoice
     }
 
     public init(
@@ -42,7 +59,9 @@ public struct GenerationConfig: Sendable {
         repeatPenalty: Float = 1.1,
         topK: Int32? = nil,
         typicalP: Float? = nil,
-        maxOutputTokens: Int? = 2048
+        maxOutputTokens: Int? = 2048,
+        tools: [ToolDefinition] = [],
+        toolChoice: ToolChoice = .auto
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -51,6 +70,8 @@ public struct GenerationConfig: Sendable {
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens
+        self.tools = tools
+        self.toolChoice = toolChoice
     }
 }
 

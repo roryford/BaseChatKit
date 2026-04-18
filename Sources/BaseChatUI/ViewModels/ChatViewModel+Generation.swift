@@ -163,6 +163,12 @@ extension ChatViewModel {
                                 msg.promptTokens = prompt
                                 msg.completionTokens = completion
                             }
+
+                        case .dispatchToolCall:
+                            // Tool execution is a host-app concern; ChatViewModel does not
+                            // implement a tool dispatch loop. Apps that need tool calling
+                            // should drive generation directly via InferenceService.
+                            break
                         }
                     }
                 } catch {
