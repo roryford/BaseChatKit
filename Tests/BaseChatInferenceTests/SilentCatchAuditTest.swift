@@ -39,6 +39,13 @@ final class SilentCatchAuditTest: XCTestCase {
     /// DO NOT add entries to make a failing test pass without human review.
     private static let allowlist: Set<String> = [
         // BaseChatInference
+        // JSONSchemaValue uses the standard "try-each-type-in-order" decoder pattern for
+        // heterogeneous JSON. Each `try?` is bound to a named constant and the result is
+        // used immediately; there is no silent discard — the next branch handles the miss.
+        "BaseChatInference/Models/ToolTypes.swift:} else if let b = try? container.decode(Bool.self) {",
+        "BaseChatInference/Models/ToolTypes.swift:} else if let n = try? container.decode(Double.self) {",
+        "BaseChatInference/Models/ToolTypes.swift:} else if let s = try? container.decode(String.self) {",
+        "BaseChatInference/Models/ToolTypes.swift:} else if let arr = try? container.decode([JSONSchemaValue].self) {",
         "BaseChatInference/Models/ModelInfo.swift:guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),",
         "BaseChatInference/Models/ModelInfo.swift:if let metadata = try? GGUFMetadataReader.readMetadata(from: url) {",
         "BaseChatInference/Models/ModelInfo.swift:guard let contents = try? fileManager.contentsOfDirectory(",

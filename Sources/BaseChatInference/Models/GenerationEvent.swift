@@ -9,4 +9,12 @@ public enum GenerationEvent: Sendable, Equatable {
 
     /// Token usage reported by the backend (cloud backends only today).
     case usage(prompt: Int, completion: Int)
+
+    /// A tool invocation requested by the model.
+    ///
+    /// Backends that support tool calling (``BackendCapabilities/supportsToolCalling``)
+    /// emit this event when the model decides to call a tool defined in
+    /// ``GenerationConfig/tools``.  The host is responsible for executing the
+    /// call and feeding a ``ToolResult`` back into the conversation.
+    case toolCall(ToolCall)
 }

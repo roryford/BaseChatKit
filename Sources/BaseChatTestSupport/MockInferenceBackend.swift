@@ -20,6 +20,14 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     /// via the AsyncThrowingStream rather than from generate() itself.
     public var shouldThrowInsideStream: Error?
 
+    /// Tool calls to emit during generation, interleaved after all text tokens.
+    ///
+    /// When non-empty the backend emits all ``tokensToYield`` tokens first,
+    /// then emits one ``GenerationEvent/toolCall(_:)`` event per entry in
+    /// this array before finishing the stream.  This lets tests assert on
+    /// the full stream event sequence without wiring up a real backend.
+    public var scriptedToolCalls: [ToolCall] = []
+
     // Track calls
     public var loadModelCallCount = 0
     public var generateCallCount = 0
@@ -75,6 +83,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
 
         isGenerating = true
         let tokens = tokensToYield
+        let toolCalls = scriptedToolCalls
 
         let stream = AsyncThrowingStream<GenerationEvent, Error> { [self] continuation in
             continuationLock.lock()
@@ -89,6 +98,12 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
                 for token in tokens {
                     if Task.isCancelled { break }
                     continuation.yield(.token(token))
+                }
+                if !Task.isCancelled {
+                    for call in toolCalls {
+                        if Task.isCancelled { break }
+                        continuation.yield(.toolCall(call))
+                    }
                 }
                 self.isGenerating = false
                 if let streamError = self.shouldThrowInsideStream, !Task.isCancelled {

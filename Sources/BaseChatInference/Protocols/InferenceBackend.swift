@@ -1,7 +1,7 @@
 import Foundation
 
 /// Sampling and generation parameters shared across all inference backends.
-public struct GenerationConfig: Sendable {
+public struct GenerationConfig: Sendable, Codable {
     public var temperature: Float
     public var topP: Float
     public var repeatPenalty: Float
@@ -17,6 +17,19 @@ public struct GenerationConfig: Sendable {
     /// `nil` means no explicit limit beyond the backend's own defaults.
     public var maxOutputTokens: Int?
 
+    /// Tool definitions made available to the model for this generation request.
+    ///
+    /// Only honoured by backends that set ``BackendCapabilities/supportsToolCalling``
+    /// to `true`.  Backends that do not support tool calling silently ignore this
+    /// field.  Defaults to an empty array (no tools).
+    public var tools: [ToolDefinition]
+
+    /// Controls which tool, if any, the backend is allowed to call.
+    ///
+    /// Only honoured when ``tools`` is non-empty and the backend supports tool
+    /// calling.  Defaults to ``ToolChoice/auto``.
+    public var toolChoice: ToolChoice
+
     @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:) instead.")
     public init(
         temperature: Float = 0.7,
@@ -25,7 +38,9 @@ public struct GenerationConfig: Sendable {
         maxTokens: Int32,
         topK: Int32? = nil,
         typicalP: Float? = nil,
-        maxOutputTokens: Int? = 2048
+        maxOutputTokens: Int? = 2048,
+        tools: [ToolDefinition] = [],
+        toolChoice: ToolChoice = .auto
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -34,6 +49,8 @@ public struct GenerationConfig: Sendable {
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens
+        self.tools = tools
+        self.toolChoice = toolChoice
     }
 
     public init(
@@ -42,7 +59,9 @@ public struct GenerationConfig: Sendable {
         repeatPenalty: Float = 1.1,
         topK: Int32? = nil,
         typicalP: Float? = nil,
-        maxOutputTokens: Int? = 2048
+        maxOutputTokens: Int? = 2048,
+        tools: [ToolDefinition] = [],
+        toolChoice: ToolChoice = .auto
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -51,6 +70,43 @@ public struct GenerationConfig: Sendable {
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens
+        self.tools = tools
+        self.toolChoice = toolChoice
+    }
+
+    // MARK: Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
+        case tools, toolChoice
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        temperature = try c.decode(Float.self, forKey: .temperature)
+        topP = try c.decode(Float.self, forKey: .topP)
+        repeatPenalty = try c.decode(Float.self, forKey: .repeatPenalty)
+        // maxTokens is deprecated; absent from payloads that never encoded it — fall back to 512.
+        maxTokens = (try c.decodeIfPresent(Int32.self, forKey: .maxTokens)) ?? 512
+        topK = try c.decodeIfPresent(Int32.self, forKey: .topK)
+        typicalP = try c.decodeIfPresent(Float.self, forKey: .typicalP)
+        maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
+        // New fields added in v0.10; absent from payloads serialised before their introduction.
+        tools = (try c.decodeIfPresent([ToolDefinition].self, forKey: .tools)) ?? []
+        toolChoice = (try c.decodeIfPresent(ToolChoice.self, forKey: .toolChoice)) ?? .auto
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(temperature, forKey: .temperature)
+        try c.encode(topP, forKey: .topP)
+        try c.encode(repeatPenalty, forKey: .repeatPenalty)
+        try c.encode(maxTokens, forKey: .maxTokens)
+        try c.encodeIfPresent(topK, forKey: .topK)
+        try c.encodeIfPresent(typicalP, forKey: .typicalP)
+        try c.encodeIfPresent(maxOutputTokens, forKey: .maxOutputTokens)
+        try c.encode(tools, forKey: .tools)
+        try c.encode(toolChoice, forKey: .toolChoice)
     }
 }
 
