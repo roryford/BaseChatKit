@@ -88,6 +88,17 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// Guarded by `stateLock`. Set by `setLoadProgressHandler(_:)` before each load.
     private var _loadProgressHandler: (@Sendable (Double) async -> Void)?
 
+    // MARK: - Memory Pressure
+
+    /// Monitors OS-level memory pressure so the decode loop can be aborted before
+    /// the OS revokes Metal buffers, which would cause llama_decode to dereference
+    /// a freed pointer and crash with SIGSEGV / EXC_BAD_ACCESS. See issue #415.
+    ///
+    /// `LlamaBackend` owns this handler and registers its callback in `init`, so
+    /// pressure events are handled here regardless of whether a `ChatViewModel` or
+    /// any other higher-level observer is also listening.
+    private let memoryPressure = MemoryPressureHandler()
+
     // MARK: - Global Backend Lifecycle
 
     /// Guards `llama_backend_init/free` which are global and must only be
@@ -119,11 +130,47 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     public init() {
         Self.retainBackend()
+        registerMemoryPressureCallback()
+        memoryPressure.startMonitoring()
     }
 
     deinit {
+        memoryPressure.removeCallback(for: self)
+        memoryPressure.stopMonitoring()
         unloadModel()
         Self.releaseBackend()
+    }
+
+    // MARK: - Memory Pressure Wiring
+
+    /// Registers the backend-level memory pressure callback.
+    ///
+    /// On `.warning`: calls `stopGeneration()` immediately so the decode loop exits
+    /// cleanly before the OS escalates. `stopGeneration()` uses `Atomic<Bool>` and is
+    /// safe to call from any thread (PR #456).
+    ///
+    /// On `.critical`: calls `stopGeneration()` AND schedules a `Task.detached` to call
+    /// `unloadAndWait()`, releasing Metal buffers before the OS reclaims them forcibly.
+    /// `Task.detached` is used explicitly so the task does not inherit any actor isolation
+    /// from the GCD callback's execution context, and the GCD callback returns immediately.
+    /// A weak capture prevents a retain cycle with the handler's closure storage.
+    private func registerMemoryPressureCallback() {
+        memoryPressure.addPressureCallback(for: self) { [weak self] level in
+            guard let self else { return }
+            switch level {
+            case .warning:
+                Self.logger.warning("Memory pressure: warning — stopping generation to prevent Metal buffer revocation (#415)")
+                self.stopGeneration()
+            case .critical:
+                Self.logger.warning("Memory pressure: critical — stopping generation and scheduling model unload (#415)")
+                self.stopGeneration()
+                Task.detached { [weak self] in
+                    await self?.unloadAndWait()
+                }
+            case .nominal:
+                break
+            }
+        }
     }
 
     // MARK: - Model Lifecycle
