@@ -796,6 +796,105 @@ final class ModelLoadPlanTests: XCTestCase {
                           "12 GB - 1B / 4 GB (ratio < 3) must not be denied by the impossible-fit guard")
     }
 
+    // MARK: - App overhead (issue #471)
+
+    /// Overhead bytes reduce the effective KV budget, producing a smaller
+    /// `effectiveContextSize` than the same inputs with no overhead.
+    func test_appOverhead_reducesKVBudget() {
+        let available: UInt64 = 5_000_000_000
+        let overhead: UInt64 = 838_860_800  // 800 MiB
+
+        let withOverhead = ModelLoadPlan.compute(inputs: ModelLoadPlan.Inputs(
+            modelFileSize: 3 * oneGB,
+            memoryStrategy: .mappable,
+            requestedContextSize: 128_000,
+            trainedContextLength: 131_072,
+            kvBytesPerToken: 65_536,
+            availableMemoryBytes: available,
+            physicalMemoryBytes: 8 * oneGB,
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40,
+            appOverheadBytes: overhead
+        ))
+
+        let withoutOverhead = ModelLoadPlan.compute(inputs: ModelLoadPlan.Inputs(
+            modelFileSize: 3 * oneGB,
+            memoryStrategy: .mappable,
+            requestedContextSize: 128_000,
+            trainedContextLength: 131_072,
+            kvBytesPerToken: 65_536,
+            availableMemoryBytes: available,
+            physicalMemoryBytes: 8 * oneGB,
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40,
+            appOverheadBytes: 0
+        ))
+
+        XCTAssertLessThan(
+            withOverhead.effectiveContextSize,
+            withoutOverhead.effectiveContextSize,
+            "App overhead must reduce the effective context size vs no-overhead baseline"
+        )
+    }
+
+    /// When `appOverheadBytes` exceeds `availableMemoryBytes`, the plan must not
+    /// underflow UInt64 and must floor `effectiveContextSize` at 1.
+    func test_appOverhead_largerThanAvailable_doesNotUnderflow() {
+        let plan = ModelLoadPlan.compute(inputs: ModelLoadPlan.Inputs(
+            modelFileSize: 500_000_000,
+            memoryStrategy: .mappable,
+            requestedContextSize: 4096,
+            trainedContextLength: 8192,
+            kvBytesPerToken: 8_192,
+            availableMemoryBytes: 100_000_000,
+            physicalMemoryBytes: 8 * oneGB,
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40,
+            appOverheadBytes: 200_000_000  // overhead > available
+        ))
+
+        XCTAssertGreaterThanOrEqual(plan.effectiveContextSize, 1,
+            "Effective context must floor at 1 when overhead exceeds available memory")
+        // Also verify totalEstimatedBytes is a sane value, not a UInt64 wraparound.
+        XCTAssertLessThan(plan.outcome.totalEstimatedBytes, UInt64.max / 2,
+            "Total estimated bytes must not contain a UInt64 underflow value")
+    }
+
+    /// Default `appOverheadBytes: 0` must produce exactly the same
+    /// `effectiveContextSize` as inputs constructed without the field — no-op
+    /// regression guard for existing callers.
+    func test_appOverhead_zero_preservesExistingBehaviour() {
+        let inputsOld = makeInputs(
+            modelFileSize: 4 * oneGB,
+            strategy: .mappable,
+            requested: 32_000,
+            trained: 131_072,
+            kvBytesPerToken: 65_536,
+            available: 8 * oneGB
+        )
+        // New inputs with explicit appOverheadBytes: 0 — must be identical.
+        let inputsNew = ModelLoadPlan.Inputs(
+            modelFileSize: 4 * oneGB,
+            memoryStrategy: .mappable,
+            requestedContextSize: 32_000,
+            trainedContextLength: 131_072,
+            kvBytesPerToken: 65_536,
+            availableMemoryBytes: 8 * oneGB,
+            physicalMemoryBytes: 16_000_000_000,
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40,
+            appOverheadBytes: 0
+        )
+
+        let planOld = ModelLoadPlan.compute(inputs: inputsOld)
+        let planNew = ModelLoadPlan.compute(inputs: inputsNew)
+
+        XCTAssertEqual(planNew.effectiveContextSize, planOld.effectiveContextSize,
+            "appOverheadBytes: 0 must preserve existing behaviour")
+        XCTAssertEqual(planNew.verdict, planOld.verdict,
+            "appOverheadBytes: 0 must produce the same verdict as the legacy path")
+    }
+
     func test_70BModelOn4GBDevice_residentStrategy_neverAllows() {
         // 70B at ~4-bit quant ~ 40 GB file. Use a generous 140 GB upper bound
         // to also cover fp16 distributions.
