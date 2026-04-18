@@ -298,151 +298,19 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 return
             }
 
-            // `n_batch` caps how many tokens can flow through a single
-            // `llama_decode` call. llama.cpp asserts
-            // `GGML_ASSERT(n_tokens_all <= cparams.n_batch)` in
-            // `llama-context.cpp`, so prompts longer than this must be decoded
-            // in chunks. We never set `n_batch` on `ctxParams`, so it inherits
-            // llama.cpp's default (2048 at the time of writing).
-            let batchSize = max(1, Int(llama_n_batch(context)))
-
-            // Clear KV cache at the start so state from any prior run (including
-            // one terminated by stopGeneration) can't collide with this run's
-            // positions.
-            if let memory = llama_get_memory(context) {
-                llama_memory_clear(memory, false)
-            }
-
-            // Set up sampler chain
-            let sparams = llama_sampler_chain_default_params()
-            guard let sampler = llama_sampler_chain_init(sparams) else {
-                await MainActor.run { generationStream.setPhase(.failed("Failed to create sampler")) }
-                continuation.finish(throwing: InferenceError.inferenceFailure("Failed to create sampler"))
-                return
-            }
-            defer { llama_sampler_free(sampler) }
-
-            // Sampler chain order matters: penalties → top_k → top_p → temp → dist
-            if config.repeatPenalty > 1.0 {
-                llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
-                    64,                    // last_n tokens to penalize
-                    config.repeatPenalty,  // repeat penalty
-                    0.0,                   // frequency penalty
-                    0.0                    // presence penalty
-                ))
-            }
-            llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40))
-            if config.topP < 1.0 {
-                llama_sampler_chain_add(sampler, llama_sampler_init_top_p(config.topP, 1))
-            }
-            llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
-            llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
-            llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 0...UInt32.max)))
-
-            // Process prompt in `n_batch`-sized chunks. A single `llama_decode`
-            // call cannot exceed `n_batch` tokens, so we stride through the
-            // prompt and decode each chunk separately. Only the last token of
-            // the final chunk has `logits = 1` — that's the one we sample from
-            // to kick off generation.
-            var promptDecodeFailed = false
-            var promptPos = 0
-            while promptPos < tokens.count {
-                if Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent) { break }
-
-                let chunkSize = min(batchSize, tokens.count - promptPos)
-                let isLastChunk = (promptPos + chunkSize) == tokens.count
-
-                var promptBatch = llama_batch_init(Int32(chunkSize), 0, 1)
-                for i in 0..<chunkSize {
-                    promptBatch.token[i] = tokens[promptPos + i]
-                    promptBatch.pos[i] = Int32(promptPos + i)
-                    promptBatch.n_seq_id[i] = 1
-                    promptBatch.seq_id[i]?[0] = 0
-                    promptBatch.logits[i] = (isLastChunk && i == chunkSize - 1) ? 1 : 0
-                }
-                promptBatch.n_tokens = Int32(chunkSize)
-
-                let decodeResult = llama_decode(context, promptBatch)
-                llama_batch_free(promptBatch)
-
-                if decodeResult != 0 {
-                    promptDecodeFailed = true
-                    break
-                }
-
-                promptPos += chunkSize
-            }
-
-            if promptDecodeFailed {
-                await MainActor.run { generationStream.setPhase(.failed("Failed to decode prompt")) }
-                continuation.finish(throwing: InferenceError.inferenceFailure("Failed to decode prompt"))
-                return
-            }
-
-            // Honour cancellation that fired mid-prompt before entering the
-            // generation loop.
-            if Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent) {
-                await MainActor.run { generationStream.setPhase(.done) }
-                continuation.finish()
-                return
-            }
-
-            // Generation loop uses a fresh 1-capacity batch — the prompt loop
-            // allocated and freed a batch per chunk, so there's nothing to
-            // reuse here.
-            var genBatch = llama_batch_init(1, 0, 1)
-            defer { llama_batch_free(genBatch) }
-
-            // The chunked prompt loop placed tokens at positions
-            // [0, tokens.count - 1]; the next decoded token goes at
-            // `tokens.count`.
-            var nCur = tokens.count
-            var invalidUTF8: [CChar] = []
-            var isFirstToken = true
-
-            for iteration in 0..<maxTokens {
-                if Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent) { break }
-
-                // First iteration samples from the final prompt chunk's logits,
-                // which llama.cpp exposes at index -1 ("last available").
-                // Subsequent iterations sample from the 1-token gen batch
-                // decoded at the end of the previous iteration, at index 0.
-                let logitIndex: Int32 = iteration == 0 ? -1 : 0
-                let token = llama_sampler_sample(sampler, context, logitIndex)
-
-                if llama_vocab_is_eog(vocab, token) { break }
-
-                // Decode token to text
-                if let text = LlamaTokenization.tokenToString(token, vocab: vocab, invalidUTF8Buffer: &invalidUTF8) {
-                    if isFirstToken {
-                        await MainActor.run { generationStream.setPhase(.streaming) }
-                        isFirstToken = false
-                    }
-                    continuation.yield(.token(text))
-                }
-
-                // Prepare next batch
-                genBatch.n_tokens = 0
-                genBatch.token[0] = token
-                genBatch.pos[0] = Int32(nCur)
-                genBatch.n_seq_id[0] = 1
-                genBatch.seq_id[0]?[0] = 0
-                genBatch.logits[0] = 1
-                genBatch.n_tokens = 1
-                nCur += 1
-
-                if Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent) { break }
-
-                if llama_decode(context, genBatch) != 0 {
-                    await MainActor.run { generationStream.setPhase(.failed("Decode failed during generation")) }
-                    continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
-                    return
-                }
-            }
-
-            await MainActor.run { generationStream.setPhase(.done) }
-
-            continuation.finish()
+            let driver = LlamaGenerationDriver()
+            await driver.run(
+                context: context,
+                vocab: vocab,
+                tokens: tokens,
+                maxTokens: maxTokens,
+                config: config,
+                isCancelled: { [weak self] in
+                    Task.isCancelled || (self?.cancelled.load(ordering: .sequentiallyConsistent) ?? true)
+                },
+                generationStream: generationStream,
+                continuation: continuation
+            )
         }
 
         // Assignment and unlock complete the critical section opened above.
