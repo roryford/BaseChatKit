@@ -92,19 +92,19 @@ final class SessionAutoRenameTests: XCTestCase {
     }
 
     func test_autoRename_onPersistenceFailure_recordsDistinctDiagnostic() async throws {
-        // Use a MockPersistenceProvider so we can force updateSession to
-        // throw after inference succeeds. This separates the inference
-        // path (which records .titleGenerationFailed) from the persistence
-        // path (which must record .sessionRenamePersistenceFailed).
-        let mockPersistence = MockPersistenceProvider()
+        // Wrap the real in-memory provider so createSession's insert goes
+        // through, then switch on shouldThrowOnUpdateSession to make the
+        // rename path trip. This separates the inference failure path
+        // (.titleGenerationFailed) from the persistence failure path
+        // (.sessionRenamePersistenceFailed).
+        let freshStack = try InMemoryPersistenceHarness.make()
+        let wrappedPersistence = ErrorInjectingPersistenceProvider(wrapping: freshStack.provider)
         let diagnostics = DiagnosticsService()
         let freshVM = SessionManagerViewModel()
-        freshVM.configure(persistence: mockPersistence, diagnostics: diagnostics)
+        freshVM.configure(persistence: wrappedPersistence, diagnostics: diagnostics)
 
         let session = try freshVM.createSession()
-        // Make updateSession throw AFTER createSession has inserted the
-        // record, so the auto-rename path is the one that trips.
-        mockPersistence.shouldThrowOnUpdateSession = ChatPersistenceError.providerNotConfigured
+        wrappedPersistence.shouldThrowOnUpdateSession = ChatPersistenceError.providerNotConfigured
 
         let service = makeInferenceService(tokens: ["Cooking", " Basics"])
 
