@@ -372,38 +372,31 @@ public final class ChatViewModel {
         AppMemoryUsage.currentBytes()
     }
 
-    // MARK: - Private State
+    // MARK: - Load Coordinator
 
-    enum LoadIntent {
-        case localModel(ModelInfo)
-        case cloudEndpoint(APIEndpoint)
+    /// Owns the "latest-wins with cancellation" model-load state machine.
+    /// Extracted from `ChatViewModel` in phase 3 of #329.
+    var loadCoordinator: ModelLoadCoordinator!
+
+    /// Forwarding accessor so tests that mutate `vm.progressBridgePollInterval`
+    /// continue to work without changes.
+    var progressBridgePollInterval: Duration {
+        get { loadCoordinator.progressBridgePollInterval }
+        set { loadCoordinator.progressBridgePollInterval = newValue }
     }
+
+    /// Forwarding accessor for completeness / test parity.
+    var progressBridgeMinTransitionInterval: Duration {
+        get { loadCoordinator.progressBridgeMinTransitionInterval }
+        set { loadCoordinator.progressBridgeMinTransitionInterval = newValue }
+    }
+
+    // MARK: - Private State
 
     /// Token for the currently active generation request, if any.
     var activeGenerationToken: InferenceService.GenerationRequestToken?
     var generationTask: Task<Void, Never>?
     var backgroundTask: Task<Void, Never>?
-    var coordinatedLoadTask: Task<Void, Never>?
-    var latestLoadIntentGeneration: UInt64 = 0
-
-    /// Polling interval for the model-load progress bridge task that mirrors
-    /// `inferenceService.modelLoadProgress` into ``activityPhase``. Tests may
-    /// override this to a small value for deterministic timing.
-    var progressBridgePollInterval: Duration = .milliseconds(50)
-
-    /// Minimum interval between published phase transitions for in-flight
-    /// model-load progress. Keeps steadily-progressing backends from
-    /// re-rendering every view observing ``activityPhase`` on every poll tick.
-    /// The first emission in a load cycle and the terminal (≥ 1.0) emission
-    /// always publish regardless of this window.
-    var progressBridgeMinTransitionInterval: Duration = .milliseconds(250)
-
-    /// Timestamp of the most recent published phase transition from
-    /// ``applyModelLoadProgress``. `nil` means the next progress change will
-    /// publish immediately (either because no progress has been published yet
-    /// in this load cycle or a fresh cycle just began).
-    @ObservationIgnored
-    var lastProgressTransitionInstant: ContinuousClock.Instant?
     var lastPressureLevel: MemoryPressureLevel = .nominal
     private var isSynchronizingSelection = false
     var isRestoringSession = false
@@ -513,6 +506,33 @@ public final class ChatViewModel {
 
         let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
         self.isFirstRun = !UserDefaults.standard.bool(forKey: firstRunKey)
+
+        let coordinator = ModelLoadCoordinator(inferenceService: inferenceService)
+        self.loadCoordinator = coordinator
+        coordinator.onTransitionPhase = { [weak self] phase in
+            self?.transitionPhase(to: phase) ?? false
+        }
+        coordinator.onSurfaceError = { [weak self] message in
+            self?.errorMessage = message
+        }
+        coordinator.onClearError = { [weak self] in
+            self?.errorMessage = nil
+        }
+        coordinator.onSetSelectedPromptTemplate = { [weak self] template in
+            self?.selectedPromptTemplate = template
+        }
+        coordinator.onInvalidateTokenCaches = { [weak self] in
+            self?.invalidateTokenCaches()
+        }
+        coordinator.isRestoringSession = { [weak self] in
+            self?.isRestoringSession ?? false
+        }
+        coordinator.currentActivityPhase = { [weak self] in
+            self?.activityPhase ?? .idle
+        }
+        coordinator.currentLoadPlanEnvironment = { [weak self] in
+            self?.loadPlanEnvironment ?? .current
+        }
     }
 
     /// Injects the persistence provider. Call once from the view layer
