@@ -32,7 +32,7 @@ changes before merging.
 |-----------|--------|
 | Signature | `void llama_backend_free(void)` |
 | Threading | Guarded by `backendLock`; only called when reference count drops to zero. |
-| Ordering | Must be the last llama.cpp call. All contexts and models must already be freed. In `LlamaBackend`, `unloadModel()` awaits the generation task before calling `llama_free` / `llama_model_free`, and only then calls `releaseBackend()`. |
+| Ordering | Must be the last llama.cpp call. All contexts and models must already be freed. In `LlamaBackend`, `unloadModel()` spawns a detached cleanup task that awaits the generation task, then calls `llama_free` / `llama_model_free`, and only then calls `releaseBackend()`. This preserves the invariant without blocking the calling thread. |
 | Limits | Symmetric with `llama_backend_init`. |
 | Ownership | Void. |
 | Failure modes | Calling when contexts or models are still alive can cause GGML internal assertion failures or resource leaks. |
@@ -349,7 +349,7 @@ changes before merging.
 | Signature | `int32_t llama_tokenize(const struct llama_vocab * vocab, const char * text, int32_t text_len, llama_token * tokens, int32_t n_tokens_max, bool add_special, bool parse_special)` |
 | Threading | **Thread-safe** — pure vocabulary lookup, no context state. |
 | Ordering | Vocabulary pointer must be valid (model loaded). |
-| Limits | Returns the token count on success (≤ `n_tokens_max`); returns a negative number (negated required size) if the buffer is too small; returns `INT32_MIN` on overflow. `LlamaBackend` allocates `utf8.count + 1` tokens which is always sufficient. |
+| Limits | Returns the token count on success (≤ `n_tokens_max`); returns a negative number (negated required size) if the buffer is too small; returns `INT32_MIN` on overflow. `LlamaBackend` allocates `text.utf8CString.count + (addBos ? 1 : 0)` tokens — `utf8CString.count` is the null-terminated byte count (`text.utf8.count + 1`), and one extra slot is reserved for the BOS token when `addBos = true`. This is always sufficient. |
 | Ownership | Writes into caller-provided `tokens` buffer. No heap allocation. |
 | Failure modes | Negative return means buffer too small — `LlamaBackend` treats negative return as failure and returns an empty array (causing `InferenceError.inferenceFailure("Failed to tokenize prompt")`). |
 
@@ -438,6 +438,33 @@ to handle the rare case of a context with no memory.
 token of a new generation following any cancellation; "Decode failed during
 generation" error in the `GenerationStream`.
 
+### 4. `cancelled` flag data race between `stopGeneration()` and the decode loop — open in PR #456 (issue #418)
+
+**Violation:** `stopped` is a plain `Bool` guarded by `stateLock`. When
+`stopGeneration()` is called from the main actor, it acquires `stateLock` to
+write `cancelled = true`. The decode loop reads `cancelled` via
+`withStateLock { self.cancelled }` on a background task. Under Thread Sanitizer
+the ordering guarantee is provided solely by `NSLock`, which TSan does not
+always model as a sequentially-consistent barrier. Additionally,
+`stopGeneration()` is documented as safe to call from any thread or actor (e.g.
+a memory-pressure handler), but `NSLock` does not establish the
+sequentially-consistent atomic ordering needed to make that guarantee airtight.
+
+**Planned fix (PR #456, not yet merged as of this writing):** Replace
+`private var cancelled = false` with `private let cancelled = Atomic<Bool>(false)`
+from Swift 6's `Synchronization` stdlib. All reads and writes use
+`.sequentiallyConsistent` ordering, making `stopGeneration()` safe to call from
+any thread without acquiring `stateLock` for the flag itself.
+
+**Current mitigation:** All existing reads and writes go through `withStateLock`
+(or hold `stateLock` directly), so the race is not exploitable in practice — the
+lock prevents concurrent access to the flag. TSan warnings remain possible on
+systems where it does not recognise `NSLock` as a synchronisation primitive.
+
+**Detection signal:** Thread Sanitizer reporting a data race on `cancelled`
+between the `stopGeneration()` caller thread and the generation task background
+thread.
+
 ---
 
 ## Binary vs. Vendored Source
@@ -491,5 +518,8 @@ The opacity of binary diffs is mitigated by two practices:
    `Package.swift`.
 6. Update the version reference in the read-only header comment in
    `docs/vendor/llama.h`.
-7. Run `swift test --filter BaseChatBackendsTests --traits Llama` locally on
+7. Update every section in this document (`LLAMA_CONTRACT.md`) that references
+   the version number or whose contract has changed according to the `llama.h`
+   diff from step 4. Commit `LLAMA_CONTRACT.md` in the same PR as the pin bump.
+8. Run `swift test --filter BaseChatBackendsTests --traits Llama` locally on
    Apple Silicon before opening the PR.
