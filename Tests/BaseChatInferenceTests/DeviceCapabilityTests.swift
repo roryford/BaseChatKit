@@ -98,13 +98,17 @@ final class DeviceCapabilityTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(tier, .minimal)
     }
 
-    func test_highestSupportedTier_returnsAtLeastMinimal_forFoundation() {
+    func test_highestSupportedTier_returnsAtLeastFast_forFoundation() {
+        // Foundation models are system-managed; the OS owns their memory budget.
+        // The floor is .fast regardless of how constrained physical RAM is.
         let tier = DeviceCapability.highestSupportedTier(for: .foundation)
-        XCTAssertGreaterThanOrEqual(tier, .minimal)
+        XCTAssertGreaterThanOrEqual(tier, .fast,
+                                    "foundation backend must always return at least .fast")
     }
 
     func test_highestSupportedTier_ggufAndMLX_returnSameTier() {
-        // gguf and mlx use the same probe-size table, so they must agree.
+        // gguf and mlx share the same probe-size table and neither gets a floor
+        // override, so they must agree on every real machine.
         let gguf = DeviceCapability.highestSupportedTier(for: .gguf)
         let mlx  = DeviceCapability.highestSupportedTier(for: .mlx)
         XCTAssertEqual(gguf, mlx,

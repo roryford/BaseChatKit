@@ -56,19 +56,34 @@ public enum DeviceCapability {
     // MARK: - Highest Supported Tier
 
     /// Returns the highest ``ModelCapabilityTier`` whose representative probe size fits
-    /// in memory for the given model type (backend framework).
+    /// in memory for the given backend framework.
     ///
     /// Iterates tiers from highest to lowest, returning the first that passes
     /// ``supports(tier:)``. Always returns at least `.minimal` — even extremely
     /// memory-constrained devices can handle a heavily quantised model.
     ///
-    /// - Parameter modelType: The ``ModelType`` (backend framework) being queried.
-    ///   `foundation` models are system-managed and always capable of `.fast` at
-    ///   minimum; the probe uses the same size table as the other types because
-    ///   the tier describes *quality*, not who manages memory.
+    /// `.foundation` models are system-managed (the OS owns their memory budget), so
+    /// they always satisfy at least `.fast` regardless of available RAM.
+    ///
+    /// - Parameter framework: The ``ModelType`` (backend framework) being queried.
     /// - Returns: The highest tier this device can comfortably run.
-    public static func highestSupportedTier(for modelType: ModelType) -> ModelCapabilityTier {
-        // Tiers in descending order — return the first one that fits.
+    public static func highestSupportedTier(for framework: ModelType) -> ModelCapabilityTier {
+        // Foundation models are managed by the OS — no local memory budget applies.
+        // Apple's on-device model is approximately 3B parameters → .fast floor.
+        if framework == .foundation {
+            let orderedDescending: [ModelCapabilityTier] = [
+                .frontier, .capable, .balanced, .fast
+            ]
+            for tier in orderedDescending {
+                if supports(tier: tier) {
+                    return tier
+                }
+            }
+            return .fast
+        }
+
+        // Local backends (gguf / mlx): tiers in descending order — return the first
+        // one whose probe size fits in physical RAM.
         let orderedDescending: [ModelCapabilityTier] = [
             .frontier, .capable, .balanced, .fast, .minimal
         ]
@@ -96,7 +111,7 @@ public enum DeviceCapability {
     /// - Parameter estimatedMemoryMB: Estimated RAM requirement in megabytes.
     ///   Pass the model's file size for a conservative (`.resident`) estimate, or
     ///   a backend-specific active footprint when available.
-    /// - Returns: `true` if available memory exceeds 85 % of the estimated need.
+    /// - Returns: `true` if the estimated memory need is within 85 % of available memory.
     public static func canLoadModel(estimatedMemoryMB: Int) -> Bool {
         guard estimatedMemoryMB > 0 else { return true }
         let estimatedBytes = UInt64(estimatedMemoryMB) * 1_048_576   // MB → bytes
