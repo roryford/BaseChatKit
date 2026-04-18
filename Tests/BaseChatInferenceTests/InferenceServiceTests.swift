@@ -24,6 +24,7 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertFalse(service.isModelLoaded)
         XCTAssertFalse(service.isGenerating)
         XCTAssertNil(service.activeBackendName)
+        XCTAssertNil(service.activeModelName)
     }
 
     // MARK: - Mock Backend via #if DEBUG init
@@ -121,6 +122,7 @@ final class InferenceServiceTests: XCTestCase {
         mock.isModelLoaded = true
         let service = InferenceService(backend: mock, name: "MockBackend")
         XCTAssertEqual(service.activeBackendName, "MockBackend")
+        XCTAssertEqual(service.activeModelName, "MockBackend")
     }
 
     // MARK: - loadCloudBackend
@@ -166,6 +168,7 @@ final class InferenceServiceTests: XCTestCase {
 
         XCTAssertTrue(service.isModelLoaded)
         XCTAssertEqual(service.activeBackendName, APIProvider.ollama.rawValue)
+        XCTAssertEqual(service.activeModelName, endpoint.modelName)
         XCTAssertEqual(mock.loadModelCallCount, 1)
         XCTAssertEqual(mock.configuredBaseURL?.absoluteString, endpoint.baseURL)
         XCTAssertEqual(mock.configuredModelName, endpoint.modelName)
