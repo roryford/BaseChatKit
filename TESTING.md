@@ -519,7 +519,8 @@ All shared test infrastructure lives in `Sources/BaseChatTestSupport/`:
 | Mock | Purpose |
 |------|---------|
 | `MockHuggingFaceService` | Stubs HF search results, tracks call counts |
-| `MockPersistenceProvider` | In-memory session/message storage with configurable errors |
+| `InMemoryPersistenceHarness` | Fresh in-memory `SwiftDataPersistenceProvider` stack — preferred over mocked storage |
+| `ErrorInjectingPersistenceProvider` | Wraps any `ChatPersistenceProvider` to add per-method error injection and call counting |
 | `MockURLProtocol` | HTTP interception with immediate, SSE (chunked), and error modes |
 
 ### Utilities

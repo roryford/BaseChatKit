@@ -36,10 +36,23 @@ final class ViewModelEdgeCaseTests: XCTestCase {
         return (vm, mock)
     }
 
-    /// Creates a view model with an in-memory mock persistence provider.
+    /// Retains the persistence stack across the test's lifetime. Without this,
+    /// the `ModelContainer` from a harness built inside a helper function would
+    /// be deallocated when the helper returns, invalidating the `ModelContext`
+    /// the provider holds and causing SwiftData to trap on next access.
+    private var persistenceStack: InMemoryPersistenceHarness.Stack?
+
+    override func tearDown() async throws {
+        persistenceStack = nil
+        try await super.tearDown()
+    }
+
+    /// Creates a view model backed by real in-memory SwiftData persistence,
+    /// wrapped in an error-injecting shim so tests can simulate storage
+    /// failures without also lying about what storage actually does.
     private func makeViewModelWithPersistence(
         mock: MockInferenceBackend = MockInferenceBackend()
-    ) throws -> (ChatViewModel, MockInferenceBackend, MockPersistenceProvider) {
+    ) throws -> (ChatViewModel, MockInferenceBackend, ErrorInjectingPersistenceProvider) {
         mock.isModelLoaded = true
         let service = InferenceService(backend: mock, name: "Mock")
         let vm = ChatViewModel(
@@ -48,7 +61,9 @@ final class ViewModelEdgeCaseTests: XCTestCase {
             modelStorage: ModelStorageService(),
             memoryPressure: MemoryPressureHandler()
         )
-        let persistence = MockPersistenceProvider()
+        let stack = try InMemoryPersistenceHarness.make()
+        persistenceStack = stack
+        let persistence = ErrorInjectingPersistenceProvider(wrapping: stack.provider)
         vm.configure(persistence: persistence)
         return (vm, mock, persistence)
     }
@@ -150,12 +165,19 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     func test_clearChat_whenPersistenceDeleteFails_reloadsPersistedMessages() async throws {
         let (vm, _, persistence) = try makeViewModelWithPersistence()
         let session = ChatSessionRecord(title: "Clear Chat Failure")
+        try persistence.insertSession(session)
         vm.activeSession = session
 
         vm.inputText = "Hello"
         await vm.sendMessage()
 
-        let expectedMessages = persistence.messages
+        // vm.sendMessage() auto-creates and persists a session if needed; read
+        // whichever session id ended up active to get the persisted messages.
+        guard let activeID = vm.activeSession?.id else {
+            XCTFail("Expected an active session after sendMessage")
+            return
+        }
+        let expectedMessages = try persistence.fetchMessages(for: activeID)
         XCTAssertEqual(expectedMessages.count, 2, "Precondition: the chat should have persisted user and assistant messages")
 
         let deleteError = NSError(
@@ -169,7 +191,8 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
         XCTAssertEqual(vm.messages.map(\.id), expectedMessages.map(\.id),
                        "clearChat should reload persisted messages when deletion fails")
-        XCTAssertEqual(persistence.messages.map(\.id), expectedMessages.map(\.id),
+        let stillPersisted = try persistence.fetchMessages(for: activeID)
+        XCTAssertEqual(stillPersisted.map(\.id), expectedMessages.map(\.id),
                        "Persistence should still contain the original messages after a failed clear")
         XCTAssertNotNil(vm.activeError, "activeError should be set when clear chat fails")
         XCTAssertEqual(vm.activeError?.kind, .persistence, "Error kind should be .persistence")

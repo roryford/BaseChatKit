@@ -11,7 +11,8 @@ final class PaginationTests: XCTestCase {
 
     private var vm: ChatViewModel!
     private var mock: MockInferenceBackend!
-    private var persistence: MockPersistenceProvider!
+    private var stack: InMemoryPersistenceHarness.Stack!
+    private var persistence: ErrorInjectingPersistenceProvider!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -22,7 +23,8 @@ final class PaginationTests: XCTestCase {
         let service = InferenceService(backend: mock, name: "MockPagination")
         vm = ChatViewModel(inferenceService: service)
 
-        persistence = MockPersistenceProvider()
+        stack = try InMemoryPersistenceHarness.make()
+        persistence = ErrorInjectingPersistenceProvider(wrapping: stack.provider)
         vm.configure(persistence: persistence)
     }
 
@@ -30,6 +32,7 @@ final class PaginationTests: XCTestCase {
         vm = nil
         mock = nil
         persistence = nil
+        stack = nil
         try await super.tearDown()
     }
 

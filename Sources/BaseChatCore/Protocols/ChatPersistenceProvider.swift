@@ -21,8 +21,10 @@ public enum ChatPersistenceError: Error, LocalizedError, Sendable, Equatable {
 
 /// Abstraction over chat persistence, decoupling view models from SwiftData.
 ///
-/// The default implementation is ``SwiftDataPersistenceProvider``. Tests can
-/// substitute ``MockPersistenceProvider`` from `BaseChatTestSupport`.
+/// The default implementation is ``SwiftDataPersistenceProvider``. Tests
+/// should build a real provider over an in-memory container via
+/// ``InMemoryPersistenceHarness`` in `BaseChatTestSupport`, optionally wrapped
+/// in ``ErrorInjectingPersistenceProvider`` when failure injection is needed.
 @MainActor
 public protocol ChatPersistenceProvider: AnyObject, Sendable {
 
