@@ -30,7 +30,10 @@ let package = Package(
         // Explicit dep required: mlx-swift-lm no longer pulls swift-transformers transitively.
         // The MLXHuggingFace macro generates `AutoTokenizer.from(modelFolder:)` which lives here.
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.2.0"),
-        .package(url: "https://github.com/mattt/llama.swift", from: "2.8672.0"),
+        // Pinned version: 2.8772.0 (Package.resolved rev 3fec82010cfbe56aa78bb4177c8f4f33dace8779).
+        // Wraps llama.cpp build b8772 as a pre-built xcframework binary.
+        // See docs/LLAMA_CONTRACT.md for the full C API contract, threading rules, and upgrade procedure.
+        .package(url: "https://github.com/mattt/llama.swift", from: "2.8772.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
         // Test-only: SwiftUI view-tree inspection for accessibility contract tests.
         // Must never appear in any production target.
