@@ -428,7 +428,7 @@ final class GenerationCoordinator {
     /// Cancels active generation and awaits the task's completion before returning.
     ///
     /// Captures the active task handle before calling `stopGeneration()` so the
-    /// task's defer block finishes before tearDown proceeds to the next test.
+    /// task's defer block fully completes before the caller proceeds.
     func stopGenerationAndWait() async {
         let task = activeTask
         stopGeneration()
