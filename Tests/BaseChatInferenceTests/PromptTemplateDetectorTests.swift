@@ -131,7 +131,9 @@ final class PromptTemplateDetectorTests: XCTestCase {
         XCTAssertEqual(PromptTemplateDetector.detect(from: metadata), .chatML)
     }
 
-    func test_detect_fromMetadata_fallsBackToArchitecture() {
+    func test_detect_fromMetadata_unambiguousArch_noTemplate_returnsArchFormat() {
+        // Architecture is the primary check for unambiguous formats — "fallback" framing
+        // no longer applies now that architecture is checked first.
         let metadata = GGUFMetadata(
             generalName: "SomeModel",
             generalArchitecture: "mistral",
@@ -139,8 +141,37 @@ final class PromptTemplateDetectorTests: XCTestCase {
             chatTemplate: nil,
             fileType: nil
         )
-
         XCTAssertEqual(PromptTemplateDetector.detect(from: metadata), .mistral)
+    }
+
+    func test_detect_fromMetadata_unambiguousArch_winsOverConflictingTemplate() {
+        // Architecture wins for unambiguous formats even when the Jinja template
+        // would map to a different non-ChatML format. Ensures the fix is not
+        // limited to the ChatML collision case.
+        let metadata = GGUFMetadata(
+            generalName: "SomeGemmaModel",
+            generalArchitecture: "gemma",
+            contextLength: 4096,
+            chatTemplate: "<|user|>\n{{ content }}<|end|>\n<|assistant|>",
+            fileType: nil
+        )
+        XCTAssertEqual(PromptTemplateDetector.detect(from: metadata), .gemma,
+                       "gemma architecture must win over a phi-style Jinja template")
+    }
+
+    func test_detect_fromMetadata_llama_nonChatMLTemplateWinsOverArchitecture() {
+        // "llama" is ambiguous: SmolLM2, TinyLlama, etc. use llama arch but different
+        // chat formats. A llama3-header Jinja template on a llama-arch model must
+        // produce .llama3, not the .chatML that the architecture alone would return.
+        let metadata = GGUFMetadata(
+            generalName: "SmolLM2-1.7B-Instruct",
+            generalArchitecture: "llama",
+            contextLength: 8192,
+            chatTemplate: "<|begin_of_text|><|start_header_id|>system<|end_header_id|>{{ content }}<|eot_id|>",
+            fileType: nil
+        )
+        XCTAssertEqual(PromptTemplateDetector.detect(from: metadata), .llama3,
+                       "llama3-format Jinja template must win over ambiguous llama architecture")
     }
 
     func test_detect_fromMetadata_fallsBackToName() {
