@@ -3,26 +3,32 @@ import Foundation
 /// Detects the best `PromptTemplate` for a model based on GGUF metadata.
 ///
 /// Uses a cascading strategy:
-/// 1. If a Jinja chat template string is present, pattern-match on template tokens.
-/// 2. If architecture is known (e.g. "llama", "phi"), map it to a template.
+/// 1. If architecture maps to an unambiguous format (phi, gemma, mistral), trust it —
+///    some Jinja templates contain compatibility-branch tokens from other formats.
+/// 2. If a Jinja chat template string is present, pattern-match on template tokens.
 /// 3. If only the model name is available, use keyword heuristics.
 /// 4. Falls back to ChatML (the most widely compatible format).
 struct PromptTemplateDetector {
 
     /// Detects the best prompt template from GGUF metadata.
     ///
-    /// Tries chat template first (most reliable), then architecture, then model name.
-    /// Returns `.chatML` as a safe default if nothing matches.
+    /// Architecture wins for unambiguous formats. For ambiguous architectures
+    /// (e.g. "llama", where many fine-tunes use different chat formats), the
+    /// Jinja template takes precedence over the architecture field.
     static func detect(from metadata: GGUFMetadata) -> PromptTemplate {
-        // 1. Try chat template string first (most reliable)
+        // 1. Architecture wins for unambiguous formats — some phi3/phi4 Jinja templates
+        //    contain <|im_start|> in compatibility branches, which fires the ChatML
+        //    heuristic before the phi-specific token check.
+        if let arch = metadata.generalArchitecture {
+            let result = detect(fromArchitecture: arch)
+            if result != .chatML { return result }
+        }
+        // 2. Chat template for ambiguous architectures (e.g. "llama" maps many
+        //    fine-tunes that use different formats the architecture can't distinguish).
         if let chatTemplate = metadata.chatTemplate {
             return detect(fromChatTemplate: chatTemplate)
         }
-        // 2. Try architecture
-        if let arch = metadata.generalArchitecture {
-            return detect(fromArchitecture: arch)
-        }
-        // 3. Try model name
+        // 3. Model name heuristic as last resort.
         if let name = metadata.generalName {
             return detect(fromFileName: name)
         }
