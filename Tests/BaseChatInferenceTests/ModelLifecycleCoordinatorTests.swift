@@ -73,6 +73,8 @@ final class ModelLifecycleCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isModelLoaded, "isModelLoaded must flip to true after successful commit")
         XCTAssertEqual(coordinator.activeBackendName, "llama.cpp",
                        "activeBackendName must reflect the backend that committed the load")
+        XCTAssertEqual(coordinator.activeModelName, "Test",
+                       "activeModelName must be set from ModelInfo.name at commit time")
     }
 
     // MARK: - 1b. Plan-taking overload commits identically
@@ -100,6 +102,7 @@ final class ModelLifecycleCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isModelLoaded,
                       "Plan-taking overload must flip isModelLoaded on successful commit")
         XCTAssertEqual(coordinator.activeBackendName, "llama.cpp")
+        XCTAssertEqual(coordinator.activeModelName, "Test")
     }
 
     /// A plan with `verdict == .deny` must throw `memoryInsufficient` before
@@ -286,10 +289,11 @@ final class ModelLifecycleCoordinatorTests: XCTestCase {
     // MARK: - 5. Unload resets phase
 
     /// After a successful load, calling `unloadModel()` must reset `isModelLoaded`
-    /// to `false` and clear `activeBackendName`.
+    /// to `false` and clear `activeBackendName` and `activeModelName`.
     ///
     /// Sabotage: if `unloadModel()` omits resetting `isModelLoaded`, the assert below
-    /// would catch it. Equally, skipping `activeBackendName = nil` exposes the nil check.
+    /// would catch it. Equally, skipping `activeBackendName = nil` or `activeModelName = nil`
+    /// exposes those nil checks.
     func test_unloadModel_resetsPhaseToIdle() async throws {
         let (coordinator, backend) = makeCoordinatorAndGate()
 
@@ -304,6 +308,7 @@ final class ModelLifecycleCoordinatorTests: XCTestCase {
 
         XCTAssertFalse(coordinator.isModelLoaded, "isModelLoaded must be false after unloadModel()")
         XCTAssertNil(coordinator.activeBackendName, "activeBackendName must be nil after unloadModel()")
+        XCTAssertNil(coordinator.activeModelName, "activeModelName must be nil after unloadModel()")
     }
 
     // MARK: - 6. Failure on stale request is classified as stale

@@ -69,6 +69,7 @@ public final class InferenceService {
     public var isModelLoaded: Bool { lifecycle.isModelLoaded }
     public var isGenerating: Bool { generation.isGenerating }
     public var activeBackendName: String? { lifecycle.activeBackendName }
+    public var activeModelName: String? { lifecycle.activeModelName }
     public var modelLoadProgress: Double? { lifecycle.modelLoadProgress }
 
     /// The prompt template to apply for backends that require one (GGUF).
@@ -268,8 +269,8 @@ public final class InferenceService {
     }
 
     #if DEBUG
-    public init(backend: any InferenceBackend, name: String = "Mock") {
-        self.lifecycle = ModelLifecycleCoordinator(backend: backend, name: name)
+    public init(backend: any InferenceBackend, name: String = "Mock", modelName: String? = nil) {
+        self.lifecycle = ModelLifecycleCoordinator(backend: backend, name: name, modelName: modelName)
         self.generation = GenerationCoordinator()
         generation.provider = self
     }

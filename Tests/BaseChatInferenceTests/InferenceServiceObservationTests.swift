@@ -85,6 +85,25 @@ final class InferenceServiceObservationTests: XCTestCase {
         XCTAssertNotNil(service.activeBackendName)
     }
 
+    // MARK: - activeModelName
+
+    func test_activeModelName_triggersObservation_onLoad() async throws {
+        let mock = MockInferenceBackend()
+        let service = InferenceService()
+        service.registerBackendFactory { type in type == .gguf ? mock : nil }
+
+        let changed = expectation(description: "activeModelName observed")
+        withObservationTracking {
+            _ = service.activeModelName
+        } onChange: {
+            changed.fulfill()
+        }
+
+        try await service.loadModel(from: makeModelInfo())
+        await fulfillment(of: [changed], timeout: 2)
+        XCTAssertEqual(service.activeModelName, "Test")
+    }
+
     // MARK: - modelLoadProgress
 
     func test_modelLoadProgress_triggersObservation_onLoadStart() async throws {

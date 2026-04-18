@@ -7,6 +7,7 @@
 - ``isModelLoaded``
 - ``isGenerating``
 - ``activeBackendName``
+- ``activeModelName``
 - ``capabilities``
 - ``selectedPromptTemplate``
 - ``lastTokenUsage``

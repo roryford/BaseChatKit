@@ -15,6 +15,7 @@ final class ModelLifecycleCoordinator {
 
     private(set) var isModelLoaded = false
     private(set) var activeBackendName: String?
+    private(set) var activeModelName: String?
     private(set) var modelLoadProgress: Double?
 
     // MARK: - Backend
@@ -71,17 +72,28 @@ final class ModelLifecycleCoordinator {
     nonisolated init() {}
 
     #if DEBUG
-    init(backend: any InferenceBackend, name: String = "Mock") {
+    /// Test-only seam for preloading a backend without driving the real load
+    /// pipeline.
+    ///
+    /// - Parameters:
+    ///   - backend: the pre-configured backend to install as current.
+    ///   - name: the backend engine label (e.g. "llama.cpp", "MLX"). Stored in
+    ///     ``activeBackendName`` and in request metadata as the `backend` field.
+    ///   - modelName: the human-readable model name (e.g. from `ModelInfo.name`).
+    ///     Stored in ``activeModelName``. Defaults to `nil` when the test did not
+    ///     load through the real pipeline and therefore has no model-level name.
+    init(backend: any InferenceBackend, name: String = "Mock", modelName: String? = nil) {
         self.backend = backend
         self.isModelLoaded = true
         self.activeBackendName = name
+        self.activeModelName = modelName
         let request = LoadRequestToken(rawValue: 1)
         self.nextLoadRequestToken = request
         self.latestRequestedLoadToken = request
         self.loadPhase = .loaded(request: request)
         self.loadRequestMetadataByToken[request] = LoadRequestMetadata(
             source: "debug",
-            target: name,
+            target: modelName ?? name,
             backend: name,
             startedAtUptime: ProcessInfo.processInfo.systemUptime
         )
@@ -219,7 +231,7 @@ final class ModelLifecycleCoordinator {
         (newBackend as? LoadProgressReporting)?.setLoadProgressHandler(nil)
 
         logLoadEvent("load.complete", request: request)
-        guard commitLoadIfCurrent(request: request, backend: newBackend, backendName: backendName) else {
+        guard commitLoadIfCurrent(request: request, backend: newBackend, backendName: backendName, modelName: modelInfo.name) else {
             newBackend.unloadModel()
             logLoadEvent("load.suppress", request: request, reason: "stale-success", clearMetadata: true)
             return
@@ -290,7 +302,8 @@ final class ModelLifecycleCoordinator {
         guard commitLoadIfCurrent(
             request: request,
             backend: newBackend,
-            backendName: endpoint.provider.rawValue
+            backendName: endpoint.provider.rawValue,
+            modelName: endpoint.modelName
         ) else {
             newBackend.unloadModel()
             logLoadEvent("load.suppress", request: request, reason: "stale-success", clearMetadata: true)
@@ -308,6 +321,7 @@ final class ModelLifecycleCoordinator {
         backend = nil
         isModelLoaded = false
         activeBackendName = nil
+        activeModelName = nil
     }
 
     // MARK: - Capability Queries
@@ -453,13 +467,15 @@ final class ModelLifecycleCoordinator {
     private func commitLoadIfCurrent(
         request: LoadRequestToken,
         backend newBackend: any InferenceBackend,
-        backendName: String
+        backendName: String,
+        modelName: String
     ) -> Bool {
         guard canCommitLoad(request) else { return false }
         backend = newBackend
         isModelLoaded = true
         modelLoadProgress = nil
         activeBackendName = backendName
+        activeModelName = modelName
         loadPhase = .loaded(request: request)
         logLoadEvent("load.commit", request: request, clearMetadata: true)
         return true

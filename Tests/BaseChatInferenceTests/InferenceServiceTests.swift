@@ -24,6 +24,7 @@ final class InferenceServiceTests: XCTestCase {
         XCTAssertFalse(service.isModelLoaded)
         XCTAssertFalse(service.isGenerating)
         XCTAssertNil(service.activeBackendName)
+        XCTAssertNil(service.activeModelName)
     }
 
     // MARK: - Mock Backend via #if DEBUG init
@@ -119,8 +120,19 @@ final class InferenceServiceTests: XCTestCase {
     func test_inferenceService_backendName_reflectsLoadedBackend() {
         let mock = MockInferenceBackend()
         mock.isModelLoaded = true
+        let service = InferenceService(backend: mock, name: "MockBackend", modelName: "tinyllama-1.1b")
+        XCTAssertEqual(service.activeBackendName, "MockBackend")
+        XCTAssertEqual(service.activeModelName, "tinyllama-1.1b",
+                       "debug init now routes backend label and model name to separate fields")
+    }
+
+    func test_inferenceService_activeModelName_isNilWhenDebugInitOmitsIt() {
+        let mock = MockInferenceBackend()
+        mock.isModelLoaded = true
         let service = InferenceService(backend: mock, name: "MockBackend")
         XCTAssertEqual(service.activeBackendName, "MockBackend")
+        XCTAssertNil(service.activeModelName,
+                     "debug init without modelName leaves activeModelName unknown, not a copy of the backend label")
     }
 
     // MARK: - loadCloudBackend
@@ -166,6 +178,7 @@ final class InferenceServiceTests: XCTestCase {
 
         XCTAssertTrue(service.isModelLoaded)
         XCTAssertEqual(service.activeBackendName, APIProvider.ollama.rawValue)
+        XCTAssertEqual(service.activeModelName, endpoint.modelName)
         XCTAssertEqual(mock.loadModelCallCount, 1)
         XCTAssertEqual(mock.configuredBaseURL?.absoluteString, endpoint.baseURL)
         XCTAssertEqual(mock.configuredModelName, endpoint.modelName)
