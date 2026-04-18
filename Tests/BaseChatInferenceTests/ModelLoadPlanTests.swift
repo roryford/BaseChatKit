@@ -751,6 +751,51 @@ final class ModelLoadPlanTests: XCTestCase {
                       "Expected .insufficientResident reason for impossible fit; got \(plan.reasons)")
     }
 
+    /// Boundary tests for the impossible-fit guard (ratio == 3). The production
+    /// formula uses integer division `file / available >= 3`, which denies
+    /// exactly when `file >= 3 * available`. A regression that flips the
+    /// comparison (> vs >=) or bumps the ratio (3 → 4) silently lets a 12 GB
+    /// model slip through on a 4 GB device — exactly the class of bug this
+    /// guard was added to prevent. These pin the boundary so future changes
+    /// require an explicit update.
+    func test_impossibleFitGuard_atRatioExactlyThree_denies() {
+        // 12 GB / 4 GB = exactly 3× → must deny.
+        let inputs = makeInputs(
+            modelFileSize: 12 * oneGB,
+            strategy: .mappable,
+            requested: 2048,
+            trained: 32_768,
+            kvBytesPerToken: 8_192,
+            available: 4 * oneGB,
+            physical: 4 * oneGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+        XCTAssertEqual(plan.verdict, .deny,
+                       "12 GB / 4 GB (ratio == 3) must deny; guard uses >= comparison")
+    }
+
+    func test_impossibleFitGuard_justBelowRatioThree_doesNotDeny() {
+        // 12 GB - 1 byte over 4 GB → integer ratio = 2 → guard does NOT fire.
+        // Verdict is whatever the normal thresholds produce; the point is that
+        // the new guard alone doesn't flip it to deny.
+        let inputs = makeInputs(
+            modelFileSize: 12 * oneGB - 1,
+            strategy: .mappable,
+            requested: 2048,
+            trained: 32_768,
+            kvBytesPerToken: 8_192,
+            available: 4 * oneGB,
+            physical: 4 * oneGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+        // Without the guard firing, a 12 GB mmap'd file on 4 GB available with
+        // tiny context (2048 tokens * 8 KB = 16 MB KV) totals ~1.016 GB
+        // (resident 1 GB cap + 16 MB KV) which is < 85% of 4 GB → .allow.
+        // If the guard fires incorrectly here the verdict would be .deny.
+        XCTAssertNotEqual(plan.verdict, .deny,
+                          "12 GB - 1B / 4 GB (ratio < 3) must not be denied by the impossible-fit guard")
+    }
+
     func test_70BModelOn4GBDevice_residentStrategy_neverAllows() {
         // 70B at ~4-bit quant ~ 40 GB file. Use a generous 140 GB upper bound
         // to also cover fp16 distributions.
