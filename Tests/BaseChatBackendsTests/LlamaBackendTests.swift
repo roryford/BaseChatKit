@@ -211,6 +211,39 @@ final class LlamaBackendTests: XCTestCase {
         XCTAssertFalse(backend.isGenerating)
     }
 
+    // MARK: - Regression: stopGeneration() thread-safety (issue #418)
+
+    /// Regression test for #418: `stopGeneration()` was called from the main actor
+    /// while the decode loop read the `cancelled` flag from a detached task. A plain
+    /// `Bool` with no synchronisation was a data race under TSan.
+    ///
+    /// This test does NOT require a GGUF model — it calls `stopGeneration()` on an
+    /// unloaded `LlamaBackend` (which is a no-op) from a concurrent task while the
+    /// decode loop would have been running if a model were present. The purpose is to
+    /// confirm that concurrent atomic access to the `cancelled` flag doesn't crash or
+    /// produce a TSan violation.
+    ///
+    /// For the concurrent-generation/stop interaction against real llama.cpp C state,
+    /// see `test_stopGeneration_thenGenerate_succeeds_regression390` which requires a
+    /// real GGUF model on disk.
+    func test_stopGeneration_concurrentCallsFromMultipleTasks_isRaceFree() async {
+        let backend = LlamaBackend()
+
+        // Fire 50 concurrent tasks that each call stopGeneration(). The flag is
+        // Atomic<Bool>, so no two stores race — TSan must see zero violations.
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<50 {
+                group.addTask {
+                    backend.stopGeneration()
+                }
+            }
+        }
+
+        // Backend was never loaded, so isGenerating must remain false throughout.
+        XCTAssertFalse(backend.isGenerating,
+                       "Concurrent stopGeneration() calls must not corrupt isGenerating state")
+    }
+
     // MARK: - Regression: Stop Then Regenerate (issue #390)
 
     /// Regression test for #390: calling `stopGeneration()` used to leave

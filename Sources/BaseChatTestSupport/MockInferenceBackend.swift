@@ -37,7 +37,13 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     public var lastConfig: GenerationConfig?
 
     /// Stored so stopGeneration() can terminate the in-flight stream.
+    ///
+    /// Protected by `continuationLock` — written from the generation Task
+    /// (on an arbitrary thread) and read/cleared from stopGeneration() which
+    /// can be called concurrently from any thread. Without serialization this
+    /// is a data race under TSan.
     private var activeContinuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation?
+    private let continuationLock = NSLock()
 
     public init(capabilities: BackendCapabilities = BackendCapabilities(
         supportedParameters: [.temperature, .topP, .repeatPenalty],
@@ -71,9 +77,13 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         let tokens = tokensToYield
 
         let stream = AsyncThrowingStream<GenerationEvent, Error> { [self] continuation in
+            continuationLock.lock()
             self.activeContinuation = continuation
-            continuation.onTermination = { @Sendable _ in
+            continuationLock.unlock()
+            continuation.onTermination = { @Sendable [self] _ in
+                self.continuationLock.lock()
                 self.activeContinuation = nil
+                self.continuationLock.unlock()
             }
             Task {
                 for token in tokens {
@@ -94,8 +104,11 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     public func stopGeneration() {
         stopCallCount += 1
         isGenerating = false
-        activeContinuation?.finish()
+        continuationLock.lock()
+        let cont = activeContinuation
         activeContinuation = nil
+        continuationLock.unlock()
+        cont?.finish()
     }
 
     public func unloadModel() {

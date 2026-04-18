@@ -2,6 +2,7 @@
 import Foundation
 import LlamaSwift
 import os
+import Synchronization
 import BaseChatInference
 
 /// llama.cpp inference backend for GGUF-format models.
@@ -71,7 +72,15 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     private var context: OpaquePointer?
     private var vocab: OpaquePointer?
     private var generationTask: Task<Void, Never>?
-    private var cancelled = false
+    /// Cancellation flag shared between the decode loop (background task) and
+    /// `stopGeneration()` / `unloadModel()` (any thread/actor).
+    ///
+    /// `Atomic<Bool>` (Swift 6 `Synchronization` stdlib) makes every read and
+    /// write sequentially consistent without requiring a lock, eliminating the
+    /// data race that existed when a plain `Bool` was written from the main actor
+    /// and read on a detached background task. This is also safe to write from
+    /// a memory-pressure handler callback (#415) running on an arbitrary thread.
+    private let cancelled = Atomic<Bool>(false)
     private var cleanupTask: Task<Void, Never>?
     private var nextLoadToken: UInt64 = 0
     private var activeLoadToken: UInt64 = 0
@@ -358,9 +367,15 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             )
         }
 
+        // Reset the cancellation flag and flip isGenerating atomically under the
+        // same lock that stopGeneration() holds when it touches generationTask.
+        // Keeping both writes inside a single critical section means a concurrent
+        // stopGeneration() call that races this startup cannot observe a window
+        // where cancelled == false but isGenerating == false (not yet set), which
+        // would let it skip the task cancel and leave the loop running uncancelled.
         withStateLock {
+            cancelled.store(false, ordering: .sequentiallyConsistent)
             isGenerating = true
-            cancelled = false
         }
         Self.logger.debug("Llama generate started")
 
@@ -455,7 +470,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             var promptDecodeFailed = false
             var promptPos = 0
             while promptPos < tokens.count {
-                if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
+                if Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent) { break }
 
                 let chunkSize = min(batchSize, tokens.count - promptPos)
                 let isLastChunk = (promptPos + chunkSize) == tokens.count
@@ -489,7 +504,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
             // Honour cancellation that fired mid-prompt before entering the
             // generation loop.
-            if Task.isCancelled || self.withStateLock({ self.cancelled }) {
+            if Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent) {
                 await MainActor.run { generationStream.setPhase(.done) }
                 continuation.finish()
                 return
@@ -509,7 +524,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             var isFirstToken = true
 
             for iteration in 0..<maxTokens {
-                if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
+                if Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent) { break }
 
                 // First iteration samples from the final prompt chunk's logits,
                 // which llama.cpp exposes at index -1 ("last available").
@@ -539,7 +554,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 genBatch.n_tokens = 1
                 nCur += 1
 
-                if Task.isCancelled || self.withStateLock({ self.cancelled }) { break }
+                if Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent) { break }
 
                 if llama_decode(context, genBatch) != 0 {
                     await MainActor.run { generationStream.setPhase(.failed("Decode failed during generation")) }
@@ -571,14 +586,27 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     // MARK: - Control
 
     public func stopGeneration() {
-        withStateLock { cancelled = true }
-        generationTask?.cancel()
-        generationTask = nil
+        // Set the atomic flag first so the decode loop can break on its very next
+        // iteration check — even before the lock is acquired below.
+        cancelled.store(true, ordering: .sequentiallyConsistent)
+        // Capture and nil-out generationTask under stateLock. generationTask is
+        // a mutable var guarded by stateLock everywhere else (generate() assigns
+        // it under the lock, unloadModel() captures it under the lock). Accessing
+        // it here without the lock would be a data race under TSan.
+        let taskToCancel = withStateLock {
+            let t = generationTask
+            generationTask = nil
+            return t
+        }
+        taskToCancel?.cancel()
     }
 
     public func unloadModel() {
+        // Signal the decode loop to stop before acquiring stateLock. The atomic
+        // write is visible to the background task immediately, so the loop can
+        // break on its next iteration check without waiting for the lock.
+        cancelled.store(true, ordering: .sequentiallyConsistent)
         stateLock.lock()
-        cancelled = true
         nextLoadToken &+= 1
         activeLoadToken = nextLoadToken
 
