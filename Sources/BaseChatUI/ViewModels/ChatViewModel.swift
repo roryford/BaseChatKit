@@ -335,6 +335,10 @@ public final class ChatViewModel {
         inferenceService.activeBackendName
     }
 
+    public var activeModelName: String? {
+        inferenceService.activeModelName
+    }
+
     // MARK: - Onboarding
 
     /// `true` on the very first launch (before first-run logic runs).

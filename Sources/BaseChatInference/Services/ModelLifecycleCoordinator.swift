@@ -15,6 +15,7 @@ final class ModelLifecycleCoordinator {
 
     private(set) var isModelLoaded = false
     private(set) var activeBackendName: String?
+    private(set) var activeModelName: String?
     private(set) var modelLoadProgress: Double?
 
     // MARK: - Backend
@@ -75,6 +76,7 @@ final class ModelLifecycleCoordinator {
         self.backend = backend
         self.isModelLoaded = true
         self.activeBackendName = name
+        self.activeModelName = name
         let request = LoadRequestToken(rawValue: 1)
         self.nextLoadRequestToken = request
         self.latestRequestedLoadToken = request
@@ -219,7 +221,7 @@ final class ModelLifecycleCoordinator {
         (newBackend as? LoadProgressReporting)?.setLoadProgressHandler(nil)
 
         logLoadEvent("load.complete", request: request)
-        guard commitLoadIfCurrent(request: request, backend: newBackend, backendName: backendName) else {
+        guard commitLoadIfCurrent(request: request, backend: newBackend, backendName: backendName, modelName: modelInfo.name) else {
             newBackend.unloadModel()
             logLoadEvent("load.suppress", request: request, reason: "stale-success", clearMetadata: true)
             return
@@ -290,7 +292,8 @@ final class ModelLifecycleCoordinator {
         guard commitLoadIfCurrent(
             request: request,
             backend: newBackend,
-            backendName: endpoint.provider.rawValue
+            backendName: endpoint.provider.rawValue,
+            modelName: endpoint.modelName
         ) else {
             newBackend.unloadModel()
             logLoadEvent("load.suppress", request: request, reason: "stale-success", clearMetadata: true)
@@ -308,6 +311,7 @@ final class ModelLifecycleCoordinator {
         backend = nil
         isModelLoaded = false
         activeBackendName = nil
+        activeModelName = nil
     }
 
     // MARK: - Capability Queries
@@ -453,13 +457,15 @@ final class ModelLifecycleCoordinator {
     private func commitLoadIfCurrent(
         request: LoadRequestToken,
         backend newBackend: any InferenceBackend,
-        backendName: String
+        backendName: String,
+        modelName: String
     ) -> Bool {
         guard canCommitLoad(request) else { return false }
         backend = newBackend
         isModelLoaded = true
         modelLoadProgress = nil
         activeBackendName = backendName
+        activeModelName = modelName
         loadPhase = .loaded(request: request)
         logLoadEvent("load.commit", request: request, clearMetadata: true)
         return true

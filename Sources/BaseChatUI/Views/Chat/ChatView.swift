@@ -460,6 +460,14 @@ public struct ChatView: View {
             }
             .accessibilityValue(viewModel.isModelLoaded ? "Yes" : "No")
 
+            if let modelName = viewModel.activeModelName {
+                LabeledContent("Model") {
+                    Text(modelName)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+
             if let backend = viewModel.activeBackendName {
                 LabeledContent("Backend") {
                     Text(backend)
