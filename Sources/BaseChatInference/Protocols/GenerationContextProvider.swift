@@ -4,7 +4,7 @@
 /// `InferenceService` conforms to this protocol so the `GenerationCoordinator`
 /// can operate without a direct dependency on `ModelLifecycleCoordinator`.
 @MainActor
-public protocol GenerationContextProvider: AnyObject {
+protocol GenerationContextProvider: AnyObject {
     var currentBackend: (any InferenceBackend)? { get }
     var isBackendLoaded: Bool { get }
     var selectedPromptTemplate: PromptTemplate { get }

@@ -6,10 +6,16 @@ import BaseChatTestSupport
 /// Direct unit tests for the `GenerationCoordinator`.
 ///
 /// The coordinator is `internal`, so this file uses `@testable import
-/// BaseChatInference` to construct it directly. Injecting a
+/// BaseChatInference` to construct it directly. A file-local
 /// `FakeGenerationContextProvider` replaces the `InferenceService`-shaped
 /// dependency without standing up an entire service. Thermal-gate tests
 /// inject a deterministic `thermalStateProvider` closure.
+///
+/// All queue / continuation assertions here are behavioral — they observe
+/// public `GenerationStream.phase` transitions and coordinator accessors
+/// (`isGenerating`, `hasQueuedRequests`). No Mirror introspection, because
+/// reflecting into `@Observable`-rewritten storage breaks silently when the
+/// macro changes its naming scheme.
 @MainActor
 final class GenerationCoordinatorTests: XCTestCase {
 
@@ -67,41 +73,47 @@ final class GenerationCoordinatorTests: XCTestCase {
 
     // MARK: - Priority insertion
 
+    /// High-priority (`.userInitiated`) requests must be inserted ahead of
+    /// already-queued `.background` work. This is the user-facing invariant:
+    /// typing a message doesn't wait behind background prefetches.
+    ///
+    /// Verified behaviorally via `stream.phase` transitions — the userInitiated
+    /// stream must advance to `.connecting` before either background stream.
     func test_enqueue_userInitiatedBehindBackground_drainsFirst() async throws {
-        // Freeze the active slot with a slow backend so queued requests can
-        // accumulate without racing their own drain.
-        let slow = SlowMockBackend(tokenCount: 10, delayMilliseconds: 30)
-        let slowProvider = FakeGenerationContextProviderWithSlowBackend(backend: slow)
+        let slowProvider = SlowFakeProvider()
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
-        // Put one request on the active slot (normal priority).
+        // Active slot holds one request; queue builds behind it.
         let (_, activeStream) = try coord.enqueue(messages: [("user", "active")], priority: .normal)
 
-        // Queue two .background and then one .userInitiated.
-        let (bgToken1, _) = try coord.enqueue(messages: [("user", "bg1")], priority: .background)
-        let (bgToken2, _) = try coord.enqueue(messages: [("user", "bg2")], priority: .background)
-        let (uiToken, _) = try coord.enqueue(messages: [("user", "ui")], priority: .userInitiated)
+        // Queue two .background, then one .userInitiated.
+        let (_, bg1Stream) = try coord.enqueue(messages: [("user", "bg1")], priority: .background)
+        let (_, bg2Stream) = try coord.enqueue(messages: [("user", "bg2")], priority: .background)
+        let (_, uiStream) = try coord.enqueue(messages: [("user", "ui")], priority: .userInitiated)
 
-        // Read the queue directly via the @testable seam to verify ordering.
-        // The queue should be [userInitiated, background1, background2].
-        let order = coord.queuedRequestTokensForTesting()
-        XCTAssertEqual(
-            order,
-            [uiToken, bgToken1, bgToken2],
-            "userInitiated must sort ahead of earlier-enqueued background requests"
-        )
+        // All three are currently queued (active is still running).
+        XCTAssertEqual(uiStream.phase, .queued)
+        XCTAssertEqual(bg1Stream.phase, .queued)
+        XCTAssertEqual(bg2Stream.phase, .queued)
 
-        // Drain the active so the queue actually advances, then stop.
-        _ = activeStream
+        // Release active: its stream completes, which kicks the defer block and
+        // drainQueue() for the next request.
+        slowProvider.backend.stopGeneration()
+        for try await _ in activeStream.events {}
+
+        // After active finishes, the userInitiated must be dequeued first.
+        XCTAssertEqual(uiStream.phase, .connecting, "userInitiated must drain before backgrounds")
+        XCTAssertEqual(bg1Stream.phase, .queued, "background1 must still be queued")
+        XCTAssertEqual(bg2Stream.phase, .queued, "background2 must still be queued")
+
         coord.stopGeneration()
     }
 
     // MARK: - Cancel: queued
 
     func test_cancel_queuedRequest_removesFromQueueAndLeavesActiveRunning() async throws {
-        let slow = SlowMockBackend(tokenCount: 20, delayMilliseconds: 20)
-        let slowProvider = FakeGenerationContextProviderWithSlowBackend(backend: slow)
+        let slowProvider = SlowFakeProvider()
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
@@ -110,25 +122,24 @@ final class GenerationCoordinatorTests: XCTestCase {
             messages: [("user", "queued")], priority: .normal
         )
 
-        // Cancel the queued one — not the active one.
         coord.cancel(queuedToken)
 
-        // The queued stream must complete (with a CancellationError finish).
-        // Consume it; confirm no tokens arrive.
+        // Cancelled queued stream must terminate; no tokens delivered.
         var tokens: [String] = []
         do {
             for try await event in queuedStream.events {
                 if case .token(let t) = event { tokens.append(t) }
             }
         } catch {
-            // CancellationError is acceptable — the coordinator finishes the
-            // continuation with an error when cancelling a queued item.
+            // CancellationError is the expected terminator here.
         }
         XCTAssertTrue(tokens.isEmpty, "cancelled queued request must not emit tokens")
 
-        // The active stream should still be running; stopGeneration cleans up.
-        _ = activeStream
+        // Active still running; the coordinator still reports it.
+        XCTAssertTrue(coord.isGenerating, "active request must remain in flight")
+
         coord.stopGeneration()
+        _ = activeStream
     }
 
     // MARK: - Cancel: active (no-token-after-cancel)
@@ -138,15 +149,12 @@ final class GenerationCoordinatorTests: XCTestCase {
     /// if the backend is still running, the coordinator must have torn down
     /// the continuation such that further yields are dropped.
     func test_cancel_activeRequest_noTokenAfterCancel() async throws {
-        let slow = SlowMockBackend(tokenCount: 50, delayMilliseconds: 20)
-        let slowProvider = FakeGenerationContextProviderWithSlowBackend(backend: slow)
+        let slowProvider = SlowFakeProvider(tokenCount: 50, delayMilliseconds: 20)
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
         let (token, stream) = try coord.enqueue(messages: [("user", "active")], priority: .normal)
 
-        // Start consuming the stream and collect tokens until we see the first
-        // one — then cancel.
         var tokensBeforeCancel = 0
         var tokensAfterCancel = 0
         var didCancel = false
@@ -179,33 +187,47 @@ final class GenerationCoordinatorTests: XCTestCase {
         )
     }
 
-    // MARK: - stopGeneration: continuations.count == 0
+    // MARK: - stopGeneration: behavioral drain
 
-    func test_stopGeneration_emptiesQueueAndContinuations() async throws {
-        let slow = SlowMockBackend(tokenCount: 50, delayMilliseconds: 20)
-        let slowProvider = FakeGenerationContextProviderWithSlowBackend(backend: slow)
+    /// `stopGeneration()` must reset the coordinator to a clean idle state —
+    /// no active request, no queued requests, and every open stream terminated
+    /// (readers unblock). Verified behaviorally: calling it, then awaiting each
+    /// stream to completion, must return without hanging.
+    func test_stopGeneration_emptiesQueueAndTerminatesAllStreams() async throws {
+        let slowProvider = SlowFakeProvider(tokenCount: 50, delayMilliseconds: 20)
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
-        _ = try coord.enqueue(messages: [("user", "active")], priority: .normal)
-        _ = try coord.enqueue(messages: [("user", "queued1")], priority: .normal)
-        _ = try coord.enqueue(messages: [("user", "queued2")], priority: .normal)
+        let (_, activeStream) = try coord.enqueue(messages: [("user", "active")], priority: .normal)
+        let (_, q1Stream) = try coord.enqueue(messages: [("user", "queued1")], priority: .normal)
+        let (_, q2Stream) = try coord.enqueue(messages: [("user", "queued2")], priority: .normal)
 
         coord.stopGeneration()
 
         XCTAssertFalse(coord.isGenerating)
         XCTAssertFalse(coord.hasQueuedRequests)
-        XCTAssertEqual(
-            coord.continuationsCountForTesting(), 0,
-            "stopGeneration must drain continuations to zero"
-        )
+
+        // Each stream must be terminated: the for-await must return (possibly
+        // via thrown CancellationError). If stopGeneration() failed to finish
+        // any continuation, the corresponding `for try await` would hang and
+        // this test would time out.
+        for stream in [activeStream, q1Stream, q2Stream] {
+            do { for try await _ in stream.events {} } catch { /* cancel error OK */ }
+        }
+
+        // After stopGeneration + drain, a fresh enqueue must succeed
+        // immediately — proving the coordinator is back in a clean state with
+        // no stale continuations blocking the queue.
+        let (_, freshStream) = try coord.enqueue(messages: [("user", "fresh")], priority: .normal)
+        XCTAssertNotEqual(freshStream.phase, .queued, "new request must start running after stop")
+        coord.stopGeneration()
+        do { for try await _ in freshStream.events {} } catch { /* cancel error OK */ }
     }
 
     // MARK: - discardRequests(notMatching:)
 
     func test_discardRequests_keepsMatchingSessionCancelsOthers() async throws {
-        let slow = SlowMockBackend(tokenCount: 50, delayMilliseconds: 20)
-        let slowProvider = FakeGenerationContextProviderWithSlowBackend(backend: slow)
+        let slowProvider = SlowFakeProvider(tokenCount: 50, delayMilliseconds: 20)
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
@@ -216,34 +238,34 @@ final class GenerationCoordinatorTests: XCTestCase {
         let (_, activeStream) = try coord.enqueue(
             messages: [("user", "active")], priority: .normal, sessionID: keepSession
         )
-        // Queued: two matching, one not.
-        let (keepToken, keepStream) = try coord.enqueue(
+        // Queued: one matching keep, one not.
+        let (_, keepStream) = try coord.enqueue(
             messages: [("user", "keep")], priority: .normal, sessionID: keepSession
         )
-        let (dropToken, dropStream) = try coord.enqueue(
+        let (_, dropStream) = try coord.enqueue(
             messages: [("user", "drop")], priority: .normal, sessionID: dropSession
         )
 
         coord.discardRequests(notMatching: keepSession)
 
-        // keepToken should still be queued; dropToken must be gone.
-        let queued = coord.queuedRequestTokensForTesting()
-        XCTAssertTrue(queued.contains(keepToken), "matching session must be preserved")
-        XCTAssertFalse(queued.contains(dropToken), "non-matching session must be cancelled")
-
-        // Drop stream should terminate (with an error).
+        // The dropped stream must terminate — no tokens.
         var dropTokens: [String] = []
         do {
             for try await event in dropStream.events {
                 if case .token(let t) = event { dropTokens.append(t) }
             }
         } catch {
-            // expected
+            // expected cancellation
         }
-        XCTAssertTrue(dropTokens.isEmpty)
+        XCTAssertTrue(dropTokens.isEmpty, "non-matching session must be cancelled")
+
+        // The kept queued stream must still be live (queued or draining once
+        // active completes). It must NOT be in `.failed`.
+        if case .failed(let reason) = keepStream.phase {
+            XCTFail("matching-session stream should not be cancelled, got .failed(\(reason))")
+        }
 
         _ = activeStream
-        _ = keepStream
         coord.stopGeneration()
     }
 
@@ -287,8 +309,7 @@ final class GenerationCoordinatorTests: XCTestCase {
     }
 
     func test_isGenerating_transitions_onCancel() async throws {
-        let slow = SlowMockBackend(tokenCount: 50, delayMilliseconds: 20)
-        let slowProvider = FakeGenerationContextProviderWithSlowBackend(backend: slow)
+        let slowProvider = SlowFakeProvider(tokenCount: 50, delayMilliseconds: 20)
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
@@ -307,44 +328,44 @@ final class GenerationCoordinatorTests: XCTestCase {
 
     /// `cancel` may fire between `finishAndDiscard` and the synchronous
     /// `drainQueue()` call inside `cancel()`. The coordinator must survive
-    /// this without crashing or leaking continuations.
+    /// this without crashing and must return to a clean idle state: not
+    /// generating, no queued requests, and a fresh enqueue succeeds.
     func test_drainQueue_reentryRace_noCrash_stateConsistent() async throws {
-        let slow = SlowMockBackend(tokenCount: 2, delayMilliseconds: 5)
-        let slowProvider = FakeGenerationContextProviderWithSlowBackend(backend: slow)
+        let slowProvider = SlowFakeProvider(tokenCount: 2, delayMilliseconds: 5)
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
         let (token1, s1) = try coord.enqueue(messages: [("user", "a")], priority: .normal)
         let (token2, s2) = try coord.enqueue(messages: [("user", "b")], priority: .normal)
 
-        // Cancel the active immediately, interleaved with a yield so the
-        // defer block gets a chance to fire concurrently with the cancel path.
+        // Interleave cancels and yields to hit the re-entry window.
         coord.cancel(token1)
         await Task.yield()
         coord.cancel(token2)
         await Task.yield()
 
         // Consume both streams to completion so no task is leaked.
-        // Cancelled streams finish with a thrown CancellationError, which is
-        // expected here — swallow it so the race assertions run.
         do { for try await _ in s1.events {} } catch { /* expected cancel */ }
         do { for try await _ in s2.events {} } catch { /* expected cancel */ }
 
         XCTAssertFalse(coord.isGenerating)
         XCTAssertFalse(coord.hasQueuedRequests)
-        XCTAssertEqual(coord.continuationsCountForTesting(), 0)
+
+        // Fresh enqueue must succeed immediately — proof that no stale
+        // continuations remained to block the queue.
+        let (_, freshStream) = try coord.enqueue(messages: [("user", "fresh")], priority: .normal)
+        XCTAssertNotEqual(freshStream.phase, .queued)
+        coord.stopGeneration()
+        do { for try await _ in freshStream.events {} } catch { /* cancel OK */ }
     }
 
     // MARK: - Enqueue ambiguous guard pinning
 
-    /// The guard at line 121 combines `provider?.currentBackend != nil` and
+    /// The enqueue guard combines `provider?.currentBackend != nil` and
     /// `provider?.isBackendLoaded == true`. If either fails, the same
     /// "No model loaded" error fires. Pin this so a future guard split
     /// can't silently change the observable error.
     func test_enqueue_noBackend_throwsNoModelLoaded() {
-        // Tear off the backend: currentBackend becomes nil.
-        // We can model this by allocating a fresh fake with an unloaded backend
-        // and then nil-ing via a subclass that returns nil for currentBackend.
         let nilProvider = NilBackendProvider()
         let coord = GenerationCoordinator()
         coord.provider = nilProvider
@@ -383,7 +404,6 @@ final class GenerationCoordinatorTests: XCTestCase {
         )
 
         // The request must be dropped without invoking the backend.
-        // Stream should terminate with an error.
         var tokenCount = 0
         do {
             for try await event in stream.events {
@@ -401,6 +421,10 @@ final class GenerationCoordinatorTests: XCTestCase {
         XCTAssertFalse(coord.isGenerating)
     }
 
+    /// Thermal state is only read on `.background` priority. Normal-priority
+    /// requests under `.serious` thermal pressure must still run. This
+    /// explicitly reaches the backend to prove the guard at line 183 is gated
+    /// on priority, not on thermal alone.
     func test_normalPriority_seriousThermal_requestNotDropped() async throws {
         let coord = makeCoordinator { .serious }
 
@@ -427,8 +451,7 @@ final class GenerationCoordinatorTests: XCTestCase {
     /// The `weak var provider` goes nil and in-flight generation ends cleanly.
     func test_providerTeardown_midStream_noCrash_cleanEnd() async throws {
         let slow = SlowMockBackend(tokenCount: 20, delayMilliseconds: 20)
-        var slowProvider: FakeGenerationContextProviderWithSlowBackend? =
-            FakeGenerationContextProviderWithSlowBackend(backend: slow)
+        var slowProvider: SlowFakeProvider? = SlowFakeProvider(backend: slow)
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
@@ -449,20 +472,46 @@ final class GenerationCoordinatorTests: XCTestCase {
         // The coordinator must be in a stable state: no crash, no active
         // generation.
         XCTAssertFalse(coord.isGenerating)
-        XCTAssertNil(coord.provider as? FakeGenerationContextProviderWithSlowBackend)
+        XCTAssertNil(coord.provider as? SlowFakeProvider)
     }
 }
 
-// MARK: - Local test doubles
+// MARK: - File-local fakes
+//
+// These conform to the internal `GenerationContextProvider` via `@testable
+// import BaseChatInference`. Keeping them file-local (rather than publishing
+// them from `BaseChatTestSupport`) means the protocol stays internal and the
+// package's public API surface is unchanged.
 
-/// A second `GenerationContextProvider` fake that vends a `SlowMockBackend`.
-/// Lives here (not TestSupport) because `FakeGenerationContextProvider` is
-/// intentionally tied to `MockInferenceBackend` for the common case; tests
-/// that need delayed token streams reach for this instead.
+/// A configurable fake that serves a `MockInferenceBackend`. Mirrors the
+/// construction pattern the rest of the inference tests use.
 @MainActor
-private final class FakeGenerationContextProviderWithSlowBackend: GenerationContextProvider {
+final class FakeGenerationContextProvider: GenerationContextProvider {
+
+    let backend: MockInferenceBackend
+    var promptTemplate: PromptTemplate = .chatML
+
+    init(backend: MockInferenceBackend = MockInferenceBackend()) {
+        self.backend = backend
+        // Default to a "loaded" state so enqueue() passes its guard. Tests
+        // that want the unloaded path flip this explicitly.
+        self.backend.isModelLoaded = true
+    }
+
+    var currentBackend: (any InferenceBackend)? { backend }
+    var isBackendLoaded: Bool { backend.isModelLoaded }
+    var selectedPromptTemplate: PromptTemplate { promptTemplate }
+}
+
+/// A fake that serves a `SlowMockBackend` for tests that need a backend that
+/// yields tokens over time (cancellation / ordering).
+@MainActor
+private final class SlowFakeProvider: GenerationContextProvider {
     let backend: SlowMockBackend
     init(backend: SlowMockBackend) { self.backend = backend }
+    convenience init(tokenCount: Int = 10, delayMilliseconds: Int = 30) {
+        self.init(backend: SlowMockBackend(tokenCount: tokenCount, delayMilliseconds: delayMilliseconds))
+    }
     var currentBackend: (any InferenceBackend)? { backend }
     var isBackendLoaded: Bool { backend.isModelLoaded }
     var selectedPromptTemplate: PromptTemplate { .chatML }
@@ -475,35 +524,4 @@ private final class NilBackendProvider: GenerationContextProvider {
     var currentBackend: (any InferenceBackend)? { nil }
     var isBackendLoaded: Bool { false }
     var selectedPromptTemplate: PromptTemplate { .chatML }
-}
-
-// MARK: - Test-only coordinator inspection helpers
-
-extension GenerationCoordinator {
-    /// Exposes the internal queue ordering so priority-insertion tests can
-    /// verify the queue layout without consuming streams.
-    ///
-    /// `@Observable` rewrites stored properties to `_`-prefixed names, so
-    /// the mirror lookup matches both the raw and the observed-prefix name.
-    func queuedRequestTokensForTesting() -> [GenerationRequestToken] {
-        Mirror(reflecting: self).children.compactMap { child -> [GenerationRequestToken]? in
-            guard child.label == "requestQueue" || child.label == "_requestQueue" else { return nil }
-            guard let queue = child.value as? [Any] else { return nil }
-            return queue.compactMap { element -> GenerationRequestToken? in
-                Mirror(reflecting: element).children.first(where: { $0.label == "token" })?
-                    .value as? GenerationRequestToken
-            }
-        }.first ?? []
-    }
-
-    /// Exposes the internal continuations-map size for the `stopGeneration`
-    /// sabotage check. Mirrors over the `[GenerationRequestToken: Continuation]`
-    /// dictionary's children count.
-    func continuationsCountForTesting() -> Int {
-        Mirror(reflecting: self).children.first(where: { child in
-            child.label == "continuations" || child.label == "_continuations"
-        }).flatMap { child -> Int? in
-            Mirror(reflecting: child.value).children.count
-        } ?? 0
-    }
 }
