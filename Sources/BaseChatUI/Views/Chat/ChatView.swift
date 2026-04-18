@@ -114,15 +114,24 @@ public struct ChatView: View {
             ChatExportSheet()
         }
         #endif
-        // API configuration can be triggered from the error recovery button which has
-        // no natural popover anchor, so it uses a sheet on all platforms. On iPad the
-        // drag indicator makes it clear the sheet is dismissible.
+        // API configuration: on compact size class (iPhone) or macOS, use a full sheet
+        // because there is no stable toolbar anchor. On regular size class (iPad) the
+        // presentation is anchored to the recovery button via `.popover` — see
+        // `recoveryButton(for:)` below which attaches the popover directly to the button
+        // so the sheet modifier here is skipped on that path.
+        #if os(iOS)
+        .sheet(isPresented: Binding(
+            get: { showAPIConfiguration && horizontalSizeClass == .compact },
+            set: { if !$0 { showAPIConfiguration = false } }
+        )) {
+            APIConfigurationView()
+                .presentationDragIndicator(.visible)
+        }
+        #else
         .sheet(isPresented: $showAPIConfiguration) {
             APIConfigurationView()
-                #if os(iOS)
-                .presentationDragIndicator(.visible)
-                #endif
         }
+        #endif
     }
 
     // MARK: - Error Banner
@@ -159,6 +168,18 @@ public struct ChatView: View {
             }
             .buttonStyle(.borderless)
             .font(.callout.bold())
+            #if os(iOS)
+            // On regular size class (iPad), anchor the API config as a popover on the
+            // recovery button so the split view stays visible. On compact (iPhone) the
+            // view-level `.sheet` above handles presentation instead.
+            .popover(isPresented: Binding(
+                get: { showAPIConfiguration && horizontalSizeClass == .regular },
+                set: { if !$0 { showAPIConfiguration = false } }
+            )) {
+                APIConfigurationView()
+                    .frame(minWidth: 360, minHeight: 440)
+            }
+            #endif
         case .selectModel:
             Button("Select Model") {
                 viewModel.activeError = nil
