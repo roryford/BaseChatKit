@@ -1,6 +1,172 @@
-#if Llama
 import XCTest
 @testable import BaseChatInference
+
+// MARK: - Thread-safe counter for @Sendable callback closures
+
+/// A minimal thread-safe integer counter for use inside `@Sendable` closures.
+///
+/// `@Sendable` closures cannot mutate captured `var` locals. This wrapper is
+/// `@unchecked Sendable` because the counter is protected by the `NSLock`, but
+/// Swift's type system cannot verify that automatically.
+private final class SendableCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func increment(by n: Int = 1) {
+        lock.lock()
+        defer { lock.unlock() }
+        value += n
+    }
+
+    var current: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
+// MARK: - Hardware-free: MemoryPressureHandler callback API
+
+/// Exercises the `addPressureCallback` / `removeCallback` / `fireCallbacks` API
+/// added to `MemoryPressureHandler` in support of issue #415.
+///
+/// These tests do not instantiate `LlamaBackend` and run without special hardware.
+/// The `#if Llama` guard is intentionally absent — these tests run in CI to give
+/// continuous coverage of the callback machinery that `LlamaBackend` relies on
+/// for memory pressure abort.
+final class MemoryPressureCallbackAPITests: XCTestCase {
+
+    // MARK: - Registration and removal
+
+    func test_addPressureCallback_replacesExistingEntryForSameOwner() {
+        let handler = MemoryPressureHandler()
+        let owner = NSObject()
+        let callCount = SendableCounter()
+
+        handler.addPressureCallback(for: owner) { _ in callCount.increment(by: 1) }
+        // Registering again for the same owner replaces the previous entry.
+        handler.addPressureCallback(for: owner) { _ in callCount.increment(by: 10) }
+
+        // Verify no crash and the table updated correctly.
+        handler.removeCallback(for: owner)
+        // callCount is still 0 — no real DispatchSource has fired.
+        XCTAssertEqual(callCount.current, 0,
+            "No callback should have fired — DispatchSource has not received an OS event")
+    }
+
+    func test_removeCallback_forUnregisteredOwner_isNoOp() {
+        let handler = MemoryPressureHandler()
+        let owner = NSObject()
+
+        // Remove before registering — must be a no-op.
+        handler.removeCallback(for: owner)
+        handler.removeCallback(for: owner)
+        // No crash = pass.
+    }
+
+    func test_removeCallback_afterRegistration_isIdempotent() {
+        let handler = MemoryPressureHandler()
+        let owner = NSObject()
+
+        handler.addPressureCallback(for: owner) { _ in }
+        handler.removeCallback(for: owner)
+        // Second remove must be a no-op.
+        handler.removeCallback(for: owner)
+        // No crash = pass.
+    }
+
+    func test_multipleOwners_independentCallbacks() {
+        let handler = MemoryPressureHandler()
+        let owner1 = NSObject()
+        let owner2 = NSObject()
+
+        handler.addPressureCallback(for: owner1) { _ in }
+        handler.addPressureCallback(for: owner2) { _ in }
+
+        // Remove one; the other must still be present (no crash on re-removal).
+        handler.removeCallback(for: owner1)
+        handler.removeCallback(for: owner2)
+    }
+
+    // MARK: - Lifecycle: deinit of handler while callbacks are registered
+
+    func test_handlerDeinit_withRegisteredCallbacks_doesNotCrash() {
+        let owner = NSObject()
+        var handler: MemoryPressureHandler? = MemoryPressureHandler()
+        handler?.addPressureCallback(for: owner) { _ in }
+        handler = nil
+        // If we reach here, the handler released its callback table cleanly.
+    }
+
+    // MARK: - Callback firing via fireCallbacks
+
+    /// Verifies that `fireCallbacks` actually invokes registered callbacks and
+    /// delivers the correct level. This exercises the same synchronous dispatch path
+    /// the DispatchSource event handler uses when the OS sends a pressure event.
+    ///
+    /// Sabotage check: comment out `self.fireCallbacks(level: level)` in
+    /// `startMonitoring`'s event handler — the production wiring stops working,
+    /// but this test (which calls `fireCallbacks` directly) still catches regressions
+    /// in the dispatch logic itself.
+    func test_fireCallbacks_invokesRegisteredCallbackWithCorrectLevel() {
+        let handler = MemoryPressureHandler()
+        let owner = NSObject()
+
+        // Use a class box so the @Sendable closure can mutate the array.
+        // fireCallbacks is always called synchronously on one thread in these tests,
+        // so no actual concurrent access occurs — the wrapper satisfies the
+        // @Sendable requirement at the type-system level.
+        final class LevelBox: @unchecked Sendable { var levels: [MemoryPressureLevel] = [] }
+        let box = LevelBox()
+
+        handler.addPressureCallback(for: owner) { level in box.levels.append(level) }
+
+        handler.fireCallbacks(level: .warning)
+        handler.fireCallbacks(level: .critical)
+        handler.fireCallbacks(level: .nominal)
+
+        // fireCallbacks runs synchronously; no async coordination needed.
+        XCTAssertEqual(box.levels, [.warning, .critical, .nominal],
+            "fireCallbacks must invoke the registered callback once per call, in order")
+    }
+
+    /// Verifies that after `removeCallback`, subsequent `fireCallbacks` calls do
+    /// not invoke the removed callback. This guards against a stale closure firing
+    /// after `LlamaBackend` has been deallocated.
+    func test_fireCallbacks_afterRemove_doesNotInvokeCallback() {
+        let handler = MemoryPressureHandler()
+        let owner = NSObject()
+        let callCount = SendableCounter()
+
+        handler.addPressureCallback(for: owner) { _ in callCount.increment() }
+        handler.removeCallback(for: owner)
+
+        handler.fireCallbacks(level: .critical)
+
+        XCTAssertEqual(callCount.current, 0, "Callback must not fire after removeCallback")
+    }
+
+    /// Verifies that removing one owner does not suppress other registered callbacks —
+    /// each `ObjectIdentifier` key is independent.
+    func test_fireCallbacks_removingOneOwner_preservesOtherCallbacks() {
+        let handler = MemoryPressureHandler()
+        let owner1 = NSObject()
+        let owner2 = NSObject()
+        let count1 = SendableCounter()
+        let count2 = SendableCounter()
+
+        handler.addPressureCallback(for: owner1) { _ in count1.increment() }
+        handler.addPressureCallback(for: owner2) { _ in count2.increment() }
+
+        handler.removeCallback(for: owner1)
+        handler.fireCallbacks(level: .warning)
+
+        XCTAssertEqual(count1.current, 0, "Removed owner1 callback must not fire")
+        XCTAssertEqual(count2.current, 1, "owner2 callback must still fire after owner1 is removed")
+    }
+}
+
+#if Llama
 @testable import BaseChatBackends
 import BaseChatTestSupport
 
@@ -63,7 +229,7 @@ final class LlamaBackendMemoryPressureTests: XCTestCase {
     // MARK: - unloadAndWait() is safe from a detached Task
 
     /// On `.critical` pressure the callback spawns:
-    ///   `Task { [weak self] in await self?.unloadAndWait() }`
+    ///   `Task.detached { [weak self] in await self?.unloadAndWait() }`
     /// Verify that `unloadAndWait()` called from a detached Task on an unloaded
     /// backend completes without crashing and leaves the backend clean.
     ///
@@ -101,80 +267,6 @@ final class LlamaBackendMemoryPressureTests: XCTestCase {
         backend = nil
         // If we reach this line, deinit ran and the callback was safely removed.
         XCTAssert(true, "LlamaBackend deinit must not crash when cleaning up the memory pressure callback")
-    }
-}
-
-// MARK: - Hardware-free: MemoryPressureHandler callback API
-
-/// Exercises the `addPressureCallback` / `removeCallback` API added to
-/// `MemoryPressureHandler` in support of issue #415.
-///
-/// These tests do not instantiate `LlamaBackend` and run without special hardware.
-final class MemoryPressureCallbackAPITests: XCTestCase {
-
-    // MARK: - Registration and removal
-
-    func test_addPressureCallback_replacesExistingEntryForSameOwner() {
-        let handler = MemoryPressureHandler()
-        let owner = NSObject()
-        var callCount = 0
-
-        handler.addPressureCallback(for: owner) { _ in callCount += 1 }
-        // Registering again for the same owner replaces the previous entry.
-        handler.addPressureCallback(for: owner) { _ in callCount += 10 }
-
-        // Verify no crash and the table updated correctly.
-        handler.removeCallback(for: owner)
-        // callCount is still 0 — no real DispatchSource has fired.
-        XCTAssertEqual(callCount, 0,
-            "No callback should have fired — DispatchSource has not received an OS event")
-    }
-
-    func test_removeCallback_forUnregisteredOwner_isNoOp() {
-        let handler = MemoryPressureHandler()
-        let owner = NSObject()
-
-        // Remove before registering — must be a no-op.
-        handler.removeCallback(for: owner)
-        handler.removeCallback(for: owner)
-        // No crash = pass.
-    }
-
-    func test_removeCallback_afterRegistration_isIdempotent() {
-        let handler = MemoryPressureHandler()
-        let owner = NSObject()
-
-        handler.addPressureCallback(for: owner) { _ in }
-        handler.removeCallback(for: owner)
-        // Second remove must be a no-op.
-        handler.removeCallback(for: owner)
-        // No crash = pass.
-    }
-
-    func test_multipleOwners_independentCallbacks() {
-        let handler = MemoryPressureHandler()
-        let owner1 = NSObject()
-        let owner2 = NSObject()
-
-        handler.addPressureCallback(for: owner1) { _ in }
-        handler.addPressureCallback(for: owner2) { _ in }
-
-        // Remove one; the other must still be present (no crash on re-removal).
-        handler.removeCallback(for: owner1)
-        // If owner2's callback were also removed, re-adding for owner2 would
-        // be a brand-new insert rather than a no-op — we can't distinguish
-        // from outside, but we confirm no crash on the whole sequence.
-        handler.removeCallback(for: owner2)
-    }
-
-    // MARK: - Lifecycle: deinit of handler while callbacks are registered
-
-    func test_handlerDeinit_withRegisteredCallbacks_doesNotCrash() {
-        let owner = NSObject()
-        var handler: MemoryPressureHandler? = MemoryPressureHandler()
-        handler?.addPressureCallback(for: owner) { _ in }
-        handler = nil
-        // If we reach here, the handler released its callback table cleanly.
     }
 }
 #endif

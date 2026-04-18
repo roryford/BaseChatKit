@@ -151,7 +151,13 @@ package final class MemoryPressureHandler: @unchecked Sendable {
 
     // MARK: - Private
 
-    private func fireCallbacks(level: MemoryPressureLevel) {
+    /// Fires all registered callbacks with `level`.
+    ///
+    /// Package-internal so tests can simulate a pressure event without relying on a
+    /// real OS `DispatchSource` firing. Takes a snapshot under the lock so callbacks
+    /// run outside the critical section, allowing re-entrant `addPressureCallback` /
+    /// `removeCallback` calls from within a callback.
+    package func fireCallbacks(level: MemoryPressureLevel) {
         // Take a snapshot under the lock so callbacks run outside it.
         callbackLock.lock()
         let snapshot = _callbacks.values.map { $0 }

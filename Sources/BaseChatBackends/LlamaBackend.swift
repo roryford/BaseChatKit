@@ -149,10 +149,11 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// cleanly before the OS escalates. `stopGeneration()` uses `Atomic<Bool>` and is
     /// safe to call from any thread (PR #456).
     ///
-    /// On `.critical`: calls `stopGeneration()` AND schedules a detached Task to call
+    /// On `.critical`: calls `stopGeneration()` AND schedules a `Task.detached` to call
     /// `unloadAndWait()`, releasing Metal buffers before the OS reclaims them forcibly.
-    /// The Task is detached so the synchronous GCD callback can return quickly. A weak
-    /// capture prevents a retain cycle with the handler's closure storage.
+    /// `Task.detached` is used explicitly so the task does not inherit any actor isolation
+    /// from the GCD callback's execution context, and the GCD callback returns immediately.
+    /// A weak capture prevents a retain cycle with the handler's closure storage.
     private func registerMemoryPressureCallback() {
         memoryPressure.addPressureCallback(for: self) { [weak self] level in
             guard let self else { return }
@@ -163,7 +164,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             case .critical:
                 Self.logger.warning("Memory pressure: critical — stopping generation and scheduling model unload (#415)")
                 self.stopGeneration()
-                Task { [weak self] in
+                Task.detached { [weak self] in
                     await self?.unloadAndWait()
                 }
             case .nominal:
