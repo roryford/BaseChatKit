@@ -73,6 +73,14 @@ final class GenerationCoordinator {
     ///
     /// This is the low-level, non-queued entry point. It does **not** participate
     /// in the generation queue.
+    ///
+    /// When the backend conforms to ``TokenCountingBackend``, an exact token count
+    /// of the assembled prompt is taken before the C-level call. If the prompt
+    /// exceeds `effectiveContextSize - maxOutputTokens`, the oldest non-system
+    /// messages are trimmed one pair at a time and the prompt is re-assembled,
+    /// up to `maxTrimAttempts` times. If the prompt still doesn't fit after
+    /// trimming, ``InferenceError/contextExhausted(promptTokens:maxOutputTokens:contextSize:)``
+    /// is thrown — the overflow never reaches the C layer.
     func generate(
         messages: [(role: String, content: String)],
         systemPrompt: String? = nil,
@@ -92,18 +100,46 @@ final class GenerationCoordinator {
             maxOutputTokens: maxOutputTokens
         )
 
-        let prompt: String
+        // Exact-count pre-flight: backends that conform to TokenCountingBackend
+        // expose the real tokenizer. Use it to verify the assembled prompt fits
+        // inside the context window before committing to the C-level decode.
+        // The heuristic guard inside LlamaBackend.generate() remains as a
+        // fast-path sanity check for obviously-too-large prompts, but this
+        // trim-and-retry loop is the definitive gate that prevents KV overflow.
+        if let counter = backend as? TokenCountingBackend,
+           backend.capabilities.requiresPromptTemplate {
+            let result = try exactPreflightAndTrim(
+                counter: counter,
+                backend: backend,
+                messages: messages,
+                systemPrompt: systemPrompt,
+                config: config
+            )
+            if let historyReceiver = backend as? ConversationHistoryReceiver {
+                // Pass the trimmed messages so the backend's own history buffer
+                // reflects what was actually sent in the prompt.
+                historyReceiver.setConversationHistory(result.trimmedMessages)
+            }
+            return try backend.generate(
+                prompt: result.prompt,
+                systemPrompt: nil,
+                config: config
+            )
+        }
+
+        // Non-TokenCountingBackend path: assemble prompt and forward.
+        // For backends that require a prompt template, messages are formatted
+        // into a single string. Otherwise the most recent user message is
+        // passed directly and the system prompt goes through a separate channel.
+        let assembledPrompt: String
         let effectiveSystemPrompt: String?
 
         if backend.capabilities.requiresPromptTemplate {
             let template = provider?.selectedPromptTemplate ?? .chatML
-            prompt = template.format(
-                messages: messages,
-                systemPrompt: systemPrompt
-            )
+            assembledPrompt = template.format(messages: messages, systemPrompt: systemPrompt)
             effectiveSystemPrompt = nil
         } else {
-            prompt = messages.last(where: { $0.role == "user" })?.content ?? ""
+            assembledPrompt = messages.last(where: { $0.role == "user" })?.content ?? ""
             effectiveSystemPrompt = systemPrompt
         }
 
@@ -112,10 +148,91 @@ final class GenerationCoordinator {
         }
 
         return try backend.generate(
-            prompt: prompt,
+            prompt: assembledPrompt,
             systemPrompt: effectiveSystemPrompt,
             config: config
         )
+    }
+
+    // MARK: - Exact Pre-flight (Private)
+
+    private struct ExactPreflightResult {
+        let prompt: String
+        let trimmedMessages: [(role: String, content: String)]
+    }
+
+    /// Counts tokens on the assembled prompt and trims the oldest non-system
+    /// messages until the prompt fits inside the context window.
+    ///
+    /// Up to `maxTrimAttempts` trimming rounds are performed. Each round drops
+    /// one non-system message from the front of the history. If the budget is
+    /// still exceeded after all attempts, throws
+    /// ``InferenceError/contextExhausted(promptTokens:maxOutputTokens:contextSize:)``.
+    private func exactPreflightAndTrim(
+        counter: TokenCountingBackend,
+        backend: InferenceBackend,
+        messages: [(role: String, content: String)],
+        systemPrompt: String?,
+        config: GenerationConfig,
+        maxTrimAttempts: Int = 20
+    ) throws -> ExactPreflightResult {
+        let contextSize = Int(backend.capabilities.maxContextTokens)
+        let maxOutput = config.maxOutputTokens ?? 2048
+        let template = provider?.selectedPromptTemplate ?? .chatML
+
+        var workingMessages = messages
+        var attempt = 0
+
+        while true {
+            let prompt = template.format(messages: workingMessages, systemPrompt: systemPrompt)
+            let promptTokens = try counter.countTokens(prompt)
+
+            if promptTokens + maxOutput <= contextSize {
+                // Fits — return the (possibly trimmed) result.
+                return ExactPreflightResult(prompt: prompt, trimmedMessages: workingMessages)
+            }
+
+            // Over budget. If we've used all trim rounds, surface the error before
+            // anything reaches the C layer.
+            guard attempt < maxTrimAttempts else {
+                throw InferenceError.contextExhausted(
+                    promptTokens: promptTokens,
+                    maxOutputTokens: maxOutput,
+                    contextSize: contextSize
+                )
+            }
+
+            // Find the oldest non-system message to drop. System messages are
+            // passed in the `systemPrompt` parameter, not as tuples, so any
+            // "system"-role tuple here is a slot injected by PromptAssembler.
+            // We trim those too — keeping only the final user turn is better
+            // than overflowing the KV cache.
+            guard let dropIndex = workingMessages.firstIndex(where: { $0.role != "system" }) else {
+                // Only system messages remain — nothing left to trim.
+                throw InferenceError.contextExhausted(
+                    promptTokens: promptTokens,
+                    maxOutputTokens: maxOutput,
+                    contextSize: contextSize
+                )
+            }
+
+            // Always protect the last user message: if dropping it would leave
+            // no user turn, stop trimming and surface the error.
+            let userCount = workingMessages.filter { $0.role == "user" }.count
+            if userCount <= 1 && workingMessages[dropIndex].role == "user" {
+                throw InferenceError.contextExhausted(
+                    promptTokens: promptTokens,
+                    maxOutputTokens: maxOutput,
+                    contextSize: contextSize
+                )
+            }
+
+            Log.inference.warning(
+                "GenerationCoordinator: prompt over budget — trimming oldest non-system message (attempt \(attempt + 1)/\(maxTrimAttempts))"
+            )
+            workingMessages.remove(at: dropIndex)
+            attempt += 1
+        }
     }
 
     // MARK: - Generation Queue

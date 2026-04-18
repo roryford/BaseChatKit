@@ -44,3 +44,21 @@ public protocol LoadProgressReporting: AnyObject {
     /// should retain the handler only for the duration of the active load.
     func setLoadProgressHandler(_ handler: (@Sendable (Double) async -> Void)?)
 }
+
+/// Adopted by local backends that can count tokens exactly using their loaded vocabulary.
+///
+/// Non-local backends (cloud, Ollama) should not conform — they have no
+/// local tokenizer. `GenerationCoordinator` gates the exact pre-flight
+/// check on this protocol so the trim-and-retry path only activates for
+/// backends where KV cache overflow is a real concern.
+///
+/// - Note: `countTokens` must only be called after the model is loaded.
+///   Implementations throw ``InferenceError/modelNotLoaded`` when invoked
+///   on an unloaded backend.
+public protocol TokenCountingBackend: AnyObject {
+    /// Returns the exact token count for `text` using the loaded model's vocabulary.
+    ///
+    /// - Throws: ``InferenceError/inferenceFailure(_:)`` if the model is not loaded,
+    ///   or if tokenization fails (e.g., vocabulary is unavailable).
+    func countTokens(_ text: String) throws -> Int
+}

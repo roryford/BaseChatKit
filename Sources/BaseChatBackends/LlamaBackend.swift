@@ -752,4 +752,30 @@ extension LlamaBackend: TokenizerVendor, TokenizerProvider {
         return tokens.isEmpty ? max(1, text.count / 4) : tokens.count
     }
 }
+
+// MARK: - TokenCountingBackend
+
+extension LlamaBackend: TokenCountingBackend {
+    /// Returns the exact token count for `text` using the loaded model's vocabulary.
+    ///
+    /// This calls `llama_tokenize` directly — a pure vocabulary lookup with no
+    /// context state involved. Safe to call from any thread while the model is loaded.
+    ///
+    /// - Throws: ``InferenceError/inferenceFailure(_:)`` when the model is not loaded
+    ///   or when `llama_tokenize` returns a negative value (buffer sizing failure).
+    /// - Note: Call only after a successful `loadModel`. The model pointer is guarded
+    ///   under `stateLock` to prevent a use-after-free race with `unloadModel()`.
+    public func countTokens(_ text: String) throws -> Int {
+        // Read vocab under stateLock to avoid a use-after-free race with unloadModel().
+        let currentVocab = withStateLock { vocab }
+        guard currentVocab != nil else {
+            throw InferenceError.inferenceFailure("countTokens called before model was loaded")
+        }
+        let tokens = tokenize(text, addBos: true)
+        guard !tokens.isEmpty || text.isEmpty else {
+            throw InferenceError.inferenceFailure("countTokens: llama_tokenize failed for text of length \(text.utf8.count)")
+        }
+        return tokens.count
+    }
+}
 #endif

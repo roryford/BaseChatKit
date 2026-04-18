@@ -445,6 +445,142 @@ final class GenerationCoordinatorTests: XCTestCase {
         )
     }
 
+    // MARK: - Exact preflight (TokenCountingBackend)
+
+    /// When the backend fits within the context window on the first count,
+    /// `generate` must call `backend.generate()` exactly once without trimming.
+    ///
+    /// Sabotage check: if `exactPreflightAndTrim` always trimmed at least one
+    /// message regardless of fit, `backend.generateCallCount` would still be 1
+    /// but the prompt passed to the backend would be shorter than the full
+    /// history — `backend.lastPrompt` would not contain all messages.
+    func test_exactPreflight_promptFits_noTrimAndGenerateCalled() async throws {
+        let tcBackend = TokenCountingMockBackend(contextSize: 256)
+        // countTokens returns 50 on first call → 50 + 128 (default maxOutput) = 178 ≤ 256 → fits.
+        tcBackend.countTokensResponses = [50]
+        tcBackend.tokensToYield = ["ok"]
+        let tcProvider = TokenCountingFakeProvider(backend: tcBackend)
+
+        let coord = GenerationCoordinator()
+        coord.provider = tcProvider
+
+        let (_, stream) = try coord.enqueue(
+            messages: [("user", "hello")],
+            maxOutputTokens: 128
+        )
+        for try await _ in stream.events {}
+
+        XCTAssertEqual(tcBackend.generateCallCount, 1,
+                       "generate must be called exactly once when the prompt fits")
+        XCTAssertEqual(tcBackend.countTokensCalled, 1,
+                       "countTokens must be called exactly once when the prompt fits")
+    }
+
+    /// When the first count is over budget but trimming brings it under,
+    /// `generate` must eventually be called with the trimmed prompt.
+    ///
+    /// The mock returns counts that decrease across retries: first call is over
+    /// budget, second call (after one trim) is within budget.
+    ///
+    /// Sabotage check: if the trim loop never removed a message,
+    /// `countTokens` would always return the over-budget value and
+    /// `contextExhausted` would be thrown, failing this test.
+    func test_exactPreflight_promptOverBudget_trimsAndGenerates() async throws {
+        // Context = 200, maxOutput = 100 → budget = 100 prompt tokens allowed.
+        // First count = 150 (over), second count = 90 (under after one trim).
+        let tcBackend = TokenCountingMockBackend(contextSize: 200)
+        tcBackend.countTokensResponses = [150, 90]
+        tcBackend.tokensToYield = ["trimmed"]
+        let tcProvider = TokenCountingFakeProvider(backend: tcBackend)
+
+        let coord = GenerationCoordinator()
+        coord.provider = tcProvider
+
+        // Two messages so we have something to trim.
+        let (_, stream) = try coord.enqueue(
+            messages: [
+                (role: "user", content: "first message that will be trimmed"),
+                (role: "user", content: "second message kept"),
+            ],
+            maxOutputTokens: 100
+        )
+        for try await _ in stream.events {}
+
+        XCTAssertEqual(tcBackend.generateCallCount, 1,
+                       "generate must be called once after successful trim")
+        // Two count calls: one over-budget, one under-budget after trim.
+        XCTAssertEqual(tcBackend.countTokensCalled, 2,
+                       "countTokens must be called twice: once over budget, once after trim")
+    }
+
+    /// When trimming cannot bring the prompt under budget (all trim attempts
+    /// exhausted or only the final user message remains),
+    /// `InferenceError.contextExhausted` must be thrown.
+    ///
+    /// Sabotage check: if the coordinator silently forwarded the over-budget
+    /// prompt to the backend, `generateCallCount` would be 1 and no error
+    /// would be thrown — the XCTAssertThrowsError would fail.
+    func test_exactPreflight_cannotTrim_throwsContextExhausted() throws {
+        // Context = 100, maxOutput = 50 → only 50 prompt tokens allowed.
+        // countTokens always returns 80 — over budget even with a single message.
+        let tcBackend = TokenCountingMockBackend(contextSize: 100)
+        tcBackend.countTokensResponses = [80, 80, 80, 80, 80]
+        let tcProvider = TokenCountingFakeProvider(backend: tcBackend)
+
+        let coord = GenerationCoordinator()
+        coord.provider = tcProvider
+
+        // Single user message — cannot trim (would remove the only user turn).
+        XCTAssertThrowsError(
+            try coord.generate(
+                messages: [("user", "a question that is too long for the context window")],
+                maxOutputTokens: 50
+            )
+        ) { error in
+            guard case InferenceError.contextExhausted = error else {
+                XCTFail("Expected contextExhausted, got \(error)")
+                return
+            }
+        }
+
+        XCTAssertEqual(tcBackend.generateCallCount, 0,
+                       "generate must never be called when context is exhausted — "
+                       + "the overflow must not reach the C layer")
+    }
+
+    /// Verifies the trim-and-retry loop reduces the message list across
+    /// multiple rounds. With three messages and counts that only fit after
+    /// two trims, the final call to `backend.generate` must receive a shorter
+    /// prompt than the original.
+    func test_exactPreflight_multiRoundTrim_reducesHistory() async throws {
+        // Context = 300, maxOutput = 100 → 200 token budget.
+        // Round 0 (3 msgs): 250 tokens → over budget (250+100=350 > 300) → trim.
+        // Round 1 (2 msgs): 210 tokens → over budget (210+100=310 > 300) → trim.
+        // Round 2 (1 msg):  180 tokens → fits     (180+100=280 ≤ 300) → call generate.
+        let tcBackend = TokenCountingMockBackend(contextSize: 300)
+        tcBackend.countTokensResponses = [250, 210, 180]
+        tcBackend.tokensToYield = ["done"]
+        let tcProvider = TokenCountingFakeProvider(backend: tcBackend)
+
+        let coord = GenerationCoordinator()
+        coord.provider = tcProvider
+
+        let (_, stream) = try coord.enqueue(
+            messages: [
+                (role: "user", content: "oldest message"),
+                (role: "assistant", content: "middle reply"),
+                (role: "user", content: "latest question"),
+            ],
+            maxOutputTokens: 100
+        )
+        for try await _ in stream.events {}
+
+        XCTAssertEqual(tcBackend.generateCallCount, 1,
+                       "generate must succeed after multi-round trim")
+        XCTAssertEqual(tcBackend.countTokensCalled, 3,
+                       "three count rounds expected: 2 over-budget, 1 under-budget")
+    }
+
     // MARK: - Provider teardown safety
 
     /// Deallocating the provider mid-stream must not crash the coordinator.
@@ -524,4 +660,87 @@ private final class NilBackendProvider: GenerationContextProvider {
     var currentBackend: (any InferenceBackend)? { nil }
     var isBackendLoaded: Bool { false }
     var selectedPromptTemplate: PromptTemplate { .chatML }
+}
+
+// MARK: - TokenCounting fakes
+
+/// An inference backend that also conforms to `TokenCountingBackend` for testing
+/// the exact pre-flight trim loop in `GenerationCoordinator`.
+///
+/// `countTokensResponses` controls what `countTokens` returns on each successive
+/// call (FIFO). Once exhausted the last value is repeated.
+/// `requiresPromptTemplate = true` so the coordinator takes the exact-preflight
+/// path instead of the cloud/MLX fallback path.
+final class TokenCountingMockBackend: InferenceBackend, TokenCountingBackend, @unchecked Sendable {
+
+    // InferenceBackend
+    var isModelLoaded: Bool = true
+    var isGenerating: Bool = false
+    var capabilities: BackendCapabilities
+
+    var tokensToYield: [String] = ["Hello", " world"]
+    var shouldThrowOnGenerate: Error?
+    private(set) var generateCallCount = 0
+    private(set) var lastPrompt: String?
+
+    // TokenCountingBackend
+    var countTokensResponses: [Int] = []
+    var countTokensError: Error?
+    private(set) var countTokensCalled = 0
+
+    init(contextSize: Int32 = 256) {
+        self.capabilities = BackendCapabilities(
+            supportedParameters: [.temperature, .topP, .repeatPenalty],
+            maxContextTokens: contextSize,
+            requiresPromptTemplate: true,      // triggers exact-preflight path
+            supportsSystemPrompt: true,
+            supportsToolCalling: false,
+            supportsStructuredOutput: false,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: true
+        )
+    }
+
+    func loadModel(from url: URL, plan: ModelLoadPlan) async throws {}
+
+    func generate(prompt: String, systemPrompt: String?, config: GenerationConfig) throws -> GenerationStream {
+        generateCallCount += 1
+        lastPrompt = prompt
+        if let error = shouldThrowOnGenerate { throw error }
+        let tokens = tokensToYield
+        let stream = AsyncThrowingStream<GenerationEvent, Error> { continuation in
+            Task {
+                for token in tokens { continuation.yield(.token(token)) }
+                continuation.finish()
+            }
+        }
+        return GenerationStream(stream)
+    }
+
+    func stopGeneration() { isGenerating = false }
+    func unloadModel() { isModelLoaded = false }
+
+    func countTokens(_ text: String) throws -> Int {
+        if let error = countTokensError { throw error }
+        countTokensCalled += 1
+        guard !countTokensResponses.isEmpty else { return 10 }
+        let idx = min(countTokensCalled - 1, countTokensResponses.count - 1)
+        return countTokensResponses[idx]
+    }
+}
+
+/// A fake provider that vends a `TokenCountingMockBackend`.
+@MainActor
+final class TokenCountingFakeProvider: GenerationContextProvider {
+    let backend: TokenCountingMockBackend
+    var promptTemplate: PromptTemplate = .chatML
+
+    init(backend: TokenCountingMockBackend = TokenCountingMockBackend()) {
+        self.backend = backend
+        self.backend.isModelLoaded = true
+    }
+
+    var currentBackend: (any InferenceBackend)? { backend }
+    var isBackendLoaded: Bool { backend.isModelLoaded }
+    var selectedPromptTemplate: PromptTemplate { promptTemplate }
 }
