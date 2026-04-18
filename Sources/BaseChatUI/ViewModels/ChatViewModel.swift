@@ -378,6 +378,12 @@ public final class ChatViewModel {
     /// Extracted from `ChatViewModel` in phase 3 of #329.
     var loadCoordinator: ModelLoadCoordinator!
 
+    // MARK: - Generation Coordinator
+
+    /// Owns the token-streaming loop.
+    /// Extracted from `ChatViewModel` in phase 4 of #329.
+    var generationCoordinator: GenerationCoordinator!
+
     /// Forwarding accessor so tests that mutate `vm.progressBridgePollInterval`
     /// continue to work without changes.
     var progressBridgePollInterval: Duration {
@@ -532,6 +538,69 @@ public final class ChatViewModel {
         }
         coordinator.currentLoadPlanEnvironment = { [weak self] in
             self?.loadPlanEnvironment ?? .current
+        }
+
+        let genCoordinator = GenerationCoordinator(
+            inferenceService: inferenceService,
+            reusableCachingTokenizer: { [weak self] in
+                // Fallback to a fresh CachingTokenizer when self is gone (never in practice).
+                self?.reusableCachingTokenizer ?? CachingTokenizer(wrapping: HeuristicTokenizer())
+            }
+        )
+        self.generationCoordinator = genCoordinator
+        genCoordinator.messages = { [weak self] in self?.messages ?? [] }
+        genCoordinator.systemPrompt = { [weak self] in self?.systemPrompt ?? "" }
+        genCoordinator.systemPromptContext = { [weak self] in self?.systemPromptContext ?? [:] }
+        genCoordinator.contextMaxTokens = { [weak self] in self?.contextMaxTokens ?? 2048 }
+        genCoordinator.temperature = { [weak self] in self?.temperature ?? 0.7 }
+        genCoordinator.topP = { [weak self] in self?.topP ?? 0.9 }
+        genCoordinator.repeatPenalty = { [weak self] in self?.repeatPenalty ?? 1.0 }
+        genCoordinator.activeSessionID = { [weak self] in self?.activeSessionID }
+        genCoordinator.loopDetectionEnabled = { [weak self] in self?.loopDetectionEnabled ?? true }
+        genCoordinator.streamingUpdateInterval = { [weak self] in self?.streamingUpdateInterval ?? .milliseconds(33) }
+        genCoordinator.streamingBatchCharacterLimit = { [weak self] in self?.streamingBatchCharacterLimit ?? 128 }
+        genCoordinator.activeBackendName = { [weak self] in self?.activeBackendName }
+        genCoordinator.activeSession = { [weak self] in self?.activeSession }
+        genCoordinator.postGenerationTasks = { [weak self] in self?.postGenerationTasks ?? [] }
+        genCoordinator.showUpgradeHint = { [weak self] in self?.showUpgradeHint ?? false }
+        genCoordinator.onTransitionPhase = { [weak self] phase in
+            self?.transitionPhase(to: phase) ?? false
+        }
+        genCoordinator.onSurfaceError = { [weak self] error, kind, context in
+            self?.surfaceError(error, kind: kind, context: context)
+        }
+        genCoordinator.onSetErrorMessage = { [weak self] message in
+            self?.errorMessage = message
+        }
+        genCoordinator.onMutateMessage = { [weak self] id, body in
+            self?.mutateMessage(id: id, body)
+        }
+        genCoordinator.onSetActiveGenerationToken = { [weak self] token in
+            self?.activeGenerationToken = token
+        }
+        genCoordinator.onSetGenerationTask = { [weak self] task in
+            self?.generationTask = task
+        }
+        genCoordinator.onSetBackgroundTask = { [weak self] task in
+            self?.backgroundTask = task
+        }
+        genCoordinator.onSetBackgroundTaskError = { [weak self] error in
+            self?.backgroundTaskError = error
+        }
+        genCoordinator.onSetShowUpgradeHint = { [weak self] value in
+            self?.showUpgradeHint = value
+        }
+        genCoordinator.onUpgradeHintTriggered = { [weak self] in
+            self?.onUpgradeHintTriggered?()
+        }
+        genCoordinator.onUpdateContextEstimate = { [weak self] in
+            self?.updateContextEstimate()
+        }
+        genCoordinator.onSaveMessage = { [weak self] message in
+            try self?.saveMessage(message)
+        }
+        genCoordinator.onRemoveMessage = { [weak self] id in
+            self?.messages.removeAll(where: { $0.id == id })
         }
     }
 
