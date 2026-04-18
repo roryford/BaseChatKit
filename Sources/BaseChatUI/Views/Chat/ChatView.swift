@@ -163,8 +163,24 @@ public struct ChatView: View {
             .font(.callout.bold())
         case .configureAPIKey:
             Button("Check API Key") {
+                #if os(iOS)
+                // On regular size class (iPad) the popover is anchored to this button,
+                // so we must NOT clear activeError here — doing so removes the error
+                // banner (and this button) from the view tree before SwiftUI can capture
+                // the anchor, causing the popover to present without an anchor or not at
+                // all. Instead, we clear activeError in the popover's dismissal handler.
+                // On compact (iPhone) the sheet is attached to the root view rather than
+                // this button, so the anchor disappearing is harmless there.
+                if horizontalSizeClass == .regular {
+                    showAPIConfiguration = true
+                } else {
+                    viewModel.activeError = nil
+                    showAPIConfiguration = true
+                }
+                #else
                 viewModel.activeError = nil
                 showAPIConfiguration = true
+                #endif
             }
             .buttonStyle(.borderless)
             .font(.callout.bold())
@@ -174,7 +190,15 @@ public struct ChatView: View {
             // view-level `.sheet` above handles presentation instead.
             .popover(isPresented: Binding(
                 get: { showAPIConfiguration && horizontalSizeClass == .regular },
-                set: { if !$0 { showAPIConfiguration = false } }
+                set: {
+                    if !$0 {
+                        showAPIConfiguration = false
+                        // Clear the error now that the popover is gone — this removes the
+                        // banner and keeps the screen clean after the user is done
+                        // configuring their API key.
+                        viewModel.activeError = nil
+                    }
+                }
             )) {
                 APIConfigurationView()
                     .frame(minWidth: 360, minHeight: 440)
