@@ -114,15 +114,24 @@ public struct ChatView: View {
             ChatExportSheet()
         }
         #endif
-        // API configuration can be triggered from the error recovery button which has
-        // no natural popover anchor, so it uses a sheet on all platforms. On iPad the
-        // drag indicator makes it clear the sheet is dismissible.
+        // API configuration: on compact size class (iPhone) or macOS, use a full sheet
+        // because there is no stable toolbar anchor. On regular size class (iPad) the
+        // presentation is anchored to the recovery button via `.popover` — see
+        // `recoveryButton(for:)` below which attaches the popover directly to the button
+        // so the sheet modifier here is skipped on that path.
+        #if os(iOS)
+        .sheet(isPresented: Binding(
+            get: { showAPIConfiguration && horizontalSizeClass == .compact },
+            set: { if !$0 { showAPIConfiguration = false } }
+        )) {
+            APIConfigurationView()
+                .presentationDragIndicator(.visible)
+        }
+        #else
         .sheet(isPresented: $showAPIConfiguration) {
             APIConfigurationView()
-                #if os(iOS)
-                .presentationDragIndicator(.visible)
-                #endif
         }
+        #endif
     }
 
     // MARK: - Error Banner
@@ -154,11 +163,47 @@ public struct ChatView: View {
             .font(.callout.bold())
         case .configureAPIKey:
             Button("Check API Key") {
+                #if os(iOS)
+                // On regular size class (iPad) the popover is anchored to this button,
+                // so we must NOT clear activeError here — doing so removes the error
+                // banner (and this button) from the view tree before SwiftUI can capture
+                // the anchor, causing the popover to present without an anchor or not at
+                // all. Instead, we clear activeError in the popover's dismissal handler.
+                // On compact (iPhone) the sheet is attached to the root view rather than
+                // this button, so the anchor disappearing is harmless there.
+                if horizontalSizeClass == .regular {
+                    showAPIConfiguration = true
+                } else {
+                    viewModel.activeError = nil
+                    showAPIConfiguration = true
+                }
+                #else
                 viewModel.activeError = nil
                 showAPIConfiguration = true
+                #endif
             }
             .buttonStyle(.borderless)
             .font(.callout.bold())
+            #if os(iOS)
+            // On regular size class (iPad), anchor the API config as a popover on the
+            // recovery button so the split view stays visible. On compact (iPhone) the
+            // view-level `.sheet` above handles presentation instead.
+            .popover(isPresented: Binding(
+                get: { showAPIConfiguration && horizontalSizeClass == .regular },
+                set: {
+                    if !$0 {
+                        showAPIConfiguration = false
+                        // Clear the error now that the popover is gone — this removes the
+                        // banner and keeps the screen clean after the user is done
+                        // configuring their API key.
+                        viewModel.activeError = nil
+                    }
+                }
+            )) {
+                APIConfigurationView()
+                    .frame(minWidth: 360, minHeight: 440)
+            }
+            #endif
         case .selectModel:
             Button("Select Model") {
                 viewModel.activeError = nil
