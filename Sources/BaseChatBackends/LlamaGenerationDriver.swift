@@ -34,6 +34,9 @@ struct LlamaGenerationDriver {
     ///   - tokens: Tokenized prompt (including BOS) — computed before the Task.
     ///   - maxTokens: Maximum number of new tokens to generate.
     ///   - config: Sampling parameters (temperature, topP, repeatPenalty).
+    ///   - markers: Thinking markers for the active template, or nil to disable ThinkingParser.
+    ///     When non-nil, `.thinkingToken` / `.thinkingComplete` events are emitted for reasoning
+    ///     content and `config.maxThinkingTokens` is enforced.
     ///   - isCancelled: Closure that returns `true` when the caller has requested
     ///     cancellation (combines `Task.isCancelled` and the backend's `Atomic<Bool>`).
     ///   - generationStream: Stream whose phase is updated on the main actor.
@@ -44,6 +47,7 @@ struct LlamaGenerationDriver {
         tokens: [llama_token],
         maxTokens: Int,
         config: GenerationConfig,
+        markers: ThinkingMarkers?,
         isCancelled: () -> Bool,
         generationStream: GenerationStream,
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
@@ -161,7 +165,14 @@ struct LlamaGenerationDriver {
         var nCur = tokens.count
         var invalidUTF8: [CChar] = []
         var isFirstToken = true
-        var thinkingFilter = ThinkingBlockFilter()
+
+        // ThinkingParser is activated only when markers are provided (i.e. the
+        // active prompt template emits reasoning blocks). When `useParser` is
+        // false, every decoded token is yielded directly as `.token` without the
+        // overhead of tag scanning — important for models that never think.
+        let useParser = markers != nil
+        var thinkingParser = ThinkingParser(markers: markers ?? .qwen3)
+        var thinkingTokenCount = 0
 
         for iteration in 0..<maxTokens {
             if isCancelled() { break }
@@ -175,22 +186,24 @@ struct LlamaGenerationDriver {
 
             if llama_vocab_is_eog(vocab, token) { break }
 
-            // Decode token to text
+            // Decode token to text and route through ThinkingParser when active.
             if let text = LlamaTokenization.tokenToString(token, vocab: vocab, invalidUTF8Buffer: &invalidUTF8) {
-                let events = thinkingFilter.process(text)
-                for evt in events {
-                    switch evt {
-                    case .token(let visible):
-                        if isFirstToken {
+                let events: [GenerationEvent] = useParser ? thinkingParser.process(text) : [.token(text)]
+                for event in events {
+                    if isFirstToken {
+                        switch event {
+                        case .token, .thinkingToken:
+                            // Trigger .streaming on first reasoning token too — models can think
+                            // for 30s before any visible output; staying in .connecting is poor UX.
                             await MainActor.run { generationStream.setPhase(.streaming) }
                             isFirstToken = false
+                        default: break
                         }
-                        continuation.yield(.token(visible))
-                    case .thinkingToken, .thinkingComplete:
-                        // Phase 2 will route thinking events; for now pass them through.
-                        continuation.yield(evt)
-                    default:
-                        break
+                    }
+                    continuation.yield(event)
+                    if case .thinkingToken = event {
+                        thinkingTokenCount += 1
+                        if let limit = config.maxThinkingTokens, thinkingTokenCount >= limit { break }
                     }
                 }
             }
@@ -212,6 +225,11 @@ struct LlamaGenerationDriver {
                 continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
                 return
             }
+        }
+
+        // Flush any bytes held back by the tag-boundary buffer.
+        for event in thinkingParser.finalize() {
+            continuation.yield(event)
         }
 
         await MainActor.run { generationStream.setPhase(.done) }

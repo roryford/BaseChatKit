@@ -204,28 +204,39 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 let outputLimit = config.maxOutputTokens
                 var outputTokenCount = 0
                 var isFirstToken = true
-                var thinkingFilter = ThinkingBlockFilter()
+
+                // Hardcoded to .qwen3: only Qwen3 variants have MLX thinking support currently.
+                // mlx-swift-lm exposes no tokenizer API to auto-detect markers at generation time.
+                // TODO: expose thinkingMarkers as a generate() parameter when Gemma 4 / other models land.
+                var thinkingParser = ThinkingParser(markers: .qwen3)
+                let useParser = config.thinkingMarkers != nil
+
                 let mlxStream = try await modelContainer.generate(
                     messages: messages,
                     parameters: generateConfig
                 )
                 for await generation in mlxStream {
                     if Task.isCancelled { break }
-                    if let raw = generation.chunk {
-                        let visible = thinkingFilter.process(raw)
-                        if !visible.isEmpty {
+                    if let text = generation.chunk {
+                        for event in useParser ? thinkingParser.process(text) : [GenerationEvent.token(text)] {
                             if isFirstToken {
-                                await MainActor.run { generationStream.setPhase(.streaming) }
-                                isFirstToken = false
+                                switch event {
+                                case .token, .thinkingToken:
+                                    await MainActor.run { generationStream.setPhase(.streaming) }
+                                    isFirstToken = false
+                                default: break
+                                }
                             }
-                            continuation.yield(.token(visible))
+                            // Only count visible output tokens toward maxOutputTokens limit
+                            if case .token = event { outputTokenCount += 1 }
+                            continuation.yield(event)
                         }
-                        // output token counting still uses raw chunks (each MLX chunk = 1 token)
-                        if let limit = outputLimit {
-                            outputTokenCount += 1
-                            if outputTokenCount >= limit { break }
-                        }
+                        if let limit = outputLimit, outputTokenCount >= limit { break }
                     }
+                }
+                // Flush any bytes held back at the tag-boundary buffer.
+                for event in thinkingParser.finalize() {
+                    continuation.yield(event)
                 }
                 await MainActor.run { generationStream.setPhase(.done) }
             } catch {
