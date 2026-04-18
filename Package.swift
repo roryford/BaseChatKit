@@ -13,6 +13,8 @@ let package = Package(
         .library(name: "BaseChatCore", targets: ["BaseChatCore"]),
         .library(name: "BaseChatBackends", targets: ["BaseChatBackends"]),
         .library(name: "BaseChatUI", targets: ["BaseChatUI"]),
+        .library(name: "BaseChatFuzz", targets: ["BaseChatFuzz"]),
+        .executable(name: "fuzz-chat", targets: ["fuzz-chat"]),
     ],
     traits: [
         .default(enabledTraits: ["MLX", "Llama"]),
@@ -144,6 +146,29 @@ let package = Package(
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
             exclude: ["__Snapshots__"]
+        ),
+        // Fuzzing engine: corpus, runner, capture, detectors, sink. Backend-agnostic.
+        // Trait-free so it never pulls MLX/Llama transitively — backend selection
+        // happens in `fuzz-chat` (executable) and `BaseChatFuzzTests` (XCTest harness).
+        .target(
+            name: "BaseChatFuzz",
+            dependencies: ["BaseChatInference"],
+            path: "Sources/BaseChatFuzz",
+            resources: [.process("Resources")]
+        ),
+        // CLI driver. Currently wires Ollama only; Llama/Foundation/MLX deferred.
+        .executableTarget(
+            name: "fuzz-chat",
+            dependencies: ["BaseChatFuzz", "BaseChatBackends", "BaseChatInference"],
+            path: "Sources/fuzz-chat",
+            swiftSettings: [
+                .define("MLX", .when(traits: ["MLX"])),
+                .define("Llama", .when(traits: ["Llama"])),
+            ]
+        ),
+        .testTarget(
+            name: "BaseChatFuzzTests",
+            dependencies: ["BaseChatFuzz", "BaseChatInference", "BaseChatTestSupport"]
         ),
         // Xcode-only: real MLX model inference requiring Metal shader library.
         // Cannot run via `swift test` — MLX's metallib is only compiled by Xcode.
