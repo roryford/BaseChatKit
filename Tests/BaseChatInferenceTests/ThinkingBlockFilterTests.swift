@@ -85,4 +85,11 @@ final class ThinkingBlockFilterTests: XCTestCase {
         let result = collect(chunks, filter: &filter)
         XCTAssertEqual(result, "Sure!  Here is your answer.")
     }
+
+    /// A literal closing tag in visible text must be preserved when not inside a think block.
+    func test_literalClosingTagInVisibleText_passThrough() {
+        var filter = ThinkingBlockFilter()
+        let result = filter.process("Visible </think> text")
+        XCTAssertEqual(result, "Visible </think> text")
+    }
 }

@@ -27,19 +27,15 @@ public struct ThinkingBlockFilter {
                     output += buffer[buffer.startIndex..<angleIdx]
                     buffer = String(buffer[angleIdx...])
 
-                    // Now buffer starts with '<'; check for tag or partial
+                    // Now buffer starts with '<'; only an opening think tag is special
                     if buffer.hasPrefix("<think>") {
                         depth += 1
                         buffer = String(buffer.dropFirst("<think>".count))
-                    } else if buffer.hasPrefix("</think>") {
-                        // Mismatched close tag in visible mode — swallow it
-                        // (depth can't go negative, so treat as visible but consume the tag)
-                        buffer = String(buffer.dropFirst("</think>".count))
-                    } else if "<think>".hasPrefix(buffer) || "</think>".hasPrefix(buffer) {
-                        // Partial prefix — wait for more input
+                    } else if "<think>".hasPrefix(buffer) {
+                        // Partial opening tag prefix — wait for more input
                         break
                     } else {
-                        // Not a think-related tag; emit the '<' and continue
+                        // Any other '<' sequence, including '</think>', is visible text
                         output += "<"
                         buffer = String(buffer.dropFirst())
                     }
