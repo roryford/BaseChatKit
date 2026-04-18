@@ -147,6 +147,22 @@ final class ToolCallContractTests: XCTestCase {
         XCTAssertEqual(decoded.toolChoice, .auto)
     }
 
+    func test_generationConfig_decodesLegacyJSON_withoutToolsOrToolChoice() throws {
+        // Payloads serialised before the tools/toolChoice fields were introduced must
+        // decode successfully, falling back to the canonical defaults ([] and .auto).
+        // Sabotage check: using `decode` instead of `decodeIfPresent` in init(from:)
+        // causes a keyNotFound DecodingError here.
+        let legacyJSON = """
+        {"temperature":0.7,"topP":0.9,"repeatPenalty":1.1,"maxTokens":512}
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(GenerationConfig.self, from: legacyJSON)
+
+        XCTAssertEqual(decoded.temperature, 0.7, accuracy: 0.001)
+        XCTAssertTrue(decoded.tools.isEmpty, "Missing 'tools' key must default to []")
+        XCTAssertEqual(decoded.toolChoice, .auto, "Missing 'toolChoice' key must default to .auto")
+    }
+
     // MARK: - MockInferenceBackend emits scripted tool calls
 
     func test_mockBackend_emitsScriptedToolCalls_afterTokens() async throws {

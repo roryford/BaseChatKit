@@ -73,6 +73,41 @@ public struct GenerationConfig: Sendable, Codable {
         self.tools = tools
         self.toolChoice = toolChoice
     }
+
+    // MARK: Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
+        case tools, toolChoice
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        temperature = try c.decode(Float.self, forKey: .temperature)
+        topP = try c.decode(Float.self, forKey: .topP)
+        repeatPenalty = try c.decode(Float.self, forKey: .repeatPenalty)
+        // maxTokens is deprecated; absent from payloads that never encoded it — fall back to 512.
+        maxTokens = (try c.decodeIfPresent(Int32.self, forKey: .maxTokens)) ?? 512
+        topK = try c.decodeIfPresent(Int32.self, forKey: .topK)
+        typicalP = try c.decodeIfPresent(Float.self, forKey: .typicalP)
+        maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
+        // New fields added in v0.10; absent from payloads serialised before their introduction.
+        tools = (try c.decodeIfPresent([ToolDefinition].self, forKey: .tools)) ?? []
+        toolChoice = (try c.decodeIfPresent(ToolChoice.self, forKey: .toolChoice)) ?? .auto
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(temperature, forKey: .temperature)
+        try c.encode(topP, forKey: .topP)
+        try c.encode(repeatPenalty, forKey: .repeatPenalty)
+        try c.encode(maxTokens, forKey: .maxTokens)
+        try c.encodeIfPresent(topK, forKey: .topK)
+        try c.encodeIfPresent(typicalP, forKey: .typicalP)
+        try c.encodeIfPresent(maxOutputTokens, forKey: .maxOutputTokens)
+        try c.encode(tools, forKey: .tools)
+        try c.encode(toolChoice, forKey: .toolChoice)
+    }
 }
 
 /// Common interface for inference backends.
