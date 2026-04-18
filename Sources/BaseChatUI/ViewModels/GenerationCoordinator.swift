@@ -198,7 +198,8 @@ final class GenerationCoordinator {
         do {
             // Build the message history, trimming to fit the context window.
             let allMessages = messages().filter { $0.id != messageID }
-            let rawSystemPrompt = systemPrompt().isEmpty ? nil : systemPrompt()
+            let prompt = systemPrompt()
+            let rawSystemPrompt = prompt.isEmpty ? nil : prompt
             let effectiveSystemPrompt: String? = rawSystemPrompt.map { prompt in
                 Self.applySystemPromptContext(prompt, context: systemPromptContext())
             }
@@ -407,7 +408,11 @@ final class GenerationCoordinator {
         let tasks = postGenerationTasks()
         guard !tasks.isEmpty else { return }
 
-        let bgTask = Task { [weak self, tasks, message, session] in
+        // Task.detached breaks the @MainActor inheritance so task.run() executes
+        // off the main actor, as PostGenerationTask.run() is documented to do.
+        // PostGenerationTask, ChatMessageRecord, and ChatSessionRecord are all
+        // Sendable, so the capture is safe under Swift 6 strict concurrency.
+        let bgTask = Task.detached { [weak self, tasks, message, session] in
             for task in tasks {
                 guard !Task.isCancelled else { break }
                 do {
@@ -415,7 +420,7 @@ final class GenerationCoordinator {
                 } catch is CancellationError {
                     break
                 } catch {
-                    self?.onSetBackgroundTaskError(error)
+                    await MainActor.run { self?.onSetBackgroundTaskError(error) }
                 }
             }
         }
