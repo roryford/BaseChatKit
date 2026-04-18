@@ -4,11 +4,13 @@ import BaseChatInference
 
 /// Renders an array of ``MessagePart`` values within a message bubble.
 ///
-/// Text parts are rendered inline (markdown for assistant, plain for user)
-/// and images are shown as thumbnails.
+/// Text parts are rendered inline (markdown for assistant, plain for user),
+/// images are shown as thumbnails, and thinking blocks show a collapsible
+/// disclosure group (or a streaming label while generation is in progress).
 struct MessagePartsView: View {
     let parts: [MessagePart]
     let role: MessageRole
+    var isStreaming: Bool = false
 
     var body: some View {
         ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
@@ -25,10 +27,10 @@ struct MessagePartsView: View {
         case .image(let data, _):
             imageView(data)
 
-        case .thinking:
-            // Thinking parts are not rendered inline in the default message view.
-            // Phase 2 will add a dedicated thinking disclosure UI.
-            EmptyView()
+        case .thinking(let text):
+            // Pass isStreaming through so the view shows "Thinking…" during active
+            // generation rather than a half-filled disclosure group.
+            ThinkingBlockView(text: text, isStreaming: isStreaming)
         }
     }
 

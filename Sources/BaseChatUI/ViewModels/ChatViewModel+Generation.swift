@@ -132,6 +132,7 @@ extension ChatViewModel {
                     maxBufferedCharacters: streamingBatchCharacterLimit
                 )
                 var consumer = GenerationStreamConsumer(loopDetectionEnabled: self.loopDetectionEnabled)
+                var thinkingAccumulator = ""
 
                 do {
                     eventLoop: for try await event in stream.events {
@@ -170,10 +171,22 @@ extension ChatViewModel {
                             // should drive generation directly via InferenceService.
                             break
 
-                        case .appendThinkingText, .finalizeThinking:
-                            // Thinking rendering is a Phase 2 concern; ChatViewModel defers
-                            // to host apps that opt in to thinking display.
-                            break
+                        case .appendThinkingText(let text):
+                            thinkingAccumulator += text
+
+                        case .finalizeThinking:
+                            let block = thinkingAccumulator
+                            thinkingAccumulator = ""  // reset — prevents multi-block concatenation
+                            guard !block.isEmpty else { break }
+                            self.mutateMessage(id: messageID) { msg in
+                                // Replace existing thinking part or insert before first text part.
+                                if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
+                                    msg.contentParts[idx] = .thinking(block)
+                                } else {
+                                    let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
+                                    msg.contentParts.insert(.thinking(block), at: insertAt)
+                                }
+                            }
                         }
                     }
                 } catch {
@@ -186,6 +199,21 @@ extension ChatViewModel {
                 // Flush remaining buffered tokens after stream ends (normal, error, or cancellation).
                 if let batch = batcher.flush(now: ContinuousClock.now) {
                     self.mutateMessage(id: messageID) { $0.content += batch }
+                }
+
+                // Finalize an unclosed thinking block — a model may emit <think>…
+                // without a closing tag if generation is cut short.
+                if !thinkingAccumulator.isEmpty {
+                    let block = thinkingAccumulator
+                    thinkingAccumulator = ""
+                    self.mutateMessage(id: messageID) { msg in
+                        if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
+                            msg.contentParts[idx] = .thinking(block)
+                        } else {
+                            let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
+                            msg.contentParts.insert(.thinking(block), at: insertAt)
+                        }
+                    }
                 }
             }
 
@@ -206,9 +234,11 @@ extension ChatViewModel {
         }
 
         // Persist the completed assistant message.
+        // Use hasVisibleContent rather than content.isEmpty so that a thinking-only
+        // response (no visible text) is still saved rather than silently discarded.
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             do {
-                if messages[idx].content.isEmpty {
+                if !messages[idx].hasVisibleContent {
                     messages.remove(at: idx)
                 } else {
                     try saveMessage(messages[idx])
@@ -222,10 +252,9 @@ extension ChatViewModel {
         // After the first assistant response on Foundation, nudge the user to
         // consider downloading a local model for longer context. Only show once
         // per session and only when Foundation is the active backend.
-        let assistantContent = messages.first(where: { $0.id == messageID })?.content ?? ""
         if BaseChatConfiguration.shared.features.showUpgradeHint,
            !showUpgradeHint,
-           !assistantContent.isEmpty,
+           messages.first(where: { $0.id == messageID })?.hasVisibleContent == true,
            activeBackendName == "Apple",
            messages.filter({ $0.role == .assistant }).count == 1 {
             showUpgradeHint = true
@@ -236,7 +265,7 @@ extension ChatViewModel {
 
         // Fire post-generation tasks off @MainActor if we have a non-empty assistant message.
         if let completedMessage = messages.first(where: { $0.id == messageID }),
-           !completedMessage.content.isEmpty,
+           completedMessage.hasVisibleContent,
            let session = activeSession {
             runPostGenerationTasks(message: completedMessage, session: session)
         }

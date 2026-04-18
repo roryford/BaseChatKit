@@ -72,17 +72,20 @@ public struct MessageBubbleView: View {
 
     private var assistantBubble: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if message.contentParts.isEmpty && isStreaming {
+            // Use hasVisibleContent rather than contentParts.isEmpty so that a
+            // thinking-only message (parts present, but no text) still shows the
+            // typing indicator until visible text arrives.
+            if !message.hasVisibleContent && isStreaming {
                 streamingPlaceholder
             } else {
-                MessagePartsView(parts: message.contentParts, role: .assistant)
+                MessagePartsView(parts: message.contentParts, role: .assistant, isStreaming: isStreaming)
             }
 
-            if isStreaming && !message.contentParts.isEmpty {
+            if isStreaming && message.hasVisibleContent {
                 streamingIndicator
             }
 
-            if !isStreaming || !message.contentParts.isEmpty {
+            if !isStreaming || message.hasVisibleContent {
                 HStack(spacing: 6) {
                     timestampLabel
                         .foregroundStyle(.secondary)
