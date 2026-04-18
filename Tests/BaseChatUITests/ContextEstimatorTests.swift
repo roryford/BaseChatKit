@@ -10,10 +10,23 @@ final class ContextEstimatorTests: XCTestCase {
 
     /// Call-counting tokenizer with the same ~4 chars/token heuristic used by
     /// `HeuristicTokenizer`. Lets the cache tests assert no redundant work.
+    ///
+    /// `callCount` is guarded by an NSLock to honor the `@unchecked Sendable`
+    /// conformance. Even though the current tests drive this synchronously from
+    /// the main actor, leaving the counter unsynchronized would be a latent
+    /// Sendable violation if a future test ever calls `tokenCount` off-actor.
     private final class CountingTokenizer: TokenizerProvider, @unchecked Sendable {
-        private(set) var callCount = 0
+        private let lock = NSLock()
+        private var _callCount = 0
+        var callCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return _callCount
+        }
         func tokenCount(_ text: String) -> Int {
-            callCount += 1
+            lock.lock()
+            _callCount += 1
+            lock.unlock()
             return max(1, text.count / 4)
         }
     }
@@ -42,7 +55,7 @@ final class ContextEstimatorTests: XCTestCase {
 
         let result = estimator.estimate(inputs)
 
-        XCTAssertEqual(result.usedTokens, 1 + 2, "empty system prompt tokenizes to 1 + message = 2")
+        XCTAssertEqual(result.usedTokens, 1 + 2, "empty system prompt tokenizes to 1 + message = 3")
         XCTAssertEqual(result.maxTokens, 2048, "default context size fallback")
         XCTAssertEqual(result.updatedCache[msg.id], 2)
     }

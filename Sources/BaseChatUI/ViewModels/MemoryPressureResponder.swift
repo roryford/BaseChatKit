@@ -13,7 +13,7 @@ struct MemoryPressureResponder {
 
     enum Action {
         case setError(ChatError)
-        case clearError
+        case clearMemoryPressureError
         case stopGeneration
         case unloadModel
     }
@@ -45,7 +45,7 @@ struct MemoryPressureResponder {
                 )
             ]
         case .nominal:
-            return [.clearError]
+            return [.clearMemoryPressureError]
         }
     }
 }

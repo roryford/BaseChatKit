@@ -29,7 +29,7 @@ extension ChatViewModel {
                 unloadModel()
             case .setError(let error):
                 activeError = error
-            case .clearError:
+            case .clearMemoryPressureError:
                 if activeError?.kind == .memoryPressure {
                     activeError = nil
                 }

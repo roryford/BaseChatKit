@@ -69,8 +69,8 @@ final class MemoryPressureResponderTests: XCTestCase {
     func testNominalAfterWarningReturnsClearError() {
         let actions = responder.actions(for: .nominal, lastLevel: .warning)
         XCTAssertEqual(actions.count, 1)
-        guard case .clearError = actions[0] else {
-            XCTFail("expected .clearError, got \(actions[0])")
+        guard case .clearMemoryPressureError = actions[0] else {
+            XCTFail("expected .clearMemoryPressureError, got \(actions[0])")
             return
         }
     }
@@ -78,8 +78,8 @@ final class MemoryPressureResponderTests: XCTestCase {
     func testNominalAfterCriticalReturnsClearError() {
         let actions = responder.actions(for: .nominal, lastLevel: .critical)
         XCTAssertEqual(actions.count, 1)
-        guard case .clearError = actions[0] else {
-            XCTFail("expected .clearError, got \(actions[0])")
+        guard case .clearMemoryPressureError = actions[0] else {
+            XCTFail("expected .clearMemoryPressureError, got \(actions[0])")
             return
         }
     }
