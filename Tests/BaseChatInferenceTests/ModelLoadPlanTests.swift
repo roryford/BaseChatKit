@@ -542,6 +542,25 @@ final class ModelLoadPlanTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - canRunModel UI helper
+
+    func test_canRunModel_smallModelOnTypicalDevice_returnsTrue() {
+        XCTAssertTrue(ModelLoadPlan.canRunModel(sizeBytes: 2 * oneGB, physicalMemoryBytes: 8 * oneGB))
+    }
+
+    func test_canRunModel_modelLargerThanRAM_returnsFalse() {
+        XCTAssertFalse(ModelLoadPlan.canRunModel(sizeBytes: 16 * oneGB, physicalMemoryBytes: 8 * oneGB))
+    }
+
+    func test_canRunModel_isUsedConsistentlyAcrossUIRecommendationCallers() {
+        // Pre-download UI helpers (ModelManagementViewModel.canRunModel,
+        // .compatibilityTier, DownloadableModel.recommendedVariant) all defer to this
+        // single helper. Sabotage check: if the helper drops the .resident strategy
+        // and goes .mappable, this small-on-large case still passes — but the
+        // boundary case below would silently flip from false to true.
+        XCTAssertFalse(ModelLoadPlan.canRunModel(sizeBytes: 6 * oneGB, physicalMemoryBytes: 4 * oneGB))
+    }
 }
 
 // MARK: - Convenience accessor (test-scoped, avoids repeating `plan.outcome.totalEstimatedBytes`)

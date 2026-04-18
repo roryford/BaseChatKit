@@ -116,12 +116,12 @@ final class DownloadableModelGroupCompatibilityTests: XCTestCase {
     }
 
     func test_recommendedVariant_partialFit_returnsLargestFitting() {
-        // 8 GB device: 4 GB fits, 6 GB does not. Expect 4 GB.
+        // 8 GB device (allow threshold = 6.8 GB with ModelLoadPlan): 4 GB fits, 8 GB does not.
         let device = DeviceCapabilityService(physicalMemory: 8 * oneGB)
 
         let models = [
             makeModel(repoID: "repo/model", fileName: "model-q4.gguf", sizeBytes: 4 * oneGB),
-            makeModel(repoID: "repo/model", fileName: "model-q6.gguf", sizeBytes: 6 * oneGB),
+            makeModel(repoID: "repo/model", fileName: "model-q6.gguf", sizeBytes: 8 * oneGB),
         ]
         let groups = DownloadableModelGroup.group(models)
         guard let group = groups.first else {
@@ -212,13 +212,12 @@ final class DownloadableModelGroupCompatibilityTests: XCTestCase {
     }
 
     func test_compatibilityTier_borderlineFit_returnsOne() {
-        // A 6 GB device (budget = 6 * 0.70 = 4.2 GB) cannot fit a 4 GB model outright
-        // (requires 4 * 1.20 = 4.8 GB), but the 80% threshold check passes
-        // (4 * 0.80 * 1.20 = 3.84 GB ≤ 4.2 GB).
+        // A 6 GB device (allow threshold = 5.1 GB with ModelLoadPlan) cannot fit a 6 GB
+        // model outright (6 > 5.1), but the 80% threshold check passes (4.8 ≤ 5.1).
         let device = DeviceCapabilityService(physicalMemory: 6 * oneGB)
         let vm = ModelManagementViewModel(deviceCapability: device)
 
-        let models = [makeModel(repoID: "repo/a", fileName: "a.gguf", sizeBytes: 4 * oneGB)]
+        let models = [makeModel(repoID: "repo/a", fileName: "a.gguf", sizeBytes: 6 * oneGB)]
         let group = DownloadableModelGroup.group(models).first!
 
         XCTAssertEqual(vm.compatibilityTier(for: group), 1,

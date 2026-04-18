@@ -520,8 +520,14 @@ public final class ModelManagementViewModel {
     // MARK: - Device Capability Queries
 
     /// Whether this device has enough RAM to run a model of the given size.
+    ///
+    /// Pre-download recommendation only — backed by `ModelLoadPlan.canRunModel`. Load-time
+    /// gating uses the full plan computation with the active backend's memory strategy.
     public func canRunModel(sizeBytes: UInt64) -> Bool {
-        deviceCapability.canLoadModel(estimatedMemoryBytes: sizeBytes)
+        ModelLoadPlan.canRunModel(
+            sizeBytes: sizeBytes,
+            physicalMemoryBytes: deviceCapability.physicalMemory
+        )
     }
 
     /// Whether there is insufficient free disk space to download this model.
@@ -554,7 +560,7 @@ public final class ModelManagementViewModel {
 
     /// Compatibility tier for sorting a group by device fit (lower = better).
     ///
-    /// - 0: at least one variant comfortably fits (`canLoadModel` passes)
+    /// - 0: at least one variant comfortably fits
     /// - 1: at least one variant borderline fits (passes at 80% of declared size)
     /// - 2: all variants too large
     /// - 3: all variants have unknown size (`sizeBytes == 0`)
@@ -562,10 +568,11 @@ public final class ModelManagementViewModel {
         let sized = group.variants.filter { $0.sizeBytes > 0 }
         guard !sized.isEmpty else { return 3 }
 
-        if sized.contains(where: { deviceCapability.canLoadModel(estimatedMemoryBytes: $0.sizeBytes) }) {
+        let physical = deviceCapability.physicalMemory
+        if sized.contains(where: { ModelLoadPlan.canRunModel(sizeBytes: $0.sizeBytes, physicalMemoryBytes: physical) }) {
             return 0
         }
-        if sized.contains(where: { deviceCapability.canLoadModel(estimatedMemoryBytes: $0.sizeBytes * 80 / 100) }) {
+        if sized.contains(where: { ModelLoadPlan.canRunModel(sizeBytes: $0.sizeBytes * 80 / 100, physicalMemoryBytes: physical) }) {
             return 1
         }
         return 2

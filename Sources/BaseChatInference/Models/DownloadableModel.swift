@@ -279,15 +279,16 @@ public struct DownloadableModelGroup: Identifiable {
     /// Returns the recommended variant for the given device capability.
     ///
     /// The recommended variant is the largest quantization (by `sizeBytes`) that still
-    /// passes `deviceCapability.canLoadModel(estimatedMemoryBytes:)`. When no variant
-    /// fits, returns the smallest variant (the most likely to succeed at runtime).
+    /// passes `ModelLoadPlan.canRunModel`. When no variant fits, returns the smallest
+    /// variant (the most likely to succeed at runtime).
     public func recommendedVariant(for deviceCapability: DeviceCapabilityService) -> DownloadableModel? {
         guard !variants.isEmpty else { return nil }
 
+        let physical = deviceCapability.physicalMemory
         // Variants are already sorted ascending by sizeBytes (see group()).
         // The largest fitting variant is the last one that passes the check.
         let fittingVariants = variants.filter {
-            $0.sizeBytes > 0 && deviceCapability.canLoadModel(estimatedMemoryBytes: $0.sizeBytes)
+            $0.sizeBytes > 0 && ModelLoadPlan.canRunModel(sizeBytes: $0.sizeBytes, physicalMemoryBytes: physical)
         }
 
         if let best = fittingVariants.last {
