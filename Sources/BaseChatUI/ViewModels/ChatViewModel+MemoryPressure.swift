@@ -16,19 +16,23 @@ extension ChatViewModel {
 
     public func handleMemoryPressure() {
         let level = memoryPressure.pressureLevel
-        guard level != lastPressureLevel else { return }
+        let responder = MemoryPressureResponder()
+        let actions = responder.actions(for: level, lastLevel: lastPressureLevel)
+        guard !actions.isEmpty else { return }
         lastPressureLevel = level
 
-        switch level {
-        case .critical:
-            stopGeneration()
-            unloadModel()
-            activeError = ChatError(kind: .memoryPressure, message: "Memory pressure is critical. The model was unloaded to prevent the app from being terminated.", recovery: .dismissOnly)
-        case .warning:
-            activeError = ChatError(kind: .memoryPressure, message: "Memory pressure is elevated. Consider closing other apps.", recovery: .dismissOnly)
-        case .nominal:
-            if activeError?.kind == .memoryPressure {
-                activeError = nil
+        for action in actions {
+            switch action {
+            case .stopGeneration:
+                stopGeneration()
+            case .unloadModel:
+                unloadModel()
+            case .setError(let error):
+                activeError = error
+            case .clearMemoryPressureError:
+                if activeError?.kind == .memoryPressure {
+                    activeError = nil
+                }
             }
         }
     }
