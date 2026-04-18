@@ -72,18 +72,28 @@ final class ModelLifecycleCoordinator {
     nonisolated init() {}
 
     #if DEBUG
-    init(backend: any InferenceBackend, name: String = "Mock") {
+    /// Test-only seam for preloading a backend without driving the real load
+    /// pipeline.
+    ///
+    /// - Parameters:
+    ///   - backend: the pre-configured backend to install as current.
+    ///   - name: the backend engine label (e.g. "llama.cpp", "MLX"). Stored in
+    ///     ``activeBackendName`` and in request metadata as the `backend` field.
+    ///   - modelName: the human-readable model name (e.g. from `ModelInfo.name`).
+    ///     Stored in ``activeModelName``. Defaults to `nil` when the test did not
+    ///     load through the real pipeline and therefore has no model-level name.
+    init(backend: any InferenceBackend, name: String = "Mock", modelName: String? = nil) {
         self.backend = backend
         self.isModelLoaded = true
         self.activeBackendName = name
-        self.activeModelName = name
+        self.activeModelName = modelName
         let request = LoadRequestToken(rawValue: 1)
         self.nextLoadRequestToken = request
         self.latestRequestedLoadToken = request
         self.loadPhase = .loaded(request: request)
         self.loadRequestMetadataByToken[request] = LoadRequestMetadata(
             source: "debug",
-            target: name,
+            target: modelName ?? name,
             backend: name,
             startedAtUptime: ProcessInfo.processInfo.systemUptime
         )

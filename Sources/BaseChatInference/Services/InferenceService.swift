@@ -269,8 +269,8 @@ public final class InferenceService {
     }
 
     #if DEBUG
-    public init(backend: any InferenceBackend, name: String = "Mock") {
-        self.lifecycle = ModelLifecycleCoordinator(backend: backend, name: name)
+    public init(backend: any InferenceBackend, name: String = "Mock", modelName: String? = nil) {
+        self.lifecycle = ModelLifecycleCoordinator(backend: backend, name: name, modelName: modelName)
         self.generation = GenerationCoordinator()
         generation.provider = self
     }
