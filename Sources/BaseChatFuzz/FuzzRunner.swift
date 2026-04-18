@@ -36,6 +36,10 @@ public actor FuzzRunner {
     private let sink: FindingsSink
     private let corpus: [CorpusEntry]
     private var rng: SeededRNG
+    /// Cached harness snapshot. Git/swift fields are immutable for the process
+    /// lifetime; only `thermalState` is refreshed per iteration. Avoids
+    /// reshelling git+swift on every record (was 3 subprocess spawns each).
+    private let harnessBaseline: RunRecord.HarnessSnapshot
 
     public init(config: FuzzConfig, backendProvider: @escaping BackendProvider) {
         self.config = config
@@ -43,6 +47,14 @@ public actor FuzzRunner {
         self.sink = FindingsSink(outputDir: config.outputDir)
         self.corpus = Corpus.load()
         self.rng = SeededRNG(seed: config.seed)
+        self.harnessBaseline = HarnessMetadata.snapshot(repoRoot: nil)
+    }
+
+    /// Reuses the cached baseline and refreshes only the drifting field.
+    private func currentHarnessSnapshot() -> RunRecord.HarnessSnapshot {
+        var snap = harnessBaseline
+        snap.thermalState = HarnessMetadata.currentThermalState()
+        return snap
     }
 
     public func run(reporter: TerminalReporter) async -> FuzzReport {
@@ -85,14 +97,17 @@ public actor FuzzRunner {
 
             await reporter.iterationStart(iter: iter, model: handle.modelId, temp: temp, totalFindings: totalFindings)
 
+            let harnessSnap = currentHarnessSnapshot()
             let record = await runSingle(
                 handle: handle,
                 entry: entry,
                 appliedMutators: appliedMutators,
                 temperature: temp,
                 topP: topP,
-                maxTokens: maxTokens
+                maxTokens: maxTokens,
+                harness: harnessSnap
             )
+            await reporter.iterationEnd()
 
             var iterationFindings: [Finding] = []
             for detector in detectors {
@@ -131,7 +146,8 @@ public actor FuzzRunner {
         appliedMutators: [String],
         temperature: Float,
         topP: Float,
-        maxTokens: Int
+        maxTokens: Int,
+        harness: RunRecord.HarnessSnapshot
     ) async -> RunRecord {
         let memBefore = AppMemoryUsage.currentBytes()
         let start = ContinuousClock.now
@@ -151,7 +167,7 @@ public actor FuzzRunner {
                 systemPrompt: entry.system,
                 config: cfg
             )
-            capture = await EventRecorder().consume(stream)
+            capture = await EventRecorder().consume(stream, maxOutputTokens: maxTokens)
         } catch {
             capture = EventRecorder.Capture(
                 events: [],
@@ -165,7 +181,8 @@ public actor FuzzRunner {
                 totalMs: start.duration(to: ContinuousClock.now).milliseconds,
                 peakBytes: memBefore,
                 promptTokens: nil,
-                completionTokens: nil
+                completionTokens: nil,
+                stopReason: "error"
             )
         }
 
@@ -181,7 +198,7 @@ public actor FuzzRunner {
         return RunRecord(
             runId: UUID().uuidString,
             ts: ISO8601DateFormatter().string(from: Date()),
-            harness: HarnessMetadata.snapshot(repoRoot: nil),
+            harness: harness,
             model: RunRecord.ModelSnapshot(
                 backend: handle.backendName,
                 id: handle.modelId,
@@ -219,7 +236,8 @@ public actor FuzzRunner {
                 tokensPerSec: tps
             ),
             phase: capture.phase,
-            error: capture.error
+            error: capture.error,
+            stopReason: capture.stopReason
         )
     }
 }

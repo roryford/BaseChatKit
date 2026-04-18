@@ -13,13 +13,22 @@ public struct EmptyOutputAfterWorkDetector: Detector {
     public let inspiredBy = "OllamaBackend.extractToken drops `thinking` field (qwen3.5:4b smoke)"
 
     /// Time threshold above which a clean-but-empty completion is suspicious.
+    /// Default raised to 8s to clear cold-start model loads (`ollama serve` first hit).
     public let workThresholdMs: Double
 
-    public init(workThresholdMs: Double = 3_000) {
+    public init(workThresholdMs: Double = 8_000) {
         self.workThresholdMs = workThresholdMs
     }
 
     public func inspect(_ r: RunRecord) -> [Finding] {
+        // Skip seeds whose user prompt is intentionally empty/whitespace
+        // (corpus ids `empty-prompt`, `whitespace-only`): an empty completion
+        // is the expected outcome, not a bug.
+        let lastUserText = r.prompt.messages.last(where: { $0.role == "user" })?.text ?? ""
+        if lastUserText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return []
+        }
+
         guard r.phase == "done",
               r.error == nil,
               r.timing.totalMs >= workThresholdMs,
@@ -29,7 +38,16 @@ public struct EmptyOutputAfterWorkDetector: Detector {
             return []
         }
 
-        let trigger = "totalMs=\(Int(r.timing.totalMs)) raw.empty thinkingRaw.empty error=nil"
+        // Bucketise totalMs into a stable categorical band so dedup keys are
+        // hash-stable across runs of the same logical bug. The exact totalMs
+        // is preserved on the RunRecord; only the trigger fingerprint coarsens.
+        let bucket: String
+        switch r.timing.totalMs {
+        case ..<30_000: bucket = ">8s"
+        case ..<120_000: bucket = ">30s"
+        default: bucket = ">2m"
+        }
+        let trigger = "silent-empty (\(bucket))"
         return [Finding(
             detectorId: id,
             subCheck: "silent-empty",

@@ -18,6 +18,9 @@ public struct RunRecord: Codable, Sendable {
     public var timing: TimingSnapshot
     public var phase: String
     public var error: String?
+    /// Coarse stop classification: `naturalStop`, `maxTokens`, `userStop`, `error`, `unknown`.
+    /// Detectors gate on this to avoid false positives from token-cap truncation.
+    public var stopReason: String?
 
     public struct HarnessSnapshot: Codable, Sendable {
         public var fuzzVersion: String

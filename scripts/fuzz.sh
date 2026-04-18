@@ -72,7 +72,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 if [[ "$LLAMA_HIT" == "miss" && "$MLX_HIT" == "miss" && "$OLLAMA_HIT" == "miss" && "$FOUNDATION_HIT" == "miss" ]]; then
     echo "No usable backends detected. Install hints:" >&2
-    echo "  Ollama:     brew install ollama && ollama serve   (then: ollama pull llama3.1:8b)" >&2
+    echo "  Ollama:     brew install ollama && ollama serve   (then: ollama pull qwen3.5:4b)" >&2
     echo "  Llama:      drop a *.gguf into ~/Documents/Models/<name>/" >&2
     echo "  MLX:        drop an MLX snapshot into ~/Documents/Models/<name>/ (config.json + *.safetensors + tokenizer)" >&2
     echo "  Foundation: requires macOS 26+" >&2

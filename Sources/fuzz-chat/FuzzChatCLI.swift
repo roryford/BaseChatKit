@@ -105,12 +105,14 @@ struct FuzzChatCLI {
 
     @MainActor
     static func makeOllamaHandle(modelHint: String?) async throws -> FuzzRunner.BackendHandle {
-        let models = OllamaDiscovery.fetchModels()
-        guard let models else {
-            throw CLIError("No Ollama server reachable at localhost:11434. Start with: ollama serve")
+        let models: [String]
+        do {
+            models = try await OllamaDiscovery.fetchModels()
+        } catch {
+            throw CLIError("No Ollama server reachable at localhost:11434 (\(error)). Start with: ollama serve")
         }
         guard let model = modelHint.flatMap({ hint in models.first(where: { $0.contains(hint) }) }) ?? models.first else {
-            throw CLIError("No Ollama model installed. Pull one with: ollama pull qwen2.5:3b")
+            throw CLIError("No Ollama model installed. Pull one with: ollama pull qwen3.5:4b")
         }
         let backend = OllamaBackend()
         backend.configure(baseURL: URL(string: "http://localhost:11434")!, modelName: model)

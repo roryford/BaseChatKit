@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import BaseChatInference
 
 public enum HarnessMetadata {
 
@@ -13,14 +14,38 @@ public enum HarnessMetadata {
             packageGitDirty: dirty,
             swiftVersion: swiftVersion(),
             osBuild: osBuild(),
-            thermalState: thermalState()
+            thermalState: currentThermalState()
         )
+    }
+
+    /// Re-queryable thermal state, cheap (no shell). Used by `FuzzRunner` to
+    /// refresh just the drifting field on each iteration without reshelling git/swift.
+    public static func currentThermalState() -> String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
     }
 
     /// Computes the SHA256 of a file in 1 MiB chunks. Returns nil for missing or unreadable files.
     public static func fileSHA256(_ url: URL) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch {
+            Log.inference.error("HarnessMetadata.fileSHA256: open failed for \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
+        defer {
+            do {
+                try handle.close()
+            } catch {
+                Log.inference.error("HarnessMetadata.fileSHA256: close failed for \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
 
         var hasher = SHA256()
         while autoreleasepool(invoking: {
@@ -51,16 +76,6 @@ public enum HarnessMetadata {
         return "\(info.operatingSystemVersionString)"
     }
 
-    private static func thermalState() -> String {
-        switch ProcessInfo.processInfo.thermalState {
-        case .nominal: return "nominal"
-        case .fair: return "fair"
-        case .serious: return "serious"
-        case .critical: return "critical"
-        @unknown default: return "unknown"
-        }
-    }
-
     private static func run(_ path: String, _ args: [String]) -> String? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
@@ -74,6 +89,10 @@ public enum HarnessMetadata {
             let data = out.fileHandleForReading.readDataToEndOfFile()
             return String(data: data, encoding: .utf8)
         } catch {
+            let argline = ([path] + args).joined(separator: " ")
+            let msg = "HarnessMetadata.run: spawn failed for `\(argline)`: \(error)"
+            Log.inference.error("\(msg, privacy: .public)")
+            FileHandle.standardError.write(Data((msg + "\n").utf8))
             return nil
         }
     }

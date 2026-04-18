@@ -15,7 +15,9 @@ final class DetectorTests: XCTestCase {
         phase: String = "done",
         totalMs: Double = 0,
         error: String? = nil,
-        markers: RunRecord.MarkerSnapshot? = .init(open: "<think>", close: "</think>")
+        markers: RunRecord.MarkerSnapshot? = .init(open: "<think>", close: "</think>"),
+        userPrompt: String = "what is two plus two?",
+        stopReason: String? = "naturalStop"
     ) -> RunRecord {
         RunRecord(
             runId: "test-run",
@@ -42,7 +44,11 @@ final class DetectorTests: XCTestCase {
                 maxTokens: nil,
                 systemPrompt: nil
             ),
-            prompt: .init(corpusId: "test", mutators: [], messages: []),
+            prompt: .init(
+                corpusId: "test",
+                mutators: [],
+                messages: [.init(role: "user", text: userPrompt)]
+            ),
             events: [],
             raw: raw,
             rendered: rendered,
@@ -53,7 +59,8 @@ final class DetectorTests: XCTestCase {
             memory: .init(beforeBytes: nil, peakBytes: nil, afterBytes: nil),
             timing: .init(firstTokenMs: nil, totalMs: totalMs, tokensPerSec: nil),
             phase: phase,
-            error: error
+            error: error,
+            stopReason: stopReason
         )
     }
 
@@ -159,15 +166,40 @@ final class DetectorTests: XCTestCase {
     // MARK: - EmptyOutputAfterWorkDetector
 
     func test_emptyOutputAfterWork_firesWhenSlowAndSilent() {
-        let r = makeRecord(rendered: "", raw: "", thinkingRaw: "", phase: "done", totalMs: 5_000, error: nil)
+        let r = makeRecord(rendered: "", raw: "", thinkingRaw: "", phase: "done", totalMs: 9_000, error: nil)
         let findings = EmptyOutputAfterWorkDetector().inspect(r)
         XCTAssertEqual(findings.count, 1)
         XCTAssertEqual(findings.first?.subCheck, "silent-empty")
     }
 
+    func test_emptyOutputAfterWork_triggerIsStableAcrossRuns() {
+        // Same logical bug at slightly different wall-clock totals must dedup
+        // to one finding (trigger drops totalMs in favour of categorical buckets).
+        let a = makeRecord(rendered: "", raw: "", thinkingRaw: "", phase: "done", totalMs: 9_001)
+        let b = makeRecord(rendered: "", raw: "", thinkingRaw: "", phase: "done", totalMs: 11_234)
+        let triggerA = EmptyOutputAfterWorkDetector().inspect(a).first?.trigger
+        let triggerB = EmptyOutputAfterWorkDetector().inspect(b).first?.trigger
+        XCTAssertNotNil(triggerA)
+        XCTAssertEqual(triggerA, triggerB)
+    }
+
     func test_emptyOutputAfterWork_doesNotFireWhenFast() {
         let r = makeRecord(rendered: "", raw: "", thinkingRaw: "", phase: "done", totalMs: 100)
         XCTAssertTrue(EmptyOutputAfterWorkDetector().inspect(r).isEmpty)
+    }
+
+    func test_emptyOutputAfterWork_doesNotFireBelowDefault8sThreshold() {
+        // Cold-start guard: 5s used to fire under the old 3s threshold.
+        let r = makeRecord(rendered: "", raw: "", thinkingRaw: "", phase: "done", totalMs: 5_000)
+        XCTAssertTrue(EmptyOutputAfterWorkDetector().inspect(r).isEmpty)
+    }
+
+    func test_emptyOutputAfterWork_doesNotFireOnEmptyPromptSeed() {
+        // Corpus seeds `empty-prompt` and `whitespace-only` produce empty output by design.
+        let empty = makeRecord(rendered: "", thinkingRaw: "", phase: "done", totalMs: 10_000, userPrompt: "")
+        XCTAssertTrue(EmptyOutputAfterWorkDetector().inspect(empty).isEmpty)
+        let ws = makeRecord(rendered: "", thinkingRaw: "", phase: "done", totalMs: 10_000, userPrompt: "   \n\t   ")
+        XCTAssertTrue(EmptyOutputAfterWorkDetector().inspect(ws).isEmpty)
     }
 
     func test_emptyOutputAfterWork_doesNotFireWhenContentPresent() {
@@ -181,7 +213,22 @@ final class DetectorTests: XCTestCase {
     }
 
     func test_emptyOutputAfterWork_doesNotFireOnError() {
-        let r = makeRecord(rendered: "", thinkingRaw: "", phase: "failed", totalMs: 10_000, error: "boom")
+        let r = makeRecord(rendered: "", thinkingRaw: "", phase: "failed", totalMs: 10_000, error: "boom", stopReason: "error")
         XCTAssertTrue(EmptyOutputAfterWorkDetector().inspect(r).isEmpty)
+    }
+
+    // MARK: - ThinkingClassificationDetector — stopReason gating
+
+    func test_thinkingClassification_unbalancedEvents_skipsWhenMaxTokensTruncation() {
+        // 64-token cap routinely truncates mid-`<think>` on reasoning models;
+        // the lack of a `thinkingComplete` event is the cap's fault, not a parser bug.
+        let r = makeRecord(
+            thinkingRaw: "still reasoning…",
+            thinkingCompleteCount: 0,
+            phase: "done",
+            stopReason: "maxTokens"
+        )
+        let findings = ThinkingClassificationDetector().inspect(r)
+        XCTAssertFalse(findings.contains { $0.subCheck == "unbalanced-thinking-events" })
     }
 }

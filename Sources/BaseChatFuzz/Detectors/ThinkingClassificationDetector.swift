@@ -50,8 +50,13 @@ public struct ThinkingClassificationDetector: Detector {
         }
 
         // 4. Unbalanced events: thinking emitted but never closed cleanly,
-        //    yet the stream completed normally.
-        if !r.thinkingRaw.isEmpty && r.thinkingCompleteCount == 0 && r.phase == "done" {
+        //    yet the stream completed normally. Skip when the model was cut
+        //    off by the token cap — truncating mid-`<think>` is the cap's
+        //    fault, not the parser's.
+        if !r.thinkingRaw.isEmpty
+            && r.thinkingCompleteCount == 0
+            && r.phase == "done"
+            && r.stopReason != "maxTokens" {
             findings.append(.init(
                 detectorId: id,
                 subCheck: "unbalanced-thinking-events",
