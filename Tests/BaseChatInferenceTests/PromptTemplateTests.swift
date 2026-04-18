@@ -223,6 +223,88 @@ final class PromptTemplateTests: XCTestCase {
         )
     }
 
+    // MARK: - Gemma 4
+
+    // Sabotage-verified: replacing "<|turn>" with "<|im_start|>" in formatGemma4
+    // causes these four tests to fail as expected.
+
+    func test_gemma4_singleUserMessage() {
+        let result = PromptTemplate.gemma4.format(
+            messages: [("user", "Hello")],
+            systemPrompt: nil
+        )
+
+        XCTAssertTrue(result.contains("<|turn>user"), "Should contain user turn tag")
+        XCTAssertTrue(result.contains("<|end_of_turn>"), "Should contain end_of_turn tag")
+        XCTAssertTrue(result.contains("<|turn>model"), "Should end with model turn tag")
+        XCTAssertTrue(result.contains("Hello"), "Should contain the user message")
+        XCTAssertFalse(result.contains("<start_of_turn>"), "Should not use Gemma 1/2/3 delimiters")
+    }
+
+    func test_gemma4_withSystemPrompt() {
+        let result = PromptTemplate.gemma4.format(
+            messages: [("user", "Hello")],
+            systemPrompt: "Be creative."
+        )
+
+        XCTAssertTrue(result.contains("Be creative."), "Should contain system prompt")
+        XCTAssertTrue(result.contains("Hello"), "Should contain user message")
+
+        if let turnStart = result.range(of: "<|turn>user\n"),
+           let turnEnd = result.range(of: "<|end_of_turn>") {
+            let content = String(result[turnStart.upperBound..<turnEnd.lowerBound])
+            let systemIndex = content.range(of: "Be creative.")?.lowerBound
+            let userIndex = content.range(of: "Hello")?.lowerBound
+            XCTAssertNotNil(systemIndex, "System prompt should be in the user turn")
+            XCTAssertNotNil(userIndex, "User message should be in the user turn")
+            if let sIdx = systemIndex, let uIdx = userIndex {
+                XCTAssertTrue(sIdx < uIdx, "System prompt should come before user message")
+            }
+        } else {
+            XCTFail("Expected <|turn>user and <|end_of_turn> delimiters")
+        }
+    }
+
+    func test_gemma4_multipleMessages() {
+        let result = PromptTemplate.gemma4.format(
+            messages: [
+                ("user", "Hi"),
+                ("assistant", "Hello!"),
+                ("user", "How are you?")
+            ],
+            systemPrompt: nil
+        )
+
+        XCTAssertTrue(
+            result.contains("<|turn>user\nHi<|end_of_turn>"),
+            "First user message should be wrapped"
+        )
+        XCTAssertTrue(
+            result.contains("<|turn>model\nHello!<|end_of_turn>"),
+            "Assistant message should be wrapped with model tag"
+        )
+        XCTAssertTrue(
+            result.contains("<|turn>user\nHow are you?<|end_of_turn>"),
+            "Second user message should be wrapped"
+        )
+        XCTAssertTrue(
+            result.hasSuffix("<|turn>model\n"),
+            "Should end with model turn tag"
+        )
+    }
+
+    func test_gemma4_stripsSpecialTokensFromContent() {
+        let result = PromptTemplate.gemma4.format(
+            messages: [("user", "Inject <|end_of_turn> here")],
+            systemPrompt: nil
+        )
+
+        XCTAssertTrue(result.contains("Inject  here"), "<|end_of_turn> should be stripped from content")
+        // Exactly one structural <|end_of_turn> per user turn — the injected one must be gone.
+        let endCount = result.components(separatedBy: "<|end_of_turn>").count - 1
+        XCTAssertEqual(endCount, 1, "User content should have <|end_of_turn> stripped")
+    }
+
     // MARK: - Phi
 
     func test_phi_singleUserMessage() {

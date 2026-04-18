@@ -11,6 +11,7 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
     case mistral = "Mistral"
     case alpaca = "Alpaca"
     case gemma = "Gemma"
+    case gemma4 = "Gemma 4"
     case phi = "Phi"
 
     public var id: String { rawValue }
@@ -29,6 +30,8 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
             return ["### Instruction:", "### Input:", "### Response:"]
         case .gemma:
             return ["<start_of_turn>", "<end_of_turn>"]
+        case .gemma4:
+            return ["<|turn>", "<|end_of_turn>"]
         case .phi:
             return ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>"]
         }
@@ -64,6 +67,8 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
             return formatAlpaca(messages: messages, systemPrompt: systemPrompt)
         case .gemma:
             return formatGemma(messages: messages, systemPrompt: systemPrompt)
+        case .gemma4:
+            return formatGemma4(messages: messages, systemPrompt: systemPrompt)
         case .phi:
             return formatPhi(messages: messages, systemPrompt: systemPrompt)
         }
@@ -231,6 +236,45 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
 
         result += "<start_of_turn>model\n"
         Log.prompt.debug("Formatted \(messages.count) messages with Gemma template")
+        return result
+    }
+
+    // MARK: - Gemma 4
+
+    /// ```
+    /// <|turn>user
+    /// {system}
+    ///
+    /// {content}<|end_of_turn>
+    /// <|turn>model
+    /// ```
+    private func formatGemma4(
+        messages: [(role: String, content: String)],
+        systemPrompt: String?
+    ) -> String {
+        var result = ""
+
+        var systemPrefix = ""
+        if let systemPrompt, !systemPrompt.isEmpty {
+            systemPrefix = sanitize(systemPrompt) + "\n\n"
+        }
+
+        var isFirstUser = true
+        for message in messages {
+            switch message.role {
+            case "user":
+                let content = isFirstUser ? systemPrefix + sanitize(message.content) : sanitize(message.content)
+                result += "<|turn>user\n\(content)<|end_of_turn>\n"
+                isFirstUser = false
+            case "assistant":
+                result += "<|turn>model\n\(sanitize(message.content))<|end_of_turn>\n"
+            default:
+                break
+            }
+        }
+
+        result += "<|turn>model\n"
+        Log.prompt.debug("Formatted \(messages.count) messages with Gemma 4 template")
         return result
     }
 

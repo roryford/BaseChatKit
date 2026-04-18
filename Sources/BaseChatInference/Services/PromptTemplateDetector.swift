@@ -43,6 +43,9 @@ struct PromptTemplateDetector {
     static func detect(fromChatTemplate template: String) -> PromptTemplate {
         if template.contains("<|im_start|>") { return .chatML }
         if template.contains("<|start_header_id|>") { return .llama3 }
+        // Gemma 4 uses <|turn> — check before Gemma 1/2/3's <start_of_turn> since
+        // both could theoretically coexist in a transitional template.
+        if template.contains("<|turn>") { return .gemma4 }
         if template.contains("<start_of_turn>") { return .gemma }
         if template.contains("<|user|>") && template.contains("<|assistant|>") { return .phi }
         if template.contains("[INST]") { return .mistral }
@@ -56,6 +59,7 @@ struct PromptTemplateDetector {
     static func detect(fromArchitecture arch: String) -> PromptTemplate {
         switch arch.lowercased() {
         case "mistral": return .mistral
+        case "gemma4", "gemma-4": return .gemma4
         case "gemma", "gemma2": return .gemma
         case "phi", "phi3": return .phi
         // "llama" is too broad — many models (SmolLM2, TinyLlama, etc.) use the
