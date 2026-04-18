@@ -659,6 +659,48 @@ final class ModelLoadPlanTests: XCTestCase {
     /// separate heuristic concern that is out of scope for this test.
     /// (See report: the mappable heuristic under-estimates for huge files
     /// and can silently `.allow` a 140 GB file; not fixed here.)
+    /// Companion to the `.resident` case above. Under `.mappable`, a 140 GB
+    /// file's resident estimate caps at `min(fileSize/4, 1 GB) == 1 GB`
+    /// regardless of the file being 140 × the available RAM. The plan then
+    /// computes total ≈ 1 GB (resident) + a few hundred MB (KV) and returns
+    /// `.allow` — silently telling a user on a 4 GB device that a 70B model
+    /// will load fine.
+    ///
+    /// This test PINS the current (broken) behavior so a good-faith fix
+    /// — e.g., scaling `residentBudget` by `fileSize / availableMemory`, or
+    /// clamping on raw `fileSize > 2 * available` regardless of strategy —
+    /// will cause the test to fail and force an explicit update.
+    ///
+    // FIXME: file a GitHub issue and replace this URL — `.mappable` residentBudget
+    // caps at min(fileSize/4, 1 GB), so huge models on small devices are silently
+    // allowed. When fixed, flip this test's expectation to `.deny` and remove the
+    // FIXME.
+    func test_70BModelOn4GBDevice_mappableStrategy_currentlyAllowsDespiteImpossibleFit() {
+        let seventyBBytes: UInt64 = 140 * oneGB
+        let fourGB: UInt64 = 4 * oneGB
+        let inputs = makeInputs(
+            modelFileSize: seventyBBytes,
+            strategy: .mappable,                   // residentBudget caps at 1 GB
+            requested: 2048,
+            trained: 131_072,
+            kvBytesPerToken: 400_000,
+            available: fourGB,
+            physical: fourGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+
+        // Production bug: this should be .deny but is currently .allow because
+        // residentBudget under .mappable is capped to 1 GB regardless of how
+        // much larger the file is than available memory.
+        XCTAssertEqual(plan.verdict, .allow,
+                       "Current .mappable heuristic allows 140 GB file on 4 GB device (bug). If this assertion fails because the bug was fixed, flip to .deny and remove the FIXME above.")
+        // Pin the underestimate: resident estimate is ~1 GB, not the ~140 GB
+        // the file actually implies. This inequality is what a fix should make
+        // false.
+        XCTAssertLessThanOrEqual(plan.outcome.estimatedResidentBytes, oneGB + 1,
+                                 "residentBudget under .mappable currently caps at 1 GB; a fix should grow this with fileSize")
+    }
+
     func test_70BModelOn4GBDevice_residentStrategy_neverAllows() {
         // 70B at ~4-bit quant ~ 40 GB file. Use a generous 140 GB upper bound
         // to also cover fp16 distributions.

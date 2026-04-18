@@ -42,10 +42,13 @@ final class GGUFKVCacheEstimatorTests: XCTestCase {
 
     // MARK: - Architecture matrix
 
-    /// Llama-3 8B-ish: GQA 8:1 (`attentionHeadCountKV < attentionHeadCount`).
-    /// This is the dominant modern architecture and the canonical case that
-    /// the GQA divisor matters for — a regression here silently over- or
-    /// under-estimates KV for Llama-3 and most of its derivatives.
+    /// Llama-3 8B: GQA 8:1 (`attentionHeadCountKV < attentionHeadCount`).
+    /// Ref: https://huggingface.co/meta-llama/Meta-Llama-3-8B/blob/main/config.json
+    /// (num_hidden_layers=32, hidden_size=4096, num_attention_heads=32,
+    /// num_key_value_heads=8). This is the dominant modern architecture and
+    /// the canonical case the GQA divisor matters for — a regression here
+    /// silently over- or under-estimates KV for Llama-3 and most of its
+    /// derivatives.
     ///
     /// Hand math (fp16 = 2 B/element):
     /// ```
@@ -68,13 +71,18 @@ final class GGUFKVCacheEstimatorTests: XCTestCase {
         XCTAssertEqual(estimate, 131_072)
     }
 
-    /// Mistral 7B-ish: MHA (`attentionHeadCountKV == attentionHeadCount`).
-    /// Pre-GQA models. The divisor is 1, so the estimate is 4x an 8:1 GQA
-    /// model of the same shape — catch a regression where the GQA path
-    /// accidentally ignores MHA.
+    /// Llama-2 7B shape: MHA (`attentionHeadCountKV == attentionHeadCount`).
+    /// Llama-2 7B uses 32 blocks, 4096 embedding, 32 attention heads, 32 KV heads
+    /// (MHA) — ref: https://huggingface.co/meta-llama/Llama-2-7b-hf/blob/main/config.json
+    /// (num_hidden_layers=32, hidden_size=4096, num_attention_heads=32, no
+    /// num_key_value_heads → MHA with KV == Q). Catches a regression where
+    /// the GQA divisor path accidentally treats every model as GQA:8.
+    ///
+    /// NOTE: Mistral 7B looks similar but uses GQA 4:1 (num_key_value_heads=8);
+    /// don't conflate the two. The MHA case here is specifically Llama-2.
     ///
     /// Hand math: 32 * (4096 + 4096) * 2 = 524 288 B/token.
-    func test_estimateBytesPerToken_mistral7B_MHA_matchesHandCalculation() {
+    func test_estimateBytesPerToken_llama2_7B_MHA_matchesHandCalculation() {
         let parameters = GGUFKVCacheParameters(
             blockCount: 32,
             embeddingLength: 4096,
@@ -87,10 +95,12 @@ final class GGUFKVCacheEstimatorTests: XCTestCase {
         XCTAssertEqual(estimate, 524_288)
     }
 
-    /// Qwen2-ish asymmetric: explicit `attentionKeyLength != attentionValueLength`.
-    /// Newer architectures (Qwen, some DeepSeek variants) separate key and value
-    /// head dims. A naive estimator that assumed K == V would silently under-
-    /// estimate when value dim is larger, or over-estimate when smaller.
+    /// Synthetic asymmetric K/V: explicit `attentionKeyLength != attentionValueLength`.
+    /// No shipped Qwen2/Llama GGUFs we've seen use K ≠ V, but the GGUF spec allows it
+    /// (`.attention.key_length` and `.attention.value_length` are independent keys) and
+    /// Multi-head Latent Attention variants (DeepSeek-V2) and future architectures
+    /// may. A naive estimator that assumed K == V would silently under-estimate when
+    /// value dim is larger, or over-estimate when smaller.
     ///
     /// Fixture uses exaggerated asymmetry (128 vs 64) so the K-path and V-path
     /// cannot collapse into the same value and silently pass the test.
@@ -101,7 +111,7 @@ final class GGUFKVCacheEstimatorTests: XCTestCase {
     /// valueWidth =  64 * 4 = 256
     /// total      = 28 * (512 + 256) * 2 = 43 008 B/token
     /// ```
-    func test_estimateBytesPerToken_qwen2_asymmetricKVDims_matchesHandCalculation() {
+    func test_estimateBytesPerToken_asymmetricKVDims_matchesHandCalculation() {
         let parameters = GGUFKVCacheParameters(
             blockCount: 28,
             embeddingLength: 3584,           // unused when explicit lengths are present
