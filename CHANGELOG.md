@@ -2,11 +2,52 @@
 
 ## [0.9.0](https://github.com/roryford/BaseChatKit/compare/v0.8.4...v0.9.0) (2026-04-18)
 
-**Single-authority load plan replaces four scattered context clamps** — Loading a model used to consult four independent code paths to answer "how much context can this device handle, and will the model even fit" — `DeviceCapabilityService.canLoadModel`, `DeviceCapabilityService.safeContextSize`, `MemoryGate.check`, and `LlamaBackend.computeRamSafeCap`. Each had different inputs and different blind spots, so iPad OOM crashes kept resurfacing from new angles ([#398](https://github.com/roryford/BaseChatKit/issues/398), [#400](https://github.com/roryford/BaseChatKit/issues/400), [#411](https://github.com/roryford/BaseChatKit/issues/411)) — every fix landed in one layer but left the other three uninformed. This release collapses that cluster into `ModelLoadPlan`, a public `Sendable` value type computed once at the UI entry point and consumed unmodified by the service facade and every backend ([#419](https://github.com/roryford/BaseChatKit/issues/419), [#420](https://github.com/roryford/BaseChatKit/issues/420), [#421](https://github.com/roryford/BaseChatKit/issues/421), [#422](https://github.com/roryford/BaseChatKit/issues/422)). The plan carries the `effectiveContextSize` to use, a `Verdict` of `.allow / .warn / .deny`, and an array of structured `Reason` cases (`.insufficientResident`, `.insufficientKVCache`, `.trainedContextExceeded`, `.absoluteCeilingReached`, `.memoryCeilingReached`) so callers can surface specific guidance instead of a generic "too big" string. `LlamaBackend` consumes the plan natively — its retry-on-nil halving loop, `computeRamSafeCap`, and metadata-extraction helpers are gone (~150 lines deleted) because the plan already carries the authoritative `n_ctx` and the backend never needs to recompute. `MemoryGate` was removed entirely ([#424](https://github.com/roryford/BaseChatKit/pull/424)); its iOS-throws / macOS-warns policy is preserved as a richer `LoadDenyPolicy` enum exposed via `InferenceService.denyPolicy`, whose `.custom(closure)` case receives the full plan including `reasons` for nuanced deny decisions. UI recommendation helpers (`ModelManagementViewModel.canRunModel`, `.compatibilityTier`, `DownloadableModel.recommendedVariant`) were migrated to a new `ModelLoadPlan.canRunModel(sizeBytes:physicalMemoryBytes:)` helper, allowing `DeviceCapabilityService.canLoadModel` and `.safeContextSize` to be deleted ([#427](https://github.com/roryford/BaseChatKit/pull/427)). The release also includes a CI gap fix: `BaseChatInferenceTests` is now part of the CI matrix, after a macOS-only test hang in [#426](https://github.com/roryford/BaseChatKit/pull/426) (closes [#425](https://github.com/roryford/BaseChatKit/issues/425)) shipped through the previous matrix unnoticed.
+**Single-authority load plan replaces four scattered context clamps.** Loading a model used to consult four independent code paths to answer "how much context can this device handle, and will the model even fit": `DeviceCapabilityService.canLoadModel`, `DeviceCapabilityService.safeContextSize`, `MemoryGate.check`, and `LlamaBackend.computeRamSafeCap`. Each had different inputs and different blind spots, so iPad OOM crashes kept resurfacing from new angles ([#398](https://github.com/roryford/BaseChatKit/issues/398), [#400](https://github.com/roryford/BaseChatKit/issues/400), [#411](https://github.com/roryford/BaseChatKit/issues/411)) — every fix landed in one layer but left the other three uninformed.
 
-### ⚠ BREAKING CHANGES
+### What's new
 
-**`InferenceBackend.loadModel(from:contextSize:)` removed; use `loadModel(from:plan:)`.** The protocol's sole load method now takes a `ModelLoadPlan`. Migration is mechanical for the common case — replace `loadModel(from: model, contextSize: n)` with `loadModel(from: model, plan: ModelLoadPlan.compute(for: model, requestedContextSize: n, strategy: .mappable))`. Use `ModelLoadPlan.cloud()` for cloud backends (where context is server-enforced) and `ModelLoadPlan.systemManaged(requestedContextSize:)` for Apple Foundation Models (where the system owns allocation). `InferenceService.loadModel(from:contextSize:)` remains as a deprecated convenience that builds a plan internally, giving downstream apps one release to migrate before it is removed.
+`ModelLoadPlan` is a public `Sendable` value type computed once at the UI entry point and consumed unmodified by the service facade and every backend ([#419](https://github.com/roryford/BaseChatKit/issues/419), [#420](https://github.com/roryford/BaseChatKit/issues/420), [#421](https://github.com/roryford/BaseChatKit/issues/421), [#422](https://github.com/roryford/BaseChatKit/issues/422)). It carries:
+
+- `effectiveContextSize` — the authoritative `n_ctx` to pass to the backend.
+- `verdict` — one of `.allow` / `.warn` / `.deny`.
+- `reasons: [Reason]` — structured causes (`.insufficientResident`, `.insufficientKVCache`, `.trainedContextExceeded`, `.absoluteCeilingReached`, `.memoryCeilingReached`) so UIs can surface specific guidance instead of a generic "too big" string.
+
+`LoadDenyPolicy` replaces `MemoryGate`'s two-way deny behavior with three cases — `.throwError`, `.warnOnly`, and `.custom(closure)`. The closure receives the full plan (including `reasons`) for nuanced decisions. Configure via `InferenceService.denyPolicy`; defaults to `.throwError` on iOS and `.warnOnly` on macOS.
+
+### What's gone
+
+- `MemoryGate` and `InferenceService.memoryGate` removed entirely ([#424](https://github.com/roryford/BaseChatKit/pull/424)).
+- `DeviceCapabilityService.canLoadModel` and `.safeContextSize` deleted ([#427](https://github.com/roryford/BaseChatKit/pull/427)). UI recommendation callers migrated to `ModelLoadPlan.canRunModel(sizeBytes:physicalMemoryBytes:)`.
+- `LlamaBackend` retry-on-nil halving loop, `computeRamSafeCap`, and GGUF metadata-extraction helpers — ~150 lines deleted. The plan already carries the authoritative `n_ctx`, so the backend never recomputes.
+
+### ⚠ Breaking change
+
+**`InferenceBackend.loadModel(from:contextSize:)` is removed.** The protocol's sole load method now takes a `ModelLoadPlan`. Migration is mechanical:
+
+```swift
+// Before
+try await backend.loadModel(from: url, contextSize: 4096)
+
+// After (local GGUF / MLX)
+let plan = ModelLoadPlan.compute(
+    for: model,
+    requestedContextSize: 4096,
+    strategy: .mappable
+)
+try await backend.loadModel(from: url, plan: plan)
+
+// After (cloud — context is server-enforced)
+try await backend.loadModel(from: url, plan: .cloud())
+
+// After (Apple Foundation Models — system owns allocation)
+try await backend.loadModel(from: url, plan: .systemManaged(requestedContextSize: 4096))
+```
+
+`InferenceService.loadModel(from:contextSize:)` remains for one release as a deprecated convenience that builds a plan internally. It will be removed in the next release.
+
+### CI coverage fix
+
+`BaseChatInferenceTests` is now part of the CI matrix, after a macOS-only test hang in [#426](https://github.com/roryford/BaseChatKit/pull/426) (closes [#425](https://github.com/roryford/BaseChatKit/issues/425)) shipped through the previous matrix unnoticed.
 
 ## [0.8.4](https://github.com/roryford/BaseChatKit/compare/v0.8.3...v0.8.4) (2026-04-16)
 
