@@ -31,13 +31,6 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// tasks that may outlive the initiating method call.
     private let stateLock = NSLock()
 
-    /// Serializes concurrent `initializeModel` C-level calls.
-    ///
-    /// `llama_model_load_from_file` and `llama_free` are not safe to call concurrently.
-    /// This lock ensures at most one detached load task is inside the C API at a time.
-    /// Blocking is acceptable here because the lock is only held inside a detached task.
-    private let loadSerializationLock = NSLock()
-
     private func withStateLock<T>(_ body: () -> T) -> T {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -88,6 +81,9 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// Guarded by `stateLock`. Set by `setLoadProgressHandler(_:)` before each load.
     private var _loadProgressHandler: (@Sendable (Double) async -> Void)?
 
+    /// Owns the serialized model-load path and the C-level parameter/progress-callback bridging.
+    private let modelLoader = LlamaModelLoader()
+
     // MARK: - Memory Pressure
 
     /// Monitors OS-level memory pressure so the decode loop can be aborted before
@@ -99,37 +95,10 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// any other higher-level observer is also listening.
     private let memoryPressure = MemoryPressureHandler()
 
-    // MARK: - Global Backend Lifecycle
-
-    /// Guards `llama_backend_init/free` which are global and must only be
-    /// called once, not per-instance.
-    /// NSLock is intentional here: init/deinit are synchronous, so actor
-    /// isolation would require fire-and-forget Tasks with no ordering guarantee.
-    nonisolated(unsafe) private static var backendRefCount = 0
-    private static let backendLock = NSLock()
-
-    private static func retainBackend() {
-        backendLock.lock()
-        defer { backendLock.unlock() }
-        if backendRefCount == 0 {
-            llama_backend_init()
-        }
-        backendRefCount += 1
-    }
-
-    private static func releaseBackend() {
-        backendLock.lock()
-        defer { backendLock.unlock() }
-        backendRefCount -= 1
-        if backendRefCount == 0 {
-            llama_backend_free()
-        }
-    }
-
     // MARK: - Init / Deinit
 
     public init() {
-        Self.retainBackend()
+        LlamaBackendProcessLifecycle.retain()
         registerMemoryPressureCallback()
         memoryPressure.startMonitoring()
     }
@@ -138,7 +107,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         memoryPressure.removeCallback(for: self)
         memoryPressure.stopMonitoring()
         unloadModel()
-        Self.releaseBackend()
+        LlamaBackendProcessLifecycle.release()
     }
 
     // MARK: - Memory Pressure Wiring
@@ -201,8 +170,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         let capturedHandler = withStateLock { _loadProgressHandler }
         let effectiveContextSize = Int32(plan.effectiveContextSize)
 
-        let loadedResources = try await Task.detached(priority: .userInitiated) { [self] in
-            return try self.serializedModelLoad(at: url, effectiveContextSize: effectiveContextSize, progressHandler: capturedHandler)
+        let loadedResources = try await Task.detached(priority: .userInitiated) { [modelLoader] in
+            return try modelLoader.serializedModelLoad(at: url, effectiveContextSize: effectiveContextSize, progressHandler: capturedHandler)
         }.value
 
         let didCommit = withStateLock {
@@ -225,154 +194,6 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         }
 
         Self.logger.info("Llama backend loaded \(url.lastPathComponent) with context \(loadedResources.effectiveContextSize)")
-    }
-
-    /// Synchronous wrapper that holds `loadSerializationLock` while calling the
-    /// C-level model init. Called from a detached task so the lock/unlock stays
-    /// in a synchronous context (required by Swift 6.3 strict concurrency).
-    private func serializedModelLoad(
-        at url: URL,
-        effectiveContextSize: Int32,
-        progressHandler: (@Sendable (Double) async -> Void)?
-    ) throws -> LoadedResources {
-        loadSerializationLock.lock()
-        defer { loadSerializationLock.unlock() }
-        return try Self.initializeModel(at: url, effectiveContextSize: effectiveContextSize, progressHandler: progressHandler)
-    }
-
-    private struct LoadedResources: @unchecked Sendable {
-        let model: LlamaModelHandle
-        let context: LlamaContextHandle
-        let effectiveContextSize: Int32
-        var vocab: OpaquePointer? { context.vocabPtr }
-    }
-
-    // MARK: - RAII Pointer Wrappers
-    //
-    // These types own C pointers and free them on deinit, making error-path
-    // cleanup in initializeModel automatic. On the successful load path,
-    // steal() transfers ownership to the instance vars so that unloadModel's
-    // explicit ordered cleanup (context before model, both before
-    // llama_backend_free) is unaffected.
-
-    /// Owns a `llama_model *`. Calls `llama_model_free` on deinit unless
-    /// ownership was transferred via `steal()`.
-    private final class LlamaModelHandle: @unchecked Sendable {
-        private(set) var pointer: OpaquePointer?
-        init(_ pointer: OpaquePointer) { self.pointer = pointer }
-        /// Transfers ownership to the caller. Subsequent deinit is a no-op.
-        func steal() -> OpaquePointer? { defer { pointer = nil }; return pointer }
-        deinit { if let p = pointer { llama_model_free(p) } }
-    }
-
-    /// Owns a `llama_context *`. Calls `llama_free` on deinit unless
-    /// ownership was transferred via `steal()`.
-    private final class LlamaContextHandle: @unchecked Sendable {
-        private(set) var pointer: OpaquePointer?
-        let vocabPtr: OpaquePointer?
-        init(context: OpaquePointer, vocab: OpaquePointer?) {
-            self.pointer = context
-            self.vocabPtr = vocab
-        }
-        /// Transfers ownership to the caller. Subsequent deinit is a no-op.
-        func steal() -> OpaquePointer? { defer { pointer = nil }; return pointer }
-        deinit { if let p = pointer { llama_free(p) } }
-    }
-
-    /// Heap-allocated box used to bridge a Swift async progress handler through the C callback ABI.
-    ///
-    /// `llama_model_params.progress_callback` is a C function pointer — it cannot capture Swift
-    /// context directly. We store the handler in this class, pass an `Unmanaged` retain into
-    /// `progress_callback_user_data`, then release it after `llama_model_load_from_file` returns.
-    private final class ProgressCallbackContext: @unchecked Sendable {
-        let handler: @Sendable (Double) async -> Void
-        init(_ handler: @escaping @Sendable (Double) async -> Void) {
-            self.handler = handler
-        }
-    }
-
-    private static func initializeModel(
-        at url: URL,
-        effectiveContextSize: Int32,
-        progressHandler: (@Sendable (Double) async -> Void)? = nil
-    ) throws -> LoadedResources {
-        var modelParams = llama_model_default_params()
-        #if targetEnvironment(simulator)
-        modelParams.n_gpu_layers = 0   // Metal not reliable in simulator
-        #else
-        modelParams.n_gpu_layers = 99  // Offload all layers to Metal
-        #endif
-
-        // Wire up the progress callback when a handler is installed.
-        // The C callback fires on the loader thread; we bridge to async by
-        // creating an unstructured Task so the synchronous C callback returns
-        // quickly. The Unmanaged retain is released once the load call returns.
-        var callbackContextRef: Unmanaged<ProgressCallbackContext>?
-        if let handler = progressHandler {
-            let ctx = ProgressCallbackContext(handler)
-            callbackContextRef = Unmanaged.passRetained(ctx)
-            modelParams.progress_callback_user_data = callbackContextRef!.toOpaque()
-            modelParams.progress_callback = { progress, userData -> Bool in
-                guard let ptr = userData else { return true }
-                // `takeUnretainedValue()` does not bump ARC here — the Task closure below
-                // captures `ctx` as a Swift reference, which provides its own ARC retain
-                // for the Task's lifetime. The Unmanaged retain managed by the outer defer
-                // in `loadModel` is separate and only responsible for keeping the context
-                // alive during the synchronous C load call.
-                let ctx = Unmanaged<ProgressCallbackContext>.fromOpaque(ptr).takeUnretainedValue()
-                let value = Double(progress)
-                Task { await ctx.handler(value) }
-                return true
-            }
-        }
-        defer { callbackContextRef?.release() }
-
-        guard let rawModel = llama_model_load_from_file(url.path, modelParams) else {
-            throw InferenceError.modelLoadFailed(underlying: NSError(
-                domain: "LlamaBackend",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to load GGUF model from \(url.lastPathComponent)"]
-            ))
-        }
-        let modelHandle = LlamaModelHandle(rawModel)
-
-        var ctxParams = llama_context_default_params()
-        ctxParams.n_ctx = UInt32(effectiveContextSize)
-        ctxParams.n_threads = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
-        ctxParams.n_threads_batch = ctxParams.n_threads
-
-        Self.logger.info(
-            "LlamaBackend: initializing context at \(effectiveContextSize) tokens (plan-authoritative)"
-        )
-
-        // Single attempt. The plan is authoritative — it has already clamped the
-        // context to a memory-safe value. If llama_init_from_model still returns
-        // nil at this size, we surface a typed error so the caller can request a
-        // smaller plan rather than silently allocating half of what was asked for.
-        guard let ctx = llama_init_from_model(rawModel, ctxParams) else {
-            // modelHandle goes out of scope here → llama_model_free called automatically
-            throw InferenceError.modelLoadFailed(underlying: NSError(
-                domain: "LlamaBackend",
-                code: -2,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "Failed to create llama context at \(effectiveContextSize) tokens. "
-                        + "The memory estimate did not account for an allocator failure at this size. "
-                        + "Retry with a smaller requested context size.",
-                ]
-            ))
-        }
-
-        let contextHandle = LlamaContextHandle(
-            context: ctx,
-            vocab: llama_model_get_vocab(rawModel)
-        )
-
-        return LoadedResources(
-            model: modelHandle,
-            context: contextHandle,
-            effectiveContextSize: effectiveContextSize
-        )
     }
 
     // MARK: - Generation
@@ -399,7 +220,16 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         // window before flipping `isGenerating`. If we failed this check
         // after the flip, callers who retry on `.contextExhausted` would see
         // an unnecessary `.alreadyGenerating` on the next call.
-        let tokens = tokenize(prompt, addBos: true)
+        //
+        // Snapshot vocab under stateLock before handing it to LlamaTokenization:
+        // without this, the read races with unloadModel() niling `self.vocab`
+        // and freeing the backing model — a use-after-free. The outer
+        // `vocab != nil` check is advisory (Swift pointer reads are atomic at
+        // machine level) but does not survive across the unprotected tokenize().
+        guard let preflightVocab = withStateLock({ vocab }) else {
+            throw InferenceError.inferenceFailure("No model loaded")
+        }
+        let tokens = LlamaTokenization.tokenize(prompt, vocab: preflightVocab, addBos: true)
         guard !tokens.isEmpty else {
             throw InferenceError.inferenceFailure("Failed to tokenize prompt")
         }
@@ -583,7 +413,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 if llama_vocab_is_eog(vocab, token) { break }
 
                 // Decode token to text
-                if let text = self.tokenToString(token, invalidUTF8Buffer: &invalidUTF8) {
+                if let text = LlamaTokenization.tokenToString(token, vocab: vocab, invalidUTF8Buffer: &invalidUTF8) {
                     if isFirstToken {
                         await MainActor.run { generationStream.setPhase(.streaming) }
                         isFirstToken = false
@@ -684,7 +514,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             return
         }
 
-        Self.retainBackend()
+        LlamaBackendProcessLifecycle.retain()
 
         // Defer llama_free off the calling thread — InferenceService is @MainActor,
         // so blocking here would freeze the UI for the duration of the spin-wait.
@@ -695,7 +525,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             await capturedTask?.value
             if let ctx = capturedContext { llama_free(ctx) }
             if let mdl = capturedModel { llama_model_free(mdl) }
-            Self.releaseBackend()
+            LlamaBackendProcessLifecycle.release()
         }
         withStateLock {
             self.cleanupTask = newCleanupTask
@@ -721,7 +551,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         await waitForPendingCleanup()
     }
 
-    // MARK: - Tokenization Helpers
+    // MARK: - Cleanup
 
     private func waitForPendingCleanup() async {
         let task = withStateLock {
@@ -730,43 +560,6 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             return task
         }
         await task?.value
-    }
-
-    private func tokenize(_ text: String, addBos: Bool) -> [llama_token] {
-        guard let vocab else { return [] }
-        let utf8 = text.utf8CString
-        let maxTokens = Int32(utf8.count) + (addBos ? 1 : 0)
-        var tokens = [llama_token](repeating: 0, count: Int(maxTokens))
-        let count = llama_tokenize(vocab, text, Int32(text.utf8.count), &tokens, maxTokens, addBos, false)
-        guard count >= 0 else { return [] }
-        return Array(tokens.prefix(Int(count)))
-    }
-
-    /// Converts a token to a string, handling multi-byte UTF-8 sequences that
-    /// may span token boundaries.
-    private func tokenToString(_ token: llama_token, invalidUTF8Buffer: inout [CChar]) -> String? {
-        guard let vocab else { return nil }
-        var buf = [CChar](repeating: 0, count: 32)
-        let n = llama_token_to_piece(vocab, token, &buf, Int32(buf.count), 0, false)
-
-        if n < 0 {
-            // Buffer too small — retry with correct size
-            buf = [CChar](repeating: 0, count: Int(-n))
-            let n2 = llama_token_to_piece(vocab, token, &buf, Int32(buf.count), 0, false)
-            guard n2 >= 0 else { return nil }
-            invalidUTF8Buffer.append(contentsOf: buf.prefix(Int(n2)))
-        } else {
-            invalidUTF8Buffer.append(contentsOf: buf.prefix(Int(n)))
-        }
-
-        // Try to form a valid UTF-8 string
-        invalidUTF8Buffer.append(0) // null-terminate
-        if let str = String(validatingUTF8: invalidUTF8Buffer) {
-            invalidUTF8Buffer.removeAll()
-            return str.isEmpty ? nil : str
-        }
-        invalidUTF8Buffer.removeLast() // remove null terminator, keep accumulating
-        return nil
     }
 }
 
@@ -795,7 +588,12 @@ extension LlamaBackend: TokenizerVendor, TokenizerProvider {
     /// Falls back to the 4-chars-per-token heuristic if no vocabulary is loaded.
     /// Callers should prefer accessing this through `InferenceService.tokenizer`.
     public func tokenCount(_ text: String) -> Int {
-        let tokens = tokenize(text, addBos: false)
+        // Snapshot vocab under stateLock to avoid a use-after-free race with
+        // unloadModel() — mirrors the `countTokens(_:)` pattern below.
+        guard let currentVocab = withStateLock({ vocab }) else {
+            return max(1, text.count / 4)
+        }
+        let tokens = LlamaTokenization.tokenize(text, vocab: currentVocab, addBos: false)
         return tokens.isEmpty ? max(1, text.count / 4) : tokens.count
     }
 }
