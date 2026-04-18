@@ -220,7 +220,16 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         // window before flipping `isGenerating`. If we failed this check
         // after the flip, callers who retry on `.contextExhausted` would see
         // an unnecessary `.alreadyGenerating` on the next call.
-        let tokens = LlamaTokenization.tokenize(prompt, vocab: vocab, addBos: true)
+        //
+        // Snapshot vocab under stateLock before handing it to LlamaTokenization:
+        // without this, the read races with unloadModel() niling `self.vocab`
+        // and freeing the backing model — a use-after-free. The outer
+        // `vocab != nil` check is advisory (Swift pointer reads are atomic at
+        // machine level) but does not survive across the unprotected tokenize().
+        guard let preflightVocab = withStateLock({ vocab }) else {
+            throw InferenceError.inferenceFailure("No model loaded")
+        }
+        let tokens = LlamaTokenization.tokenize(prompt, vocab: preflightVocab, addBos: true)
         guard !tokens.isEmpty else {
             throw InferenceError.inferenceFailure("Failed to tokenize prompt")
         }
@@ -579,7 +588,12 @@ extension LlamaBackend: TokenizerVendor, TokenizerProvider {
     /// Falls back to the 4-chars-per-token heuristic if no vocabulary is loaded.
     /// Callers should prefer accessing this through `InferenceService.tokenizer`.
     public func tokenCount(_ text: String) -> Int {
-        let tokens = LlamaTokenization.tokenize(text, vocab: vocab, addBos: false)
+        // Snapshot vocab under stateLock to avoid a use-after-free race with
+        // unloadModel() — mirrors the `countTokens(_:)` pattern below.
+        guard let currentVocab = withStateLock({ vocab }) else {
+            return max(1, text.count / 4)
+        }
+        let tokens = LlamaTokenization.tokenize(text, vocab: currentVocab, addBos: false)
         return tokens.isEmpty ? max(1, text.count / 4) : tokens.count
     }
 }

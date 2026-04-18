@@ -27,6 +27,7 @@ enum LlamaBackendProcessLifecycle {
     static func release() {
         lock.lock()
         defer { lock.unlock() }
+        precondition(refCount > 0, "LlamaBackendProcessLifecycle.release() called without a matching retain() — retain/release imbalance")
         refCount -= 1
         if refCount == 0 {
             llama_backend_free()
