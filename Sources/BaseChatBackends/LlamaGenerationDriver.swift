@@ -161,6 +161,7 @@ struct LlamaGenerationDriver {
         var nCur = tokens.count
         var invalidUTF8: [CChar] = []
         var isFirstToken = true
+        var thinkingFilter = ThinkingBlockFilter()
 
         for iteration in 0..<maxTokens {
             if isCancelled() { break }
@@ -176,11 +177,14 @@ struct LlamaGenerationDriver {
 
             // Decode token to text
             if let text = LlamaTokenization.tokenToString(token, vocab: vocab, invalidUTF8Buffer: &invalidUTF8) {
-                if isFirstToken {
-                    await MainActor.run { generationStream.setPhase(.streaming) }
-                    isFirstToken = false
+                let visible = thinkingFilter.process(text)
+                if !visible.isEmpty {
+                    if isFirstToken {
+                        await MainActor.run { generationStream.setPhase(.streaming) }
+                        isFirstToken = false
+                    }
+                    continuation.yield(.token(visible))
                 }
-                continuation.yield(.token(text))
             }
 
             // Prepare next batch

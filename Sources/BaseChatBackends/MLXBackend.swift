@@ -204,19 +204,23 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 let outputLimit = config.maxOutputTokens
                 var outputTokenCount = 0
                 var isFirstToken = true
+                var thinkingFilter = ThinkingBlockFilter()
                 let mlxStream = try await modelContainer.generate(
                     messages: messages,
                     parameters: generateConfig
                 )
                 for await generation in mlxStream {
                     if Task.isCancelled { break }
-                    if let text = generation.chunk {
-                        if isFirstToken {
-                            await MainActor.run { generationStream.setPhase(.streaming) }
-                            isFirstToken = false
+                    if let raw = generation.chunk {
+                        let visible = thinkingFilter.process(raw)
+                        if !visible.isEmpty {
+                            if isFirstToken {
+                                await MainActor.run { generationStream.setPhase(.streaming) }
+                                isFirstToken = false
+                            }
+                            continuation.yield(.token(visible))
                         }
-                        continuation.yield(.token(text))
-                        // Each chunk from MLX corresponds to one token.
+                        // output token counting still uses raw chunks (each MLX chunk = 1 token)
                         if let limit = outputLimit {
                             outputTokenCount += 1
                             if outputTokenCount >= limit { break }
