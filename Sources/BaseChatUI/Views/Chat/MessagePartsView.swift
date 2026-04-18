@@ -28,9 +28,13 @@ struct MessagePartsView: View {
             imageView(data)
 
         case .thinking(let text):
-            // Pass isStreaming through so the view shows "Thinking…" during active
-            // generation rather than a half-filled disclosure group.
-            ThinkingBlockView(text: text, isStreaming: isStreaming)
+            // A thinking part with empty text is a streaming placeholder inserted
+            // when the first .thinkingToken arrives; non-empty means the block was
+            // finalized by .thinkingComplete. Using the text emptiness rather than
+            // the overall isStreaming flag allows the disclosure group to appear
+            // as soon as reasoning is complete, even while visible tokens are still
+            // arriving.
+            ThinkingBlockView(text: text, isThinkingStreaming: text.isEmpty && isStreaming)
         }
     }
 

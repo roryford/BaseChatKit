@@ -173,8 +173,10 @@ struct LlamaGenerationDriver {
         let useParser = markers != nil
         var thinkingParser = ThinkingParser(markers: markers ?? .qwen3)
         var thinkingTokenCount = 0
+        // Flag set when maxThinkingTokens is reached so we can break the outer loop cleanly.
+        var thinkingLimitReached = false
 
-        for iteration in 0..<maxTokens {
+        generationLoop: for iteration in 0..<maxTokens {
             if isCancelled() { break }
 
             // First iteration samples from the final prompt chunk's logits,
@@ -203,9 +205,13 @@ struct LlamaGenerationDriver {
                     continuation.yield(event)
                     if case .thinkingToken = event {
                         thinkingTokenCount += 1
-                        if let limit = config.maxThinkingTokens, thinkingTokenCount >= limit { break }
+                        if let limit = config.maxThinkingTokens, thinkingTokenCount >= limit {
+                            thinkingLimitReached = true
+                            break
+                        }
                     }
                 }
+                if thinkingLimitReached { break generationLoop }
             }
 
             // Prepare next batch

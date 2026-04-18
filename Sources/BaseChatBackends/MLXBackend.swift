@@ -205,10 +205,10 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 var outputTokenCount = 0
                 var isFirstToken = true
 
-                // Hardcoded to .qwen3: only Qwen3 variants have MLX thinking support currently.
+                // Use the caller-configured markers when provided; fall back to .qwen3 (Qwen3/DeepSeek-R1).
                 // mlx-swift-lm exposes no tokenizer API to auto-detect markers at generation time.
                 // TODO: expose thinkingMarkers as a generate() parameter when Gemma 4 / other models land.
-                var thinkingParser = ThinkingParser(markers: .qwen3)
+                var thinkingParser = ThinkingParser(markers: config.thinkingMarkers ?? .qwen3)
                 let useParser = config.thinkingMarkers != nil
 
                 let mlxStream = try await modelContainer.generate(

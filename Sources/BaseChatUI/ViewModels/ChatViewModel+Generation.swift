@@ -172,16 +172,30 @@ extension ChatViewModel {
                             break
 
                         case .appendThinkingText(let text):
+                            let isFirstThinkingFragment = thinkingAccumulator.isEmpty
                             thinkingAccumulator += text
+                            if isFirstThinkingFragment {
+                                // Insert a placeholder `.thinking("")` part immediately so the
+                                // UI can render the "Thinking…" label during the reasoning phase
+                                // rather than staying on the generic typing placeholder.
+                                self.mutateMessage(id: messageID) { msg in
+                                    if msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) == nil {
+                                        let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
+                                        msg.contentParts.insert(.thinking(""), at: insertAt)
+                                    }
+                                }
+                            }
 
                         case .finalizeThinking:
                             let block = thinkingAccumulator
-                            thinkingAccumulator = ""  // reset — prevents multi-block concatenation
+                            thinkingAccumulator = ""
                             guard !block.isEmpty else { break }
                             self.mutateMessage(id: messageID) { msg in
-                                // Replace existing thinking part or insert before first text part.
+                                // Append to any existing thinking part so multiple <think>…</think>
+                                // blocks within one response are concatenated into a single part.
                                 if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
-                                    msg.contentParts[idx] = .thinking(block)
+                                    let existing = msg.contentParts[idx].thinkingContent ?? ""
+                                    msg.contentParts[idx] = .thinking(existing.isEmpty ? block : existing + "\n\n" + block)
                                 } else {
                                     let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
                                     msg.contentParts.insert(.thinking(block), at: insertAt)
@@ -208,7 +222,8 @@ extension ChatViewModel {
                     thinkingAccumulator = ""
                     self.mutateMessage(id: messageID) { msg in
                         if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
-                            msg.contentParts[idx] = .thinking(block)
+                            let existing = msg.contentParts[idx].thinkingContent ?? ""
+                            msg.contentParts[idx] = .thinking(existing.isEmpty ? block : existing + "\n\n" + block)
                         } else {
                             let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
                             msg.contentParts.insert(.thinking(block), at: insertAt)
@@ -234,11 +249,12 @@ extension ChatViewModel {
         }
 
         // Persist the completed assistant message.
-        // Use hasVisibleContent rather than content.isEmpty so that a thinking-only
-        // response (no visible text) is still saved rather than silently discarded.
+        // Keep the message if it has visible text OR thinking content — a thinking-only
+        // response (no visible text but `.thinking` parts present) is still meaningful.
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            let hasThinkingContent = messages[idx].contentParts.contains { $0.thinkingContent != nil }
             do {
-                if !messages[idx].hasVisibleContent {
+                if !messages[idx].hasVisibleContent && !hasThinkingContent {
                     messages.remove(at: idx)
                 } else {
                     try saveMessage(messages[idx])
