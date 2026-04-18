@@ -70,6 +70,17 @@ Do not widen `inferenceService` to `public` — it exposes load coordination int
 - **Error handling**: only validate at system boundaries (user input, external APIs, file I/O). Don't add defensive guards for internal invariants that Swift's type system already enforces.
 - **Comments**: explain *why*, not *what*. Omit when the code is self-evident.
 
+## Platform policy
+
+BaseChatKit targets **n-1**: the current Apple OS release and the one immediately before it.
+
+| Platform | Current (n) | Minimum (n-1) |
+|----------|-------------|---------------|
+| macOS    | 26          | 15            |
+| iOS      | 26          | 18            |
+
+When Apple ships a new major OS each September, bump both minimums by one and remove any `#available` guards that were added to paper over the previous floor. Do not use `Atomic`, `OSAllocatedUnfairLock`, or other APIs that post-date the minimum without first checking their availability annotation.
+
 ## Hardware constraints (simulator / CI)
 
 - `LlamaBackend` uses a global `llama_backend_init` — only one instance can exist per process. Tests must share a single instance or use `MockInferenceBackend`.
