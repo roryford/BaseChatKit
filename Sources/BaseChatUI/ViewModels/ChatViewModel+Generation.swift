@@ -252,7 +252,7 @@ extension ChatViewModel {
         // Keep the message if it has visible text OR thinking content — a thinking-only
         // response (no visible text but `.thinking` parts present) is still meaningful.
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            let hasThinkingContent = messages[idx].contentParts.contains { $0.thinkingContent != nil }
+            let hasThinkingContent = messages[idx].contentParts.contains(where: { $0.thinkingContent != nil })
             do {
                 if !messages[idx].hasVisibleContent && !hasThinkingContent {
                     messages.remove(at: idx)

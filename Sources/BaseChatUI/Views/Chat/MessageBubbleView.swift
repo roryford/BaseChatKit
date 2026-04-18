@@ -76,7 +76,7 @@ public struct MessageBubbleView: View {
             // (no visible text, no thinking parts). Once a thinking part has been
             // inserted — even as an empty placeholder — render MessagePartsView so
             // ThinkingBlockView can show its "Thinking…" label in-bubble.
-            let hasThinkingParts = message.contentParts.contains { $0.thinkingContent != nil }
+            let hasThinkingParts = message.contentParts.contains(where: { $0.thinkingContent != nil })
             if !message.hasVisibleContent && !hasThinkingParts && isStreaming {
                 streamingPlaceholder
             } else {
