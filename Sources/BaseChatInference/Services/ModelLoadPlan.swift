@@ -295,6 +295,31 @@ public struct ModelLoadPlan: Sendable {
         return ModelLoadPlan(inputs: inputs, outcome: outcome)
     }
 
+    /// Quick "can this device probably run a model of this size?" check for pre-download
+    /// UI recommendation paths (badges, tier sorting, variant suggestion).
+    ///
+    /// Uses the `.resident` strategy — pessimistic about RAM cost — so the UI stays
+    /// conservative when telling users which downloads will fit. Load-time gating uses
+    /// the full `compute(for:requestedContextSize:strategy:)` against the backend's true
+    /// memory strategy, which may be more permissive (e.g., `.mappable` for GGUF).
+    public static func canRunModel(sizeBytes: UInt64, physicalMemoryBytes: UInt64) -> Bool {
+        let plan = compute(inputs: Inputs(
+            modelFileSize: sizeBytes,
+            memoryStrategy: .resident,
+            requestedContextSize: 2048,
+            trainedContextLength: nil,
+            kvBytesPerToken: GGUFKVCacheEstimator.legacyFallbackBytesPerToken,
+            availableMemoryBytes: physicalMemoryBytes,
+            physicalMemoryBytes: physicalMemoryBytes,
+            absoluteContextCeiling: 128_000,
+            headroomFraction: 0.40
+        ))
+        // .allow only — .warn means "might fit with pressure", which is not a
+        // pre-download recommendation. Tier sorting in the UI distinguishes
+        // comfortable-fit from borderline by probing at 80% size.
+        return plan.verdict == .allow
+    }
+
     /// For cloud backends with no local KV cache. `effectiveContextSize` is purely
     /// informational — cloud providers enforce their own limits server-side.
     public static func cloud(requestedContextSize: Int = 0) -> ModelLoadPlan {

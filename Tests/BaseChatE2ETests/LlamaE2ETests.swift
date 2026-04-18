@@ -266,17 +266,24 @@ final class LlamaE2ETests: XCTestCase {
         let trainedContext = try XCTUnwrap(model.detectedContextLength)
         let estimatedKVBytesPerToken = try XCTUnwrap(model.estimatedKVBytesPerToken)
         let availableMemory = DeviceCapabilityService.queryAvailableMemory()
+        let physicalMemory = ProcessInfo.processInfo.physicalMemory
 
-        let architecturalClamp = DeviceCapabilityService.safeContextSize(
-            for: trainedContext,
-            availableMemoryBytes: availableMemory,
-            estimatedKVBytesPerToken: estimatedKVBytesPerToken
-        )
-        let legacyClamp = DeviceCapabilityService.safeContextSize(
-            for: trainedContext,
-            availableMemoryBytes: availableMemory,
-            estimatedKVBytesPerToken: GGUFKVCacheEstimator.legacyFallbackBytesPerToken
-        )
+        func planContext(kvBytesPerToken: UInt64) -> Int {
+            ModelLoadPlan.compute(inputs: ModelLoadPlan.Inputs(
+                modelFileSize: model.fileSize,
+                memoryStrategy: .mappable,
+                requestedContextSize: trainedContext,
+                trainedContextLength: trainedContext,
+                kvBytesPerToken: kvBytesPerToken,
+                availableMemoryBytes: availableMemory,
+                physicalMemoryBytes: physicalMemory,
+                absoluteContextCeiling: 128_000,
+                headroomFraction: 0.40
+            )).effectiveContextSize
+        }
+
+        let architecturalClamp = planContext(kvBytesPerToken: estimatedKVBytesPerToken)
+        let legacyClamp = planContext(kvBytesPerToken: GGUFKVCacheEstimator.legacyFallbackBytesPerToken)
 
         if architecturalClamp == legacyClamp {
             throw XCTSkip(
