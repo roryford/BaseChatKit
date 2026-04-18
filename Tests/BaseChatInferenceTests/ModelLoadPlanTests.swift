@@ -561,6 +561,168 @@ final class ModelLoadPlanTests: XCTestCase {
         // boundary case below would silently flip from false to true.
         XCTAssertFalse(ModelLoadPlan.canRunModel(sizeBytes: 6 * oneGB, physicalMemoryBytes: 4 * oneGB))
     }
+
+    // MARK: - Saturating-arithmetic edges (W2)
+
+    /// Available memory well below the resident budget must not underflow
+    /// `UInt64`. The saturating-subtraction branch around line 162 guards
+    /// this. A regression that accidentally uses wrapping subtraction would
+    /// produce a kvBudget of ~18 exabytes and silently `.allow` everything.
+    func test_nearZeroMemory_saturatingSubtractionDoesNotUnderflow() {
+        // 4 GB model, mappable (resident budget 1 GB), 1 KB available.
+        // reserveAfterHeadroom = 1000 * 0.6 = 600 bytes.
+        // residentBudget (1 GB) > reserveAfterHeadroom (600 B) → kvBudget == 0.
+        let inputs = makeInputs(
+            modelFileSize: 4 * oneGB,
+            strategy: .mappable,
+            requested: 4096,
+            trained: 8192,
+            kvBytesPerToken: 8_192,
+            available: 1_000
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+
+        // effective is floored to 1 (not a huge wrapped number).
+        XCTAssertEqual(plan.effectiveContextSize, 1,
+                       "Effective context must floor at 1, not wrap from UInt64 underflow")
+        // KV = 1 * 8_192 = 8_192. Total = resident (≤1 GB) + 8 KB, which is
+        // vastly greater than the 1 000 B available → .deny.
+        XCTAssertEqual(plan.verdict, .deny)
+        // And critically, totalEstimatedBytes stays a sane number — not
+        // anywhere near UInt64.max that an underflow would produce.
+        XCTAssertLessThan(plan.outcome.totalEstimatedBytes, 2 * oneGB,
+                          "Total must not contain a wrapped-underflow value")
+    }
+
+    /// `kvBytesPerToken == 0` sets `memoryCeiling = Int.max`, which is the
+    /// div-by-zero guard at line 168. A regression that made memoryCeiling
+    /// small (e.g., 0) would falsely clamp every context to 1. A regression
+    /// that dropped the guard would crash. Verify the verdict stays sensible:
+    /// the estimator never pretends zero KV is unlimited free memory.
+    func test_kvBytesPerTokenZero_memoryCeilingIntMax_verdictReflectsOnlyResident() {
+        // Modest resident cost, no KV cost. Should be freely .allow — and
+        // effective context == requested, because memoryCeiling is Int.max.
+        let inputs = makeInputs(
+            modelFileSize: 100_000_000,
+            strategy: .mappable,
+            requested: 8192,
+            trained: 16_384,
+            kvBytesPerToken: 0,
+            available: 4 * oneGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+
+        XCTAssertEqual(plan.effectiveContextSize, 8192)
+        XCTAssertEqual(plan.verdict, .allow)
+        XCTAssertEqual(plan.outcome.estimatedKVBytes, 0)
+        // No memoryCeilingReached reason when the kv-divisor path is stubbed out.
+        let hasMemoryReason = plan.reasons.contains { reason in
+            if case .memoryCeilingReached = reason { return true }
+            return false
+        }
+        XCTAssertFalse(hasMemoryReason,
+                       "kvBytesPerToken == 0 must not surface a memoryCeilingReached reason")
+    }
+
+    /// `kvBytesPerToken == 0` with resident overrunning available must still
+    /// `.deny` — the Int.max ceiling isn't a free pass. Verifies the verdict
+    /// is driven by total cost, not just the ceiling.
+    func test_kvBytesPerTokenZero_residentOverrunsAvailable_stillDenies() {
+        let inputs = makeInputs(
+            modelFileSize: 16 * oneGB,
+            strategy: .resident,
+            requested: 8192,
+            trained: 16_384,
+            kvBytesPerToken: 0,
+            available: 2 * oneGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+
+        XCTAssertEqual(plan.verdict, .deny,
+                       "kvBytesPerToken == 0 must not mask an insufficient-resident deny")
+        let hasInsufficientResident = plan.reasons.contains { reason in
+            if case .insufficientResident = reason { return true }
+            return false
+        }
+        XCTAssertTrue(hasInsufficientResident,
+                      "Expected .insufficientResident reason; got \(plan.reasons)")
+    }
+
+    /// 70B-class model (~140 GB weights, ~400 KB/token KV) on a 4 GB device
+    /// must never `.allow`. This is the "catastrophically wrong" case — if
+    /// anything in the plan silently permits it, users on small devices see
+    /// OOM crashes with no upstream warning.
+    ///
+    /// Uses the `.resident` strategy because that's the path where
+    /// `estimatedResidentBytes` actually tracks the file size. Under
+    /// `.mappable`, resident caps at 1 GB regardless of file size — a
+    /// separate heuristic concern that is out of scope for this test.
+    /// (See report: the mappable heuristic under-estimates for huge files
+    /// and can silently `.allow` a 140 GB file; not fixed here.)
+    /// Companion to the `.resident` case above. Under `.mappable`, a 140 GB
+    /// file's resident estimate caps at `min(fileSize/4, 1 GB) == 1 GB`
+    /// regardless of the file being 140 × the available RAM. The plan then
+    /// computes total ≈ 1 GB (resident) + a few hundred MB (KV) and returns
+    /// `.allow` — silently telling a user on a 4 GB device that a 70B model
+    /// will load fine.
+    ///
+    /// This test PINS the current (broken) behavior so a good-faith fix
+    /// — e.g., scaling `residentBudget` by `fileSize / availableMemory`, or
+    /// clamping on raw `fileSize > 2 * available` regardless of strategy —
+    /// will cause the test to fail and force an explicit update.
+    ///
+    // FIXME: file a GitHub issue and replace this URL — `.mappable` residentBudget
+    // caps at min(fileSize/4, 1 GB), so huge models on small devices are silently
+    // allowed. When fixed, flip this test's expectation to `.deny` and remove the
+    // FIXME.
+    func test_70BModelOn4GBDevice_mappableStrategy_currentlyAllowsDespiteImpossibleFit() {
+        let seventyBBytes: UInt64 = 140 * oneGB
+        let fourGB: UInt64 = 4 * oneGB
+        let inputs = makeInputs(
+            modelFileSize: seventyBBytes,
+            strategy: .mappable,                   // residentBudget caps at 1 GB
+            requested: 2048,
+            trained: 131_072,
+            kvBytesPerToken: 400_000,
+            available: fourGB,
+            physical: fourGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+
+        // Production bug: this should be .deny but is currently .allow because
+        // residentBudget under .mappable is capped to 1 GB regardless of how
+        // much larger the file is than available memory.
+        XCTAssertEqual(plan.verdict, .allow,
+                       "Current .mappable heuristic allows 140 GB file on 4 GB device (bug). If this assertion fails because the bug was fixed, flip to .deny and remove the FIXME above.")
+        // Pin the underestimate: resident estimate is ~1 GB, not the ~140 GB
+        // the file actually implies. This inequality is what a fix should make
+        // false.
+        XCTAssertLessThanOrEqual(plan.outcome.estimatedResidentBytes, oneGB + 1,
+                                 "residentBudget under .mappable currently caps at 1 GB; a fix should grow this with fileSize")
+    }
+
+    func test_70BModelOn4GBDevice_residentStrategy_neverAllows() {
+        // 70B at ~4-bit quant ~ 40 GB file. Use a generous 140 GB upper bound
+        // to also cover fp16 distributions.
+        let seventyBBytes: UInt64 = 140 * oneGB
+        let fourGB: UInt64 = 4 * oneGB
+        let inputs = makeInputs(
+            modelFileSize: seventyBBytes,
+            strategy: .resident,                   // residentBudget == file size
+            requested: 2048,                       // small context — favours .allow
+            trained: 131_072,
+            kvBytesPerToken: 400_000,              // 70B-ish architectural KV
+            available: fourGB,
+            physical: fourGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+
+        XCTAssertNotEqual(plan.verdict, .allow,
+                          "70B-class on 4 GB must never .allow; got \(plan.verdict) with total=\(plan.outcome.totalEstimatedBytes)")
+        // Stronger: it should be a flat deny — .warn would still be wrong
+        // here, because a 140 GB file cannot fit with only 4 GB resident.
+        XCTAssertEqual(plan.verdict, .deny)
+    }
 }
 
 // MARK: - Convenience accessor (test-scoped, avoids repeating `plan.outcome.totalEstimatedBytes`)
