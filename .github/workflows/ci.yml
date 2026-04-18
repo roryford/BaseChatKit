@@ -52,7 +52,7 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-spm-
 
       # CI smoke profile (GitHub macOS Apple Silicon runners):
-      # - Runs BaseChatCoreTests + BaseChatUITests + BaseChatBackendsTests.
+      # - Runs BaseChatCoreTests + BaseChatInferenceTests + BaseChatUITests + BaseChatBackendsTests.
       # - --disable-default-traits skips MLX (default-enabled) to avoid metallib
       #   crashes in CI — Metal shaders are only compiled by Xcode.
       # - BaseChatBackendsTests without traits runs only CI-safe cloud/SSE tests.
@@ -66,6 +66,9 @@ jobs:
 
       - name: Test — Core
         run: swift test --filter BaseChatCoreTests --disable-default-traits
+
+      - name: Test — Inference
+        run: swift test --filter BaseChatInferenceTests --disable-default-traits
 
       - name: Test — UI
         run: swift test --filter BaseChatUITests --disable-default-traits
