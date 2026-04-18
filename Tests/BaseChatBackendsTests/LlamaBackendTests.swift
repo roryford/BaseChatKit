@@ -458,6 +458,70 @@ final class LlamaBackendTests: XCTestCase {
         XCTAssertLessThan(short, long, "Longer text should produce a higher token count")
     }
 
+    // MARK: - countTokens (TokenCountingBackend)
+
+    /// `countTokens` must throw when called before any model is loaded, because
+    /// the vocab pointer is nil and there is nothing to tokenize against.
+    ///
+    /// Sabotage check: if `countTokens` silently fell back to the heuristic
+    /// instead of throwing, this test would fail (no error thrown).
+    func test_countTokens_withoutModel_throws() {
+        let backend = LlamaBackend()
+        XCTAssertFalse(backend.isModelLoaded)
+        XCTAssertThrowsError(try backend.countTokens("hello world")) { error in
+            guard case InferenceError.inferenceFailure = error else {
+                XCTFail("Expected InferenceError.inferenceFailure, got \(error)")
+                return
+            }
+        }
+    }
+
+    /// When a real GGUF model is loaded, `countTokens` must return a positive
+    /// and plausible count — not the heuristic fallback and not zero.
+    ///
+    /// The assertion checks lower bound only; exact token counts are
+    /// model-specific and change with vocabulary.
+    ///
+    /// Sabotage check: if `countTokens` were hardcoded to return 1 for all
+    /// input, `XCTAssertGreaterThan(count, 1)` would fail.
+    func test_countTokens_withLoadedModel_returnsPlausibleCount() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip(
+                "No GGUF model on disk. Place a `.gguf` file in ~/Documents/Models/ to run this test."
+            )
+        }
+
+        let backend = LlamaBackend()
+        addTeardownBlock { await backend.unloadAndWait() }
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 1024))
+
+        // A multi-word English phrase typically produces several tokens.
+        let count = try backend.countTokens("The quick brown fox jumps over the lazy dog.")
+        XCTAssertGreaterThan(count, 1,
+                             "A non-trivial sentence must produce more than one token")
+        // Rough sanity bound: BPE models compress ~4 chars/token on average English.
+        // 45-character phrase → at most ~30 tokens even for a small vocab.
+        XCTAssertLessThan(count, 30,
+                          "Token count seems implausibly large — possible tokenizer bug")
+    }
+
+    /// `countTokens` must be consistent: calling it twice on the same string
+    /// must return the same value (pure vocabulary lookup, no stochastic state).
+    func test_countTokens_idempotent_withLoadedModel() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip("No GGUF model on disk.")
+        }
+
+        let backend = LlamaBackend()
+        addTeardownBlock { await backend.unloadAndWait() }
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 1024))
+
+        let text = "Consistency is key."
+        let first = try backend.countTokens(text)
+        let second = try backend.countTokens(text)
+        XCTAssertEqual(first, second, "countTokens must be deterministic")
+    }
+
     // MARK: - Backend Contract
 
     func test_contract_allInvariants() {
