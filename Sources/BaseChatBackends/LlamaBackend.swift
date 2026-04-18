@@ -766,16 +766,23 @@ extension LlamaBackend: TokenCountingBackend {
     /// - Note: Call only after a successful `loadModel`. The model pointer is guarded
     ///   under `stateLock` to prevent a use-after-free race with `unloadModel()`.
     public func countTokens(_ text: String) throws -> Int {
-        // Read vocab under stateLock to avoid a use-after-free race with unloadModel().
-        let currentVocab = withStateLock { vocab }
-        guard currentVocab != nil else {
+        // Snapshot the vocab pointer under stateLock and use it directly for
+        // llama_tokenize. Without this snapshot, calling tokenize() outside the
+        // lock would re-read `self.vocab` and race with unloadModel() setting it
+        // to nil and freeing the backing model — a use-after-free crash.
+        // Holding the lock only for the snapshot (not the whole C call) keeps
+        // `unloadModel()` responsive while still preventing the race.
+        guard let currentVocab = withStateLock({ vocab }) else {
             throw InferenceError.inferenceFailure("countTokens called before model was loaded")
         }
-        let tokens = tokenize(text, addBos: true)
-        guard !tokens.isEmpty || text.isEmpty else {
+        let utf8 = text.utf8CString
+        let maxTokens = Int32(utf8.count) + 1  // +1 for BOS
+        var tokens = [llama_token](repeating: 0, count: Int(maxTokens))
+        let count = llama_tokenize(currentVocab, text, Int32(text.utf8.count), &tokens, maxTokens, true, false)
+        guard count >= 0 || text.isEmpty else {
             throw InferenceError.inferenceFailure("countTokens: llama_tokenize failed for text of length \(text.utf8.count)")
         }
-        return tokens.count
+        return text.isEmpty ? 0 : Int(count)
     }
 }
 #endif

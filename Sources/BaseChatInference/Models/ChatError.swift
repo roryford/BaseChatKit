@@ -61,6 +61,10 @@ public struct ChatError: Identifiable, Sendable {
                 switch inference {
                 case .modelNotFound, .memoryInsufficient:
                     recovery = .selectModel
+                case .contextExhausted:
+                    // The conversation exceeds the model's context window.
+                    // Prompt the user to switch to a model with a larger context.
+                    recovery = .selectModel
                 default:
                     recovery = .dismissOnly
                 }

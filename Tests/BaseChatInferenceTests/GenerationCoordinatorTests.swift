@@ -671,7 +671,7 @@ private final class NilBackendProvider: GenerationContextProvider {
 /// call (FIFO). Once exhausted the last value is repeated.
 /// `requiresPromptTemplate = true` so the coordinator takes the exact-preflight
 /// path instead of the cloud/MLX fallback path.
-final class TokenCountingMockBackend: InferenceBackend, TokenCountingBackend, @unchecked Sendable {
+private final class TokenCountingMockBackend: InferenceBackend, TokenCountingBackend, @unchecked Sendable {
 
     // InferenceBackend
     var isModelLoaded: Bool = true
@@ -731,7 +731,7 @@ final class TokenCountingMockBackend: InferenceBackend, TokenCountingBackend, @u
 
 /// A fake provider that vends a `TokenCountingMockBackend`.
 @MainActor
-final class TokenCountingFakeProvider: GenerationContextProvider {
+private final class TokenCountingFakeProvider: GenerationContextProvider {
     let backend: TokenCountingMockBackend
     var promptTemplate: PromptTemplate = .chatML
 
