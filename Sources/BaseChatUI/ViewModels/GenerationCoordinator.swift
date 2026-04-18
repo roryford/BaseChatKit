@@ -400,19 +400,15 @@ final class GenerationCoordinator {
 
     // MARK: - Private Helpers
 
-    /// Launches post-generation tasks sequentially off `@MainActor`.
+    /// Launches post-generation tasks sequentially in a `Task` that inherits `@MainActor` isolation.
     ///
-    /// A throwing task records its error in ``backgroundTaskError`` and execution
-    /// continues with the next task. Cancellation via ``backgroundTask`` exits the loop.
+    /// A throwing task records its error via ``onSetBackgroundTaskError`` and execution
+    /// continues with the next task. Cancellation via ``onSetBackgroundTask`` exits the loop.
     private func runPostGenerationTasks(message: ChatMessageRecord, session: ChatSessionRecord) {
         let tasks = postGenerationTasks()
         guard !tasks.isEmpty else { return }
 
-        // Task.detached breaks the @MainActor inheritance so task.run() executes
-        // off the main actor, as PostGenerationTask.run() is documented to do.
-        // PostGenerationTask, ChatMessageRecord, and ChatSessionRecord are all
-        // Sendable, so the capture is safe under Swift 6 strict concurrency.
-        let bgTask = Task.detached { [weak self, tasks, message, session] in
+        let bgTask = Task { [weak self, tasks, message, session] in
             for task in tasks {
                 guard !Task.isCancelled else { break }
                 do {
@@ -420,7 +416,7 @@ final class GenerationCoordinator {
                 } catch is CancellationError {
                     break
                 } catch {
-                    await MainActor.run { self?.onSetBackgroundTaskError(error) }
+                    self?.onSetBackgroundTaskError(error)
                 }
             }
         }
