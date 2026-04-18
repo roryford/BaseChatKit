@@ -12,6 +12,7 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
 
     // Configurable behavior
     public var tokensToYield: [String] = ["Hello", " world"]
+    public var thinkingTokensToYield: [String] = []
     public var shouldThrowOnGenerate: Error? = nil
     public var shouldThrowOnLoad: Error? = nil
 
@@ -85,6 +86,8 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         let tokens = tokensToYield
         let toolCalls = scriptedToolCalls
 
+        let thinkingTokens = thinkingTokensToYield
+
         let stream = AsyncThrowingStream<GenerationEvent, Error> { [self] continuation in
             continuationLock.lock()
             self.activeContinuation = continuation
@@ -95,6 +98,13 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
                 self.continuationLock.unlock()
             }
             Task {
+                for t in thinkingTokens {
+                    if Task.isCancelled { break }
+                    continuation.yield(.thinkingToken(t))
+                }
+                if !thinkingTokens.isEmpty && !Task.isCancelled {
+                    continuation.yield(.thinkingComplete)
+                }
                 for token in tokens {
                     if Task.isCancelled { break }
                     continuation.yield(.token(token))

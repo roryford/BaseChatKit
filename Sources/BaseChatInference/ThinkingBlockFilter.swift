@@ -1,75 +1,76 @@
-/// Stateful, chunk-safe filter that strips `<think>...</think>` reasoning blocks
-/// from streamed token output.
+/// Stateful, chunk-safe parser that separates reasoning from visible text.
 ///
-/// Tokens arrive as arbitrary-length strings that may split a tag across boundaries.
-/// The filter buffers incomplete tag prefixes until enough characters arrive to
-/// confirm or reject a match.
-public struct ThinkingBlockFilter {
+/// Emits `[GenerationEvent]` from each chunk rather than a plain `String`,
+/// allowing callers to route thinking content separately from visible content.
+/// Parameterized by `ThinkingMarkers` so the same logic handles both
+/// `<think>`/`</think>` (Qwen3, DeepSeek-R1) and custom model formats.
+public struct ThinkingParser {
+    public let markers: ThinkingMarkers
     private var depth = 0
     private var buffer = ""
 
-    public init() {}
-
-    /// Process one token chunk. Returns the visible portion (may be empty).
-    public mutating func process(_ chunk: String) -> String {
-        buffer += chunk
-        return flush()
+    public init(markers: ThinkingMarkers = .qwen3) {
+        self.markers = markers
     }
 
-    private mutating func flush() -> String {
-        var output = ""
+    /// Process a chunk of streamed text. Returns a mix of `.token`,
+    /// `.thinkingToken`, and `.thinkingComplete` events.
+    public mutating func process(_ chunk: String) -> [GenerationEvent] {
+        buffer += chunk
+        var events: [GenerationEvent] = []
 
-        while !buffer.isEmpty {
-            if depth == 0 {
-                // Visible mode: emit text up to the next '<'
-                if let angleIdx = buffer.firstIndex(of: "<") {
-                    // Emit everything before the '<'
-                    output += buffer[buffer.startIndex..<angleIdx]
-                    buffer = String(buffer[angleIdx...])
+        while true {
+            let tag = depth > 0 ? markers.close : markers.open
 
-                    // Now buffer starts with '<'; only an opening think tag is special
-                    if buffer.hasPrefix("<think>") {
-                        depth += 1
-                        buffer = String(buffer.dropFirst("<think>".count))
-                    } else if "<think>".hasPrefix(buffer) {
-                        // Partial opening tag prefix — wait for more input
-                        break
-                    } else {
-                        // Any other '<' sequence, including '</think>', is visible text
-                        output += "<"
-                        buffer = String(buffer.dropFirst())
+            if let range = buffer.range(of: tag) {
+                // Emit everything before the tag as the current mode's event type
+                let before = String(buffer[..<range.lowerBound])
+                if !before.isEmpty {
+                    events.append(depth > 0 ? .thinkingToken(before) : .token(before))
+                }
+
+                // Transition state
+                if depth > 0 {
+                    depth -= 1
+                    if depth == 0 {
+                        // Only fire thinkingComplete on 1→0 transition (not for nested close tags)
+                        events.append(.thinkingComplete)
                     }
                 } else {
-                    // No '<' in buffer — all visible
-                    output += buffer
-                    buffer = ""
+                    depth += 1
                 }
+
+                buffer = String(buffer[range.upperBound...])
             } else {
-                // Suppressed mode: skip everything, only look for tag boundaries
-                if let angleIdx = buffer.firstIndex(of: "<") {
-                    // Discard text before '<'
-                    buffer = String(buffer[angleIdx...])
-
-                    if buffer.hasPrefix("<think>") {
-                        depth += 1
-                        buffer = String(buffer.dropFirst("<think>".count))
-                    } else if buffer.hasPrefix("</think>") {
-                        depth = max(0, depth - 1)
-                        buffer = String(buffer.dropFirst("</think>".count))
-                    } else if "<think>".hasPrefix(buffer) || "</think>".hasPrefix(buffer) {
-                        // Partial prefix — wait for more input
-                        break
-                    } else {
-                        // Non-think '<' inside a thinking block — swallow it
-                        buffer = String(buffer.dropFirst())
-                    }
-                } else {
-                    // No '<' — all suppressed, discard
-                    buffer = ""
-                }
+                break
             }
         }
 
-        return output
+        // Hold back bytes that could be the start of a partial open or close tag.
+        // Size = max(open.count, close.count) to handle either partial tag.
+        let holdback = markers.holdback
+        if buffer.count > holdback {
+            let safeCount = buffer.count - holdback
+            let confirmed = String(buffer.prefix(safeCount))
+            buffer = String(buffer.suffix(holdback))
+            if !confirmed.isEmpty {
+                events.append(depth > 0 ? .thinkingToken(confirmed) : .token(confirmed))
+            }
+        }
+
+        return events
+    }
+
+    /// Flush the held-back buffer at stream end. Call once after the generation loop ends.
+    /// Returns `.thinkingToken` if inside an unclosed block, `.token` otherwise.
+    public mutating func finalize() -> [GenerationEvent] {
+        guard !buffer.isEmpty else { return [] }
+        let remaining = buffer
+        buffer = ""
+        return [depth > 0 ? .thinkingToken(remaining) : .token(remaining)]
     }
 }
+
+@available(*, deprecated, renamed: "ThinkingParser",
+    message: "Return type changed from String to [GenerationEvent]. Use ThinkingParser directly.")
+public typealias ThinkingBlockFilter = ThinkingParser

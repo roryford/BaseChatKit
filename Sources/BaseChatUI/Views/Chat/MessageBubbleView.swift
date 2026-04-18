@@ -72,17 +72,22 @@ public struct MessageBubbleView: View {
 
     private var assistantBubble: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if message.contentParts.isEmpty && isStreaming {
+            // Show the typing placeholder only when there is nothing at all to display
+            // (no visible text, no thinking parts). Once a thinking part has been
+            // inserted — even as an empty placeholder — render MessagePartsView so
+            // ThinkingBlockView can show its "Thinking…" label in-bubble.
+            let hasThinkingParts = message.contentParts.contains(where: { $0.thinkingContent != nil })
+            if !message.hasVisibleContent && !hasThinkingParts && isStreaming {
                 streamingPlaceholder
             } else {
-                MessagePartsView(parts: message.contentParts, role: .assistant)
+                MessagePartsView(parts: message.contentParts, role: .assistant, isStreaming: isStreaming)
             }
 
-            if isStreaming && !message.contentParts.isEmpty {
+            if isStreaming && message.hasVisibleContent {
                 streamingIndicator
             }
 
-            if !isStreaming || !message.contentParts.isEmpty {
+            if !isStreaming || message.hasVisibleContent {
                 HStack(spacing: 6) {
                     timestampLabel
                         .foregroundStyle(.secondary)

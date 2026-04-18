@@ -305,6 +305,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 tokens: tokens,
                 maxTokens: maxTokens,
                 config: config,
+                markers: config.thinkingMarkers,
                 isCancelled: {
                     Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent)
                 },

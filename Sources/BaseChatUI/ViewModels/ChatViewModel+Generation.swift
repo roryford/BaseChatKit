@@ -132,6 +132,7 @@ extension ChatViewModel {
                     maxBufferedCharacters: streamingBatchCharacterLimit
                 )
                 var consumer = GenerationStreamConsumer(loopDetectionEnabled: self.loopDetectionEnabled)
+                var thinkingAccumulator = ""
 
                 do {
                     eventLoop: for try await event in stream.events {
@@ -169,6 +170,37 @@ extension ChatViewModel {
                             // implement a tool dispatch loop. Apps that need tool calling
                             // should drive generation directly via InferenceService.
                             break
+
+                        case .appendThinkingText(let text):
+                            let isFirstThinkingFragment = thinkingAccumulator.isEmpty
+                            thinkingAccumulator += text
+                            if isFirstThinkingFragment {
+                                // Insert a placeholder `.thinking("")` part immediately so the
+                                // UI can render the "Thinking…" label during the reasoning phase
+                                // rather than staying on the generic typing placeholder.
+                                self.mutateMessage(id: messageID) { msg in
+                                    if msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) == nil {
+                                        let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
+                                        msg.contentParts.insert(.thinking(""), at: insertAt)
+                                    }
+                                }
+                            }
+
+                        case .finalizeThinking:
+                            let block = thinkingAccumulator
+                            thinkingAccumulator = ""
+                            guard !block.isEmpty else { break }
+                            self.mutateMessage(id: messageID) { msg in
+                                // Append to any existing thinking part so multiple <think>…</think>
+                                // blocks within one response are concatenated into a single part.
+                                if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
+                                    let existing = msg.contentParts[idx].thinkingContent ?? ""
+                                    msg.contentParts[idx] = .thinking(existing.isEmpty ? block : existing + "\n\n" + block)
+                                } else {
+                                    let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
+                                    msg.contentParts.insert(.thinking(block), at: insertAt)
+                                }
+                            }
                         }
                     }
                 } catch {
@@ -181,6 +213,22 @@ extension ChatViewModel {
                 // Flush remaining buffered tokens after stream ends (normal, error, or cancellation).
                 if let batch = batcher.flush(now: ContinuousClock.now) {
                     self.mutateMessage(id: messageID) { $0.content += batch }
+                }
+
+                // Finalize an unclosed thinking block — a model may emit <think>…
+                // without a closing tag if generation is cut short.
+                if !thinkingAccumulator.isEmpty {
+                    let block = thinkingAccumulator
+                    thinkingAccumulator = ""
+                    self.mutateMessage(id: messageID) { msg in
+                        if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
+                            let existing = msg.contentParts[idx].thinkingContent ?? ""
+                            msg.contentParts[idx] = .thinking(existing.isEmpty ? block : existing + "\n\n" + block)
+                        } else {
+                            let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
+                            msg.contentParts.insert(.thinking(block), at: insertAt)
+                        }
+                    }
                 }
             }
 
@@ -201,9 +249,12 @@ extension ChatViewModel {
         }
 
         // Persist the completed assistant message.
+        // Keep the message if it has visible text OR thinking content — a thinking-only
+        // response (no visible text but `.thinking` parts present) is still meaningful.
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            let hasThinkingContent = messages[idx].contentParts.contains(where: { $0.thinkingContent != nil })
             do {
-                if messages[idx].content.isEmpty {
+                if !messages[idx].hasVisibleContent && !hasThinkingContent {
                     messages.remove(at: idx)
                 } else {
                     try saveMessage(messages[idx])
@@ -217,10 +268,9 @@ extension ChatViewModel {
         // After the first assistant response on Foundation, nudge the user to
         // consider downloading a local model for longer context. Only show once
         // per session and only when Foundation is the active backend.
-        let assistantContent = messages.first(where: { $0.id == messageID })?.content ?? ""
         if BaseChatConfiguration.shared.features.showUpgradeHint,
            !showUpgradeHint,
-           !assistantContent.isEmpty,
+           messages.first(where: { $0.id == messageID })?.hasVisibleContent == true,
            activeBackendName == "Apple",
            messages.filter({ $0.role == .assistant }).count == 1 {
             showUpgradeHint = true
@@ -231,7 +281,7 @@ extension ChatViewModel {
 
         // Fire post-generation tasks off @MainActor if we have a non-empty assistant message.
         if let completedMessage = messages.first(where: { $0.id == messageID }),
-           !completedMessage.content.isEmpty,
+           completedMessage.hasVisibleContent,
            let session = activeSession {
             runPostGenerationTasks(message: completedMessage, session: session)
         }

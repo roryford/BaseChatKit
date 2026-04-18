@@ -186,6 +186,7 @@ final class ToolCallContractTests: XCTestCase {
             case .token(let text): tokens.append(text)
             case .toolCall(let call): toolCalls.append(call)
             case .usage: break
+            case .thinkingToken, .thinkingComplete: break
             }
         }
 
@@ -252,6 +253,7 @@ final class ToolCallContractTests: XCTestCase {
             case .token(let t): tokens.append(t)
             case .toolCall(let c): toolCalls.append(c)
             case .usage: break
+            case .thinkingToken, .thinkingComplete: break
             }
         }
 

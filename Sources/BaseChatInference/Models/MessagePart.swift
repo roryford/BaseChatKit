@@ -14,6 +14,8 @@ import Foundation
 public enum MessagePart: Codable, Hashable, Sendable {
     case text(String)
     case image(data: Data, mimeType: String)
+    /// Accumulated model reasoning. Excluded from context window (textContent returns nil).
+    case thinking(String)
 }
 
 extension MessagePart {
@@ -21,6 +23,11 @@ extension MessagePart {
     /// The plain-text content of this part, or `nil` for non-text parts.
     public var textContent: String? {
         if case .text(let t) = self { return t }
+        return nil
+    }
+
+    public var thinkingContent: String? {
+        if case .thinking(let t) = self { return t }
         return nil
     }
 }

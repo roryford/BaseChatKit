@@ -24,6 +24,12 @@ public struct GenerationStreamConsumer: Sendable {
 
         case .toolCall(let call):
             return .dispatchToolCall(call)
+
+        case .thinkingToken(let text):
+            return .appendThinkingText(text)
+
+        case .thinkingComplete:
+            return .finalizeThinking
         }
     }
 
@@ -45,5 +51,9 @@ public struct GenerationStreamConsumer: Sendable {
         case recordUsage(prompt: Int, completion: Int)
         /// Execute the requested tool call and feed a ``ToolResult`` back into the conversation.
         case dispatchToolCall(ToolCall)
+        /// Append the text to the current thinking accumulation buffer.
+        case appendThinkingText(String)
+        /// Reasoning block complete — finalize and store the accumulated thinking content.
+        case finalizeThinking
     }
 }
