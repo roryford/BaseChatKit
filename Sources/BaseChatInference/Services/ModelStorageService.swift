@@ -24,12 +24,14 @@ public final class ModelStorageService {
     /// Can be overridden via `baseDirectory` at init time (used in tests).
     public var modelsDirectory: URL {
         if let custom = customDirectory { return custom }
-        guard let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            // documentDirectory is always available on Apple platforms.
-            // Crash here would indicate a fundamental OS problem.
-            preconditionFailure("Documents directory unavailable")
+        let base: URL
+        if let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+            base = documents
+        } else {
+            Log.inference.fault("Documents directory unavailable — falling back to temp directory")
+            base = fileManager.temporaryDirectory
         }
-        return documents.appendingPathComponent(
+        return base.appendingPathComponent(
             BaseChatConfiguration.shared.modelsDirectoryName,
             isDirectory: true
         )

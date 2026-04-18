@@ -32,7 +32,9 @@ final class GenerationCoordinatorTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        coordinator?.stopGeneration()
+        // stopGenerationAndWait() cancels the active task and awaits its completion,
+        // preventing the task's defer block from bleeding into the next test's setUp.
+        await coordinator?.stopGenerationAndWait()
         coordinator = nil
         provider = nil
         try await super.tearDown()
