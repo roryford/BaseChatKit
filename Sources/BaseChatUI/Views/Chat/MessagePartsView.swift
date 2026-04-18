@@ -24,6 +24,11 @@ struct MessagePartsView: View {
 
         case .image(let data, _):
             imageView(data)
+
+        case .thinking:
+            // Thinking parts are not rendered inline in the default message view.
+            // Phase 2 will add a dedicated thinking disclosure UI.
+            EmptyView()
         }
     }
 

@@ -30,6 +30,12 @@ public struct GenerationConfig: Sendable, Codable {
     /// calling.  Defaults to ``ToolChoice/auto``.
     public var toolChoice: ToolChoice
 
+    /// Approximate cap on reasoning tokens. Counts thinkingToken events (≈ one per decoded token).
+    /// nil = no limit. Only enforced by LlamaGenerationDriver; MLX ignores this field.
+    /// Note: lives on GenerationConfig as a per-request hint. Will move to BackendCapabilities
+    /// when a backend-level thinking-capability flag is added.
+    public var maxThinkingTokens: Int?
+
     @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:) instead.")
     public init(
         temperature: Float = 0.7,
@@ -40,7 +46,8 @@ public struct GenerationConfig: Sendable, Codable {
         typicalP: Float? = nil,
         maxOutputTokens: Int? = 2048,
         tools: [ToolDefinition] = [],
-        toolChoice: ToolChoice = .auto
+        toolChoice: ToolChoice = .auto,
+        maxThinkingTokens: Int? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -51,6 +58,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.maxOutputTokens = maxOutputTokens
         self.tools = tools
         self.toolChoice = toolChoice
+        self.maxThinkingTokens = maxThinkingTokens
     }
 
     public init(
@@ -61,7 +69,8 @@ public struct GenerationConfig: Sendable, Codable {
         typicalP: Float? = nil,
         maxOutputTokens: Int? = 2048,
         tools: [ToolDefinition] = [],
-        toolChoice: ToolChoice = .auto
+        toolChoice: ToolChoice = .auto,
+        maxThinkingTokens: Int? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -72,13 +81,14 @@ public struct GenerationConfig: Sendable, Codable {
         self.maxOutputTokens = maxOutputTokens
         self.tools = tools
         self.toolChoice = toolChoice
+        self.maxThinkingTokens = maxThinkingTokens
     }
 
     // MARK: Codable
 
     private enum CodingKeys: String, CodingKey {
         case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
-        case tools, toolChoice
+        case tools, toolChoice, maxThinkingTokens
     }
 
     public init(from decoder: Decoder) throws {
@@ -94,6 +104,7 @@ public struct GenerationConfig: Sendable, Codable {
         // New fields added in v0.10; absent from payloads serialised before their introduction.
         tools = (try c.decodeIfPresent([ToolDefinition].self, forKey: .tools)) ?? []
         toolChoice = (try c.decodeIfPresent(ToolChoice.self, forKey: .toolChoice)) ?? .auto
+        maxThinkingTokens = try c.decodeIfPresent(Int.self, forKey: .maxThinkingTokens)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -107,6 +118,7 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encodeIfPresent(maxOutputTokens, forKey: .maxOutputTokens)
         try c.encode(tools, forKey: .tools)
         try c.encode(toolChoice, forKey: .toolChoice)
+        try c.encodeIfPresent(maxThinkingTokens, forKey: .maxThinkingTokens)
     }
 }
 

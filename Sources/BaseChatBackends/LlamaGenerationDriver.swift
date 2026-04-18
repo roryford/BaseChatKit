@@ -177,13 +177,21 @@ struct LlamaGenerationDriver {
 
             // Decode token to text
             if let text = LlamaTokenization.tokenToString(token, vocab: vocab, invalidUTF8Buffer: &invalidUTF8) {
-                let visible = thinkingFilter.process(text)
-                if !visible.isEmpty {
-                    if isFirstToken {
-                        await MainActor.run { generationStream.setPhase(.streaming) }
-                        isFirstToken = false
+                let events = thinkingFilter.process(text)
+                for evt in events {
+                    switch evt {
+                    case .token(let visible):
+                        if isFirstToken {
+                            await MainActor.run { generationStream.setPhase(.streaming) }
+                            isFirstToken = false
+                        }
+                        continuation.yield(.token(visible))
+                    case .thinkingToken, .thinkingComplete:
+                        // Phase 2 will route thinking events; for now pass them through.
+                        continuation.yield(evt)
+                    default:
+                        break
                     }
-                    continuation.yield(.token(visible))
                 }
             }
 

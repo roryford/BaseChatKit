@@ -17,4 +17,10 @@ public enum GenerationEvent: Sendable, Equatable {
     /// ``GenerationConfig/tools``.  The host is responsible for executing the
     /// call and feeding a ``ToolResult`` back into the conversation.
     case toolCall(ToolCall)
+
+    /// A fragment of model reasoning (inside a thinking block). Streamed during generation.
+    case thinkingToken(String)
+
+    /// Reasoning block complete (depth 1→0 transition). Finalize accumulated thinking content.
+    case thinkingComplete
 }

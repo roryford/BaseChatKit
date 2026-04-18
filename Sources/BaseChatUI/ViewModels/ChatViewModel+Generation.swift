@@ -169,6 +169,11 @@ extension ChatViewModel {
                             // implement a tool dispatch loop. Apps that need tool calling
                             // should drive generation directly via InferenceService.
                             break
+
+                        case .appendThinkingText, .finalizeThinking:
+                            // Thinking rendering is a Phase 2 concern; ChatViewModel defers
+                            // to host apps that opt in to thinking display.
+                            break
                         }
                     }
                 } catch {
