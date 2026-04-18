@@ -20,6 +20,7 @@ public struct ModelLoadPlan: Sendable {
         public let physicalMemoryBytes: UInt64
         public let absoluteContextCeiling: Int
         public let headroomFraction: Double
+        public let appOverheadBytes: UInt64
 
         public init(
             modelFileSize: UInt64,
@@ -30,7 +31,8 @@ public struct ModelLoadPlan: Sendable {
             availableMemoryBytes: UInt64,
             physicalMemoryBytes: UInt64,
             absoluteContextCeiling: Int,
-            headroomFraction: Double
+            headroomFraction: Double,
+            appOverheadBytes: UInt64 = 0
         ) {
             self.modelFileSize = modelFileSize
             self.memoryStrategy = memoryStrategy
@@ -41,6 +43,7 @@ public struct ModelLoadPlan: Sendable {
             self.physicalMemoryBytes = physicalMemoryBytes
             self.absoluteContextCeiling = absoluteContextCeiling
             self.headroomFraction = headroomFraction
+            self.appOverheadBytes = appOverheadBytes
         }
     }
 
@@ -140,6 +143,13 @@ public struct ModelLoadPlan: Sendable {
         let available = inputs.availableMemoryBytes
         let headroom = inputs.headroomFraction
 
+        // Subtract platform app overhead before KV budget math. On iOS the jetsam limit
+        // is below `recommendedMaxWorkingSetSize`; leaving no headroom for SwiftData, UI,
+        // and OS bookkeeping causes SIGKILL. See issue #471.
+        let effective_available = available > inputs.appOverheadBytes
+            ? available - inputs.appOverheadBytes
+            : 0
+
         // Resident budget: full weights for .resident, a mmap-style fraction for .mappable.
         // .external keeps the legacy behaviour of "no local weight memory" — 0 resident.
         let residentBudget: UInt64
@@ -164,7 +174,7 @@ public struct ModelLoadPlan: Sendable {
         // KV budget: what's left of available memory after the resident reserve, minus
         // the caller-specified headroom fraction. Saturating subtraction so we never
         // underflow UInt64 when resident > available * (1 - headroom).
-        let reserveAfterHeadroom = UInt64(Double(available) * (1.0 - headroom))
+        let reserveAfterHeadroom = UInt64(Double(effective_available) * (1.0 - headroom))
         let kvBudget: UInt64 = reserveAfterHeadroom > residentBudget
             ? reserveAfterHeadroom - residentBudget
             : 0
@@ -282,6 +292,18 @@ public struct ModelLoadPlan: Sendable {
             ? model.estimatedKVBytesPerToken!
             : GGUFKVCacheEstimator.legacyFallbackBytesPerToken
 
+        #if os(iOS) || os(visionOS)
+        // 800 MiB headroom for SwiftData, UI, and OS on memory-constrained iOS devices.
+        // iOS jetsam kills apps below `recommendedMaxWorkingSetSize`; this margin keeps
+        // the KV budget inside the true usable ceiling. Not applied on high-RAM iPads
+        // (≥ 12 GB physical) where pressure behaviour is closer to macOS. See #471.
+        let appOverhead: UInt64 = environment.physicalMemoryBytes < 12_884_901_888
+            ? 838_860_800   // 800 MiB
+            : 0
+        #else
+        let appOverhead: UInt64 = 0
+        #endif
+
         let inputs = Inputs(
             modelFileSize: model.fileSize,
             memoryStrategy: strategy,
@@ -291,7 +313,8 @@ public struct ModelLoadPlan: Sendable {
             availableMemoryBytes: environment.availableMemoryBytes(),
             physicalMemoryBytes: environment.physicalMemoryBytes,
             absoluteContextCeiling: absoluteContextCeiling,
-            headroomFraction: headroomFraction
+            headroomFraction: headroomFraction,
+            appOverheadBytes: appOverhead
         )
         return compute(inputs: inputs)
     }
