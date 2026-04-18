@@ -22,6 +22,14 @@ final class GenerationCoordinator {
 
     weak var provider: (any GenerationContextProvider)?
 
+    /// Injected reader for the current thermal state.
+    ///
+    /// Defaults to `ProcessInfo.processInfo.thermalState`. Tests override this
+    /// to exercise the background-priority thermal-drop branch deterministically
+    /// without `@testable import` or `#if DEBUG` hooks. `@Sendable` and
+    /// non-isolated so it is safe under Swift 6 strict concurrency.
+    private let thermalStateProvider: @Sendable () -> ProcessInfo.ThermalState
+
     // MARK: - Queue Types (Private)
 
     private struct QueuedRequest {
@@ -53,7 +61,11 @@ final class GenerationCoordinator {
 
     // MARK: - Initializers
 
-    nonisolated init() {}
+    nonisolated init(
+        thermalStateProvider: @Sendable @escaping () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState }
+    ) {
+        self.thermalStateProvider = thermalStateProvider
+    }
 
     // MARK: - Generation (Non-Queued)
 
@@ -169,7 +181,7 @@ final class GenerationCoordinator {
 
         // Thermal gate: drop background requests under thermal pressure.
         if next.priority == .background {
-            let thermal = ProcessInfo.processInfo.thermalState
+            let thermal = thermalStateProvider()
             if thermal == .serious || thermal == .critical {
                 let throttleError = InferenceError.inferenceFailure("Thermal throttle")
                 Log.inference.warning("Dropping background generation \(next.token): thermal state \(thermal.rawValue)")

@@ -290,8 +290,8 @@ public final class InferenceService {
 // MARK: - GenerationContextProvider Conformance
 
 extension InferenceService: GenerationContextProvider {
-    var currentBackend: (any InferenceBackend)? { lifecycle.backend }
-    var isBackendLoaded: Bool { lifecycle.isModelLoaded }
+    public var currentBackend: (any InferenceBackend)? { lifecycle.backend }
+    public var isBackendLoaded: Bool { lifecycle.isModelLoaded }
 }
 
 // MARK: - Backend Snapshot
