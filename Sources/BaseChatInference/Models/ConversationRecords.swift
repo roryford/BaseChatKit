@@ -70,10 +70,11 @@ public struct ChatMessageRecord: Identifiable, Hashable, Sendable {
         set { contentParts = [.text(newValue)] }
     }
 
-    /// True if the message contains at least one visible text part.
-    /// Use instead of `content.isEmpty` to correctly handle thinking-only responses.
+    /// True if the message contains non-empty visible text.
+    /// Use instead of `content.isEmpty` to correctly handle thinking-only responses
+    /// — a message with only `.thinking` parts (or only empty `.text("")` parts) returns false.
     public var hasVisibleContent: Bool {
-        contentParts.contains { $0.textContent != nil }
+        !content.isEmpty
     }
 
     public init(
