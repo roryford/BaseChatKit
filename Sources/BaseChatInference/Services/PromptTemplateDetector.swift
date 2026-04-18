@@ -60,7 +60,7 @@ struct PromptTemplateDetector {
         switch arch.lowercased() {
         case "mistral": return .mistral
         case "gemma4", "gemma-4": return .gemma4
-        case "gemma", "gemma2": return .gemma
+        case "gemma", "gemma2", "gemma3", "gemma-3": return .gemma
         case "phi", "phi3": return .phi
         // "llama" is too broad — many models (SmolLM2, TinyLlama, etc.) use the
         // LLaMA architecture but train with ChatML. Fall through to chatML default.

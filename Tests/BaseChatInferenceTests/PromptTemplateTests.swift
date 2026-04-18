@@ -247,21 +247,27 @@ final class PromptTemplateTests: XCTestCase {
             systemPrompt: "Be creative."
         )
 
-        XCTAssertTrue(result.contains("Be creative."), "Should contain system prompt")
-        XCTAssertTrue(result.contains("Hello"), "Should contain user message")
+        XCTAssertTrue(
+            result.contains("<|turn>system\nBe creative.<|end_of_turn>"),
+            "System prompt should be wrapped in a dedicated <|turn>system turn"
+        )
+        XCTAssertTrue(
+            result.contains("<|turn>user\nHello<|end_of_turn>"),
+            "User message should be wrapped in its own <|turn>user turn, not merged with system"
+        )
+        XCTAssertTrue(
+            result.hasSuffix("<|turn>model\n"),
+            "Should end with model turn tag"
+        )
 
-        if let turnStart = result.range(of: "<|turn>user\n"),
-           let turnEnd = result.range(of: "<|end_of_turn>") {
-            let content = String(result[turnStart.upperBound..<turnEnd.lowerBound])
-            let systemIndex = content.range(of: "Be creative.")?.lowerBound
-            let userIndex = content.range(of: "Hello")?.lowerBound
-            XCTAssertNotNil(systemIndex, "System prompt should be in the user turn")
-            XCTAssertNotNil(userIndex, "User message should be in the user turn")
-            if let sIdx = systemIndex, let uIdx = userIndex {
-                XCTAssertTrue(sIdx < uIdx, "System prompt should come before user message")
-            }
+        if let systemTurn = result.range(of: "<|turn>system"),
+           let userTurn = result.range(of: "<|turn>user") {
+            XCTAssertTrue(
+                systemTurn.lowerBound < userTurn.lowerBound,
+                "System turn should come before user turn"
+            )
         } else {
-            XCTFail("Expected <|turn>user and <|end_of_turn> delimiters")
+            XCTFail("Expected separate <|turn>system and <|turn>user delimiters")
         }
     }
 
@@ -299,10 +305,22 @@ final class PromptTemplateTests: XCTestCase {
             systemPrompt: nil
         )
 
-        XCTAssertTrue(result.contains("Inject  here"), "<|end_of_turn> should be stripped from content")
-        // Exactly one structural <|end_of_turn> per user turn — the injected one must be gone.
-        let endCount = result.components(separatedBy: "<|end_of_turn>").count - 1
-        XCTAssertEqual(endCount, 1, "User content should have <|end_of_turn> stripped")
+        // Slice the user turn to assert on what actually reached user-controlled
+        // content, rather than counting global delimiters (which would misfire if
+        // a system turn or future structural turn is added).
+        let userPrefix = "<|turn>user\n"
+        guard let userStart = result.range(of: userPrefix)?.upperBound else {
+            return XCTFail("Formatted prompt should contain a <|turn>user prefix")
+        }
+        guard let userEnd = result[userStart...].range(of: "<|end_of_turn>")?.lowerBound else {
+            return XCTFail("Formatted prompt should contain a closing <|end_of_turn> for the user turn")
+        }
+        let userContent = String(result[userStart..<userEnd])
+        XCTAssertEqual(userContent, "Inject  here", "Injected <|end_of_turn> should be stripped from user content")
+        XCTAssertFalse(
+            userContent.contains("<|end_of_turn>"),
+            "Injected structural token must not survive in user content"
+        )
     }
 
     // MARK: - Phi

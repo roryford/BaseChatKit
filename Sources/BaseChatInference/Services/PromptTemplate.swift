@@ -242,30 +242,31 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
     // MARK: - Gemma 4
 
     /// ```
+    /// <|turn>system
+    /// {system}<|end_of_turn>       ← emitted only when systemPrompt is non-empty
     /// <|turn>user
-    /// {system}
-    ///
     /// {content}<|end_of_turn>
     /// <|turn>model
+    /// {content}<|end_of_turn>
+    /// <|turn>model                 ← generation prompt (no closing delimiter)
     /// ```
+    ///
+    /// Unlike Gemma 1/2/3 (which prepend the system prompt to the first user turn),
+    /// Gemma 4 uses an explicit `<|turn>system` turn.
     private func formatGemma4(
         messages: [(role: String, content: String)],
         systemPrompt: String?
     ) -> String {
         var result = ""
 
-        var systemPrefix = ""
         if let systemPrompt, !systemPrompt.isEmpty {
-            systemPrefix = sanitize(systemPrompt) + "\n\n"
+            result += "<|turn>system\n\(sanitize(systemPrompt))<|end_of_turn>\n"
         }
 
-        var isFirstUser = true
         for message in messages {
             switch message.role {
             case "user":
-                let content = isFirstUser ? systemPrefix + sanitize(message.content) : sanitize(message.content)
-                result += "<|turn>user\n\(content)<|end_of_turn>\n"
-                isFirstUser = false
+                result += "<|turn>user\n\(sanitize(message.content))<|end_of_turn>\n"
             case "assistant":
                 result += "<|turn>model\n\(sanitize(message.content))<|end_of_turn>\n"
             default:
