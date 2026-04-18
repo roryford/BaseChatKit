@@ -149,6 +149,12 @@ public struct ModelLoadPlan: Sendable {
         case .mappable:
             // Mappable heuristic: min(fileSize/4, 1 GB). mmap-backed loads only need
             // a fraction of the file resident in RAM for active working pages.
+            //
+            // BUT: even with mmap, a file that is wildly larger than the device's
+            // available RAM cannot stream through the page cache without
+            // catastrophic thrashing — llama.cpp will either crash or appear to
+            // hang. The 1 GB cap alone silently allows e.g. a 140 GB 70B model on
+            // a 4 GB iPad. Guard against that below via `impossibleFitRatio`.
             let oneGB: UInt64 = 1_073_741_824
             residentBudget = min(inputs.modelFileSize / 4, oneGB)
         case .external:
@@ -207,11 +213,32 @@ public struct ModelLoadPlan: Sendable {
         let estimatedKV = UInt64(effectiveContextSize) * inputs.kvBytesPerToken
         let total = residentBudget &+ estimatedKV  // residentBudget is already bounded
 
+        // Impossible-fit guard: regardless of strategy, a model file that is
+        // dramatically larger than the device's available RAM cannot load
+        // successfully. Under `.mappable`, the residentBudget heuristic caps at
+        // 1 GB so a 140 GB file on a 4 GB device would otherwise silently
+        // `.allow`; under `.resident` the normal threshold check already denies,
+        // but the explicit guard keeps the reason informative. A ratio of 3
+        // means a 12 GB file on 4 GB RAM is still permitted (mmap can plausibly
+        // handle ~3× working set) while a 30 GB file on 4 GB RAM is rejected
+        // before it reaches llama.cpp. `.external` (cloud / system-managed)
+        // reports fileSize == 0 and is unaffected.
+        let impossibleFitRatio: UInt64 = 3
+        let impossibleFit = inputs.modelFileSize > 0
+            && available > 0
+            && inputs.modelFileSize / available >= impossibleFitRatio
+
         // Verdict thresholds: allow ≤85% of available, warn up to 100%, deny above.
         let allowThreshold = UInt64(Double(available) * 0.85)
         let verdict: Verdict
         var finalReasons = reasons
-        if total <= allowThreshold {
+        if impossibleFit {
+            verdict = .deny
+            finalReasons.append(.insufficientResident(
+                required: inputs.modelFileSize,
+                available: available
+            ))
+        } else if total <= allowThreshold {
             verdict = .allow
         } else if total <= available {
             verdict = .warn

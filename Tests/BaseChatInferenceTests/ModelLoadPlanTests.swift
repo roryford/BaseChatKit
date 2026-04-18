@@ -47,8 +47,15 @@ final class ModelLoadPlanTests: XCTestCase {
         let kvBytes = UInt64(effective) * kvBytesPerToken
         let total = residentBudget &+ kvBytes
         let allowThreshold = UInt64(Double(available) * 0.85)
+        // Mirror production's impossible-fit guard: see ModelLoadPlan.compute.
+        let impossibleFitRatio: UInt64 = 3
+        let impossibleFit = modelFileSize > 0
+            && available > 0
+            && modelFileSize / available >= impossibleFitRatio
         let verdict: ModelLoadPlan.Verdict
-        if total <= allowThreshold {
+        if impossibleFit {
+            verdict = .deny
+        } else if total <= allowThreshold {
             verdict = .allow
         } else if total <= available {
             verdict = .warn
@@ -660,27 +667,21 @@ final class ModelLoadPlanTests: XCTestCase {
     /// (See report: the mappable heuristic under-estimates for huge files
     /// and can silently `.allow` a 140 GB file; not fixed here.)
     /// Companion to the `.resident` case above. Under `.mappable`, a 140 GB
-    /// file's resident estimate caps at `min(fileSize/4, 1 GB) == 1 GB`
-    /// regardless of the file being 140 × the available RAM. The plan then
-    /// computes total ≈ 1 GB (resident) + a few hundred MB (KV) and returns
-    /// `.allow` — silently telling a user on a 4 GB device that a 70B model
-    /// will load fine.
+    /// file on a 4 GB device is 35× the available RAM — far beyond what mmap
+    /// can stream without catastrophic thrashing. The plan must `.deny` before
+    /// the load ever reaches llama.cpp (where it would crash or hang with a
+    /// useless error).
     ///
-    /// This test PINS the current (broken) behavior so a good-faith fix
-    /// — e.g., scaling `residentBudget` by `fileSize / availableMemory`, or
-    /// clamping on raw `fileSize > 2 * available` regardless of strategy —
-    /// will cause the test to fail and force an explicit update.
-    ///
-    // FIXME: file a GitHub issue and replace this URL — `.mappable` residentBudget
-    // caps at min(fileSize/4, 1 GB), so huge models on small devices are silently
-    // allowed. When fixed, flip this test's expectation to `.deny` and remove the
-    // FIXME.
-    func test_70BModelOn4GBDevice_mappableStrategy_currentlyAllowsDespiteImpossibleFit() {
+    /// Historical note: prior to the impossible-fit guard, the `.mappable`
+    /// residentBudget capped at `min(fileSize/4, 1 GB) == 1 GB` for any huge
+    /// file, so total ≈ 1 GB + a few hundred MB of KV fit under the 85%
+    /// threshold and the plan silently returned `.allow`.
+    func test_70BModelOn4GBDevice_mappableStrategy_denies() {
         let seventyBBytes: UInt64 = 140 * oneGB
         let fourGB: UInt64 = 4 * oneGB
         let inputs = makeInputs(
             modelFileSize: seventyBBytes,
-            strategy: .mappable,                   // residentBudget caps at 1 GB
+            strategy: .mappable,
             requested: 2048,
             trained: 131_072,
             kvBytesPerToken: 400_000,
@@ -689,16 +690,65 @@ final class ModelLoadPlanTests: XCTestCase {
         )
         let plan = ModelLoadPlan.compute(inputs: inputs)
 
-        // Production bug: this should be .deny but is currently .allow because
-        // residentBudget under .mappable is capped to 1 GB regardless of how
-        // much larger the file is than available memory.
+        XCTAssertEqual(plan.verdict, .deny,
+                       "140 GB file on 4 GB device must .deny; got \(plan.verdict)")
+        // A primary reason the UI can surface — not just a silent deny.
+        let hasInsufficientResident = plan.reasons.contains { reason in
+            if case .insufficientResident = reason { return true }
+            return false
+        }
+        XCTAssertTrue(hasInsufficientResident,
+                      "Expected .insufficientResident reason; got \(plan.reasons)")
+    }
+
+    /// Boundary case on the permissive side of the impossible-fit guard: a
+    /// 10 GB model on an 8 GB-RAM device (ratio 1.25×) must still be allowed
+    /// under `.mappable`. The fix must not over-reject legitimate loads —
+    /// page-cache-backed mmap handles working sets up to ~2-3× RAM routinely.
+    func test_10GBModelOn8GBDevice_mappableStrategy_allows() {
+        let tenGB: UInt64 = 10 * oneGB
+        let eightGB: UInt64 = 8 * oneGB
+        let inputs = makeInputs(
+            modelFileSize: tenGB,
+            strategy: .mappable,
+            requested: 4096,
+            trained: 32_768,
+            kvBytesPerToken: 8_192,
+            available: eightGB,
+            physical: eightGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+
         XCTAssertEqual(plan.verdict, .allow,
-                       "Current .mappable heuristic allows 140 GB file on 4 GB device (bug). If this assertion fails because the bug was fixed, flip to .deny and remove the FIXME above.")
-        // Pin the underestimate: resident estimate is ~1 GB, not the ~140 GB
-        // the file actually implies. This inequality is what a fix should make
-        // false.
-        XCTAssertLessThanOrEqual(plan.outcome.estimatedResidentBytes, oneGB + 1,
-                                 "residentBudget under .mappable currently caps at 1 GB; a fix should grow this with fileSize")
+                       "10 GB / 8 GB RAM (1.25×) must remain allowed; impossible-fit guard must not over-reject")
+    }
+
+    /// Boundary case on the deny side: 30 GB file on 4 GB RAM (ratio 7.5×)
+    /// is far beyond what mmap can realistically stream — the guard must
+    /// reject it pre-load. This tests the core invariant the fix enforces
+    /// without relying on 70B-scale numbers.
+    func test_30GBModelOn4GBDevice_mappableStrategy_denies() {
+        let thirtyGB: UInt64 = 30 * oneGB
+        let fourGB: UInt64 = 4 * oneGB
+        let inputs = makeInputs(
+            modelFileSize: thirtyGB,
+            strategy: .mappable,
+            requested: 2048,
+            trained: 32_768,
+            kvBytesPerToken: 8_192,
+            available: fourGB,
+            physical: fourGB
+        )
+        let plan = ModelLoadPlan.compute(inputs: inputs)
+
+        XCTAssertEqual(plan.verdict, .deny,
+                       "30 GB / 4 GB RAM (7.5×) must deny; mmap cannot stream at that ratio without thrashing")
+        let hasInsufficientResident = plan.reasons.contains { reason in
+            if case .insufficientResident = reason { return true }
+            return false
+        }
+        XCTAssertTrue(hasInsufficientResident,
+                      "Expected .insufficientResident reason for impossible fit; got \(plan.reasons)")
     }
 
     func test_70BModelOn4GBDevice_residentStrategy_neverAllows() {
