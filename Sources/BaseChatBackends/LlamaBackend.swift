@@ -305,8 +305,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 tokens: tokens,
                 maxTokens: maxTokens,
                 config: config,
-                isCancelled: { [weak self] in
-                    Task.isCancelled || (self?.cancelled.load(ordering: .sequentiallyConsistent) ?? true)
+                isCancelled: {
+                    Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent)
                 },
                 generationStream: generationStream,
                 continuation: continuation

@@ -48,6 +48,7 @@ struct LlamaGenerationDriver {
         generationStream: GenerationStream,
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
     ) async {
+        Self.logger.debug("LlamaGenerationDriver run started")
 
         // MARK: Batch size
 
@@ -132,6 +133,7 @@ struct LlamaGenerationDriver {
         }
 
         if promptDecodeFailed {
+            Self.logger.error("Llama prompt decode failed")
             await MainActor.run { generationStream.setPhase(.failed("Failed to decode prompt")) }
             continuation.finish(throwing: InferenceError.inferenceFailure("Failed to decode prompt"))
             return
@@ -201,6 +203,7 @@ struct LlamaGenerationDriver {
         }
 
         await MainActor.run { generationStream.setPhase(.done) }
+        Self.logger.debug("LlamaGenerationDriver run finished")
         continuation.finish()
     }
 }
