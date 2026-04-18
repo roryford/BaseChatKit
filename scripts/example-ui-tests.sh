@@ -18,16 +18,20 @@ Usage:
 
 Options:
   --destination 'platform=iOS Simulator,id=<SIMULATOR_ID>'
+  --destination 'platform=macOS'
+  --macos                          Shorthand for --destination 'platform=macOS'
   --derived-data-path <path>
 
 Examples:
   scripts/example-ui-tests.sh build-for-testing
   scripts/example-ui-tests.sh test-without-building -only-testing:BaseChatDemoUITests/ChatFlowUITests/testEmptyStateShowsWelcome
   scripts/example-ui-tests.sh test-without-building --destination 'platform=iOS Simulator,id=<SIMULATOR_ID>' -only-testing:BaseChatDemoUITests/SettingsUITests
+  scripts/example-ui-tests.sh build-for-testing --macos
+  scripts/example-ui-tests.sh test-without-building --macos -only-testing:BaseChatDemoUITests/ChatFlowUITests/testEmptyStateShowsWelcome
 
 The default destination is the first booted iPhone simulator. If none are booted,
 the script falls back to the first available iPhone simulator, then the first
-available iPad simulator.
+available iPad simulator. Pass --macos to target macOS instead.
 EOF
 }
 
@@ -84,6 +88,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo "--destination requires a value" >&2; exit 1; }
             DESTINATION="$2"
             shift 2
+            ;;
+        --macos)
+            DESTINATION="platform=macOS"
+            shift
             ;;
         --derived-data-path)
             [[ $# -ge 2 ]] || { echo "--derived-data-path requires a value" >&2; exit 1; }

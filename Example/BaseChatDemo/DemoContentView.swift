@@ -33,6 +33,9 @@ struct DemoContentView: View {
         } detail: {
             ChatView(showModelManagement: $isModelManagementPresented)
                 .toolbar {
+                    // .topBarLeading is iOS-only; macOS NavigationSplitView manages
+                    // sidebar visibility via its own controls so this button is not
+                    // needed on macOS. (#375)
                     #if os(iOS)
                     if horizontalSizeClass == .compact {
                         ToolbarItem(placement: .topBarLeading) {
