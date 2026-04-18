@@ -103,8 +103,24 @@ final class PromptTemplateDetectorTests: XCTestCase {
 
     // MARK: - Full Metadata Detection (Cascading Priority)
 
-    func test_detect_fromMetadata_prefersChatTemplate() {
-        // Even with architecture = "llama", a ChatML template should win
+    func test_detect_fromMetadata_unambiguousArch_winsOverChatMLTemplate() {
+        // phi3 architecture is unambiguous — even if the Jinja template contains
+        // <|im_start|> in a compatibility branch, architecture must win.
+        // Regression: Phi-4-mini-instruct was misidentified as ChatML (issue #464).
+        let metadata = GGUFMetadata(
+            generalName: "Phi-4-mini-instruct",
+            generalArchitecture: "phi3",
+            contextLength: 4096,
+            chatTemplate: "{% if true %}<|im_start|>system\n{{ content }}<|im_end|>{% endif %}<|user|>\n{{ content }}<|end|>\n<|assistant|>",
+            fileType: nil
+        )
+        XCTAssertEqual(PromptTemplateDetector.detect(from: metadata), .phi,
+                       "phi3 architecture must override a Jinja template that contains ChatML tokens")
+    }
+
+    func test_detect_fromMetadata_llama_chatTemplateWinsOverArchitecture() {
+        // "llama" is ambiguous — many fine-tunes use different formats.
+        // A ChatML Jinja template on an llama-arch model should still produce ChatML.
         let metadata = GGUFMetadata(
             generalName: "Mistral-7B",
             generalArchitecture: "llama",
@@ -112,7 +128,6 @@ final class PromptTemplateDetectorTests: XCTestCase {
             chatTemplate: "<|im_start|>system\n{{ content }}<|im_end|>",
             fileType: nil
         )
-
         XCTAssertEqual(PromptTemplateDetector.detect(from: metadata), .chatML)
     }
 
