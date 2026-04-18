@@ -25,6 +25,21 @@ final class PromptTemplateDetectorTests: XCTestCase {
         XCTAssertEqual(PromptTemplateDetector.detect(fromChatTemplate: template), .gemma)
     }
 
+    // Sabotage-verified: removing the `<|turn>` branch from detect(fromChatTemplate:)
+    // causes the two gemma4 template tests below to fail.
+
+    func test_detect_gemma4Template() {
+        let template = "<|turn>user\n{{ content }}<|end_of_turn>\n<|turn>model"
+        XCTAssertEqual(PromptTemplateDetector.detect(fromChatTemplate: template), .gemma4)
+    }
+
+    func test_detect_gemma4Template_beatsGemma3() {
+        // A transitional template that contains both delimiters should resolve to gemma4
+        // because <|turn> is the more specific Gemma 4 marker.
+        let template = "<|turn>user\n<start_of_turn>legacy hint<|end_of_turn>\n<|turn>model"
+        XCTAssertEqual(PromptTemplateDetector.detect(fromChatTemplate: template), .gemma4)
+    }
+
     func test_detect_phiTemplate() {
         let template = "<|system|>\n{{ system }}<|end|>\n<|user|>\n{{ content }}<|end|>\n<|assistant|>"
         XCTAssertEqual(PromptTemplateDetector.detect(fromChatTemplate: template), .phi)
@@ -55,6 +70,20 @@ final class PromptTemplateDetectorTests: XCTestCase {
     }
 
     func test_detect_fromArchitecture_gemma2() {
+        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "gemma2"), .gemma)
+    }
+
+    func test_detect_fromArchitecture_gemma4() {
+        // The chat-template path is the authoritative signal for Gemma 4 detection;
+        // architecture lookup is a best-effort fallback keyed on the plausible identifiers.
+        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "gemma4"), .gemma4)
+        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "gemma-4"), .gemma4)
+        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "GEMMA4"), .gemma4)
+    }
+
+    func test_detect_fromArchitecture_gemma_unchanged() {
+        // Regression: bare "gemma" and "gemma2" must keep mapping to .gemma, not .gemma4.
+        XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "gemma"), .gemma)
         XCTAssertEqual(PromptTemplateDetector.detect(fromArchitecture: "gemma2"), .gemma)
     }
 

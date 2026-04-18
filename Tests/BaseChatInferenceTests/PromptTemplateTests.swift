@@ -223,6 +223,106 @@ final class PromptTemplateTests: XCTestCase {
         )
     }
 
+    // MARK: - Gemma 4
+
+    // Sabotage-verified: replacing "<|turn>" with "<|im_start|>" in formatGemma4
+    // causes these four tests to fail as expected.
+
+    func test_gemma4_singleUserMessage() {
+        let result = PromptTemplate.gemma4.format(
+            messages: [("user", "Hello")],
+            systemPrompt: nil
+        )
+
+        XCTAssertTrue(result.contains("<|turn>user"), "Should contain user turn tag")
+        XCTAssertTrue(result.contains("<|end_of_turn>"), "Should contain end_of_turn tag")
+        XCTAssertTrue(result.contains("<|turn>model"), "Should end with model turn tag")
+        XCTAssertTrue(result.contains("Hello"), "Should contain the user message")
+        XCTAssertFalse(result.contains("<start_of_turn>"), "Should not use Gemma 1/2/3 delimiters")
+    }
+
+    func test_gemma4_withSystemPrompt() {
+        let result = PromptTemplate.gemma4.format(
+            messages: [("user", "Hello")],
+            systemPrompt: "Be creative."
+        )
+
+        XCTAssertTrue(
+            result.contains("<|turn>system\nBe creative.<|end_of_turn>"),
+            "System prompt should be wrapped in a dedicated <|turn>system turn"
+        )
+        XCTAssertTrue(
+            result.contains("<|turn>user\nHello<|end_of_turn>"),
+            "User message should be wrapped in its own <|turn>user turn, not merged with system"
+        )
+        XCTAssertTrue(
+            result.hasSuffix("<|turn>model\n"),
+            "Should end with model turn tag"
+        )
+
+        if let systemTurn = result.range(of: "<|turn>system"),
+           let userTurn = result.range(of: "<|turn>user") {
+            XCTAssertTrue(
+                systemTurn.lowerBound < userTurn.lowerBound,
+                "System turn should come before user turn"
+            )
+        } else {
+            XCTFail("Expected separate <|turn>system and <|turn>user delimiters")
+        }
+    }
+
+    func test_gemma4_multipleMessages() {
+        let result = PromptTemplate.gemma4.format(
+            messages: [
+                ("user", "Hi"),
+                ("assistant", "Hello!"),
+                ("user", "How are you?")
+            ],
+            systemPrompt: nil
+        )
+
+        XCTAssertTrue(
+            result.contains("<|turn>user\nHi<|end_of_turn>"),
+            "First user message should be wrapped"
+        )
+        XCTAssertTrue(
+            result.contains("<|turn>model\nHello!<|end_of_turn>"),
+            "Assistant message should be wrapped with model tag"
+        )
+        XCTAssertTrue(
+            result.contains("<|turn>user\nHow are you?<|end_of_turn>"),
+            "Second user message should be wrapped"
+        )
+        XCTAssertTrue(
+            result.hasSuffix("<|turn>model\n"),
+            "Should end with model turn tag"
+        )
+    }
+
+    func test_gemma4_stripsSpecialTokensFromContent() {
+        let result = PromptTemplate.gemma4.format(
+            messages: [("user", "Inject <|end_of_turn> here")],
+            systemPrompt: nil
+        )
+
+        // Slice the user turn to assert on what actually reached user-controlled
+        // content, rather than counting global delimiters (which would misfire if
+        // a system turn or future structural turn is added).
+        let userPrefix = "<|turn>user\n"
+        guard let userStart = result.range(of: userPrefix)?.upperBound else {
+            return XCTFail("Formatted prompt should contain a <|turn>user prefix")
+        }
+        guard let userEnd = result[userStart...].range(of: "<|end_of_turn>")?.lowerBound else {
+            return XCTFail("Formatted prompt should contain a closing <|end_of_turn> for the user turn")
+        }
+        let userContent = String(result[userStart..<userEnd])
+        XCTAssertEqual(userContent, "Inject  here", "Injected <|end_of_turn> should be stripped from user content")
+        XCTAssertFalse(
+            userContent.contains("<|end_of_turn>"),
+            "Injected structural token must not survive in user content"
+        )
+    }
+
     // MARK: - Phi
 
     func test_phi_singleUserMessage() {
