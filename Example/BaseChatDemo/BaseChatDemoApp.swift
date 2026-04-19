@@ -15,7 +15,11 @@ struct BaseChatDemoApp: App {
     /// When `true`, the app was launched with `--uitesting` and should use
     /// an in-memory store, skip auto-model-load, and disable animations.
     private let isUITesting: Bool
-    private let modelContainer: ModelContainer
+
+    // Created asynchronously in .task to avoid blocking App.init() — SwiftData
+    // container setup (schema compilation + SQLite open) can stall the first
+    // frame for several seconds when done on the main thread.
+    @State private var modelContainer: ModelContainer?
 
     init() {
         let testing = CommandLine.arguments.contains("--uitesting")
@@ -55,9 +59,6 @@ struct BaseChatDemoApp: App {
             huggingFaceService: hfService,
             downloadManager: downloadManager
         ))
-
-        let config = ModelConfiguration("BaseChatDemo", isStoredInMemoryOnly: testing)
-        self.modelContainer = try! ModelContainerFactory.makeContainer(configurations: [config])
     }
 
     // MARK: - Curated Models
@@ -79,7 +80,7 @@ struct BaseChatDemoApp: App {
         CuratedModel(
             id: "phi-4-mini-mlx",
             displayName: "Phi-4 Mini (MLX, 4-bit)",
-            fileName: "mlx-community/Phi-4-mini-instruct-4bit",
+            fileName: "Phi-4-mini-instruct-4bit",
             repoID: "mlx-community/Phi-4-mini-instruct-4bit",
             modelType: .mlx,
             approximateSizeBytes: 2_400_000_000,
@@ -104,7 +105,7 @@ struct BaseChatDemoApp: App {
         CuratedModel(
             id: "llama-3.2-3b-mlx",
             displayName: "Llama 3.2 3B Instruct (MLX, 4-bit)",
-            fileName: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            fileName: "Llama-3.2-3B-Instruct-4bit",
             repoID: "mlx-community/Llama-3.2-3B-Instruct-4bit",
             modelType: .mlx,
             approximateSizeBytes: 1_800_000_000,
@@ -117,7 +118,7 @@ struct BaseChatDemoApp: App {
         CuratedModel(
             id: "qwen-2.5-7b-mlx",
             displayName: "Qwen 2.5 7B Instruct (MLX, 4-bit)",
-            fileName: "mlx-community/Qwen2.5-7B-Instruct-4bit",
+            fileName: "Qwen2.5-7B-Instruct-4bit",
             repoID: "mlx-community/Qwen2.5-7B-Instruct-4bit",
             modelType: .mlx,
             approximateSizeBytes: 4_500_000_000,
@@ -130,13 +131,27 @@ struct BaseChatDemoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            DemoContentView(inferenceService: inferenceService, skipAutoModelLoad: isUITesting)
-                .environment(chatViewModel)
-                .environment(modelManagementViewModel)
-                .environment(sessionManager)
-                .frame(minWidth: 600, minHeight: 400)
+            if let container = modelContainer {
+                DemoContentView(inferenceService: inferenceService, skipAutoModelLoad: isUITesting)
+                    .environment(chatViewModel)
+                    .environment(modelManagementViewModel)
+                    .environment(sessionManager)
+                    #if os(macOS)
+                    .frame(minWidth: 600, minHeight: 400)
+                    #endif
+                    .modelContainer(container)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .task {
+                        let testing = isUITesting
+                        modelContainer = await Task.detached(priority: .userInitiated) {
+                            let config = ModelConfiguration("BaseChatDemo", isStoredInMemoryOnly: testing)
+                            return try! ModelContainerFactory.makeContainer(configurations: [config])
+                        }.value
+                    }
+            }
         }
-        .modelContainer(modelContainer)
         #if os(macOS)
         .defaultSize(width: 900, height: 700)
         #endif

@@ -11,12 +11,17 @@ import LlamaSwift
 /// lifetime against a concurrent `unloadModel()`.
 enum LlamaTokenization {
 
-    static func tokenize(_ text: String, vocab: OpaquePointer?, addBos: Bool) -> [llama_token] {
+    static func tokenize(
+        _ text: String,
+        vocab: OpaquePointer?,
+        addBos: Bool,
+        parseSpecial: Bool = true
+    ) -> [llama_token] {
         guard let vocab else { return [] }
         let utf8 = text.utf8CString
         let maxTokens = Int32(utf8.count) + (addBos ? 1 : 0)
         var tokens = [llama_token](repeating: 0, count: Int(maxTokens))
-        let count = llama_tokenize(vocab, text, Int32(text.utf8.count), &tokens, maxTokens, addBos, false)
+        let count = llama_tokenize(vocab, text, Int32(text.utf8.count), &tokens, maxTokens, addBos, parseSpecial)
         guard count >= 0 else { return [] }
         return Array(tokens.prefix(Int(count)))
     }

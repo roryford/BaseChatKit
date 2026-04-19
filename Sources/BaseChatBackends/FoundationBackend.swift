@@ -70,6 +70,36 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
     public init() {}
 
+    // MARK: - Test-only accessors
+
+#if DEBUG
+    /// Exposes the active session reference for unit tests that verify session reuse /
+    /// recreation without running real inference. Not part of the public API.
+    var _session: LanguageModelSession? { withStateLock { session } }
+
+    /// Exposes the system prompt that was used to create the current session, so tests
+    /// can assert that the tracking variable is updated correctly without inference.
+    var _currentSystemPrompt: String? { withStateLock { currentSystemPrompt } }
+
+    /// Forces `_isModelLoaded = true` without calling `loadModel()`.
+    /// Lets unit tests exercise the session-creation branch inside `generate()` on CI
+    /// runners that do not have Apple Intelligence available.
+    func _forceLoaded() {
+        withStateLock { _isModelLoaded = true }
+    }
+
+    /// Cancels the active generation task without resetting `session` or
+    /// `currentSystemPrompt`.  Unlike `stopGeneration()`, this preserves session state
+    /// so tests can verify that a second `generate()` call reuses the same session.
+    func _cancelTaskOnly() {
+        let task = withStateLock { () -> Task<Void, Never>? in
+            defer { generationTask = nil }
+            return generationTask
+        }
+        task?.cancel()
+    }
+#endif
+
     // MARK: - Availability
 
     /// Whether the system language model is available on this device.
