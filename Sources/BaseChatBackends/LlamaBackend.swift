@@ -462,7 +462,7 @@ extension LlamaBackend: TokenizerVendor, TokenizerProvider {
         guard let currentVocab = withStateLock({ vocab }) else {
             return max(1, text.count / 4)
         }
-        let tokens = LlamaTokenization.tokenize(text, vocab: currentVocab, addBos: false)
+        let tokens = LlamaTokenization.tokenize(text, vocab: currentVocab, addBos: false, parseSpecial: false)
         return tokens.isEmpty ? max(1, text.count / 4) : tokens.count
     }
 }
@@ -492,7 +492,7 @@ extension LlamaBackend: TokenCountingBackend {
         let utf8 = text.utf8CString
         let maxTokens = Int32(utf8.count) + 1  // +1 for BOS
         var tokens = [llama_token](repeating: 0, count: Int(maxTokens))
-        let count = llama_tokenize(currentVocab, text, Int32(text.utf8.count), &tokens, maxTokens, true, false)
+        let count = llama_tokenize(currentVocab, text, Int32(text.utf8.count), &tokens, maxTokens, true, true)
         guard count >= 0 || text.isEmpty else {
             throw InferenceError.inferenceFailure("countTokens: llama_tokenize failed for text of length \(text.utf8.count)")
         }

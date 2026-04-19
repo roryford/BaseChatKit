@@ -369,6 +369,44 @@ final class MLXBackendGenerationTests: XCTestCase {
         // today — the full detection matrix is Metal-gated.
     }
 
+    // MARK: - test_generate_usesConversationHistory
+
+    func test_generate_usesConversationHistory() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["ok"]
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+
+        // Simulate two prior turns before the current user message.
+        backend.setConversationHistory([
+            ("user", "What is the capital of France?"),
+            ("assistant", "Paris."),
+            ("user", "And Germany?"),
+        ])
+
+        let stream = try backend.generate(
+            prompt: "And Germany?",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        )
+        _ = try await collectTokens(from: stream)
+
+        let sent = try XCTUnwrap(mock.lastMessages)
+        XCTAssertEqual(sent.count, 3,
+            "All three history turns must be forwarded to the container")
+        XCTAssertEqual(sent[0]["role"], "user")
+        XCTAssertEqual(sent[0]["content"], "What is the capital of France?")
+        XCTAssertEqual(sent[1]["role"], "assistant")
+        XCTAssertEqual(sent[1]["content"], "Paris.")
+        XCTAssertEqual(sent[2]["role"], "user")
+        XCTAssertEqual(sent[2]["content"], "And Germany?")
+
+        // Sabotage check: removing the setConversationHistory call causes the
+        // backend to fall back to the bare prompt path, producing a 1-element
+        // messages array and failing the count assertion.
+    }
+
     func test_sendableLMInput_wrapsAndUnwraps() throws {
         // This test verifies `SendableLMInput` at the type level: the wrapper must
         // satisfy Swift's `Sendable` requirement so the compiler allows cross-actor

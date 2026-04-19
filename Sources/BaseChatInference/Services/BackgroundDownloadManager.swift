@@ -654,6 +654,10 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         guard resolvedFinalURL.path.hasPrefix(resolvedModelsDir.path + "/") else {
             throw HuggingFaceError.invalidDownloadedFile(reason: "Model filename escapes models directory: \(finalFileName)")
         }
+        try FileManager.default.createDirectory(
+            at: finalURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         if FileManager.default.fileExists(atPath: finalURL.path) {
             try FileManager.default.removeItem(at: finalURL)
         }

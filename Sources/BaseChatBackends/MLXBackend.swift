@@ -73,6 +73,8 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     private var _modelContainer: (any MLXModelContainerProtocol)?
     /// Access only under `stateLock`.
     private var _generationTask: Task<Void, Never>?
+    /// Access only under `stateLock`.
+    private var _conversationHistory: [(role: String, content: String)] = []
 
     // MARK: - Load Progress
 
@@ -181,13 +183,22 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             repetitionPenalty: config.repeatPenalty
         )
 
-        // Build messages in chat format.
+        // Build messages in chat format, using full conversation history when available
+        // so multi-turn exchanges retain context. Falls back to the bare prompt when
+        // setConversationHistory has not been called (e.g. direct unit-test calls).
+        let conversationHistory = withStateLock { _conversationHistory }
         let messages: [[String: String]] = {
             var msgs: [[String: String]] = []
             if let systemPrompt, !systemPrompt.isEmpty {
                 msgs.append(["role": "system", "content": systemPrompt])
             }
-            msgs.append(["role": "user", "content": prompt])
+            if !conversationHistory.isEmpty {
+                for msg in conversationHistory {
+                    msgs.append(["role": msg.role, "content": msg.content])
+                }
+            } else {
+                msgs.append(["role": "user", "content": prompt])
+            }
             return msgs
         }()
 
@@ -298,12 +309,21 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             _modelContainer = nil
             _isModelLoaded = false
             _isGenerating = false
+            _conversationHistory = []
             return had
         }
         if hadContainer {
             Memory.clearCache()
         }
         Self.logger.info("MLX backend unloaded")
+    }
+}
+
+// MARK: - ConversationHistoryReceiver
+
+extension MLXBackend: ConversationHistoryReceiver {
+    public func setConversationHistory(_ history: [(role: String, content: String)]) {
+        withStateLock { _conversationHistory = history }
     }
 }
 
