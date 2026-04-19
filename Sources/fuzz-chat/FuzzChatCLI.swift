@@ -24,6 +24,7 @@ struct FuzzChatCLI {
         var detectorFilter: Set<String>?
         var quiet = false
         var replayHash: String?
+        var shrinkHash: String?
         var force = false
         var sessionScripts = false
 
@@ -69,6 +70,14 @@ struct FuzzChatCLI {
                     fail("--replay hash must be 12–40 lowercase hex characters (got: \(candidate))")
                 }
                 replayHash = candidate
+            case "--shrink":
+                i = argv.index(after: i)
+                guard i < argv.endIndex else { fail("--shrink requires a hash value") }
+                let candidate = argv[i]
+                guard isValidReplayHash(candidate) else {
+                    fail("--shrink hash must be 12–40 lowercase hex characters (got: \(candidate))")
+                }
+                shrinkHash = candidate
             case "--force":
                 force = true
             case "--session-scripts":
@@ -95,6 +104,22 @@ struct FuzzChatCLI {
             }
         case .llama, .foundation, .mlx, .all:
             fail("\(backend.rawValue) backend not yet wired in v1 (Ollama only).")
+        }
+
+        // Shrink mode: greedy-delta-debug the recorded trigger down to a
+        // minimal still-reproducing input. Implies replay — we reuse the
+        // `Replayer` under the hood — so `--shrink` is exclusive with
+        // `--replay`. See Sources/BaseChatFuzz/Replay/Shrinker.swift.
+        if let hash = shrinkHash {
+            if replayHash != nil {
+                fail("--shrink and --replay cannot be combined (shrink already replays)")
+            }
+            let exitCode = await runShrink(
+                hash: hash,
+                outputDir: outputDir,
+                factory: factory
+            )
+            exit(exitCode)
         }
 
         // Replay mode short-circuits the campaign loop entirely. It reruns a
@@ -236,6 +261,59 @@ struct FuzzChatCLI {
         }
     }
 
+    /// Drives the Shrinker and maps its `Result` / errors to an exit code +
+    /// summary line. Exit codes:
+    ///   0  — successful shrink (either reached minimal or exhausted budget)
+    ///   2  — non-determinism or no-reproduction pre-check failed
+    ///   3  — internal error (record-not-found, replay failure)
+    static func runShrink(
+        hash: String,
+        outputDir: URL,
+        factory: any FuzzBackendFactory
+    ) async -> Int32 {
+        let replayer = Replayer(findingsRoot: outputDir, factory: factory)
+        let shrinker = Shrinker(replayer: replayer)
+
+        let result: Shrinker.Result
+        do {
+            result = try await shrinker.shrink(hash: hash)
+        } catch Shrinker.Failure.recordNotFound(let h) {
+            FileHandle.standardError.write(Data("Shrink \(h): record not found\n".utf8))
+            return 3
+        } catch {
+            FileHandle.standardError.write(Data("Shrink \(hash): internal error — \(error)\n".utf8))
+            return 3
+        }
+
+        switch result.reason {
+        case .minimal:
+            print("Shrink \(hash): shrunk \(result.originalPromptLength) chars → \(result.shrunkPromptLength) chars in \(result.steps) steps (minimal)")
+            persistShrunkArtefact(shrinker: shrinker, hash: hash, result: result)
+            return 0
+        case .budgetExhausted:
+            print("Shrink \(hash): shrunk \(result.originalPromptLength) chars → \(result.shrunkPromptLength) chars in \(result.steps) steps (budget exhausted)")
+            persistShrunkArtefact(shrinker: shrinker, hash: hash, result: result)
+            return 0
+        case .nonDeterministic:
+            print("Shrink \(hash): input is flaky, not shrinkable")
+            return 2
+        case .noReproduction:
+            print("Shrink \(hash): original input does not reproduce (0/3); nothing to shrink")
+            return 2
+        }
+    }
+
+    /// Best-effort persistence of `shrunk.json`. A write failure is reported
+    /// on stderr but does NOT downgrade the exit code — the shrinker's result
+    /// is the source of truth, and the CLI already printed the summary line.
+    static func persistShrunkArtefact(shrinker: Shrinker, hash: String, result: Shrinker.Result) {
+        do {
+            _ = try shrinker.writeShrunkArtefact(hash: hash, result: result)
+        } catch {
+            FileHandle.standardError.write(Data("Shrink \(hash): warning — could not write shrunk.json: \(error)\n".utf8))
+        }
+    }
+
     /// Validates `--replay` argument shape: 12–40 lowercase hex chars. Finding
     /// hashes produced by `Finding.computeHash` are exactly 12 chars today;
     /// allowing up to 40 lets us roundtrip full SHA-256 prefixes if the finding
@@ -265,6 +343,8 @@ struct FuzzChatCLI {
             "  --single            shorthand for --iterations 1",
             "  --quiet             suppress live output (still prints findings)",
             "  --replay <hash>     rerun a recorded finding (12–40 hex chars)",
+            "  --shrink <hash>     greedy delta-debug a finding down to a minimal repro",
+            "                      (implies --replay; exclusive with it)",
             "  --force             ignore git/model drift on --replay",
             "  --session-scripts   drive bundled multi-turn SessionScripts via",
             "                      InferenceService.enqueue (opt-in for this PR;",

@@ -63,21 +63,27 @@ public struct Replayer: Sendable {
     private let gitRevResolver: @Sendable () -> String
     private let modelHashResolver: @Sendable (URL) -> String?
     private let clock: @Sendable () -> Date
+    private let detectors: [any Detector]
 
     /// Designated initialiser. The resolver closures let tests substitute
     /// deterministic values for the shelled-out git rev and the file-hash scan.
+    /// `detectors` defaults to `DetectorRegistry.all`; tests override to inject
+    /// stub detectors that gate on specific RunRecord fields (e.g. mutator id
+    /// presence) — required for Shrinker unit tests.
     public init(
         findingsRoot: URL,
         factory: any FuzzBackendFactory,
         gitRevResolver: (@Sendable () -> String)? = nil,
         modelHashResolver: (@Sendable (URL) -> String?)? = nil,
-        clock: (@Sendable () -> Date)? = nil
+        clock: (@Sendable () -> Date)? = nil,
+        detectors: [any Detector]? = nil
     ) {
         self.findingsRoot = findingsRoot
         self.factory = factory
         self.gitRevResolver = gitRevResolver ?? { Replayer.resolveCurrentGitRev() }
         self.modelHashResolver = modelHashResolver ?? { HarnessMetadata.fileSHA256($0) }
         self.clock = clock ?? { Date() }
+        self.detectors = detectors ?? DetectorRegistry.all
     }
 
     public func replay(
@@ -165,6 +171,53 @@ public struct Replayer: Sendable {
             drift: force && drift.any ? drift : nil
         )
         return .reproduced(result)
+    }
+
+    /// Runs `attempts` replays against a caller-supplied record and returns the
+    /// count of runs whose output reproduced `originalHash`. Skips drift /
+    /// schema / resolution entirely — the caller owns the record and is
+    /// responsible for those checks. `Shrinker` uses this to evaluate mutated
+    /// candidate records (shorter prompts, dropped mutators, etc.) without
+    /// round-tripping through the findings directory.
+    @MainActor
+    public func replay(
+        record: RunRecord,
+        originalHash: String,
+        attempts: Int
+    ) async throws -> Int {
+        let handle = try await factory.makeHandle()
+        var successes = 0
+        for _ in 0..<attempts {
+            let replayRecord = await runOnce(handle: handle, record: record)
+            if findingHashReproduced(originalHash: originalHash, record: replayRecord) {
+                successes += 1
+            }
+        }
+        return successes
+    }
+
+    /// Loads + decodes the record for a hash. Public so `Shrinker` can materialise
+    /// the record once and then mutate candidates from it in-memory.
+    public func loadRecord(hash: String) throws -> RunRecord? {
+        guard let url = resolveRecordURL(hash: hash) else { return nil }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw Failure.decodeFailed("read failed at \(url.path): \(error)")
+        }
+        do {
+            return try JSONDecoder().decode(RunRecord.self, from: data)
+        } catch {
+            throw Failure.decodeFailed("JSON decode failed: \(error)")
+        }
+    }
+
+    /// URL under which shrink artefacts for `hash` should be written. Exposed so
+    /// `Shrinker` can persist `shrunk.json` alongside the seed `record.json`.
+    public func findingDirectory(forHash hash: String) -> URL? {
+        guard let recordURL = resolveRecordURL(hash: hash) else { return nil }
+        return recordURL.deletingLastPathComponent()
     }
 
     /// Promotion threshold: `ceil(2/3 * attempts)`, floored at 1 so a single-shot
@@ -382,7 +435,7 @@ public struct Replayer: Sendable {
     /// Re-runs every detector against the new record and returns true if any
     /// emitted Finding shares the hash we were trying to reproduce.
     private func findingHashReproduced(originalHash: String, record: RunRecord) -> Bool {
-        for detector in DetectorRegistry.all {
+        for detector in detectors {
             for finding in detector.inspect(record) {
                 if finding.hash == originalHash { return true }
             }
