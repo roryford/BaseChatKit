@@ -28,7 +28,6 @@ public struct EventRecorder: Sendable {
 
     /// - Parameter maxOutputTokens: the cap requested in `GenerationConfig`, used to
     ///   classify the stop reason as `maxTokens` when the final usage report meets/exceeds it.
-    @MainActor
     public func consume(_ stream: GenerationStream, maxOutputTokens: Int? = nil) async -> Capture {
         let start = ContinuousClock.now
         var events: [RunRecord.EventSnapshot] = []

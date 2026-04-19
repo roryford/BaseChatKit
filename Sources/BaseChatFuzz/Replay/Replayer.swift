@@ -267,7 +267,6 @@ public struct Replayer: Sendable {
     /// fresh `FuzzConfig` purely so the `ConfigSnapshot` emitted by this attempt
     /// carries the recorded seed; sampling is bypassed. The seed-plumbing sabotage
     /// test asserts this field is NOT silently replaced with a fresh seed.
-    @MainActor
     private func runOnce(
         handle: FuzzRunner.BackendHandle,
         record: RunRecord

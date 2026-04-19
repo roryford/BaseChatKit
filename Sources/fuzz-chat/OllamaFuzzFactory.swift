@@ -21,7 +21,6 @@ public struct OllamaFuzzFactory: FuzzBackendFactory {
         self.baseURL = baseURL
     }
 
-    @MainActor
     public func makeHandle() async throws -> FuzzRunner.BackendHandle {
         guard let models = HardwareRequirements.listOllamaModels() else {
             throw CLIError("No Ollama server reachable at \(baseURL.absoluteString). Start with: ollama serve")
