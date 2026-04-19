@@ -142,15 +142,42 @@ The remaining seven detectors and the calibration corpus are tracked as follow-u
 
 ## Reproducing a Finding
 
-Every finding directory ships an auto-generated `repro.sh`. It re-runs the harness with the original seed and model substring as a single iteration:
+Every finding directory ships an auto-generated `repro.sh` pointing at the preferred replay path:
 
 ```bash
 bash tmp/fuzz/findings/<detector-id>/<hash>/repro.sh
 # expands to:
-swift run fuzz-chat --seed <N> --model <substr> --single
+swift run fuzz-chat --replay <hash>
 ```
 
-Determinism caveat: the seed pins prompt and sampler selection, but real backends (Ollama, MLX, Llama) don't expose a sampling seed today, so token-level reproduction is best-effort. A `--replay` mode that reloads the full `record.json` and bypasses sampling is tracked as a follow-up — see [Known Gaps](#known-gaps).
+`--replay` resolves the hash to `tmp/fuzz/findings/*/<hash>/record.json`, refuses if the package git rev or the model's SHA-256 have drifted (override with `--force`), and re-runs the exact recorded prompt + sampler config three times. Output summarises pass/fail:
+
+```
+Replay 7f2a8c91b0de: reproduced 2/3 — promoted to confirmed
+Replay 7f2a8c91b0de: reproduced 0/3 — remains flaky
+Replay 7f2a8c91b0de: drift refused (git 7076c6f → fa9e236); pass --force to override
+Replay 7f2a8c91b0de: record not found
+Replay 7f2a8c91b0de: schema version 99 is newer than harness (supported: 1)
+```
+
+Exit codes: `0` for reproduced / not-reproduced (both are valid data), `2` for drift refused, record not found, schema unsupported, or non-deterministic backend.
+
+### Replay determinism per backend
+
+`--replay` is only useful when the backend will bit-reproduce given the same prompt + sampler config. `FuzzBackendFactory` exposes `supportsDeterministicReplay` (default `true`); cloud factories override to `false` and `--replay` short-circuits with a clear message rather than deliver misleading data.
+
+| Backend | Deterministic? | Notes |
+|---------|----------------|-------|
+| MLX, Llama | yes (seed + temperature=0) | bit-identical; the default 2/3 promotion threshold is safe. |
+| Foundation Models | yes | on-device; deterministic given identical prompt + config. |
+| Ollama | backend-dependent | seed plumbing varies by model/version. Verify by running the same prompt twice at `--seed N` before trusting a promotion. If outputs aren't bit-identical, raise the threshold (e.g. 3/5) before promoting. |
+| Claude, OpenAI, cloud | no | `--replay` refuses with `non-deterministic backend`. Structural-equivalence replay is a follow-up. |
+
+The promotion gate is `ceil(2/3 * attempts)` successes: 2/3 at the default `attempts: 3`. Fallback to the old direct-seed recipe is preserved as a commented line at the bottom of every `repro.sh` for cases where a rev bump has invalidated the record and you want to re-fuzz without replay.
+
+### Drift detection
+
+`record.harness.packageGitRev` is compared against the current `git rev-parse --short HEAD` on every replay. `record.model.fileSHA256` is compared against the current on-disk model hash when both sides are non-nil. Any mismatch returns `.driftRefused(DriftReport)` and exits non-zero — the developer sees exactly what changed rather than debugging a phantom "it worked yesterday" non-repro. `--force` threads through, logs a warning, and annotates the Result with the drift for later inspection.
 
 ---
 
@@ -243,7 +270,6 @@ These are wired but not yet implemented. Day-one issues will be filed for each.
 ### Infrastructure
 
 - **Calibration corpus** — known-good outputs to score detectors against; gates the `flaky` → `confirmed` severity promotion.
-- **`--replay <hash>`** — reload `record.json`, bypass sampling, and re-issue the exact recorded request for true bit-level reproduction.
 - **`--shrink`** — minimise a failing prompt to the smallest input that still fires the detector.
 - **Multi-turn** — current harness fuzzes single-turn only; multi-turn would surface KV-collision and session-isolation bugs the single-turn path can't see.
 - **Slash command** — `/fuzz` shortcut to run `scripts/fuzz.sh` from inside Claude Code.

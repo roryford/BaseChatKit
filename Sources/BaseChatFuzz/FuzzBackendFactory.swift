@@ -10,4 +10,20 @@ public protocol FuzzBackendFactory: Sendable {
     /// Construct a fresh `BackendHandle`. Called once per fuzz iteration when
     /// the runner needs a backend (e.g., rotation in #501, or first use today).
     func makeHandle() async throws -> FuzzRunner.BackendHandle
+
+    /// Whether this backend can bit-reproduce an output given the same prompt +
+    /// sampler config. Local backends (MLX, Llama with seed+temperature=0,
+    /// Foundation) return `true`; cloud backends (Claude, OpenAI) return `false`.
+    /// Ollama's seed plumbing varies by model/version — the default is `true`
+    /// with an explicit "verify first" note in FUZZING.md.
+    ///
+    /// `Replayer` short-circuits with `.nonDeterministicBackend` when this is
+    /// `false` rather than run a guaranteed-noisy replay and mislead the
+    /// developer into thinking the finding is flaky.
+    var supportsDeterministicReplay: Bool { get }
+}
+
+public extension FuzzBackendFactory {
+    /// Default: assume deterministic. Cloud factories opt out explicitly.
+    var supportsDeterministicReplay: Bool { true }
 }

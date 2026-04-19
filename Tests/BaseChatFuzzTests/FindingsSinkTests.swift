@@ -71,10 +71,12 @@ final class FindingsSinkTests: XCTestCase {
             .split(separator: "\n")
             .map(String.init)
             .filter { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        XCTAssertFalse(
-            executableLines.contains(where: { $0.contains("--replay") }),
-            "--replay is not implemented; recipe must use direct seed/model/--single"
+        XCTAssertTrue(
+            executableLines.contains(where: { $0.contains("--replay \(finding.hash)") }),
+            "--replay is the preferred repro recipe (#490); seed/model variant lives as a commented fallback"
         )
+        // The commented fallback still references the original seed/model pair so the
+        // developer can bypass replay if a rev bump invalidates the record.
         XCTAssertTrue(repro.contains("--seed 0"))
         XCTAssertTrue(repro.contains("--model qwen-test"))
         XCTAssertTrue(repro.contains("--single"))
@@ -120,8 +122,7 @@ final class FindingsSinkTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: indexURL.path))
         let md = try String(contentsOf: indexURL, encoding: .utf8)
         XCTAssertTrue(md.contains("`\(finding.hash)`"))
-        XCTAssertFalse(md.contains("--replay"), "--replay is not implemented")
-        XCTAssertTrue(md.contains("swift run fuzz-chat --seed 0 --model indexed-model --single"))
+        XCTAssertTrue(md.contains("swift run fuzz-chat --replay \(finding.hash)"))
         XCTAssertTrue(md.contains("1 total runs"))
 
         await sink.recordRun(makeRecord(modelId: "indexed-model"), findings: [finding])
