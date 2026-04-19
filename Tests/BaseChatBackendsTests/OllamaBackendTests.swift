@@ -625,9 +625,7 @@ struct OllamaBackendTests {
         let stream = try backend.generate(prompt: "And 3+3?", systemPrompt: nil, config: .init())
         for try await _ in stream.events { }
 
-        let captured = MockURLProtocol.capturedRequests.last(where: {
-            $0.url?.absoluteString.contains("api/chat") == true
-        })
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
         let body = try extractBody(from: captured)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         let messages = try #require(json["messages"] as? [[String: String]])
