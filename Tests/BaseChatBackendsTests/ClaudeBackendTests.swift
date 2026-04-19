@@ -252,6 +252,69 @@ extension ClaudeBackendTests {
     }
 }
 
+// MARK: - Rate-limit error shape (#531)
+
+extension ClaudeBackendTests {
+
+    /// Pins today's 429 handling: a structured Claude rate-limit body
+    /// (`{"type":"error","error":{"type":"rate_limit_error","message":"..."}}`)
+    /// plus the documented `anthropic-ratelimit-*` headers surface as
+    /// `CloudBackendError.rateLimited(retryAfter: 45)` from the `Retry-After`
+    /// header alone.
+    ///
+    /// FIXME(#531): once `anthropic-ratelimit-tokens-reset` is plumbed through,
+    /// flip to assert the structured reset time and the parsed error body message.
+    func test_rateLimit_anthropicErrorBody_surfacesRetryAfterOnly() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: config)
+        let backend = ClaudeBackend(urlSession: session)
+
+        // Disable retries so the first 429 propagates immediately, preserving
+        // the retryAfter we want to assert on.
+        backend.retryStrategy = ExponentialBackoffStrategy(maxRetries: 0)
+
+        let url = URL(string: "https://claude-ratelimit-\(UUID().uuidString).test")!
+        backend.configure(baseURL: url, apiKey: "sk-ant-test", modelName: "claude-sonnet-4-20250514")
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
+
+        let body = Data(#"{"type":"error","error":{"type":"rate_limit_error","message":"Too many requests"}}"#.utf8)
+        let messagesURL = url.appendingPathComponent("v1/messages")
+        MockURLProtocol.stub(url: messagesURL, response: .immediate(
+            data: body,
+            statusCode: 429,
+            headers: [
+                "Retry-After": "45",
+                "anthropic-ratelimit-requests-remaining": "0",
+                "anthropic-ratelimit-tokens-remaining": "0",
+                "anthropic-ratelimit-tokens-reset": "2026-04-19T12:34:56Z"
+            ]
+        ))
+        defer { MockURLProtocol.unstub(url: messagesURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: GenerationConfig())
+
+        do {
+            for try await _ in stream.events { }
+            XCTFail("Expected rateLimited error")
+        } catch {
+            guard let cloud = extractCloudError(error) else {
+                XCTFail("Expected CloudBackendError, got \(error)")
+                return
+            }
+            guard case .rateLimited(let retryAfter) = cloud else {
+                XCTFail("Expected rateLimited, got \(cloud)")
+                return
+            }
+            // Today: only Retry-After is honoured. The structured body and the
+            // anthropic-ratelimit-* headers are discarded. Flipping this test
+            // is the signal that richer parsing landed.
+            XCTAssertEqual(retryAfter, 45,
+                           "Retry-After header must surface as the rateLimited retryAfter value")
+        }
+    }
+}
+
 // MARK: - Backend Contract
 
 extension ClaudeBackendTests {
