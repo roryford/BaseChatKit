@@ -62,16 +62,20 @@ public actor FuzzRunner {
             return FuzzReport(totalRuns: 0, findings: [], dedupedCount: 0, perDetectorFlagRate: [:])
         }
 
-        let handle: BackendHandle
+        // Prime the factory once before the loop. The first handle double-duties
+        // as the preflight target (keeps the banner line stable) and as the
+        // iteration-1 handle, which matches the pre-#501 single-model cost
+        // profile for campaigns that never rotate.
+        let primeHandle: BackendHandle
         do {
-            handle = try await factory.makeHandle()
+            primeHandle = try await factory.makeHandle()
         } catch {
             await reporter.error("Backend factory failed: \(error)")
             return FuzzReport(totalRuns: 0, findings: [], dedupedCount: 0, perDetectorFlagRate: [:])
         }
 
         let detectors = DetectorRegistry.resolve(config.detectorFilter)
-        await reporter.preflight(backend: handle.backendName, model: handle.modelId, detectors: detectors.map(\.id))
+        await reporter.preflight(backend: primeHandle.backendName, model: primeHandle.modelId, detectors: detectors.map(\.id))
 
         let deadline: ContinuousClock.Instant?
         if let minutes = config.minutes {
@@ -83,10 +87,29 @@ public actor FuzzRunner {
         var iter = 0
         var totalFindings = 0
         var perDetector: [String: Int] = [:]
+        // Reuse `primeHandle` on the first iteration so single-model campaigns
+        // pay the factory once; rotating factories hand back a new model from
+        // iteration 2 onward. This is the minimum change needed to let option
+        // (b) from #501 actually rotate — `RotatingFuzzFactory` advances its
+        // index per `makeHandle()` call, which now happens per iteration.
+        var pendingHandle: BackendHandle? = primeHandle
 
         while iter < iterCap {
             if let deadline, ContinuousClock.now >= deadline { break }
             iter += 1
+
+            let handle: BackendHandle
+            if let pending = pendingHandle {
+                handle = pending
+                pendingHandle = nil
+            } else {
+                do {
+                    handle = try await factory.makeHandle()
+                } catch {
+                    await reporter.error("Backend factory failed mid-run: \(error)")
+                    break
+                }
+            }
 
             let baseEntry = corpus.randomElement(using: &rng)!
             let (entry, appliedMutators) = MutatorChain.allRandom(baseEntry, rng: &rng)

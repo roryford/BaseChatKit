@@ -10,6 +10,7 @@ On its first real-model smoke run against `qwen3.5:4b` via Ollama, the harness l
 
 - [Quickstart](#quickstart)
 - [Backends](#backends)
+- [Rotation](#rotation)
 - [Anatomy of a Finding](#anatomy-of-a-finding)
 - [Day-One Detectors](#day-one-detectors)
 - [Reproducing a Finding](#reproducing-a-finding)
@@ -46,7 +47,7 @@ Common flags:
 | `--iterations N` | Iteration cap; runs until either budget is hit. |
 | `--single` | One iteration then exit — useful with `--seed`. |
 | `--seed N` | Deterministic prompt/sampler selection for repro. |
-| `--model <substr>` | Restrict to models matching the substring. |
+| `--model <substr>` | Pin to the first installed Ollama model containing `<substr>`. Pass `all` (or omit) to rotate through every installed Ollama model, one per iteration — see [Rotation](#rotation). |
 | `--detector <ids>` | Comma-separated detector IDs to enable. |
 | `--quiet` | Suppress the per-iteration log line. |
 
@@ -72,6 +73,36 @@ scripts/fuzz.sh --with-mlx --minutes 5
 ```
 
 This invokes `xcodebuild test -scheme BaseChatKit-Package -only-testing BaseChatFuzzTests/MLXFuzzTests` after the swift-run path completes.
+
+---
+
+## Rotation
+
+Bug shapes diverge per model. The #487 `thinking`-drop only showed up on reasoning models; repetition and looping skew toward small-quant instruct models. A campaign that touches a single model misses everything that lives on its siblings, which is why rotation is the default.
+
+**Default behaviour.** With no `--model` flag (or `--model all`), `fuzz-chat` enumerates every installed Ollama model at startup and round-robins through them — one model per iteration. With six iterations across two installed models, each model gets three iterations. Deduplication is unaffected: `Finding.hash` already mixes `modelId` into the key, so the same bug shape on two different models produces two distinct findings.
+
+**Pinning to one model.** `--model <substr>` preserves the pre-#501 behaviour: pick the first installed model whose name contains the substring, and use only that model for the whole campaign.
+
+**Determinism.** The discovered model list is sorted by UTF-8 byte order before rotation, so two invocations on the same machine — regardless of the order Ollama reports its models — produce the same iteration-to-model mapping. This is the contract that keeps `--seed N --replay` (#490) meaningful: given a fixed seed and a fixed installed-model list, the rotation sequence is reproducible.
+
+**Llama opt-out.** `LlamaBackend` calls `llama_backend_init` as a process-global one-shot — only one instance per process is supported. Rotation never applies to Llama. The CLI's Llama path is still unwired today and throws; when it lands, it will stay single-model even under `--model all`.
+
+**Mechanism.** The rotating factory is a `FuzzBackendFactory` conformance that wraps an ordered array of child factories and advances an internal index per `makeHandle()` call. The runner's `init(config:factory:)` contract (#537) is unchanged — rotation is hidden behind the factory boundary. See `RotatingFuzzFactory` in `Sources/BaseChatFuzz/`.
+
+```bash
+# Rotate through every installed Ollama model (default)
+swift run fuzz-chat --iterations 6
+
+# Same, explicit
+swift run fuzz-chat --model all --iterations 6
+
+# Pin to one model
+swift run fuzz-chat --model qwen3.5 --iterations 6
+
+# Verify rotation hit every model evenly
+cat tmp/fuzz/index.json | jq '.[].model_id' | sort | uniq -c
+```
 
 ---
 
