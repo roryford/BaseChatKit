@@ -197,7 +197,8 @@ struct LlamaGenerationDriver {
         var repeatWindowLast = ""
         var repeatWindowCount = 0
 
-        // Phrase-level repetition state: a bounded circular buffer of the last
+        // Phrase-level repetition state: a bounded sliding window (Array, evicted
+        // via removeFirst — O(n) but cap=61 so cost is negligible) of the last
         // `phraseWindowCap` decoded token strings. After each token is appended,
         // the tail is scanned for back-to-back phrase repetitions of lengths 2–20.
         var phraseWindow: [String] = []
