@@ -34,7 +34,7 @@ public final class DownloadState: Identifiable {
     // MARK: - State Transitions (called by DownloadManager)
 
     public func updateProgress(bytesDownloaded: Int64, totalBytes: Int64) {
-        let fraction = totalBytes > 0 ? Double(bytesDownloaded) / Double(totalBytes) : 0
+        let fraction = totalBytes > 0 ? min(1.0, Double(bytesDownloaded) / Double(totalBytes)) : 0
         status = .downloading(progress: fraction, bytesDownloaded: bytesDownloaded, totalBytes: totalBytes)
     }
 

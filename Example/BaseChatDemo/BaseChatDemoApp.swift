@@ -80,7 +80,7 @@ struct BaseChatDemoApp: App {
         CuratedModel(
             id: "phi-4-mini-mlx",
             displayName: "Phi-4 Mini (MLX, 4-bit)",
-            fileName: "mlx-community/Phi-4-mini-instruct-4bit",
+            fileName: "Phi-4-mini-instruct-4bit",
             repoID: "mlx-community/Phi-4-mini-instruct-4bit",
             modelType: .mlx,
             approximateSizeBytes: 2_400_000_000,
@@ -105,7 +105,7 @@ struct BaseChatDemoApp: App {
         CuratedModel(
             id: "llama-3.2-3b-mlx",
             displayName: "Llama 3.2 3B Instruct (MLX, 4-bit)",
-            fileName: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            fileName: "Llama-3.2-3B-Instruct-4bit",
             repoID: "mlx-community/Llama-3.2-3B-Instruct-4bit",
             modelType: .mlx,
             approximateSizeBytes: 1_800_000_000,
@@ -118,7 +118,7 @@ struct BaseChatDemoApp: App {
         CuratedModel(
             id: "qwen-2.5-7b-mlx",
             displayName: "Qwen 2.5 7B Instruct (MLX, 4-bit)",
-            fileName: "mlx-community/Qwen2.5-7B-Instruct-4bit",
+            fileName: "Qwen2.5-7B-Instruct-4bit",
             repoID: "mlx-community/Qwen2.5-7B-Instruct-4bit",
             modelType: .mlx,
             approximateSizeBytes: 4_500_000_000,
