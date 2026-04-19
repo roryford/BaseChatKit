@@ -82,6 +82,15 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatBackends/OpenAIBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/SSECloudBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
 
+        // BaseChatFuzz — SessionScript resource loader uses the "try-each-shape-in-order"
+        // decoder pattern: each `try?` is a shape probe (single-object vs. array of scripts).
+        // When both shape probes miss, SessionScript.loadAll writes an explicit stderr
+        // diagnostic on the next line. The Data(contentsOf:) swallow is a benign
+        // skip-this-resource case — the loader continues with the remaining scripts.
+        "BaseChatFuzz/SessionScript.swift:guard let data = try? Data(contentsOf: url) else { continue }",
+        "BaseChatFuzz/SessionScript.swift:if let one = try? decoder.decode(SessionScript.self, from: data) {",
+        "BaseChatFuzz/SessionScript.swift:if let many = try? decoder.decode([SessionScript].self, from: data) {",
+
         // BaseChatUI — Task.sleep cancellation is intentionally ignored;
         // parser/rendering fallbacks are benign optional conversions.
         "BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))",

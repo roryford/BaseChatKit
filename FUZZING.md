@@ -271,7 +271,7 @@ These are wired but not yet implemented. Day-one issues will be filed for each.
 
 - **Calibration corpus** — known-good outputs to score detectors against; gates the `flaky` → `confirmed` severity promotion.
 - **`--shrink`** — minimise a failing prompt to the smallest input that still fires the detector.
-- **Multi-turn** — current harness fuzzes single-turn only; multi-turn would surface KV-collision and session-isolation bugs the single-turn path can't see.
+- **Multi-turn** — opt-in via `--session-scripts`. The harness drives bundled `SessionScript` JSONs through `InferenceService.enqueue`, exercising the queue, cancellation, and latest-wins load paths that single-turn fuzzing can't reach. Three multi-turn detectors ship alongside: `turn-boundary-kv-state`, `cancellation-race`, and `session-context-leak`. Single-turn remains the default ([#492](https://github.com/roryford/BaseChatKit/issues/492)).
 - **Slash command** — `/fuzz` shortcut to run `scripts/fuzz.sh` from inside Claude Code.
 - **Multi-backend factory fleet** — `FuzzRunner` now accepts a `FuzzBackendFactory` protocol (landed via [#496](https://github.com/roryford/BaseChatKit/issues/496)). Ship `LlamaFuzzFactory`, `FoundationFuzzFactory`, and `MLXFuzzFactory` to feed `--backend all` ([#501](https://github.com/roryford/BaseChatKit/issues/501)).
 

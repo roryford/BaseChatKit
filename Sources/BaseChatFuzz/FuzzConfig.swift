@@ -18,6 +18,10 @@ public struct FuzzConfig: Sendable {
     public let outputDir: URL
     public let calibrate: Bool
     public let quiet: Bool
+    /// When `true`, the harness drives multi-turn scripts through
+    /// ``SessionFuzzRunner`` instead of the single-turn ``FuzzRunner``.
+    /// Additive today — the single-turn path is unchanged.
+    public let sessionScripts: Bool
 
     public init(
         backend: BackendChoice = .ollama,
@@ -28,7 +32,8 @@ public struct FuzzConfig: Sendable {
         detectorFilter: Set<String>? = nil,
         outputDir: URL = URL(fileURLWithPath: "tmp/fuzz", isDirectory: true),
         calibrate: Bool = false,
-        quiet: Bool = false
+        quiet: Bool = false,
+        sessionScripts: Bool = false
     ) {
         self.backend = backend
         self.minutes = minutes
@@ -39,5 +44,6 @@ public struct FuzzConfig: Sendable {
         self.outputDir = outputDir
         self.calibrate = calibrate
         self.quiet = quiet
+        self.sessionScripts = sessionScripts
     }
 }

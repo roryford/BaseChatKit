@@ -1,0 +1,10 @@
+{
+  "id": "rapid-send-cancel",
+  "sessionLabel": "race",
+  "systemPrompt": "You are a verbose narrator. Describe in detail.",
+  "steps": [
+    { "op": "send", "text": "Describe the solar system." },
+    { "op": "stop" },
+    { "op": "send", "text": "What is 2 + 2?" }
+  ]
+}

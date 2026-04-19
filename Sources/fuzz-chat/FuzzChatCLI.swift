@@ -25,6 +25,7 @@ struct FuzzChatCLI {
         var quiet = false
         var replayHash: String?
         var force = false
+        var sessionScripts = false
 
         var i = argv.startIndex
         while i < argv.endIndex {
@@ -70,6 +71,8 @@ struct FuzzChatCLI {
                 replayHash = candidate
             case "--force":
                 force = true
+            case "--session-scripts":
+                sessionScripts = true
             default:
                 fail("unknown argument: \(arg)")
             }
@@ -119,12 +122,18 @@ struct FuzzChatCLI {
             detectorFilter: detectorFilter,
             outputDir: outputDir,
             calibrate: false,
-            quiet: quiet
+            quiet: quiet,
+            sessionScripts: sessionScripts
         )
 
-        let runner = FuzzRunner(config: config, factory: factory)
         let reporter = TerminalReporter(quiet: quiet)
-        _ = await runner.run(reporter: reporter)
+        if sessionScripts {
+            let runner = SessionFuzzRunner(config: config, factory: factory)
+            _ = await runner.run(reporter: reporter)
+        } else {
+            let runner = FuzzRunner(config: config, factory: factory)
+            _ = await runner.run(reporter: reporter)
+        }
     }
 
     /// Builds the Ollama-backed factory for the runner.
@@ -257,6 +266,9 @@ struct FuzzChatCLI {
             "  --quiet             suppress live output (still prints findings)",
             "  --replay <hash>     rerun a recorded finding (12–40 hex chars)",
             "  --force             ignore git/model drift on --replay",
+            "  --session-scripts   drive bundled multi-turn SessionScripts via",
+            "                      InferenceService.enqueue (opt-in for this PR;",
+            "                      exercises queue, cancellation, session scoping).",
             "  -h, --help          this help",
         ]
         print(lines.joined(separator: "\n"))
