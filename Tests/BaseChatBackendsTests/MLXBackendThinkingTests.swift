@@ -196,5 +196,110 @@ final class MLXBackendThinkingTests: XCTestCase {
         // Sabotage check: always running ThinkingParser regardless of config.thinkingMarkers
         // would produce .thinkingToken events here and fail the thinkingEvents.isEmpty check.
     }
+
+    // MARK: - 4. Custom (non-qwen3) thinking markers route through ThinkingParser (#513)
+
+    /// Verifies that `ThinkingMarkers.custom(open:close:)` — the extensibility hook for
+    /// non-Qwen3 reasoning formats (GPT-OSS `<|channel|>`, Gemma 4 variants, etc.) —
+    /// drives the MLX ThinkingParser the same way `.qwen3` does.
+    ///
+    /// `MLXBackendThinkingTests` only exercised the qwen3 tag pair before this fixture,
+    /// so any future marker variant would have landed against untested code.
+    func test_customMarkers_routeThroughParser() async throws {
+        let mock = MockMLXModelContainer()
+        // GPT-OSS-style channel markers (representative non-qwen3 pair).
+        let markers = ThinkingMarkers.custom(open: "<|channel|>analysis", close: "<|channel|>final")
+        // Interleave enough whitespace to keep the ThinkingParser's holdback buffer
+        // small and predictable; the parser treats the open/close markers as opaque
+        // substrings regardless of the surrounding whitespace.
+        mock.tokensToYield = [
+            "<|channel|>analysis", " hmm ", "<|channel|>final", " answer"
+        ]
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+
+        var config = GenerationConfig()
+        config.thinkingMarkers = markers
+
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: config
+        )
+
+        let allEvents = try await collectAllEvents(from: stream)
+
+        // The reasoning content between the custom open/close markers must route through
+        // .thinkingToken, not raw .token, proving the config-passed markers reach the parser.
+        let thinkingTexts = allEvents.compactMap { event -> String? in
+            if case .thinkingToken(let t) = event { return t } else { return nil }
+        }
+        XCTAssertFalse(thinkingTexts.isEmpty,
+            "Custom markers must produce at least one .thinkingToken event for content between them")
+        XCTAssertTrue(thinkingTexts.joined().contains("hmm"),
+            "The reasoning body (\"hmm\") must appear inside .thinkingToken events, not raw .token events")
+
+        // Exactly one .thinkingComplete at the close marker.
+        let completions = allEvents.filter {
+            if case .thinkingComplete = $0 { return true } else { return false }
+        }
+        XCTAssertEqual(completions.count, 1,
+            "Exactly one .thinkingComplete must fire when the custom close marker is encountered")
+
+        // Post-close content must emerge as visible .token events.
+        let visibleTexts = allEvents.compactMap { event -> String? in
+            if case .token(let t) = event { return t } else { return nil }
+        }
+        XCTAssertTrue(visibleTexts.joined().contains("answer"),
+            "Content after the custom close marker must be emitted as .token events")
+
+        // The raw open/close marker strings must NOT leak into visible token output.
+        XCTAssertFalse(visibleTexts.joined().contains("<|channel|>"),
+            "Custom open/close marker bytes must be consumed by the parser, not leaked as .token text")
+
+        // Sabotage check: swapping `config.thinkingMarkers = markers` for `= .qwen3` would
+        // stop the parser from recognising the `<|channel|>` pair; the whole stream would
+        // surface as raw .token events and thinkingTexts.isEmpty would fail.
+    }
+
+    // MARK: - 5. maxThinkingTokens parity with LlamaGenerationDriver (#514)
+
+    /// Verifies that `GenerationConfig.maxThinkingTokens` terminates MLX generation the
+    /// same way it does in `LlamaGenerationDriver`.
+    ///
+    /// Today `MLXBackend.generate` does NOT track or enforce the thinking-token budget —
+    /// the test is skipped with a pointer to the backend gap so the divergence is visible
+    /// in the CI output rather than silently ignored.
+    func test_maxThinkingTokens_terminatesGeneration_parity_with_llama() async throws {
+        // FIXME: unskip when MLXBackend honours config.maxThinkingTokens
+        // (tracked in https://github.com/roryford/BaseChatKit/issues/550).
+        //
+        // Target assertions, enabled once the backend fix lands:
+        //
+        //   let mock = MockMLXModelContainer()
+        //   mock.tokensToYield = ["<think>", "a", "b", "c", "d", "</think>", "answer"]
+        //   let backend = MLXBackend()
+        //   backend._inject(mock)
+        //   var config = GenerationConfig(thinkingMarkers: .qwen3)
+        //   config.maxThinkingTokens = 2
+        //   let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        //   let events = try await collectAllEvents(from: stream)
+        //   let thinkingTokens = events.compactMap { ev -> String? in
+        //       if case .thinkingToken(let t) = ev { return t } else { return nil }
+        //   }
+        //   let visibleTokens = events.compactMap { ev -> String? in
+        //       if case .token(let t) = ev { return t } else { return nil }
+        //   }
+        //   XCTAssertLessThanOrEqual(thinkingTokens.count, 2)
+        //   XCTAssertFalse(visibleTokens.joined().contains("answer"))
+        //
+        // Sabotage check once unskipped: raising maxThinkingTokens to 10 would let every
+        // thinking token and the full "answer" token through, failing both assertions.
+        throw XCTSkip(
+            "MLXBackend does not yet enforce maxThinkingTokens; see issue #550 for the backend fix. " +
+            "Fixture lands today so the parity gap with LlamaGenerationDriver is documented."
+        )
+    }
 }
 #endif
