@@ -7,8 +7,9 @@ import BaseChatInference
 /// `FuzzBackendFactory` conformance that instantiates `FoundationBackend`.
 ///
 /// The Apple Intelligence system model is always resident — no model file is needed.
-/// Skips gracefully when Apple Intelligence is unavailable (not enabled, or not
-/// supported on this device) rather than crashing the campaign.
+/// Throws `CLIError` when Apple Intelligence is unavailable (not enabled, or not
+/// supported on this device), which `FuzzChatCLI` surfaces as an early-exit error
+/// rather than letting the campaign run 0 iterations silently.
 ///
 /// Requires macOS 26 / iOS 26. Call sites must be guarded with
 /// `#available(macOS 26, iOS 26, *)`.
@@ -25,7 +26,9 @@ public struct FoundationFuzzFactory: FuzzBackendFactory {
         }
         let backend = FoundationBackend()
         let modelURL = URL(string: "foundation:system")!
-        try await backend.loadModel(from: modelURL, plan: .cloud())
+        // .systemManaged correctly signals OS-owned memory with no KV-cache estimate;
+        // .cloud() would be semantically misleading for a local on-device backend.
+        try await backend.loadModel(from: modelURL, plan: .systemManaged(requestedContextSize: 0))
         return FuzzRunner.BackendHandle(
             backend: backend,
             modelId: "apple-intelligence",

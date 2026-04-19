@@ -61,7 +61,7 @@ Common flags:
 | Ollama | Wired | `curl http://localhost:11434/api/tags` | Default backend in v1. |
 | Llama  | Wired | `~/Documents/Models/**/*.gguf` via `HardwareRequirements` | Single-model only: `llama_backend_init` is a process-global one-shot, so `--model all` is a no-op for this backend. |
 | MLX    | Wired (xcodebuild path) | `~/Documents/Models/<dir>/{config.json,*.safetensors,tokenizer.*}` | Requires the xcodebuild path because MLX Metal shaders only compile under Xcode — see `--with-mlx` below. |
-| Foundation Models | Wired | `sw_vers -productVersion >= 26` | macOS 26+ only. Skips gracefully when Apple Intelligence is not enabled. |
+| Foundation Models | Wired | `sw_vers -productVersion >= 26` | macOS 26+ only. Requires Apple Intelligence to be enabled; otherwise backend creation fails and the run exits early with an error. |
 
 Backend wiring lives behind the `FuzzBackendFactory` protocol. A factory exposes `makeHandle() async throws -> FuzzRunner.BackendHandle`, where `BackendHandle` carries `(backend: any InferenceBackend, modelId: String, modelURL: URL, backendName: String, templateMarkers: RunRecord.MarkerSnapshot)`. To plug a new backend in, conform a `Sendable` struct to `FuzzBackendFactory` and pass it to `FuzzRunner(config:factory:)` — see `OllamaFuzzFactory` in `Sources/fuzz-chat/` for the canonical example. Detectors operate on the resulting `RunRecord` and don't care which backend produced it. Llama, Foundation, and MLX factory conformances are tracked in [#501](https://github.com/roryford/BaseChatKit/issues/501).
 

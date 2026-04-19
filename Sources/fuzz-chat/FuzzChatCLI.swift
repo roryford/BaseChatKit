@@ -147,6 +147,7 @@ struct FuzzChatCLI {
                 outputDir: outputDir,
                 factory: factory
             )
+            await factory.teardown()
             exit(exitCode)
         }
 
@@ -160,6 +161,7 @@ struct FuzzChatCLI {
                 outputDir: outputDir,
                 factory: factory
             )
+            await factory.teardown()
             exit(exitCode)
         }
 
@@ -188,6 +190,10 @@ struct FuzzChatCLI {
             let runner = FuzzRunner(config: config, factory: factory)
             _ = await runner.run(reporter: reporter)
         }
+        // Ordered backend teardown before process exit. The default implementation
+        // is a no-op; LlamaFuzzFactory overrides this to await unloadAndWait(),
+        // preventing the SIGABRT from ggml-metal resource-set teardown (#391).
+        await factory.teardown()
     }
 
     /// Builds the Ollama-backed factory for the runner.

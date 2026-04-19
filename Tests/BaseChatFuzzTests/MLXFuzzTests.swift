@@ -50,7 +50,10 @@ final class MLXFuzzTests: XCTestCase {
         }
         modelURL = found
         outputDir = Self.repoRoot().appendingPathComponent("tmp/fuzz", isDirectory: true)
-        try? FileManager.default.createDirectory(
+        // Let the error propagate so setUp() fails loudly if the output directory
+        // cannot be created (e.g. permissions, read-only checkout), rather than
+        // masking the problem and producing a harder-to-diagnose test failure later.
+        try FileManager.default.createDirectory(
             at: outputDir,
             withIntermediateDirectories: true
         )
