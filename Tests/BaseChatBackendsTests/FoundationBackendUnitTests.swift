@@ -286,6 +286,121 @@ final class FoundationBackendUnitTests: XCTestCase {
         XCTAssertFalse(backend.isGenerating)
     }
 
+    // MARK: - Session reuse for multi-turn context preservation
+
+    /// Verifies that consecutive `generate()` calls with the same `systemPrompt`
+    /// reuse the **same** `LanguageModelSession` object.
+    ///
+    /// `LanguageModelSession.streamResponse(to:)` accumulates turns inside the session,
+    /// which is how FoundationBackend provides multi-turn context to the model.
+    /// If a new session were created on every call, all prior conversation history
+    /// would be lost.
+    ///
+    /// The test drives this path without real inference by:
+    ///   1. Forcing the backend into the loaded state via `_forceLoaded()`.
+    ///   2. Calling `generate()` to trigger the lazy session-creation branch.
+    ///   3. Cancelling via `_cancelTaskOnly()` — which does NOT reset the session,
+    ///      unlike `stopGeneration()` — so the session survives into the next call.
+    ///   4. Draining the stream so `isGenerating` resets before the second call.
+    ///   5. Calling `generate()` again with the same systemPrompt.
+    ///   6. Asserting object identity (`===`) on the captured session references.
+    ///
+    /// Sabotage check: change the `needsNewSession` condition in `FoundationBackend.generate`
+    /// so it always creates a new session (e.g. `let needsNewSession = true`). The
+    /// `XCTAssert(session1 === session2)` assertion will fail because a new object is
+    /// allocated on every call. Remove the sabotage before committing.
+    func test_generate_reusesSameSession_whenSystemPromptUnchanged() async throws {
+        // These tests exercise internal session-management state. They do not run real
+        // inference, but they do instantiate LanguageModelSession — a macOS 26 type.
+        // The setUpWithError guard already enforces the OS floor, so no additional skip
+        // is needed here. We do still skip when Apple Intelligence is NOT available,
+        // because LanguageModelSession() may raise an error at creation time on devices
+        // where the model is absent.
+        //
+        // Note: on CI (no Apple Intelligence) this test is SKIPPED — the session-reuse
+        // logic is verified on a real device where LanguageModelSession can be created.
+        try XCTSkipUnless(
+            FoundationBackend.isAvailable,
+            "LanguageModelSession cannot be created without Apple Intelligence — skipping session-reuse test"
+        )
+
+        backend._forceLoaded()
+
+        // First call — creates the session lazily.
+        let systemPrompt = "You are a helpful assistant."
+        let stream1 = try backend.generate(prompt: "Hello", systemPrompt: systemPrompt, config: GenerationConfig())
+
+        // Capture the session before cancellation resets it (stopGeneration would nil it).
+        let session1 = backend._session
+        XCTAssertNotNil(session1, "First generate() must create a session")
+        XCTAssertEqual(backend._currentSystemPrompt, systemPrompt, "currentSystemPrompt must be set")
+
+        // Cancel the task without resetting the session, then drain so isGenerating → false.
+        backend._cancelTaskOnly()
+        for try await _ in stream1.events {}
+        XCTAssertFalse(backend.isGenerating, "isGenerating must be false after stream drains")
+
+        // Second call — same systemPrompt → must reuse the same session object.
+        let stream2 = try backend.generate(prompt: "How are you?", systemPrompt: systemPrompt, config: GenerationConfig())
+        let session2 = backend._session
+        XCTAssertNotNil(session2, "Second generate() must have a session")
+
+        backend._cancelTaskOnly()
+        for try await _ in stream2.events {}
+
+        // The key invariant: same session object identity means conversation history was preserved.
+        XCTAssert(
+            session1 === session2,
+            "Session must be REUSED when systemPrompt is unchanged — object identity must match"
+        )
+    }
+
+    /// Verifies that `generate()` creates a **new** `LanguageModelSession` when the
+    /// system prompt changes between calls.
+    ///
+    /// `LanguageModelSession(instructions:)` bakes the system prompt into the session.
+    /// There is no API to mutate instructions after creation, so a prompt change forces
+    /// a new session (accepting that prior conversation history is discarded in exchange
+    /// for the correct persona).
+    ///
+    /// Sabotage check: remove the `systemPrompt != currentSystemPrompt` clause from the
+    /// `needsNewSession` condition in `FoundationBackend.generate`. The assertion
+    /// `XCTAssert(session1 !== session2)` will fail because the old session is reused
+    /// even though the prompt changed. Remove the sabotage before committing.
+    func test_generate_createsNewSession_whenSystemPromptChanges() async throws {
+        try XCTSkipUnless(
+            FoundationBackend.isAvailable,
+            "LanguageModelSession cannot be created without Apple Intelligence — skipping session-recreation test"
+        )
+
+        backend._forceLoaded()
+
+        // First call with prompt "A".
+        let stream1 = try backend.generate(prompt: "Hello", systemPrompt: "Persona A", config: GenerationConfig())
+        let session1 = backend._session
+        XCTAssertNotNil(session1, "First generate() must create a session")
+        XCTAssertEqual(backend._currentSystemPrompt, "Persona A")
+
+        backend._cancelTaskOnly()
+        for try await _ in stream1.events {}
+        XCTAssertFalse(backend.isGenerating, "isGenerating must be false after stream drains")
+
+        // Second call with a DIFFERENT prompt "B" — must allocate a new session.
+        let stream2 = try backend.generate(prompt: "Hello", systemPrompt: "Persona B", config: GenerationConfig())
+        let session2 = backend._session
+        XCTAssertNotNil(session2, "Second generate() must create a session")
+        XCTAssertEqual(backend._currentSystemPrompt, "Persona B", "currentSystemPrompt must update to new prompt")
+
+        backend._cancelTaskOnly()
+        for try await _ in stream2.events {}
+
+        // The key invariant: a different system prompt must produce a different session object.
+        XCTAssert(
+            session1 !== session2,
+            "Session must be RECREATED when systemPrompt changes — object identity must differ"
+        )
+    }
+
     // MARK: - Backend Contract
 
     func test_contract_allInvariants() {
