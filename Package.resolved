@@ -1,5 +1,5 @@
 {
-  "originHash" : "3270b2e752845d7f13ddd048a8dfd3fd80544bb9c83984ac540f3069aaa8af5e",
+  "originHash" : "a44830f46120a6c3108ff93418db8e9529723e5dd91a1a4ba616c9585f13c7c2",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -15,14 +15,14 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mattt/llama.swift",
       "state" : {
-        "revision" : "3fec82010cfbe56aa78bb4177c8f4f33dace8779",
-        "version" : "2.8772.0"
+        "revision" : "9eda3e02dbe67d1e23973652da620cc4f4e5fc67",
+        "version" : "2.8840.0"
       }
     },
     {
       "identity" : "mlx-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ml-explore/mlx-swift.git",
+      "location" : "https://github.com/ml-explore/mlx-swift",
       "state" : {
         "revision" : "61b9e011e09a62b489f6bd647958f1555bdf2896",
         "version" : "0.31.3"
