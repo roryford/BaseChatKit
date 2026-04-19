@@ -597,6 +597,52 @@ struct OllamaBackendTests {
         #expect(messages[1]["content"] == "First reply")
     }
 
+    /// Network-mocked unit test: verifies that every turn passed to
+    /// `setConversationHistory` appears in the outgoing `messages` array in
+    /// order. The coverage gap this closes: prior tests only set 2-turn history
+    /// and didn't assert positional correctness of each entry.
+    ///
+    /// Sabotage check: deleting the `setConversationHistory` call below causes
+    /// the messages count assertion to fail (backend falls back to the bare
+    /// prompt-only message), confirming the assertion is load-bearing.
+    @Test func generate_forwardsFullConversationHistoryInRequestBody() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        backend.setConversationHistory([
+            (role: "user",      content: "What is 2+2?"),
+            (role: "assistant", content: "4."),
+            (role: "user",      content: "And 3+3?"),
+        ])
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"6"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "And 3+3?", systemPrompt: nil, config: .init())
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: {
+            $0.url?.absoluteString.contains("api/chat") == true
+        })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try #require(json["messages"] as? [[String: String]])
+
+        // All three history turns must be forwarded in order.
+        #expect(messages.count == 3)
+        #expect(messages[0]["role"] == "user")
+        #expect(messages[0]["content"] == "What is 2+2?")
+        #expect(messages[1]["role"] == "assistant")
+        #expect(messages[1]["content"] == "4.")
+        // The final turn must be the last user message with exact content.
+        #expect(messages[2]["role"] == "user")
+        #expect(messages[2]["content"] == "And 3+3?")
+    }
+
     // MARK: - stopGeneration
 
     @Test func stopGeneration_setsIsGeneratingFalse() async throws {
