@@ -21,9 +21,18 @@ public protocol FuzzBackendFactory: Sendable {
     /// `false` rather than run a guaranteed-noisy replay and mislead the
     /// developer into thinking the finding is flaky.
     var supportsDeterministicReplay: Bool { get }
+
+    /// Called by `FuzzChatCLI` after the campaign (or replay/shrink) finishes,
+    /// before the process exits. Factories that hold resources requiring ordered
+    /// shutdown (e.g. `LlamaBackend.unloadAndWait()`) implement this; the default
+    /// is a no-op so existing factories need no changes.
+    func teardown() async
 }
 
 public extension FuzzBackendFactory {
     /// Default: assume deterministic. Cloud factories opt out explicitly.
     var supportsDeterministicReplay: Bool { true }
+
+    /// Default: no teardown needed.
+    func teardown() async {}
 }

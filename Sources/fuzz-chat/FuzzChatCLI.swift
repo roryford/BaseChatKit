@@ -114,8 +114,24 @@ struct FuzzChatCLI {
             factory = MockFuzzFactory()
         case .chaos:
             factory = ChaosFuzzFactory()
-        case .llama, .foundation, .mlx, .all:
-            fail("\(backend.rawValue) backend not yet wired in v1 (Ollama only).")
+        case .llama:
+            #if Llama
+            factory = LlamaFuzzFactory()
+            #else
+            fail("Llama backend requires the Llama build trait. Build with --traits Llama.")
+            #endif
+        case .foundation:
+            #if canImport(FoundationModels)
+            if #available(macOS 26, iOS 26, *) {
+                factory = FoundationFuzzFactory()
+            } else {
+                fail("Foundation backend requires macOS 26 or iOS 26.")
+            }
+            #else
+            fail("Foundation backend requires macOS 26+ with FoundationModels.")
+            #endif
+        case .mlx, .all:
+            fail("\(backend.rawValue) backend not yet wired in CLI. Use scripts/fuzz.sh --with-mlx for MLX.")
         }
 
         // Shrink mode: greedy-delta-debug the recorded trigger down to a
@@ -131,6 +147,7 @@ struct FuzzChatCLI {
                 outputDir: outputDir,
                 factory: factory
             )
+            await factory.teardown()
             exit(exitCode)
         }
 
@@ -144,6 +161,7 @@ struct FuzzChatCLI {
                 outputDir: outputDir,
                 factory: factory
             )
+            await factory.teardown()
             exit(exitCode)
         }
 
@@ -172,6 +190,10 @@ struct FuzzChatCLI {
             let runner = FuzzRunner(config: config, factory: factory)
             _ = await runner.run(reporter: reporter)
         }
+        // Ordered backend teardown before process exit. The default implementation
+        // is a no-op; LlamaFuzzFactory overrides this to await unloadAndWait(),
+        // preventing the SIGABRT from ggml-metal resource-set teardown (#391).
+        await factory.teardown()
     }
 
     /// Builds the Ollama-backed factory for the runner.
