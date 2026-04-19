@@ -4,7 +4,7 @@ import BaseChatInference
 /// Inspired by qwen3.5:4b looping inside `<think>` blocks until `maxOutputTokens`
 /// exhausts. Runs `RepetitionDetector.looksLikeLooping` over both the visible
 /// stream and the thinking buffer separately — the thinking-side loop leaves
-/// `rendered` empty, which a rendered-only check would miss.
+/// `raw` empty, which a raw-only check would miss.
 public struct LoopingDetector: Detector {
     public let id = "looping"
     public let humanName = "Repetition / loop"
@@ -15,12 +15,14 @@ public struct LoopingDetector: Detector {
     public func inspect(_ r: RunRecord) -> [Finding] {
         var findings: [Finding] = []
 
-        if r.rendered.count >= 100, RepetitionDetector.looksLikeLooping(r.rendered) {
+        // Sub-check id stays `rendered-loop` for dedup stability across the
+        // existing on-disk sink — the name predates `rendered`'s deprecation.
+        if r.raw.count >= 100, RepetitionDetector.looksLikeLooping(r.raw) {
             findings.append(.init(
                 detectorId: id,
                 subCheck: "rendered-loop",
                 severity: .flaky,
-                trigger: String(r.rendered.suffix(120)),
+                trigger: String(r.raw.suffix(120)),
                 modelId: r.model.id
             ))
         }

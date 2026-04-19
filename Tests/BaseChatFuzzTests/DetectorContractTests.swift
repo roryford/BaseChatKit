@@ -54,8 +54,11 @@ private enum ContractRecord {
                 messages: [.init(role: "user", text: userPrompt)]
             ),
             events: [],
-            raw: raw,
-            rendered: rendered,
+            // `rendered` is deprecated (always a duplicate of `raw` in
+            // production). Mirror the two so contract fixtures that set only
+            // `rendered:` still exercise detectors that now read `raw`.
+            raw: raw.isEmpty ? rendered : raw,
+            rendered: rendered.isEmpty ? raw : rendered,
             thinkingRaw: thinkingRaw,
             thinkingParts: thinkingParts,
             thinkingCompleteCount: thinkingCompleteCount,
@@ -159,12 +162,15 @@ enum ThinkingClassificationContract: DetectorContract {
         )
     }
 
-    /// Negative: proper separation — thinking content stays in `thinkingRaw`,
-    /// rendered carries only the user-visible answer, complete event balances.
+    /// Negative: the backend stripped markers from the stream and surfaced
+    /// thinking tokens via structured events. `raw` carries only the
+    /// user-visible answer, `thinkingRaw` captures reasoning, and the complete
+    /// event balances. Pre-#499 this fixture relied on `rendered` diverging
+    /// from `raw` to avoid `visible-text-leak`; detectors now read `raw`
+    /// directly, so the fixture must keep markers out of `raw` itself.
     static var negativeFixture: RunRecord {
         ContractRecord.make(
-            rendered: "The answer is 4.",
-            raw: "<think>two plus two</think>The answer is 4.",
+            raw: "The answer is 4.",
             thinkingRaw: "two plus two",
             thinkingParts: ["two plus two"],
             thinkingCompleteCount: 1

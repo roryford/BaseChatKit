@@ -50,8 +50,12 @@ final class DetectorTests: XCTestCase {
                 messages: [.init(role: "user", text: userPrompt)]
             ),
             events: [],
-            raw: raw,
-            rendered: rendered,
+            // `rendered` is deprecated (always a duplicate of `raw` in
+            // production). Mirror it when only one of the two is set so legacy
+            // test call sites passing `rendered:` still drive the detectors,
+            // which now read `raw`.
+            raw: raw.isEmpty ? rendered : raw,
+            rendered: rendered.isEmpty ? raw : rendered,
             thinkingRaw: thinkingRaw,
             thinkingParts: thinkingParts,
             thinkingCompleteCount: thinkingCompleteCount,
@@ -98,9 +102,11 @@ final class DetectorTests: XCTestCase {
     }
 
     func test_thinkingClassification_properThinkingEvents_producesNoFindings() {
+        // Backends that surface thinking via structured events strip markers
+        // out of `raw` itself — post-#499, detectors read `raw` directly, so
+        // keeping markers out of `raw` is the correct negative shape.
         let r = makeRecord(
-            rendered: "final answer",
-            raw: "<think>reason</think>final answer",
+            raw: "final answer",
             thinkingRaw: "reason",
             thinkingParts: ["reason"],
             thinkingCompleteCount: 1

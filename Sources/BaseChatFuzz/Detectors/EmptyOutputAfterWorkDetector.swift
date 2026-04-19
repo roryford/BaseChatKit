@@ -32,7 +32,7 @@ public struct EmptyOutputAfterWorkDetector: Detector {
         guard r.phase == "done",
               r.error == nil,
               r.timing.totalMs >= workThresholdMs,
-              r.rendered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              r.raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               r.thinkingRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             return []

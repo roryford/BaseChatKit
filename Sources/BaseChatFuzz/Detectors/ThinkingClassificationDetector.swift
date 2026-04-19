@@ -15,12 +15,16 @@ public struct ThinkingClassificationDetector: Detector {
         let markers = r.templateMarkers ?? .init(open: "<think>", close: "</think>")
 
         // 1. Visible-text leak: literal markers appear in the user-visible string.
-        if r.rendered.contains(markers.open) || r.rendered.contains(markers.close) {
+        //    Reads `raw` directly — `rendered` is deprecated and currently
+        //    identical to `raw`. Once the harness starts running `raw` through
+        //    the real UI transform pipeline (follow-up to #499), this will
+        //    switch to the post-transform string.
+        if r.raw.contains(markers.open) || r.raw.contains(markers.close) {
             findings.append(.init(
                 detectorId: id,
                 subCheck: "visible-text-leak",
                 severity: .flaky,
-                trigger: extractContext(r.rendered, around: markers.open),
+                trigger: extractContext(r.raw, around: markers.open),
                 modelId: r.model.id
             ))
         }
