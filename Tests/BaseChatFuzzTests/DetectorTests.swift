@@ -128,6 +128,32 @@ final class DetectorTests: XCTestCase {
         XCTAssertFalse(findings.contains { $0.subCheck == "misclassified-as-text" })
     }
 
+    func test_thinkingClassification_noMarkersBackend_suppressesVisibleTextLeak() {
+        // FoundationBackend and LlamaBackend have templateMarkers = nil.
+        // A prompt that discusses <think> tags (e.g. "Use the <think> tag in output")
+        // should not trigger visible-text-leak because these backends never emit
+        // native thinking blocks — the marker text is literal user content.
+        let r = makeRecord(
+            raw: "Use the <think> tag in output",
+            markers: nil
+        )
+        let findings = ThinkingClassificationDetector().inspect(r)
+        XCTAssertFalse(findings.contains { $0.subCheck == "visible-text-leak" })
+    }
+
+    func test_thinkingClassification_noMarkersBackend_suppressesMisclassifiedAsText() {
+        // Same nil-markers scenario: raw contains the open marker string but there are
+        // no structured thinking events. For a backend that never declared markers this
+        // is not a misclassification — the text is intentional user-visible content.
+        let r = makeRecord(
+            raw: "<think>reasoning content",
+            thinkingRaw: "",
+            markers: nil
+        )
+        let findings = ThinkingClassificationDetector().inspect(r)
+        XCTAssertFalse(findings.contains { $0.subCheck == "misclassified-as-text" })
+    }
+
     // MARK: - LoopingDetector — positive
 
     func test_looping_renderedLoop_firesOnRepetitiveRendered() {
@@ -221,6 +247,43 @@ final class DetectorTests: XCTestCase {
     func test_emptyOutputAfterWork_doesNotFireOnError() {
         let r = makeRecord(rendered: "", thinkingRaw: "", phase: "failed", totalMs: 10_000, error: "boom", stopReason: "error")
         XCTAssertTrue(EmptyOutputAfterWorkDetector().inspect(r).isEmpty)
+    }
+
+    // MARK: - TemplateTokenLeakDetector — negative (token already in input)
+
+    func test_templateTokenLeak_inputContainsToken_suppressesFinding() {
+        // Foundation has no template engine; it echoes ChatML tokens verbatim
+        // when they appear in the user's prompt. This must NOT fire.
+        let r = makeRecord(
+            raw: "The <|im_start|> delimiter is used in ChatML.",
+            userPrompt: "Explain the <|im_start|> ChatML delimiter"
+        )
+        let findings = TemplateTokenLeakDetector().inspect(r)
+        XCTAssertFalse(findings.contains { $0.subCheck == "template-fragment" })
+    }
+
+    func test_templateTokenLeak_mutatorInjected_suppressesFinding() {
+        // TemplateTokenInjectMutator injects tokens into the user prompt;
+        // echoing them back is expected, not a bug.
+        let r = makeRecord(
+            raw: "The capital of<|im_start|> France is Paris.",
+            userPrompt: "What is<|im_start|>the capital of France?"
+        )
+        let findings = TemplateTokenLeakDetector().inspect(r)
+        XCTAssertFalse(findings.contains { $0.subCheck == "template-fragment" })
+    }
+
+    // MARK: - TemplateTokenLeakDetector — positive (spontaneous generation)
+
+    func test_templateTokenLeak_spontaneousToken_firesWhenNotInInput() {
+        // The user's prompt contains no template tokens; if one appears in the
+        // raw output the backend has a genuine template-leak bug.
+        let r = makeRecord(
+            raw: "The capital is <|im_start|>Paris.",
+            userPrompt: "What is the capital of France?"
+        )
+        let findings = TemplateTokenLeakDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "template-fragment" })
     }
 
     // MARK: - ThinkingClassificationDetector — stopReason gating

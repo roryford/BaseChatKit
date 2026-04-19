@@ -16,6 +16,21 @@ struct LlamaGenerationDriver {
         category: "inference"
     )
 
+    /// Consecutive identical decoded-token run length that triggers an early exit.
+    ///
+    /// Small models (e.g. smollm2-135m) can enter visible repetition loops where the same
+    /// token string is emitted hundreds of times. The existing `LoopingDetector` catches this
+    /// after the fact; this constant lets the generation loop break out as soon as the
+    /// repetition is unambiguous, saving KV-cache cycles and wall time.
+    private static let maxRepeatWindow = 20
+
+    /// Maximum phrase length (in tokens) to scan for repeated sequences.
+    private static let maxPhraseLen = 20
+    /// Minimum consecutive phrase repetitions before early exit.
+    private static let minPhraseRepeats = 3
+    /// Capacity of the phrase-detection token buffer (maxPhraseLen × minPhraseRepeats + 1).
+    private static let phraseWindowCap = maxPhraseLen * minPhraseRepeats + 1
+
     // MARK: - Run
 
     /// Executes the generation loop: clears the KV cache, builds the sampler
@@ -176,6 +191,19 @@ struct LlamaGenerationDriver {
         // Flag set when maxThinkingTokens is reached so we can break the outer loop cleanly.
         var thinkingLimitReached = false
 
+        // Repetition-window state: track the last decoded token string and how
+        // many times it has appeared consecutively. Exceeding `maxRepeatWindow`
+        // triggers an early exit — no need to run the loop all the way to maxTokens.
+        var repeatWindowLast = ""
+        var repeatWindowCount = 0
+
+        // Phrase-level repetition state: a bounded sliding window (Array, evicted
+        // via removeFirst — O(n) but cap=61 so cost is negligible) of the last
+        // `phraseWindowCap` decoded token strings. After each token is appended,
+        // the tail is scanned for back-to-back phrase repetitions of lengths 2–20.
+        var phraseWindow: [String] = []
+        phraseWindow.reserveCapacity(Self.phraseWindowCap + 1)
+
         generationLoop: for iteration in 0..<maxTokens {
             if isCancelled() { break }
 
@@ -190,6 +218,37 @@ struct LlamaGenerationDriver {
 
             // Decode token to text and route through ThinkingParser when active.
             if let text = LlamaTokenization.tokenToString(token, vocab: vocab, invalidUTF8Buffer: &invalidUTF8) {
+                // Single-token repetition guard: identical-token run of ≥maxRepeatWindow
+                // terminates the loop. Catches small-model repetition loops (e.g.
+                // smollm2-135m emitting " " hundreds of times) before the post-hoc
+                // LoopingDetector has to clean them up.
+                if text == repeatWindowLast {
+                    repeatWindowCount += 1
+                    if repeatWindowCount >= Self.maxRepeatWindow {
+                        break generationLoop
+                    }
+                } else {
+                    repeatWindowLast = text
+                    repeatWindowCount = 1
+                }
+
+                // Phrase-level repetition guard: catch multi-token loops (2–20 tokens)
+                // that the single-token window misses. Live fuzz runs on smollm2-135m
+                // surfaced loops with repeating units such as ASCII-art phrases, HTML
+                // timestamp blocks, and RTL override sequences.
+                phraseWindow.append(text)
+                if phraseWindow.count > Self.phraseWindowCap {
+                    phraseWindow.removeFirst()
+                }
+                let maxScanLen = min(Self.maxPhraseLen, phraseWindow.count / Self.minPhraseRepeats)
+                if maxScanLen >= 2 {
+                    for phraseLen in 2...maxScanLen {
+                        if Self.tailRepeats(phraseWindow, phraseLen: phraseLen, minRepeats: Self.minPhraseRepeats) {
+                            break generationLoop
+                        }
+                    }
+                }
+
                 let events: [GenerationEvent] = useParser ? thinkingParser.process(text) : [.token(text)]
                 for event in events {
                     if isFirstToken {
@@ -241,6 +300,24 @@ struct LlamaGenerationDriver {
         await MainActor.run { generationStream.setPhase(.done) }
         Self.logger.debug("LlamaGenerationDriver run finished")
         continuation.finish()
+    }
+
+    // MARK: - Phrase Detection
+
+    /// Returns true when the tail of `window` contains `minRepeats` consecutive
+    /// identical phrases of length `phraseLen`.
+    private static func tailRepeats(_ window: [String], phraseLen: Int, minRepeats: Int) -> Bool {
+        let needed = phraseLen * minRepeats
+        guard window.count >= needed else { return false }
+        let n = window.count
+        let phrase = window[(n - phraseLen)...]
+        for rep in 1..<minRepeats {
+            let start = n - phraseLen * (rep + 1)
+            let end   = n - phraseLen * rep
+            guard start >= 0 else { return false }
+            if window[start..<end].elementsEqual(phrase) == false { return false }
+        }
+        return true
     }
 }
 #endif

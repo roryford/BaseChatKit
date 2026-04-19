@@ -12,34 +12,40 @@ public struct ThinkingClassificationDetector: Detector {
 
     public func inspect(_ r: RunRecord) -> [Finding] {
         var findings: [Finding] = []
-        let markers = r.templateMarkers ?? .init(open: "<think>", close: "</think>")
 
-        // 1. Visible-text leak: literal markers appear in the user-visible string.
-        //    Reads `raw` directly — `rendered` is deprecated and currently
-        //    identical to `raw`. Once the harness starts running `raw` through
-        //    the real UI transform pipeline (follow-up to #499), this will
-        //    switch to the post-transform string.
-        if r.raw.contains(markers.open) || r.raw.contains(markers.close) {
-            findings.append(.init(
-                detectorId: id,
-                subCheck: "visible-text-leak",
-                severity: .flaky,
-                trigger: extractContext(r.raw, around: markers.open),
-                modelId: r.model.id
-            ))
-        }
+        // Sub-checks 1 and 2 are only meaningful for backends that declare
+        // native thinking markers (e.g. Qwen3 with <think>…</think>).
+        // FoundationBackend and LlamaBackend set templateMarkers = nil; a
+        // prompt that *discusses* <think> tags would otherwise produce false
+        // positives here. Skip both sub-checks when no markers are declared.
+        if let markers = r.templateMarkers {
+            // 1. Visible-text leak: literal markers appear in the user-visible string.
+            //    Reads `raw` directly — `rendered` is deprecated and currently
+            //    identical to `raw`. Once the harness starts running `raw` through
+            //    the real UI transform pipeline (follow-up to #499), this will
+            //    switch to the post-transform string.
+            if r.raw.contains(markers.open) || r.raw.contains(markers.close) {
+                findings.append(.init(
+                    detectorId: id,
+                    subCheck: "visible-text-leak",
+                    severity: .flaky,
+                    trigger: extractContext(r.raw, around: markers.open),
+                    modelId: r.model.id
+                ))
+            }
 
-        // 2. Misclassified-as-text: open marker appears in raw stream but no
-        //    structured thinking events were emitted (parser failed; reasoning
-        //    fell into `.text`).
-        if r.raw.contains(markers.open) && r.thinkingRaw.isEmpty {
-            findings.append(.init(
-                detectorId: id,
-                subCheck: "misclassified-as-text",
-                severity: .flaky,
-                trigger: extractContext(r.raw, around: markers.open),
-                modelId: r.model.id
-            ))
+            // 2. Misclassified-as-text: open marker appears in raw stream but no
+            //    structured thinking events were emitted (parser failed; reasoning
+            //    fell into `.text`).
+            if r.raw.contains(markers.open) && r.thinkingRaw.isEmpty {
+                findings.append(.init(
+                    detectorId: id,
+                    subCheck: "misclassified-as-text",
+                    severity: .flaky,
+                    trigger: extractContext(r.raw, around: markers.open),
+                    modelId: r.model.id
+                ))
+            }
         }
 
         // 3. Orphan thinking-complete: complete event fired without any thinking tokens.
