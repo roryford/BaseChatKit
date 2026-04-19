@@ -63,7 +63,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     private var model: OpaquePointer?
     private var context: OpaquePointer?
-    private var vocab: OpaquePointer?
+    /// Accessible to tests via `@testable import` for vocabulary-level assertions.
+    var vocab: OpaquePointer?
     private var generationTask: Task<Void, Never>?
     /// Cancellation flag shared between the decode loop (background task) and
     /// `stopGeneration()` / `unloadModel()` (any thread/actor).
