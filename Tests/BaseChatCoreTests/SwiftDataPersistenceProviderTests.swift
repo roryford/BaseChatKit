@@ -4,9 +4,12 @@ import SwiftData
 import BaseChatInference
 import BaseChatTestSupport
 
-/// Unit tests for ``SwiftDataPersistenceProvider`` against a fresh in-memory
-/// SwiftData stack per test. Covers CRUD, ordering, pagination, cascade scope,
-/// and the malformed-CSV footgun on `pinnedMessageIDsRaw`.
+/// Integration tests for ``SwiftDataPersistenceProvider`` against a fresh
+/// in-memory SwiftData stack per test. Covers CRUD, ordering, pagination,
+/// cascade scope, and the malformed-CSV footgun on `pinnedMessageIDsRaw`.
+///
+/// Classified integration (not unit) per CLAUDE.md: the suite drives a real
+/// SwiftData `ModelContainer`. See TESTING.md §Classification audit.
 @MainActor
 final class SwiftDataPersistenceProviderTests: XCTestCase {
 

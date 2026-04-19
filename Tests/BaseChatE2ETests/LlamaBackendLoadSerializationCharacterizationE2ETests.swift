@@ -37,7 +37,7 @@ import BaseChatTestSupport
 /// but to match the spirit of the constraint and keep tests robust, this file
 /// shares a single backend across both tests via a static cache — see
 /// `sharedBackend()`.
-final class LlamaBackendLoadSerializationCharacterizationTests: XCTestCase {
+final class LlamaBackendLoadSerializationCharacterizationE2ETests: XCTestCase {
 
     // MARK: - Shared Backend
 
