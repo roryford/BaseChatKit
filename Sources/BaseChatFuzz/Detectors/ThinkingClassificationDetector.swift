@@ -6,7 +6,7 @@ import Foundation
 public struct ThinkingClassificationDetector: Detector {
     public let id = "thinking-classification"
     public let humanName = "Thinking classification"
-    public let inspiredBy = "df94418, PR #476"
+    public let inspiredBy = "PR #476 thinking-token work"
 
     public init() {}
 

@@ -8,7 +8,7 @@ import BaseChatInference
 public struct LoopingDetector: Detector {
     public let id = "looping"
     public let humanName = "Repetition / loop"
-    public let inspiredBy = "qwen3.5:4b loop-in-think (user_local_backend_env)"
+    public let inspiredBy = "PR #476 thinking-token work + longstanding looping-on-repetitive-prompts observation"
 
     public init() {}
 
