@@ -86,7 +86,6 @@ public actor SessionFuzzRunner {
         var totalFindings = 0
         var perDetector: [String: Int] = [:]
         var pendingHandle: FuzzRunner.BackendHandle? = primeHandle
-        var lastHandle: FuzzRunner.BackendHandle = primeHandle
 
         // Each "iteration" = one full session-script execution. We loop the
         // whole corpus until the time/iteration budget is spent, mirroring
@@ -110,7 +109,6 @@ public actor SessionFuzzRunner {
                     break
                 }
             }
-            lastHandle = handle
 
             await reporter.iterationStart(iter: iter, model: handle.modelId, temp: 0.7, totalFindings: totalFindings)
 
@@ -148,7 +146,7 @@ public actor SessionFuzzRunner {
             }
         }
 
-        await factory.teardown(handle: lastHandle)
+        await factory.teardown()
 
         let snapshot = await sink.snapshot()
         let perDetectorRate = perDetector.mapValues { Double($0) / Double(max(iter, 1)) }
