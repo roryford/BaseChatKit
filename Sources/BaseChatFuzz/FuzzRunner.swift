@@ -149,6 +149,8 @@ public actor FuzzRunner {
             }
         }
 
+        await factory.teardown()
+
         let snapshot = await sink.snapshot()
         let perDetectorRate = perDetector.mapValues { Double($0) / Double(max(iter, 1)) }
         let report = FuzzReport(
