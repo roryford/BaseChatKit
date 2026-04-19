@@ -527,5 +527,248 @@ final class LlamaBackendTests: XCTestCase {
     func test_contract_allInvariants() {
         BackendContractChecks.assertAllInvariants { LlamaBackend() }
     }
+
+    // MARK: - EOG Token Variants (#519)
+
+    /// Closes #519 — exercises the `llama_vocab_is_eog` termination path of
+    /// `LlamaGenerationDriver.run`, which is the only way real models stop mid-stream.
+    ///
+    /// GGUF tokenizers each carry their own end-of-generation token(s) — `</s>`,
+    /// `<|endoftext|>`, `<|eot_id|>`, and Gemma variants with both `<end_of_turn>`
+    /// and `<eos>`. Without hitting `vocab_is_eog`, generation only stops when the
+    /// `maxOutputTokens` budget is exhausted. This fixture proves the EOG path
+    /// terminates the stream cleanly on whatever GGUF happens to be available:
+    /// the `maxOutputTokens` budget is set generously (256) while the prompt asks
+    /// for a brief reply, so any well-behaved model hits EOG before the budget.
+    ///
+    /// Gated on a real GGUF today — per #519, unskipping requires refactoring
+    /// `LlamaGenerationDriver` to accept a mockable sampler, which is out of
+    /// scope for a fixture PR that is not allowed to modify the driver.
+    ///
+    /// Sabotage check: delete the `if llama_vocab_is_eog(vocab, token) { break }`
+    /// line in `LlamaGenerationDriver.run`. Generation runs until `maxOutputTokens`
+    /// instead of terminating on EOG, so `tokenCount == maxOutputTokens` rather
+    /// than strictly less.
+    func test_fixture_eogTokenTerminatesStreamBeforeBudget_regression519() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip("No GGUF on disk. Place a `.gguf` in ~/Documents/Models/ to run this fixture.")
+        }
+
+        let backend = LlamaBackend()
+        addTeardownBlock { await backend.unloadAndWait() }
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
+
+        let maxBudget = 256
+        let config = GenerationConfig(temperature: 0.1, maxOutputTokens: maxBudget)
+        let stream = try backend.generate(
+            prompt: "Reply with just the word 'ok'.",
+            systemPrompt: nil,
+            config: config
+        )
+
+        var tokenCount = 0
+        for try await event in stream.events {
+            if case .token = event { tokenCount += 1 }
+        }
+
+        XCTAssertGreaterThan(tokenCount, 0, "EOG fixture must produce at least one token")
+        XCTAssertLessThan(
+            tokenCount, maxBudget,
+            "Generation must terminate on an EOG token before the \(maxBudget)-token budget — "
+            + "if tokenCount == budget, the EOG branch in LlamaGenerationDriver.run never fired"
+        )
+    }
+
+    // MARK: - n_batch Boundary Cases (#520)
+
+    /// Closes #520 — pins the `n_batch`-sized chunked decode path of
+    /// `LlamaGenerationDriver.run` against preflight clamping for oversized prompts.
+    ///
+    /// The driver chunks prompt decode into `llama_n_batch(context)`-sized pieces;
+    /// prompts longer than `contextSize` are pre-empted by `LlamaBackend.generate`'s
+    /// `tokens.count + maxOutputTokens <= contextSize` check which throws
+    /// `InferenceError.contextExhausted`. Without a fixture, the chunking regression
+    /// fixed in PR #409 can reappear silently when the decode loop is touched.
+    ///
+    /// Fixture strategy: build a plausible-but-oversized prompt by repeating a short
+    /// string until the UTF-8 length guarantees the token count will exceed the
+    /// clamped 512-token context (4-chars-per-token BPE average × 512 context
+    /// = ~2 048 chars minimum; we use 16 000 chars for a comfortable margin).
+    /// The exact token count is model-dependent, so we assert throws rather than
+    /// reading the decoded count.
+    ///
+    /// The successful path — prompts short enough to decode in one chunk — is
+    /// already covered by `test_stopGeneration_thenGenerate_succeeds_regression390`
+    /// (the "Say hello." second-generation leg). Unskipping the exact `n_batch` /
+    /// `n_batch + 1` / `contextSize - 1` counts requires a driver-level mock per #520.
+    ///
+    /// Sabotage check: change the preflight to `tokens.count + maxOutputTokens < 0`
+    /// so the guard always passes. The oversized prompt reaches `llama_decode` and
+    /// either succeeds (invalidating the fixture) or crashes llama.cpp instead of
+    /// throwing the expected `InferenceError.contextExhausted`.
+    func test_fixture_nBatchBoundary_oversizedPromptThrowsContextExhausted_scaffold520() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip("No GGUF on disk. Place a `.gguf` in ~/Documents/Models/ to run this fixture.")
+        }
+
+        let backend = LlamaBackend()
+        addTeardownBlock { await backend.unloadAndWait() }
+        // Clamp the context tight so a 16 kB repetition blows past it
+        // without requiring a 100 kB fixture string.
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
+
+        // 16 000 chars ≈ 4 000 tokens at BPE's ~4 chars/token — an order of
+        // magnitude over the clamped 512 context. Safe across tokenizers.
+        let oversizedPrompt = String(repeating: "word ", count: 3_200)
+
+        XCTAssertThrowsError(
+            try backend.generate(
+                prompt: oversizedPrompt,
+                systemPrompt: nil,
+                config: GenerationConfig(temperature: 0.1, maxOutputTokens: 16)
+            )
+        ) { error in
+            guard let inferenceError = error as? InferenceError else {
+                XCTFail("Expected InferenceError, got \(error)")
+                return
+            }
+            if case .contextExhausted = inferenceError {
+                // Expected — preflight caught the oversized prompt before
+                // `llama_decode` could assert on `n_tokens_all > n_batch`.
+            } else {
+                XCTFail("Expected contextExhausted, got \(inferenceError)")
+            }
+        }
+    }
+
+    // MARK: - llama_decode Error Paths (#521)
+
+    /// Closes #521 — pins the "generate() called before loadModel succeeded" path
+    /// that funnels through the same `InferenceError.inferenceFailure` surface as
+    /// `llama_decode` failures inside the driver.
+    ///
+    /// The issue's ideal fixture — mocking `llama_decode` to return non-zero and
+    /// asserting the stream finishes with `.failed("Failed to decode prompt")` /
+    /// `.failed("Decode failed during generation")` — requires refactoring
+    /// `LlamaGenerationDriver` to inject the C call, which this PR cannot do.
+    /// As the smoke-test-level substitute called out in the issue, this pins the
+    /// public error contract: callers attempting to generate on a backend whose
+    /// load failed (or was never issued) must see `InferenceError.inferenceFailure`,
+    /// the same type they would see if `llama_decode` blew up mid-loop.
+    ///
+    /// Additionally verifies `isGenerating` stays false across the failure — a
+    /// mid-loop decode failure goes through the same `defer { isGenerating = false }`,
+    /// so the invariant is identical.
+    ///
+    /// Sabotage check: change the `No model loaded` guard in
+    /// `LlamaBackend.generate` to `throw CancellationError()`. The fixture fails
+    /// because the error type is no longer `InferenceError.inferenceFailure`.
+    func test_fixture_decodeErrorPath_publicErrorContractForGeneratePreconditions_scaffold521() async throws {
+        let backend = LlamaBackend()
+
+        // Attempt generation on an unloaded backend. LlamaBackend.generate()
+        // throws .inferenceFailure("No model loaded") synchronously — the same
+        // error case the driver emits for `llama_decode != 0`.
+        XCTAssertThrowsError(
+            try backend.generate(
+                prompt: "hello",
+                systemPrompt: nil,
+                config: GenerationConfig(temperature: 0.1, maxOutputTokens: 16)
+            )
+        ) { error in
+            guard let inferenceError = error as? InferenceError else {
+                XCTFail("Expected InferenceError, got \(error)")
+                return
+            }
+            if case .inferenceFailure = inferenceError {
+                // Expected. Any decode failure path in LlamaGenerationDriver.run
+                // surfaces the same case.
+            } else {
+                XCTFail("Expected inferenceFailure, got \(inferenceError)")
+            }
+        }
+
+        XCTAssertFalse(backend.isGenerating,
+                       "isGenerating must remain false after generate() throws a decode-family failure")
+    }
+
+    // MARK: - stopGeneration Mid-Decode (#522)
+
+    /// Closes #522 — stopGeneration() fired during a long prompt decode must flip
+    /// `isGenerating` to false within a bounded time, proving the cancellation flag
+    /// is observed between chunked `llama_decode` calls.
+    ///
+    /// `LlamaGenerationDriver.run` checks `isCancelled()` between prompt chunks
+    /// AND between generation-loop iterations, not inside a single `llama_decode`
+    /// call (that call is synchronous C). A stop fired mid-decode must wait for
+    /// the current chunk/iteration to return, but from the caller's perspective
+    /// `isGenerating` must fall false promptly after — within a 2-second budget
+    /// per the issue's gated-on-real-GGUF fixture shape.
+    ///
+    /// This fixture specifically targets the case where the stop happens after
+    /// generation has started yielding tokens, to guarantee we are cancelling
+    /// inside the generation loop (not before decode even begins).
+    ///
+    /// Sabotage check: remove the `if isCancelled() { break }` check at the top
+    /// of the generation loop. The loop runs until `maxOutputTokens` / EOG, and
+    /// `isGenerating` stays true for the full generation — this fixture's
+    /// 2-second polling window expires and the `XCTAssertFalse` fails.
+    ///
+    /// For the mockable driver-level variant described in #522 (stop during
+    /// chunk N of a prompt-loop split, assert batch is freed and stream finishes
+    /// `.done` not `.failed`), a driver refactor is required — deferred until
+    /// the `LlamaGenerationDriver` decomposition follow-up lands.
+    func test_fixture_stopGeneration_midDecode_isGeneratingFallsFalseWithinBudget_regression522() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip("No GGUF on disk. Place a `.gguf` in ~/Documents/Models/ to run this fixture.")
+        }
+
+        let backend = LlamaBackend()
+        addTeardownBlock { await backend.unloadAndWait() }
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
+
+        // Same prompt + temperature as the proven-working
+        // `test_stopGeneration_thenGenerate_succeeds_regression390` path —
+        // reliably produces multiple tokens before EOG on small instruct
+        // models (incl. SmolLM2 / Phi-3 / TinyLlama).
+        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 128)
+        let stream = try backend.generate(
+            prompt: "Reply with a long story about a cat.",
+            systemPrompt: nil,
+            config: config
+        )
+
+        // Consume a few tokens so generation has demonstrably entered the
+        // decode loop — matching the regression390 test's 3-token warm-up.
+        var sawToken = false
+        var tokenCount = 0
+        for try await event in stream.events {
+            if case .token = event {
+                tokenCount += 1
+                if tokenCount >= 3 {
+                    sawToken = true
+                    break
+                }
+            }
+        }
+        XCTAssertTrue(sawToken, "Expected at least three tokens before stopping — generation never reached the decode loop")
+
+        // Fire the stop mid-generation. The generation loop's `isCancelled()`
+        // check must pick this up and break on the next iteration.
+        backend.stopGeneration()
+
+        // Drain the stream so the task's `defer { isGenerating = false }` runs.
+        for try await _ in stream.events { }
+
+        // Poll within a 2-second budget (per #522's gated fixture shape).
+        let waitDeadline = ContinuousClock.now + .seconds(2)
+        while backend.isGenerating && ContinuousClock.now < waitDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertFalse(backend.isGenerating,
+                       "stopGeneration() mid-decode must cause isGenerating to fall false within 2s — "
+                       + "a regression here means the cancel check was moved out of the decode loop")
+    }
 }
 #endif

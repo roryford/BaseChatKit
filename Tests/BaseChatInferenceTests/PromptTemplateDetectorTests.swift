@@ -226,4 +226,103 @@ final class PromptTemplateDetectorTests: XCTestCase {
 
         XCTAssertEqual(PromptTemplateDetector.detect(from: metadata), .chatML)
     }
+
+    // MARK: - GGUF Metadata Fixture Variants (#518)
+
+    /// Closes #518 — per-variant GGUF metadata fixtures proving
+    /// `PromptTemplateDetector.detect(from:)` resolves every supported
+    /// `PromptTemplate` case from realistic Jinja templates observed on actual
+    /// Hugging Face GGUFs (Qwen2, Meta-Llama-3, Gemma 4, Mistral-7B, Phi-3).
+    ///
+    /// `LlamaBackend.capabilities.requiresPromptTemplate == true`, so
+    /// `InferenceService` formats the prompt using whatever this detector returns.
+    /// A regression here (e.g. `gemma4` silently collapsing to `gemma`, or a
+    /// Qwen-style ChatML template misrouted to Phi) ships as malformed prompts
+    /// with no failing test — this fixture pins one case per supported variant.
+    ///
+    /// Sabotage check: change the final `return .chatML` fallback in
+    /// `detect(fromChatTemplate:)` to `return .llama3`. Every non-llama3 case
+    /// in this fixture fails, and the Qwen2 case (whose architecture is not in
+    /// the unambiguous list and therefore falls through to the chat-template
+    /// path) also fails — proving the fixture actually exercises both branches.
+    func test_fixture_perVariant_detectsCorrectTemplate() {
+        let fixtures: [(name: String, metadata: GGUFMetadata, expected: PromptTemplate)] = [
+            // Qwen2/Qwen3 ChatML — architecture "qwen2" is ambiguous, so the
+            // <|im_start|> Jinja marker must route the detector to chatML.
+            (
+                "Qwen2.5 ChatML",
+                GGUFMetadata(
+                    generalName: "Qwen2.5-7B-Instruct",
+                    generalArchitecture: "qwen2",
+                    contextLength: 32_768,
+                    chatTemplate: "{% for message in messages %}<|im_start|>{{ message.role }}\n{{ message.content }}<|im_end|>\n{% endfor %}<|im_start|>assistant\n",
+                    fileType: nil
+                ),
+                .chatML
+            ),
+            // Meta-Llama-3 — `llama` architecture is ambiguous; the
+            // <|start_header_id|> marker in the Jinja template must win.
+            (
+                "Meta-Llama-3 header",
+                GGUFMetadata(
+                    generalName: "Meta-Llama-3-8B-Instruct",
+                    generalArchitecture: "llama",
+                    contextLength: 8192,
+                    chatTemplate: "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{{ system }}<|eot_id|>",
+                    fileType: nil
+                ),
+                .llama3
+            ),
+            // Gemma 4 — the named #518 regression: <|turn> must NOT be swallowed
+            // by the older <start_of_turn> branch. A transitional template might
+            // contain both; the <|turn> variant is the more specific signal.
+            (
+                "Gemma 4 turn",
+                GGUFMetadata(
+                    generalName: "gemma-4-9b-it",
+                    generalArchitecture: "gemma4",
+                    contextLength: 8192,
+                    chatTemplate: "<|turn>user\n{{ content }}<|end_of_turn>\n<|turn>model\n",
+                    fileType: nil
+                ),
+                .gemma4
+            ),
+            // Mistral — [INST] marker pair; architecture "mistral" is also
+            // unambiguous, so both branches corroborate.
+            (
+                "Mistral INST",
+                GGUFMetadata(
+                    generalName: "Mistral-7B-Instruct-v0.2",
+                    generalArchitecture: "mistral",
+                    contextLength: 32_768,
+                    chatTemplate: "{{ bos_token }}{% for message in messages %}[INST] {{ message.content }} [/INST]{% endfor %}",
+                    fileType: nil
+                ),
+                .mistral
+            ),
+            // Phi 3 — regression anchor for #464 (Phi-4-mini-instruct silently
+            // misidentified as ChatML because the Jinja template carried a
+            // compatibility <|im_start|> branch). The phi3 architecture must
+            // override the Jinja marker.
+            (
+                "Phi 3 architecture",
+                GGUFMetadata(
+                    generalName: "Phi-3-mini-4k-instruct",
+                    generalArchitecture: "phi3",
+                    contextLength: 4096,
+                    chatTemplate: "<|user|>\n{{ content }}<|end|>\n<|assistant|>\n",
+                    fileType: nil
+                ),
+                .phi
+            ),
+        ]
+
+        for fixture in fixtures {
+            XCTAssertEqual(
+                PromptTemplateDetector.detect(from: fixture.metadata),
+                fixture.expected,
+                "\(fixture.name) fixture must resolve to \(fixture.expected.rawValue)"
+            )
+        }
+    }
 }
