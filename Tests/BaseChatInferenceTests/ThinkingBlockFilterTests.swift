@@ -26,8 +26,8 @@ final class ThinkingBlockFilterTests: XCTestCase {
     func test_passthrough_noTags_returnsAllAsVisible() {
         var parser = ThinkingParser()
         let events = parser.process("Hello, world!")
-        // Holdback: qwen3 markers max("</think>".count=8, "<think>".count=7) = 8 chars held
-        // The string is 13 chars; 5 are flushed immediately. finalize() releases the rest.
+        // No '<' in "Hello, world!" so no suffix can be a prefix of "<think>".
+        // All 13 chars are emitted immediately; finalize() is a no-op.
         let finalEvents = parser.finalize()
         let allEvents = events + finalEvents
 
@@ -161,7 +161,7 @@ final class ThinkingBlockFilterTests: XCTestCase {
 
     func test_partialOpenTagAtStreamEnd_flushedByFinalize() {
         var parser = ThinkingParser()
-        // Feed exactly the holdback window — it should be held back during process()
+        // "<think" is a prefix of "<think>" so the entire 6 chars are held during process()
         let events = parser.process("<think")
         // finalize() must flush the partial tag as .token (still depth 0, no complete tag seen)
         let finalEvents = parser.finalize()
@@ -180,20 +180,20 @@ final class ThinkingBlockFilterTests: XCTestCase {
 
     func test_visibleBeforePartialTag_emittedImmediately() {
         var parser = ThinkingParser()
-        // Feed a chunk with content longer than holdback followed by a partial tag.
-        // The confirmed prefix must be emitted as .token; the partial tag held back.
+        // "Hello world! " has no suffix that's a prefix of "<think>", so it's emitted
+        // immediately. "<think" is a prefix of "<think>" and is held back.
         let events = parser.process("Hello world! <think")
         let finalEvents = parser.finalize()
         let allEvents = events + finalEvents
 
         let visible = collectVisible(allEvents)
         XCTAssertTrue(visible.hasPrefix("Hello"),
-            "Content confirmed before the holdback window must be emitted as .token")
+            "Content before the partial tag must be emitted as .token immediately")
         XCTAssertTrue(visible.contains("<think"),
             "The incomplete tag should be flushed by finalize() as visible text")
 
-        // Sabotage check: if the holdback were 0, the partial tag would be emitted
-        // immediately and could corrupt subsequent processing.
+        // Sabotage check: if the holdback were disabled entirely, the partial tag
+        // would be emitted immediately and could corrupt subsequent processing.
     }
 
     // MARK: - Stray close tag in visible mode (regression for PR #472)
