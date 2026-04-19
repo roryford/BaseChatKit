@@ -87,7 +87,11 @@ struct FuzzChatCLI {
         let factory: any FuzzBackendFactory
         switch backend {
         case .ollama:
-            factory = OllamaFuzzFactory(modelHint: modelHint)
+            do {
+                factory = try Self.makeOllamaFactory(modelHint: modelHint)
+            } catch {
+                fail(String(describing: error))
+            }
         case .llama, .foundation, .mlx, .all:
             fail("\(backend.rawValue) backend not yet wired in v1 (Ollama only).")
         }
@@ -95,6 +99,42 @@ struct FuzzChatCLI {
         let runner = FuzzRunner(config: config, factory: factory)
         let reporter = TerminalReporter(quiet: quiet)
         _ = await runner.run(reporter: reporter)
+    }
+
+    /// Builds the Ollama-backed factory for the runner.
+    ///
+    /// - When `modelHint` is `nil` or `"all"`: enumerates every installed Ollama
+    ///   model, sorts by UTF-8 byte order, and wraps them in a
+    ///   `RotatingFuzzFactory` so the runner round-robins one model per
+    ///   iteration. The #501 driver: single-model campaigns miss bugs that
+    ///   only surface on a sibling model (e.g., the #487 `thinking` drop).
+    /// - When `modelHint` is a substring: delegates to the existing
+    ///   `OllamaFuzzFactory` which pins to the first match — preserves the
+    ///   pre-#501 behaviour for callers who want a specific target.
+    ///
+    /// Llama is intentionally excluded from rotation: `llama_backend_init` is
+    /// a global, one-instance-per-process constraint, so rotating multiple
+    /// Llama handles in one campaign would trip it. Llama remains unwired in
+    /// the CLI today, and should stay single-model even when it lands.
+    static func makeOllamaFactory(modelHint: String?) throws -> any FuzzBackendFactory {
+        let rotateAll = (modelHint == nil) || (modelHint?.lowercased() == "all")
+        if !rotateAll, let hint = modelHint {
+            // Pin-to-one path: let OllamaFuzzFactory resolve the hint lazily,
+            // matching pre-#501 behaviour and its error messaging.
+            return OllamaFuzzFactory(modelHint: hint)
+        }
+
+        guard let models = HardwareRequirements.listOllamaModels() else {
+            throw CLIError("No Ollama server reachable at http://localhost:11434. Start with: ollama serve")
+        }
+        guard !models.isEmpty else {
+            throw CLIError("No Ollama model installed. Pull one with: ollama pull qwen3.5:4b")
+        }
+        // Sort UTF-8 byte order for deterministic rotation across invocations.
+        // Replay (#490) relies on the index-to-model mapping being stable.
+        let sorted = models.sorted()
+        let children: [any FuzzBackendFactory] = sorted.map { OllamaFuzzFactory(modelHint: $0) }
+        return RotatingFuzzFactory(children: children)
     }
 
     static func printUsage() {
@@ -108,7 +148,11 @@ struct FuzzChatCLI {
             "  --minutes N         time budget (default 5 if neither flag set)",
             "  --iterations N      iteration budget",
             "  --seed N            RNG seed (default random)",
-            "  --model <substr>    model id substring filter",
+            "  --model <substr>    pin to first installed Ollama model containing <substr>.",
+            "                      Pass `all` (or omit) to rotate through every installed",
+            "                      Ollama model, one per iteration. Rotation is Ollama-only:",
+            "                      Llama has a per-process global init constraint and stays",
+            "                      single-model.",
             "  --detector ids      comma-separated detector ids to run",
             "  --single            shorthand for --iterations 1",
             "  --quiet             suppress live output (still prints findings)",
