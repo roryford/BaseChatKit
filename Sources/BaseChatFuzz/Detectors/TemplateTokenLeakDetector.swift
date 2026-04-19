@@ -38,11 +38,20 @@ public struct TemplateTokenLeakDetector: Detector {
         // before scanning so prose about `<|im_start|>` doesn't fire.
         let scannable = Self.stripCodeSpans(r.raw)
 
+        // Collect the full text of every input message so we can distinguish
+        // "backend spontaneously generated a template token" (real bug) from
+        // "backend echoed a token that was already in the user's prompt"
+        // (expected for Foundation's no-template pass-through and for seeds /
+        // mutators that deliberately inject template tokens like
+        // TemplateTokenInjectMutator).
+        let inputText = r.prompt.messages.map(\.text).joined()
+
         var findings: [Finding] = []
         var seen: Set<String> = []
         for fragment in Self.templateFragments {
             guard !seen.contains(fragment),
-                  scannable.contains(fragment)
+                  scannable.contains(fragment),
+                  !inputText.contains(fragment)   // skip echoed-input fragments
             else { continue }
             seen.insert(fragment)
             findings.append(.init(
