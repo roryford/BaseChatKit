@@ -114,8 +114,24 @@ struct FuzzChatCLI {
             factory = MockFuzzFactory()
         case .chaos:
             factory = ChaosFuzzFactory()
-        case .llama, .foundation, .mlx, .all:
-            fail("\(backend.rawValue) backend not yet wired in v1 (Ollama only).")
+        case .llama:
+            #if Llama
+            factory = LlamaFuzzFactory()
+            #else
+            fail("Llama backend requires the Llama build trait. Build with --traits Llama.")
+            #endif
+        case .foundation:
+            #if canImport(FoundationModels)
+            if #available(macOS 26, iOS 26, *) {
+                factory = FoundationFuzzFactory()
+            } else {
+                fail("Foundation backend requires macOS 26 or iOS 26.")
+            }
+            #else
+            fail("Foundation backend requires macOS 26+ with FoundationModels.")
+            #endif
+        case .mlx, .all:
+            fail("\(backend.rawValue) backend not yet wired in CLI. Use scripts/fuzz.sh --with-mlx for MLX.")
         }
 
         // Shrink mode: greedy-delta-debug the recorded trigger down to a

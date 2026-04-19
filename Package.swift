@@ -156,7 +156,7 @@ let package = Package(
             path: "Sources/BaseChatFuzz",
             resources: [.process("Resources")]
         ),
-        // CLI driver. Currently wires Ollama only; Llama/Foundation/MLX deferred.
+        // CLI driver. Wires Ollama, Llama, Foundation; MLX runs via xcodebuild fuzz path.
         .executableTarget(
             name: "fuzz-chat",
             dependencies: ["BaseChatFuzz", "BaseChatBackends", "BaseChatInference", "BaseChatTestSupport"],
@@ -168,7 +168,16 @@ let package = Package(
         ),
         .testTarget(
             name: "BaseChatFuzzTests",
-            dependencies: ["BaseChatFuzz", "BaseChatInference", "BaseChatTestSupport"]
+            dependencies: [
+                "BaseChatFuzz",
+                "BaseChatBackends",
+                "BaseChatInference",
+                "BaseChatTestSupport",
+            ],
+            swiftSettings: [
+                .define("MLX", .when(traits: ["MLX"])),
+                .define("Llama", .when(traits: ["Llama"])),
+            ]
         ),
         // Xcode-only: real MLX model inference requiring Metal shader library.
         // Cannot run via `swift test` — MLX's metallib is only compiled by Xcode.
