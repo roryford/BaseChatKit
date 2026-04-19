@@ -2,6 +2,7 @@ import Foundation
 import BaseChatFuzz
 import BaseChatBackends
 import BaseChatInference
+import BaseChatTestSupport
 
 @main
 @MainActor
@@ -105,13 +106,13 @@ struct FuzzChatCLI {
 
     @MainActor
     static func makeOllamaHandle(modelHint: String?) async throws -> FuzzRunner.BackendHandle {
-        let models: [String]
-        do {
-            models = try await OllamaDiscovery.fetchModels()
-        } catch {
-            throw CLIError("No Ollama server reachable at localhost:11434 (\(error)). Start with: ollama serve")
+        guard let models = HardwareRequirements.listOllamaModels() else {
+            throw CLIError("No Ollama server reachable at localhost:11434. Start with: ollama serve")
         }
-        guard let model = modelHint.flatMap({ hint in models.first(where: { $0.contains(hint) }) }) ?? models.first else {
+        let hintedModel: String? = modelHint.flatMap { hint in
+            HardwareRequirements.findOllamaModel(nameContains: hint)
+        }
+        guard let model = hintedModel ?? models.first else {
             throw CLIError("No Ollama model installed. Pull one with: ollama pull qwen3.5:4b")
         }
         let backend = OllamaBackend()

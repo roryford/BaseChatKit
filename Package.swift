@@ -159,7 +159,7 @@ let package = Package(
         // CLI driver. Currently wires Ollama only; Llama/Foundation/MLX deferred.
         .executableTarget(
             name: "fuzz-chat",
-            dependencies: ["BaseChatFuzz", "BaseChatBackends", "BaseChatInference"],
+            dependencies: ["BaseChatFuzz", "BaseChatBackends", "BaseChatInference", "BaseChatTestSupport"],
             path: "Sources/fuzz-chat",
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
