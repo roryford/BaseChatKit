@@ -10,7 +10,7 @@ import Foundation
 public struct EmptyOutputAfterWorkDetector: Detector {
     public let id = "empty-output-after-work"
     public let humanName = "Empty output after non-trivial work"
-    public let inspiredBy = "OllamaBackend.extractToken drops `thinking` field (qwen3.5:4b smoke)"
+    public let inspiredBy = "#487 — Ollama thinking-drop smoke finding"
 
     /// Time threshold above which a clean-but-empty completion is suspicious.
     /// Default raised to 8s to clear cold-start model loads (`ollama serve` first hit).
