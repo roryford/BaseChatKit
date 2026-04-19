@@ -109,7 +109,15 @@ public actor FindingsSink {
             }
 
             let reproCmd = Self.reproCommand(seed: recordedSeed, modelId: record.model.id)
-            let reproScript = "#!/bin/sh\n# --replay is not yet implemented (#490); using direct seed/model/--single recipe\n\(reproCmd)\n"
+            let replayCmd = Self.replayCommand(hash: finding.hash)
+            let reproScript = """
+            #!/bin/sh
+            # Preferred: bit-level replay against the recorded prompt/config.
+            \(replayCmd)
+            # Fallback: re-enter the campaign loop at the original seed/model.
+            # \(reproCmd)
+
+            """
             do {
                 try reproScript.write(to: dir.appendingPathComponent("repro.sh"), atomically: true, encoding: .utf8)
             } catch {
@@ -151,8 +159,8 @@ public actor FindingsSink {
         for row in rows {
             let f = row.finding
             let trigger = f.trigger.replacingOccurrences(of: "|", with: "\\|").prefix(80)
-            let repro = Self.reproCommand(seed: row.seed, modelId: row.modelId)
-            md += "| \(f.severity.rawValue) | \(f.detectorId) / \(f.subCheck) | \(row.modelId) | `\(f.hash)` | \(f.firstSeen) | \(f.count) | \(trigger) | `\(repro)` |\n"
+            let replay = Self.replayCommand(hash: f.hash)
+            md += "| \(f.severity.rawValue) | \(f.detectorId) / \(f.subCheck) | \(row.modelId) | `\(f.hash)` | \(f.firstSeen) | \(f.count) | \(trigger) | `\(replay)` |\n"
         }
         let mdURL = outputDir.appendingPathComponent("INDEX.md")
         do {
@@ -164,6 +172,10 @@ public actor FindingsSink {
 
     private static func reproCommand(seed: UInt64, modelId: String) -> String {
         "swift run fuzz-chat --seed \(seed) --model \(modelId) --single"
+    }
+
+    private static func replayCommand(hash: String) -> String {
+        "swift run fuzz-chat --replay \(hash)"
     }
 
     private static func logError(_ message: String) {

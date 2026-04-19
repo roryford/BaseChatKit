@@ -23,6 +23,8 @@ struct FuzzChatCLI {
         var modelHint: String?
         var detectorFilter: Set<String>?
         var quiet = false
+        var replayHash: String?
+        var force = false
 
         var i = argv.startIndex
         while i < argv.endIndex {
@@ -58,6 +60,16 @@ struct FuzzChatCLI {
                 quiet = true
             case "--single":
                 iterations = 1
+            case "--replay":
+                i = argv.index(after: i)
+                guard i < argv.endIndex else { fail("--replay requires a hash value") }
+                let candidate = argv[i]
+                guard isValidReplayHash(candidate) else {
+                    fail("--replay hash must be 12–40 lowercase hex characters (got: \(candidate))")
+                }
+                replayHash = candidate
+            case "--force":
+                force = true
             default:
                 fail("unknown argument: \(arg)")
             }
@@ -68,21 +80,7 @@ struct FuzzChatCLI {
             fail("MLX cannot run via `swift run` (needs Xcode-compiled metallib). Use scripts/fuzz.sh or xcodebuild.")
         }
 
-        // Default termination if neither flag passed: 5 minutes.
-        if minutes == nil && iterations == nil { minutes = 5 }
-
         let outputDir = URL(fileURLWithPath: "tmp/fuzz", isDirectory: true)
-        let config = FuzzConfig(
-            backend: backend,
-            minutes: minutes,
-            iterations: iterations,
-            seed: seed,
-            modelHint: modelHint,
-            detectorFilter: detectorFilter,
-            outputDir: outputDir,
-            calibrate: false,
-            quiet: quiet
-        )
 
         let factory: any FuzzBackendFactory
         switch backend {
@@ -95,6 +93,34 @@ struct FuzzChatCLI {
         case .llama, .foundation, .mlx, .all:
             fail("\(backend.rawValue) backend not yet wired in v1 (Ollama only).")
         }
+
+        // Replay mode short-circuits the campaign loop entirely. It reruns a
+        // single recorded finding against the same prompt/config/seed 3x and
+        // prints a promotion verdict. See Sources/BaseChatFuzz/Replay/Replayer.swift.
+        if let hash = replayHash {
+            let exitCode = await runReplay(
+                hash: hash,
+                force: force,
+                outputDir: outputDir,
+                factory: factory
+            )
+            exit(exitCode)
+        }
+
+        // Default termination if neither flag passed: 5 minutes.
+        if minutes == nil && iterations == nil { minutes = 5 }
+
+        let config = FuzzConfig(
+            backend: backend,
+            minutes: minutes,
+            iterations: iterations,
+            seed: seed,
+            modelHint: modelHint,
+            detectorFilter: detectorFilter,
+            outputDir: outputDir,
+            calibrate: false,
+            quiet: quiet
+        )
 
         let runner = FuzzRunner(config: config, factory: factory)
         let reporter = TerminalReporter(quiet: quiet)
@@ -137,6 +163,79 @@ struct FuzzChatCLI {
         return RotatingFuzzFactory(children: children)
     }
 
+    /// Drives the Replayer and maps its `Outcome` to an exit code + summary line.
+    /// Exit codes match the issue brief:
+    ///   0  — reproduced or not-reproduced (both are valid data)
+    ///   2  — record not found, drift refused, schema unsupported, non-deterministic
+    ///   3  — internal error (decode failure, factory failure)
+    static func runReplay(
+        hash: String,
+        force: Bool,
+        outputDir: URL,
+        factory: any FuzzBackendFactory
+    ) async -> Int32 {
+        let replayer = Replayer(findingsRoot: outputDir, factory: factory)
+        let outcome: Replayer.Outcome
+        do {
+            outcome = try await replayer.replay(hash: hash, attempts: 3, force: force)
+        } catch {
+            FileHandle.standardError.write(Data("Replay \(hash): failed — \(error)\n".utf8))
+            return 3
+        }
+
+        switch outcome {
+        case .reproduced(let result):
+            let verdict: String = {
+                if result.newSeverity == .confirmed {
+                    return "promoted to confirmed"
+                } else {
+                    return "remains flaky"
+                }
+            }()
+            var line = "Replay \(hash): reproduced \(result.successfulReproductions)/\(result.attempts) — \(verdict)"
+            if result.drift != nil {
+                line += " [forced despite drift]"
+            }
+            print(line)
+            return 0
+
+        case .driftRefused(let report):
+            var parts: [String] = []
+            if report.gitDrifted {
+                parts.append("git \(report.recordedGitRev) → \(report.currentGitRev)")
+            }
+            if report.modelHashDrifted {
+                let a = report.recordedModelHash?.prefix(12) ?? "nil"
+                let b = report.currentModelHash?.prefix(12) ?? "nil"
+                parts.append("model \(a) → \(b)")
+            }
+            let explanation = parts.joined(separator: "; ")
+            print("Replay \(hash): drift refused (\(explanation)); pass --force to override")
+            return 2
+
+        case .recordNotFound:
+            print("Replay \(hash): record not found")
+            return 2
+
+        case .schemaUnsupported(let v):
+            print("Replay \(hash): schema version \(v) is newer than harness (supported: \(RunRecord.currentSchema))")
+            return 2
+
+        case .nonDeterministicBackend(let name):
+            print("Replay \(hash): non-deterministic backend (\(name)); --replay not supported")
+            return 2
+        }
+    }
+
+    /// Validates `--replay` argument shape: 12–40 lowercase hex chars. Finding
+    /// hashes produced by `Finding.computeHash` are exactly 12 chars today;
+    /// allowing up to 40 lets us roundtrip full SHA-256 prefixes if the finding
+    /// hash length ever grows without a CLI change.
+    static func isValidReplayHash(_ s: String) -> Bool {
+        guard (12...40).contains(s.count) else { return false }
+        return s.allSatisfy { $0.isHexDigit && ($0.isNumber || $0.isLowercase) }
+    }
+
     static func printUsage() {
         let lines = [
             "fuzz-chat — chat anomaly fuzzer",
@@ -156,6 +255,8 @@ struct FuzzChatCLI {
             "  --detector ids      comma-separated detector ids to run",
             "  --single            shorthand for --iterations 1",
             "  --quiet             suppress live output (still prints findings)",
+            "  --replay <hash>     rerun a recorded finding (12–40 hex chars)",
+            "  --force             ignore git/model drift on --replay",
             "  -h, --help          this help",
         ]
         print(lines.joined(separator: "\n"))
