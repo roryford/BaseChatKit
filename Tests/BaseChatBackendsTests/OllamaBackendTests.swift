@@ -146,6 +146,34 @@ struct OllamaBackendTests {
         #expect(messages.first?["content"] == "You are a test bot.")
     }
 
+    /// Ollama's final NDJSON chunk can carry several `done_reason` values —
+    /// `stop` (normal termination), `length` (hit `num_predict`), `load` /
+    /// `unload` (server-side model swap). None of these should produce an
+    /// extra `.token` event because their `message.content` is empty. This
+    /// fixture pins the current behaviour so future wiring of `done_reason`
+    /// into `GenerationStream.phase` has a green baseline to diff against.
+    /// Closes #507.
+    @Test func streaming_doneReasonVariants_notYielded() async throws {
+        let variants = ["length", "load", "unload"]
+        for reason in variants {
+            let (backend, chatURL) = makeConfiguredBackend()
+            try await loadBackend(backend)
+
+            let chunks: [Data] = [
+                ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true,"done_reason":"\#(reason)","total_duration":42000000,"eval_count":128}"#),
+            ]
+            MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+            defer { MockURLProtocol.unstub(url: chatURL) }
+
+            let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+            var tokens: [String] = []
+            for try await event in stream.events {
+                if case .token(let t) = event { tokens.append(t) }
+            }
+            #expect(tokens.isEmpty, "done_reason=\(reason) should produce no .token events (got \(tokens))")
+        }
+    }
+
     @Test func streaming_doneChunk_notYielded() async throws {
         let (backend, chatURL) = makeConfiguredBackend()
         try await loadBackend(backend)
@@ -163,6 +191,39 @@ struct OllamaBackendTests {
         for try await event in stream.events { if case .token(let text) = event { tokens.append(text) } }
 
         #expect(tokens == ["Hi"])
+    }
+
+    // MARK: - Chunk Boundary
+
+    /// Under real network conditions, `URLSession.AsyncBytes` will deliver a
+    /// JSON object split across TCP reads — a partial payload followed by the
+    /// rest on the next chunk, with the newline landing on the second read.
+    /// Every other streaming test delivers one complete JSON object per chunk,
+    /// so the byte-buffer path is otherwise untested for splits. A refactor
+    /// that swaps the per-byte reader for a chunked reader must still assemble
+    /// pre-newline bytes with post-newline bytes before JSON parse.
+    /// Closes #509.
+    @Test func streaming_midLineSplit_reassembles() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        // Split a single JSON object across two chunks. The newline arrives
+        // on the second chunk so the parser must join the two buffers.
+        let chunks: [Data] = [
+            Data(#"{"model":"llama3.2","message":{"role":"assistant","content":"Hel"#.utf8),
+            Data(#"lo"},"done":false}"#.utf8) + Data("\n".utf8),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+        var tokens: [String] = []
+        for try await event in stream.events {
+            if case .token(let t) = event { tokens.append(t) }
+        }
+
+        #expect(tokens == ["Hello"], "mid-line split must be reassembled before JSON parse")
     }
 
     @Test func streaming_malformedLine_skipped() async throws {
@@ -247,6 +308,228 @@ struct OllamaBackendTests {
             switch error {
             case .rateLimited: break
             default: Issue.record("Expected rateLimited, got \(error)")
+            }
+        }
+    }
+
+    /// `OllamaBackend.checkStatusCode` parses `Retry-After` via
+    /// `TimeInterval(init)`, which accepts integer seconds but silently fails
+    /// on the RFC 7231 HTTP-date form (`Wed, 21 Oct 2026 07:28:00 GMT`). Pin
+    /// both: integer parses to a retry hint, HTTP-date currently becomes `nil`
+    /// so retry policy loses the hint. Once a date parser lands, flip the
+    /// HTTP-date assertion.
+    ///
+    /// We set `maxRetries: 0` on both sub-cases so the integer-seconds variant
+    /// doesn't actually sleep 30s waiting to retry.
+    /// Closes #512.
+    @Test func rateLimitError_429_retryAfterVariants() async throws {
+        // Integer seconds — parses as expected.
+        do {
+            let (backend, chatURL) = makeConfiguredBackend()
+            backend.retryStrategy = ExponentialBackoffStrategy(maxRetries: 0)
+            try await loadBackend(backend)
+
+            MockURLProtocol.stub(url: chatURL, response: .immediate(
+                data: Data(),
+                statusCode: 429,
+                headers: ["Retry-After": "30"]
+            ))
+            defer { MockURLProtocol.unstub(url: chatURL) }
+
+            let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+            do {
+                for try await _ in stream.events {}
+                Issue.record("Expected rateLimited error for integer Retry-After")
+            } catch {
+                guard let error = extractCloudError(error) else {
+                    Issue.record("Expected CloudBackendError, got \(error)")
+                    return
+                }
+                switch error {
+                case .rateLimited(let retryAfter):
+                    #expect(retryAfter == 30, "integer Retry-After must parse to 30s (got \(String(describing: retryAfter)))")
+                default:
+                    Issue.record("Expected rateLimited, got \(error)")
+                }
+            }
+        }
+
+        // HTTP-date form — currently unsupported by TimeInterval(init).
+        // Documented behaviour: retryAfter is nil. Flip when a date parser exists.
+        do {
+            let (backend, chatURL) = makeConfiguredBackend()
+            backend.retryStrategy = ExponentialBackoffStrategy(maxRetries: 0)
+            try await loadBackend(backend)
+
+            MockURLProtocol.stub(url: chatURL, response: .immediate(
+                data: Data(),
+                statusCode: 429,
+                headers: ["Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"]
+            ))
+            defer { MockURLProtocol.unstub(url: chatURL) }
+
+            let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+            do {
+                for try await _ in stream.events {}
+                Issue.record("Expected rateLimited error for HTTP-date Retry-After")
+            } catch {
+                guard let error = extractCloudError(error) else {
+                    Issue.record("Expected CloudBackendError, got \(error)")
+                    return
+                }
+                switch error {
+                case .rateLimited(let retryAfter):
+                    // Current behaviour: HTTP-date parse falls through to nil.
+                    #expect(retryAfter == nil, "HTTP-date Retry-After is currently unparsed (hint lost)")
+                default:
+                    Issue.record("Expected rateLimited, got \(error)")
+                }
+            }
+        }
+    }
+
+    // MARK: - Usage Stats (ignored)
+
+    /// The Ollama final chunk carries per-call usage — `prompt_eval_count`,
+    /// `eval_count`, `eval_duration`, `total_duration`. The
+    /// ``OllamaPayloadHandler.extractUsage`` hook returns `nil` today, so
+    /// usage never flows into a `TokenUsageProvider`. This fixture pins that
+    /// "ignored" contract: once usage wiring lands, flip the assertion.
+    /// Closes #508.
+    @Test func payloadHandler_extractUsage_returnsNil_evenWithUsageFields() {
+        let handler = OllamaBackend.OllamaPayloadHandler()
+        let json = #"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":15,"eval_count":42,"eval_duration":1500000000,"total_duration":2200000000}"#
+        // Current contract: usage is not surfaced. Flip to a concrete expectation
+        // once `TokenUsageProvider` wiring lands in OllamaBackend.
+        #expect(handler.extractUsage(from: json) == nil)
+    }
+
+    // MARK: - /api/generate Endpoint Shape
+
+    /// `/api/generate` (non-chat) uses top-level `response` instead of
+    /// `message.content`. Older Ollama clients and third-party proxies still
+    /// speak it. Today's `parseLine` normalises both shapes, so `extractToken`
+    /// DOES surface `response`. This differs from the original issue #510
+    /// premise (which assumed `response` was dropped) — the backend gained
+    /// `/api/generate` support alongside #487 thinking-field handling. Pin
+    /// the current normalised behaviour so any regression that re-breaks
+    /// /api/generate is caught.
+    /// Closes #510.
+    @Test func extractToken_generateEndpointShape_surfacesResponse() {
+        // Streaming intermediate chunks — `response` surfaces as a token.
+        let midLine = #"{"model":"llama3.2","response":"Hello","done":false}"#
+        #expect(OllamaBackend.extractToken(from: midLine) == "Hello")
+
+        let midLine2 = #"{"model":"llama3.2","response":" world","done":false}"#
+        #expect(OllamaBackend.extractToken(from: midLine2) == " world")
+
+        // Final chunk — `done:true` suppresses token emission regardless of shape.
+        let doneLine = #"{"model":"llama3.2","response":"","done":true,"done_reason":"stop"}"#
+        #expect(OllamaBackend.extractToken(from: doneLine) == nil)
+    }
+
+    // MARK: - SSE Stream Limits (NDJSON path)
+
+    /// `parseResponseStream` enforces the same `SSEStreamLimits` caps as the
+    /// SSE path — `maxTotalBytes`, `maxEventBytes`, `maxEventsPerSecond`.
+    /// Three drivers in one test, each with a dedicated backend so per-backend
+    /// limit overrides don't leak. A future change to the counters or
+    /// `noteEventYielded()` gating would otherwise silently stop enforcing
+    /// caps against a malicious Ollama-compatible server.
+    /// Closes #511.
+    @Test func streaming_sseStreamLimits_enforced() async throws {
+        // --- streamTooLarge: total bytes exceed maxTotalBytes ---
+        do {
+            let (backend, chatURL) = makeConfiguredBackend()
+            backend.sseStreamLimits = SSEStreamLimits(
+                maxEventBytes: 1_000_000,
+                maxTotalBytes: 100,
+                maxEventsPerSecond: 5_000
+            )
+            try await loadBackend(backend)
+
+            // ~200 bytes of valid NDJSON — comfortably over maxTotalBytes=100.
+            let line = #"{"model":"llama3.2","message":{"role":"assistant","content":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"done":false}"#
+            let chunks: [Data] = [ndjsonLine(line)]
+            MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+            defer { MockURLProtocol.unstub(url: chatURL) }
+
+            let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+            do {
+                for try await _ in stream.events {}
+                Issue.record("Expected SSEStreamError.streamTooLarge")
+            } catch let error as SSEStreamError {
+                switch error {
+                case .streamTooLarge: break
+                default: Issue.record("Expected streamTooLarge, got \(error)")
+                }
+            } catch {
+                // The error may be wrapped; accept any throw but prefer SSEStreamError.
+                Issue.record("Expected SSEStreamError.streamTooLarge, got \(error)")
+            }
+        }
+
+        // --- eventTooLarge: single line exceeds maxEventBytes before newline ---
+        do {
+            let (backend, chatURL) = makeConfiguredBackend()
+            backend.sseStreamLimits = SSEStreamLimits(
+                maxEventBytes: 50,
+                maxTotalBytes: 10_000_000,
+                maxEventsPerSecond: 5_000
+            )
+            try await loadBackend(backend)
+
+            // A single JSON line longer than 50 bytes with no newline until the end.
+            let oversizeLine = #"{"model":"llama3.2","message":{"role":"assistant","content":"overflow-content-goes-well-beyond-fifty-bytes"},"done":false}"#
+            let chunks: [Data] = [Data(oversizeLine.utf8)] // no newline
+            MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+            defer { MockURLProtocol.unstub(url: chatURL) }
+
+            let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+            do {
+                for try await _ in stream.events {}
+                Issue.record("Expected SSEStreamError.eventTooLarge")
+            } catch let error as SSEStreamError {
+                switch error {
+                case .eventTooLarge: break
+                default: Issue.record("Expected eventTooLarge, got \(error)")
+                }
+            } catch {
+                Issue.record("Expected SSEStreamError.eventTooLarge, got \(error)")
+            }
+        }
+
+        // --- eventRateExceeded: more than maxEventsPerSecond within 1s window ---
+        do {
+            let (backend, chatURL) = makeConfiguredBackend()
+            backend.sseStreamLimits = SSEStreamLimits(
+                maxEventBytes: 1_000_000,
+                maxTotalBytes: 10_000_000,
+                maxEventsPerSecond: 3
+            )
+            try await loadBackend(backend)
+
+            // Five rapid content events — well above the cap of 3/s — delivered
+            // all at once so they land inside the same rate window.
+            var chunks: [Data] = []
+            for i in 0..<5 {
+                chunks.append(ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"t\#(i)"},"done":false}"#))
+            }
+            chunks.append(ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#))
+            MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+            defer { MockURLProtocol.unstub(url: chatURL) }
+
+            let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+            do {
+                for try await _ in stream.events {}
+                Issue.record("Expected SSEStreamError.eventRateExceeded")
+            } catch let error as SSEStreamError {
+                switch error {
+                case .eventRateExceeded: break
+                default: Issue.record("Expected eventRateExceeded, got \(error)")
+                }
+            } catch {
+                Issue.record("Expected SSEStreamError.eventRateExceeded, got \(error)")
             }
         }
     }
