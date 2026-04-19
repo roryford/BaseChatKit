@@ -361,7 +361,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                     guard let self else {
                         throw CloudBackendError.backendDeallocated
                     }
-                    try await self.parseResponseStream(bytes: bytes, continuation: continuation)
+                    try await self.parseResponseStream(bytes: bytes, config: config, continuation: continuation)
 
                     await MainActor.run { streamBox.value?.setPhase(.done) }
                     continuation.finish()
@@ -391,6 +391,22 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     // MARK: - Stream Parsing
 
     /// Parses the HTTP response byte stream into generation events.
+    ///
+    /// The default implementation forwards to the config-less overload so
+    /// existing subclasses (OpenAI, Claude) keep working unchanged. Subclasses
+    /// that need the active ``GenerationConfig`` during parsing (e.g. Ollama
+    /// needs ``GenerationConfig/maxThinkingTokens`` to cap reasoning output)
+    /// override this method directly.
+    open func parseResponseStream(
+        bytes: URLSession.AsyncBytes,
+        config: GenerationConfig,
+        continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
+    ) async throws {
+        try await parseResponseStream(bytes: bytes, continuation: continuation)
+    }
+
+    /// Legacy overload retained for backward compatibility with subclasses
+    /// that don't need access to the active ``GenerationConfig``.
     ///
     /// The default implementation uses SSE format via ``SSEStreamParser``.
     /// Subclasses override for NDJSON (Ollama) or other wire formats.

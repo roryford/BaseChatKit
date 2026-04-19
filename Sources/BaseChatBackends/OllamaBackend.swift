@@ -134,8 +134,20 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     /// Applies the same ``SSEStreamLimits`` caps as the SSE parser so a
     /// hostile Ollama-compatible server cannot exhaust memory with oversized
     /// lines, total volume, or an event flood.
+    ///
+    /// Reasoning models (qwen3, qwen3.5:4b, deepseek-r1) surface chain-of-thought
+    /// tokens in a separate `thinking` field — `message.thinking` on the
+    /// `/api/chat` endpoint and top-level `thinking` on `/api/generate`. We
+    /// emit ``GenerationEvent/thinkingToken(_:)`` while a line carries
+    /// non-empty thinking, and ``GenerationEvent/thinkingComplete`` exactly
+    /// once — either on the transition from "thinking was non-empty" to
+    /// "thinking is now empty", or on `"done":true` when a thinking
+    /// accumulator is still open. ``GenerationConfig/maxThinkingTokens``
+    /// caps reasoning emission; once exceeded subsequent thinking content is
+    /// dropped and only visible ``GenerationEvent/token(_:)`` events continue.
     public override func parseResponseStream(
         bytes: URLSession.AsyncBytes,
+        config: GenerationConfig,
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
     ) async throws {
         let limits = effectiveSSEStreamLimits
@@ -143,6 +155,12 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         var totalBytes = 0
         var rateWindowStart = ContinuousClock.now
         var rateWindowCount = 0
+
+        // Tracks whether we've emitted any thinking content on this stream,
+        // so we know when to fire the single .thinkingComplete event.
+        var thinkingOpen = false
+        var thinkingTokenCount = 0
+        let thinkingLimit = config.maxThinkingTokens
 
         func noteEventYielded() throws {
             let now = ContinuousClock.now
@@ -157,6 +175,51 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             }
         }
 
+        func handleLine(_ line: String) throws {
+            guard let parsed = Self.parseLine(line) else { return }
+
+            // Route thinking field (if any) first so downstream consumers see
+            // reasoning before visible content for a given NDJSON record.
+            if let thinking = parsed.thinking, !thinking.isEmpty {
+                if let limit = thinkingLimit, thinkingTokenCount >= limit {
+                    // Cap reached — drop this thinking chunk silently.
+                } else {
+                    try noteEventYielded()
+                    continuation.yield(.thinkingToken(thinking))
+                    thinkingOpen = true
+                    // Count each thinking-bearing NDJSON line as one "token"
+                    // for cap purposes. Ollama ships whole-blob thinking per
+                    // line rather than per-token, so this matches the
+                    // coarser grain of the wire format.
+                    thinkingTokenCount += 1
+                }
+            } else if thinkingOpen {
+                // Transition from thinking → content. Fire .thinkingComplete
+                // exactly once on the first empty-thinking line we see after
+                // any non-empty thinking was emitted.
+                try noteEventYielded()
+                continuation.yield(.thinkingComplete)
+                thinkingOpen = false
+            }
+
+            if let content = parsed.content, !content.isEmpty {
+                try noteEventYielded()
+                continuation.yield(.token(content))
+            }
+
+            if parsed.done {
+                // Ollama can terminate with `"done":true` while thinking is
+                // still the only content emitted (e.g. reasoning model hits
+                // num_predict mid-think). Flush .thinkingComplete so
+                // downstream consumers don't leave the thinking block open.
+                if thinkingOpen {
+                    try noteEventYielded()
+                    continuation.yield(.thinkingComplete)
+                    thinkingOpen = false
+                }
+            }
+        }
+
         for try await byte in bytes {
             if Task.isCancelled { break }
 
@@ -167,10 +230,8 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
 
             if byte == UInt8(ascii: "\n") {
                 if !lineBuffer.isEmpty {
-                    if let line = String(data: lineBuffer, encoding: .utf8),
-                       let token = Self.extractToken(from: line) {
-                        try noteEventYielded()
-                        continuation.yield(.token(token))
+                    if let line = String(data: lineBuffer, encoding: .utf8) {
+                        try handleLine(line)
                     }
                     lineBuffer.removeAll(keepingCapacity: true)
                 }
@@ -184,10 +245,16 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
 
         // Flush any final line without a trailing newline.
         if !lineBuffer.isEmpty,
-           let line = String(data: lineBuffer, encoding: .utf8),
-           let token = Self.extractToken(from: line) {
+           let line = String(data: lineBuffer, encoding: .utf8) {
+            try handleLine(line)
+        }
+
+        // Safety net: if the stream ends while thinking is still "open"
+        // (no done-chunk, no empty-thinking transition), still close it out
+        // so consumers don't hang in a thinking-only state.
+        if thinkingOpen {
             try noteEventYielded()
-            continuation.yield(.token(token))
+            continuation.yield(.thinkingComplete)
         }
     }
 
@@ -226,29 +293,90 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
 
     // MARK: - NDJSON Parsing
 
-    /// Extracts the assistant content token from an Ollama `/api/chat` NDJSON line.
+    /// Decoded shape of a single Ollama NDJSON record.
+    ///
+    /// Ollama's two endpoints carry data in different places:
+    /// - `/api/chat` streams put content in `message.content` and reasoning in
+    ///   `message.thinking`.
+    /// - `/api/generate` (non-chat) uses top-level `response` and top-level
+    ///   `thinking`.
+    /// `parseLine` normalises both shapes; consumers read `content` and
+    /// `thinking` without caring which endpoint produced the line.
+    struct ParsedLine {
+        var content: String?
+        var thinking: String?
+        var done: Bool
+    }
+
+    /// Parses a single Ollama NDJSON line into a normalised shape.
+    ///
+    /// Returns `nil` for malformed lines so the stream parser can skip them
+    /// the same way it historically skipped unparseable JSON.
+    static func parseLine(_ json: String) -> ParsedLine? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        let done = (parsed["done"] as? Bool) ?? false
+
+        var content: String?
+        var thinking: String?
+
+        if let message = parsed["message"] as? [String: Any] {
+            // `/api/chat` shape.
+            content = message["content"] as? String
+            thinking = message["thinking"] as? String
+        }
+
+        // `/api/generate` shape — top-level `response` and `thinking`. If both
+        // `message.content` and top-level `response` are present (shouldn't
+        // happen in practice), chat-shape wins because it arrived first.
+        if content == nil, let response = parsed["response"] as? String {
+            content = response
+        }
+        if thinking == nil, let topThinking = parsed["thinking"] as? String {
+            thinking = topThinking
+        }
+
+        return ParsedLine(content: content, thinking: thinking, done: done)
+    }
+
+    /// Extracts the assistant content token from an Ollama NDJSON line.
     ///
     /// Ollama streaming format (one JSON object per line, no `data:` prefix):
     /// ```json
     /// {"model":"llama3","message":{"role":"assistant","content":"Hello"},"done":false}
     /// ```
     /// Final chunk has `"done":true` and empty or absent content — we skip it.
+    ///
+    /// This method only surfaces visible content; reasoning-model `thinking`
+    /// fields are handled inline by ``parseResponseStream(bytes:config:continuation:)``
+    /// so they can be emitted as ``GenerationEvent/thinkingToken(_:)`` with
+    /// proper ``GenerationEvent/thinkingComplete`` bracketing. Kept for the
+    /// ``SSEPayloadHandler`` protocol conformance and external callers.
     static func extractToken(from json: String) -> String? {
-        guard let data = json.data(using: .utf8),
-              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-
+        guard let parsed = parseLine(json) else { return nil }
         // Skip the final "done" chunk.
-        if let done = parsed["done"] as? Bool, done { return nil }
+        if parsed.done { return nil }
+        guard let content = parsed.content, !content.isEmpty else { return nil }
+        return content
+    }
 
-        guard let message = parsed["message"] as? [String: Any],
-              let content = message["content"] as? String,
-              !content.isEmpty else {
+    /// Extracts reasoning content from an Ollama NDJSON line, if any.
+    ///
+    /// Returns `nil` when the line carries no `thinking` field or an empty
+    /// one. Exposed for symmetry with ``extractToken(from:)``; streaming
+    /// callers use the inline logic in
+    /// ``parseResponseStream(bytes:config:continuation:)`` to bracket
+    /// thinking emissions with ``GenerationEvent/thinkingComplete``.
+    static func extractThinking(from json: String) -> String? {
+        guard let parsed = parseLine(json),
+              let thinking = parsed.thinking,
+              !thinking.isEmpty else {
             return nil
         }
-
-        return content
+        return thinking
     }
 
     /// Extracts an error message from an Ollama error response body.

@@ -343,6 +343,191 @@ struct OllamaBackendTests {
     @Test func extractToken_malformedJSON_returnsNil() {
         #expect(OllamaBackend.extractToken(from: "not json") == nil)
     }
+
+    // MARK: - Thinking field (issue #487)
+
+    /// Reasoning models (qwen3, qwen3.5:4b, deepseek-r1) emit chain-of-thought in
+    /// a separate `thinking` field on the `/api/chat` endpoint. The backend
+    /// must surface these as `.thinkingToken` events and close with
+    /// `.thinkingComplete` when thinking transitions back to empty.
+    @Test func streaming_chatEndpoint_thinkingFieldEmitsThinkingEvents() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"Reasoning step 1","content":""},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"","content":"answer"},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+        var events: [GenerationEvent] = []
+        for try await event in stream.events { events.append(event) }
+
+        // Ordering: .thinkingToken → .thinkingComplete → .token
+        let thinkingTokens = events.compactMap { event -> String? in
+            if case .thinkingToken(let t) = event { return t } else { return nil }
+        }
+        let tokens = events.compactMap { event -> String? in
+            if case .token(let t) = event { return t } else { return nil }
+        }
+        let completeCount = events.filter {
+            if case .thinkingComplete = $0 { return true } else { return false }
+        }.count
+
+        #expect(thinkingTokens == ["Reasoning step 1"])
+        #expect(tokens == ["answer"])
+        #expect(completeCount == 1)
+
+        // Verify event ordering: thinkingToken precedes thinkingComplete precedes token.
+        var sawThinking = false
+        var sawComplete = false
+        for event in events {
+            switch event {
+            case .thinkingToken:
+                #expect(!sawComplete, "thinkingToken must precede thinkingComplete")
+                sawThinking = true
+            case .thinkingComplete:
+                #expect(sawThinking, "thinkingComplete must follow at least one thinkingToken")
+                sawComplete = true
+            case .token:
+                #expect(sawComplete, "visible token must follow thinkingComplete")
+            default: break
+            }
+        }
+    }
+
+    /// `/api/generate` surfaces reasoning at top-level `thinking` rather than
+    /// under `message.thinking`. The backend must handle both endpoint shapes.
+    @Test func streaming_generateEndpoint_topLevelThinkingEmitsThinkingEvents() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"response":"","thinking":"Thinking...","done":false}"#),
+            ndjsonLine(#"{"response":"answer","thinking":"","done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+        var events: [GenerationEvent] = []
+        for try await event in stream.events { events.append(event) }
+
+        let thinkingTokens = events.compactMap { event -> String? in
+            if case .thinkingToken(let t) = event { return t } else { return nil }
+        }
+        let tokens = events.compactMap { event -> String? in
+            if case .token(let t) = event { return t } else { return nil }
+        }
+        let completeCount = events.filter {
+            if case .thinkingComplete = $0 { return true } else { return false }
+        }.count
+
+        #expect(thinkingTokens == ["Thinking..."])
+        #expect(tokens == ["answer"])
+        #expect(completeCount == 1)
+    }
+
+    /// Actual #487 repro: reasoning model exhausts `num_predict` entirely in
+    /// `<think>` and Ollama returns a single line with `done:true`,
+    /// `done_reason:length`, non-empty `thinking`, and empty `response`.
+    /// Previously dropped on the floor — users saw a blank message.
+    @Test func streaming_thinkingOnly_thenDone_flushesThinkingComplete() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"response":"","thinking":"entire reasoning","done":true,"done_reason":"length"}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+        var events: [GenerationEvent] = []
+        for try await event in stream.events { events.append(event) }
+
+        let thinkingTokens = events.compactMap { event -> String? in
+            if case .thinkingToken(let t) = event { return t } else { return nil }
+        }
+        let completeCount = events.filter {
+            if case .thinkingComplete = $0 { return true } else { return false }
+        }.count
+
+        #expect(thinkingTokens == ["entire reasoning"])
+        #expect(completeCount == 1)
+    }
+
+    /// `config.maxThinkingTokens` caps reasoning emission so a runaway
+    /// reasoning model doesn't flood the UI. Lines with thinking beyond the
+    /// cap are dropped; visible content still flows through.
+    @Test func streaming_maxThinkingTokens_capsEmission() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        // 5 thinking-bearing lines, then transition to visible answer.
+        let chunks: [Data] = [
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"t1","content":""},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"t2","content":""},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"t3","content":""},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"t4","content":""},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"t5","content":""},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"","content":"answer"},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxThinkingTokens = 2
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        var events: [GenerationEvent] = []
+        for try await event in stream.events { events.append(event) }
+
+        let thinkingTokens = events.compactMap { event -> String? in
+            if case .thinkingToken(let t) = event { return t } else { return nil }
+        }
+        let tokens = events.compactMap { event -> String? in
+            if case .token(let t) = event { return t } else { return nil }
+        }
+
+        // Only the first 2 thinking chunks emit; t3, t4, t5 are dropped.
+        #expect(thinkingTokens == ["t1", "t2"])
+        #expect(tokens == ["answer"])
+    }
+
+    // MARK: - NDJSON parseLine
+
+    @Test func parseLine_chatThinking() {
+        let json = #"{"message":{"role":"assistant","thinking":"reasoning","content":"hi"},"done":false}"#
+        let parsed = try? #require(OllamaBackend.parseLine(json))
+        #expect(parsed?.thinking == "reasoning")
+        #expect(parsed?.content == "hi")
+        #expect(parsed?.done == false)
+    }
+
+    @Test func parseLine_generateTopLevelThinking() {
+        let json = #"{"response":"answer","thinking":"reasoning","done":true}"#
+        let parsed = try? #require(OllamaBackend.parseLine(json))
+        #expect(parsed?.thinking == "reasoning")
+        #expect(parsed?.content == "answer")
+        #expect(parsed?.done == true)
+    }
+
+    @Test func extractThinking_returnsThinkingField() {
+        let json = #"{"response":"","thinking":"reasoning","done":false}"#
+        #expect(OllamaBackend.extractThinking(from: json) == "reasoning")
+    }
+
+    @Test func extractThinking_emptyThinking_returnsNil() {
+        let json = #"{"response":"hi","thinking":"","done":false}"#
+        #expect(OllamaBackend.extractThinking(from: json) == nil)
+    }
+
+    @Test func extractThinking_noThinkingField_returnsNil() {
+        let json = #"{"message":{"role":"assistant","content":"hi"},"done":false}"#
+        #expect(OllamaBackend.extractThinking(from: json) == nil)
+    }
 }
 
 // MARK: - OllamaModelListService Tests
