@@ -62,6 +62,33 @@ final class DownloadableModelTests: XCTestCase {
         )
     }
 
+    func test_initFromCuratedModel_mlxId_doesNotDoubleRepoPath() {
+        // MLX curated models use just the repo name as fileName (e.g. "Phi-4-mini-instruct-4bit"),
+        // NOT the full "org/repo" path. If fileName == repoID the computed id becomes
+        // "org/repo/org/repo" — a doubled path that corrupts download tracking keys.
+        let curated = CuratedModel(
+            id: "test-mlx",
+            displayName: "Test MLX",
+            fileName: "MyRepo",
+            repoID: "myorg/MyRepo",
+            modelType: .mlx,
+            approximateSizeBytes: 1_000_000_000,
+            recommendedFor: [.large],
+            contextSize: 4096,
+            promptTemplate: .chatML,
+            description: "Test"
+        )
+
+        let model = DownloadableModel(from: curated)
+
+        XCTAssertEqual(model.id, "myorg/MyRepo/MyRepo",
+                       "id must be repoID/fileName — not doubled")
+        XCTAssertFalse(model.id.contains("myorg/MyRepo/myorg/MyRepo"),
+                       "fileName must not repeat the org/repo prefix; that doubles the id")
+
+        // Sabotage check: set fileName: "myorg/MyRepo" above and the second assertion fails.
+    }
+
     // MARK: - Size Formatting
 
     func test_sizeFormatted_formatsCorrectly() {

@@ -75,6 +75,27 @@ final class DownloadStateTests: XCTestCase {
         }
     }
 
+    func test_updateProgress_bytesExceedTotal_fractionClampedToOne() {
+        // Snapshot file sizes sometimes exceed the pre-download estimate, making
+        // bytesDownloaded > totalBytes. The fraction must be clamped to 1.0 so
+        // ProgressView(value:) does not receive an out-of-range value and log a warning.
+        let state = DownloadState(model: makeModel())
+
+        state.updateProgress(bytesDownloaded: 1500, totalBytes: 1000)
+
+        if case .downloading(let progress, let downloaded, let total) = state.status {
+            XCTAssertEqual(progress, 1.0, accuracy: 0.001,
+                           "Fraction must be clamped to 1.0 when bytes exceed the estimate")
+            XCTAssertEqual(downloaded, 1500, "Raw byte count must be preserved for display")
+            XCTAssertEqual(total, 1000, "Raw total must be preserved for display")
+        } else {
+            XCTFail("Expected .downloading, got \(state.status)")
+        }
+
+        // Sabotage check: remove the min(1.0, ...) clamp in updateProgress and the
+        // fraction assertion above will fail with 1.5 instead of 1.0.
+    }
+
     // MARK: - State Transitions
 
     func test_markCompleted_setsCompletedStatus() {
