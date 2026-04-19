@@ -2,19 +2,9 @@
 
 ## [0.10.1](https://github.com/roryford/BaseChatKit/compare/v0.10.0...v0.10.1) (2026-04-19)
 
+**Fuzz harness hardened against false positives and small-model repetition loops** — live fuzz runs against Llama, Foundation, and MLX backends surfaced two classes of detector noise and two generation pathologies that this release fixes. Two fuzz detectors were flagging false positives: `ThinkingClassificationDetector` was firing on models that don't emit `<think>` markers (they have no reasoning blocks to leak), and `TemplateTokenLeakDetector` was flagging template fragments that the model correctly echoed back from the prompt input ([#570](https://github.com/roryford/BaseChatKit/issues/570), [#569](https://github.com/roryford/BaseChatKit/issues/569)). Both detectors now gate on the relevant precondition before raising a finding.
 
-### Features
-
-* **fuzz:** wire Llama, Foundation, and MLX fuzz backends ([8b5681f](https://github.com/roryford/BaseChatKit/commit/8b5681f5d31d484d69d52c6928e9c3604e8e3353))
-
-
-### Bug Fixes
-
-* **fuzz:** add FuzzBackendFactory teardown hook to drain LlamaBackend before exit ([#571](https://github.com/roryford/BaseChatKit/issues/571)) ([5a3fda6](https://github.com/roryford/BaseChatKit/commit/5a3fda6476d098698256856566bfcf2cfef9f079))
-* **fuzz:** gate thinking-classification on declared template markers ([#570](https://github.com/roryford/BaseChatKit/issues/570)) ([240ef34](https://github.com/roryford/BaseChatKit/commit/240ef3491a009790012ff70736c67613573eae28))
-* **fuzz:** suppress template-token-leak when fragment was in prompt input ([#569](https://github.com/roryford/BaseChatKit/issues/569)) ([8991f22](https://github.com/roryford/BaseChatKit/commit/8991f2202fd81f35823b95f4cb83635be82bc476))
-* **llama:** add max-repeat-window early-exit in LlamaGenerationDriver ([#568](https://github.com/roryford/BaseChatKit/issues/568)) ([aea07db](https://github.com/roryford/BaseChatKit/commit/aea07db2af1d16621017f73b6d7353582f0e92bc)), closes [#565](https://github.com/roryford/BaseChatKit/issues/565)
-* **llama:** add phrase-level repetition guard to LlamaGenerationDriver ([d1af7cf](https://github.com/roryford/BaseChatKit/commit/d1af7cf8ee021b9c0ecd4f1a92c8a2870a1b2db3))
+On the generation side, `LlamaGenerationDriver` gains two repetition guards that break the token loop early instead of running to `maxTokens`: a single-token window (20-token identical-token run) catches trivial space/punctuation spam from small models like smollm2-135m ([#568](https://github.com/roryford/BaseChatKit/issues/568), closes [#565](https://github.com/roryford/BaseChatKit/issues/565)), and a phrase-level sliding window (phrases 2–20 tokens, 3 consecutive repeats required) catches multi-token loops such as echoed prompts, HTML timestamp blocks, and ASCII-art sequences that the single-token guard misses. The `FuzzBackendFactory` teardown hook ensures `LlamaBackend.unloadAndWait()` completes before the CLI process exits, preventing the SIGABRT from ggml-metal's resource-set assertion ([#571](https://github.com/roryford/BaseChatKit/issues/571)). This release also wires the Llama, Foundation, and MLX native backends into the fuzz harness so campaigns can run against all three without Ollama.
 
 ## [0.10.0](https://github.com/roryford/BaseChatKit/compare/v0.9.2...v0.10.0) (2026-04-19)
 
