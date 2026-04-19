@@ -84,50 +84,17 @@ struct FuzzChatCLI {
             quiet: quiet
         )
 
-        let resolvedBackend = backend
-        let resolvedHint = modelHint
-        let provider: FuzzRunner.BackendProvider = { @Sendable in
-            try await Self.makeBackend(choice: resolvedBackend, modelHint: resolvedHint)
+        let factory: any FuzzBackendFactory
+        switch backend {
+        case .ollama:
+            factory = OllamaFuzzFactory(modelHint: modelHint)
+        case .llama, .foundation, .mlx, .all:
+            fail("\(backend.rawValue) backend not yet wired in v1 (Ollama only).")
         }
 
-        let runner = FuzzRunner(config: config, backendProvider: provider)
+        let runner = FuzzRunner(config: config, factory: factory)
         let reporter = TerminalReporter(quiet: quiet)
         _ = await runner.run(reporter: reporter)
-    }
-
-    static func makeBackend(choice: BackendChoice, modelHint: String?) async throws -> FuzzRunner.BackendHandle {
-        switch choice {
-        case .ollama:
-            return try await makeOllamaHandle(modelHint: modelHint)
-        case .llama, .foundation, .mlx, .all:
-            throw CLIError("\(choice.rawValue) backend not yet wired in v1 (Ollama only).")
-        }
-    }
-
-    @MainActor
-    static func makeOllamaHandle(modelHint: String?) async throws -> FuzzRunner.BackendHandle {
-        guard let models = HardwareRequirements.listOllamaModels() else {
-            throw CLIError("No Ollama server reachable at localhost:11434. Start with: ollama serve")
-        }
-        let hintedModel: String? = modelHint.flatMap { hint in
-            HardwareRequirements.findOllamaModel(nameContains: hint)
-        }
-        guard let model = hintedModel ?? models.first else {
-            throw CLIError("No Ollama model installed. Pull one with: ollama pull qwen3.5:4b")
-        }
-        let backend = OllamaBackend()
-        backend.configure(baseURL: URL(string: "http://localhost:11434")!, modelName: model)
-        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
-        // Ollama presents the model's emitted thinking via its native streaming;
-        // the canonical qwen3 markers are the right baseline for the detector.
-        let markers = RunRecord.MarkerSnapshot(open: "<think>", close: "</think>")
-        return FuzzRunner.BackendHandle(
-            backend: backend,
-            modelId: model,
-            modelURL: URL(string: "ollama:" + model)!,
-            backendName: "ollama",
-            templateMarkers: markers
-        )
     }
 
     static func printUsage() {

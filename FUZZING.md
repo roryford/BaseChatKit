@@ -61,7 +61,7 @@ Common flags:
 | MLX    | Throws | `~/Documents/Models/<dir>/{config.json,*.safetensors,tokenizer.*}` | Requires the xcodebuild path because MLX Metal shaders only compile under Xcode — see `--with-mlx` below. |
 | Foundation Models | Throws | `sw_vers -productVersion >= 26` | macOS 26+ only. |
 
-Backend wiring lives behind a closure rather than a protocol today. `FuzzRunner.BackendProvider` is `() async throws -> FuzzRunner.BackendHandle`, where `BackendHandle` carries `(backend: any InferenceBackend, modelId: String, modelURL: URL, backendName: String, templateMarkers: RunRecord.MarkerSnapshot)`. To plug a new backend in, build a closure that constructs and configures the backend, returns the handle, and pass it to `FuzzRunner(config:backendProvider:)` — see `FuzzChatCLI.makeOllamaHandle` for the canonical example. Detectors operate on the resulting `RunRecord` and don't care which backend produced it. Issue [#496](https://github.com/roryford/BaseChatKit/issues/496) tracks promoting the closure into a proper `BackendDriver` protocol once a second backend is wired.
+Backend wiring lives behind the `FuzzBackendFactory` protocol. A factory exposes `makeHandle() async throws -> FuzzRunner.BackendHandle`, where `BackendHandle` carries `(backend: any InferenceBackend, modelId: String, modelURL: URL, backendName: String, templateMarkers: RunRecord.MarkerSnapshot)`. To plug a new backend in, conform a `Sendable` struct to `FuzzBackendFactory` and pass it to `FuzzRunner(config:factory:)` — see `OllamaFuzzFactory` in `Sources/fuzz-chat/` for the canonical example. Detectors operate on the resulting `RunRecord` and don't care which backend produced it. Llama, Foundation, and MLX factory conformances are tracked in [#501](https://github.com/roryford/BaseChatKit/issues/501).
 
 ### MLX via xcodebuild
 
@@ -216,7 +216,7 @@ These are wired but not yet implemented. Day-one issues will be filed for each.
 - **`--shrink`** — minimise a failing prompt to the smallest input that still fires the detector.
 - **Multi-turn** — current harness fuzzes single-turn only; multi-turn would surface KV-collision and session-isolation bugs the single-turn path can't see.
 - **Slash command** — `/fuzz` shortcut to run `scripts/fuzz.sh` from inside Claude Code.
-- **`BackendDriver` protocol** — promote `FuzzRunner.BackendProvider` from a closure to a protocol once a second backend is wired ([#496](https://github.com/roryford/BaseChatKit/issues/496)).
+- **Multi-backend factory fleet** — `FuzzRunner` now accepts a `FuzzBackendFactory` protocol (landed via [#496](https://github.com/roryford/BaseChatKit/issues/496)). Ship `LlamaFuzzFactory`, `FoundationFuzzFactory`, and `MLXFuzzFactory` to feed `--backend all` ([#501](https://github.com/roryford/BaseChatKit/issues/501)).
 
 The fuzzer does not run in CI by design — it's a pre-release activity, not a gate.
 

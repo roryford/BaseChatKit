@@ -3,11 +3,10 @@ import BaseChatInference
 
 /// Drives a fuzzing campaign: samples (corpus entry, config), drives `runSingle`
 /// for each iteration, runs detectors over the resulting `RunRecord`, and writes
-/// findings via `FindingsSink`. Backend instantiation is delegated to a closure
-/// so the engine stays free of MLX/Llama/Ollama dependencies.
+/// findings via `FindingsSink`. Backend instantiation is delegated to a
+/// `FuzzBackendFactory` so the engine stays free of MLX/Llama/Ollama
+/// dependencies.
 public actor FuzzRunner {
-
-    public typealias BackendProvider = @Sendable () async throws -> BackendHandle
 
     public struct BackendHandle: Sendable {
         public let backend: any InferenceBackend
@@ -32,7 +31,7 @@ public actor FuzzRunner {
     }
 
     private let config: FuzzConfig
-    private let provider: BackendProvider
+    private let factory: any FuzzBackendFactory
     private let sink: FindingsSink
     private let corpus: [CorpusEntry]
     private var rng: SeededRNG
@@ -41,9 +40,9 @@ public actor FuzzRunner {
     /// reshelling git+swift on every record (was 3 subprocess spawns each).
     private let harnessBaseline: RunRecord.HarnessSnapshot
 
-    public init(config: FuzzConfig, backendProvider: @escaping BackendProvider) {
+    public init(config: FuzzConfig, factory: any FuzzBackendFactory) {
         self.config = config
-        self.provider = backendProvider
+        self.factory = factory
         self.sink = FindingsSink(outputDir: config.outputDir)
         self.corpus = Corpus.load()
         self.rng = SeededRNG(seed: config.seed)
@@ -65,9 +64,9 @@ public actor FuzzRunner {
 
         let handle: BackendHandle
         do {
-            handle = try await provider()
+            handle = try await factory.makeHandle()
         } catch {
-            await reporter.error("Backend provider failed: \(error)")
+            await reporter.error("Backend factory failed: \(error)")
             return FuzzReport(totalRuns: 0, findings: [], dedupedCount: 0, perDetectorFlagRate: [:])
         }
 
