@@ -74,6 +74,29 @@ public enum HardwareRequirements {
         return selectOllamaModel(from: models, preferredSizeRange: preferredSizeRange)
     }
 
+    /// Returns the first installed Ollama model whose name contains `substring`,
+    /// or `nil` if none match. Returns `nil` if the server is unreachable.
+    ///
+    /// Unlike `findOllamaModel(preferredSizeRange:)`, this matches by name only
+    /// and does not consult `parameter_size`. Use for CLI callers that let the
+    /// user nominate a specific model by substring.
+    public static func findOllamaModel(nameContains substring: String) -> String? {
+        guard let models = fetchOllamaModels() else { return nil }
+        for model in models {
+            if let name = model["name"] as? String, name.contains(substring) {
+                return name
+            }
+        }
+        return nil
+    }
+
+    /// Returns the list of installed Ollama model names, or `nil` if the server
+    /// is unreachable.
+    public static func listOllamaModels() -> [String]? {
+        guard let models = fetchOllamaModels() else { return nil }
+        return models.compactMap { $0["name"] as? String }
+    }
+
     /// Selects the best model from a pre-fetched Ollama model list.
     /// Extracted from `findOllamaModel` for testability.
     static func selectOllamaModel(
