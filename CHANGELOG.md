@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.10.2](https://github.com/roryford/BaseChatKit/compare/v0.10.1...v0.10.2) (2026-04-19)
+
+**Multi-turn context and special token fixes for local backends** — MLX models now correctly recall prior messages in a conversation. Llama-format models (SmolLM2, Mistral, etc.) no longer generate commentary about `<|im_start|>` tokens — responses are coherent from the first message. MLX model downloads complete reliably and show correct progress. The demo app opens immediately on launch instead of showing a blank screen for several seconds.
+
 ## [0.10.1](https://github.com/roryford/BaseChatKit/compare/v0.10.0...v0.10.1) (2026-04-19)
 
 **Fuzz harness hardened against false positives and small-model repetition loops** — live fuzz runs against Llama, Foundation, and MLX backends surfaced two classes of detector noise and two generation pathologies that this release fixes. Two fuzz detectors were flagging false positives: `ThinkingClassificationDetector` was firing on models that don't emit `<think>` markers (they have no reasoning blocks to leak), and `TemplateTokenLeakDetector` was flagging template fragments that the model correctly echoed back from the prompt input ([#570](https://github.com/roryford/BaseChatKit/issues/570), [#569](https://github.com/roryford/BaseChatKit/issues/569)). Both detectors now gate on the relevant precondition before raising a finding.
