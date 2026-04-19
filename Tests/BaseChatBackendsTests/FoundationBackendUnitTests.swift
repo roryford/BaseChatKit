@@ -291,5 +291,151 @@ final class FoundationBackendUnitTests: XCTestCase {
     func test_contract_allInvariants() {
         BackendContractChecks.assertAllInvariants { FoundationBackend() }
     }
+
+    // MARK: - Parameter passthrough (#523)
+
+    /// Pins the capability contract for `GenerationOptions` passthrough.
+    ///
+    /// `FoundationBackend.generate` builds a `GenerationOptions` with only
+    /// `options.temperature`. `topP`, `topK`, and `repeatPenalty` are silently
+    /// dropped. That is honest only if the capability advertises the same thing,
+    /// so UI code won't surface controls whose values have no effect.
+    ///
+    /// A future change that starts honouring any of these parameters must also
+    /// add them to `supportedParameters` — this test is the tripwire that forces
+    /// both edits to land together.
+    func test_capabilities_advertisesOnlyTemperature_notTopPTopKRepeatPenalty() {
+        let caps = FoundationBackend().capabilities
+
+        XCTAssertTrue(
+            caps.supportedParameters.contains(.temperature),
+            "temperature is the one parameter FoundationBackend passes through"
+        )
+        XCTAssertFalse(
+            caps.supportedParameters.contains(.topP),
+            "topP is dropped by generate() — must not be advertised as supported"
+        )
+        XCTAssertFalse(
+            caps.supportedParameters.contains(.topK),
+            "topK is dropped by generate() — must not be advertised as supported"
+        )
+        XCTAssertFalse(
+            caps.supportedParameters.contains(.repeatPenalty),
+            "repeatPenalty is dropped by generate() — must not be advertised as supported"
+        )
+        XCTAssertFalse(
+            caps.supportedParameters.contains(.typicalP),
+            "typicalP is dropped by generate() — must not be advertised as supported"
+        )
+        // Belt-and-braces: visibleParameters is what the UI renders; it must also
+        // exclude the dropped parameters.
+        XCTAssertEqual(
+            caps.visibleParameters,
+            [.temperature],
+            "UI must only render a temperature control for FoundationBackend"
+        )
+    }
+
+    // MARK: - Availability variants (#524)
+
+    /// Documents the current gap: `FoundationBackend.loadModel` collapses every
+    /// non-`.available` `SystemLanguageModel.Availability` case into a single
+    /// error message. There is no dependency-injection hook to stub availability,
+    /// so per-reason assertions (`.deviceNotEligible`, `.appleIntelligenceNotEnabled`,
+    /// `.modelNotReady`, …) can't be driven from a unit test today.
+    ///
+    /// The weak contract we CAN pin: on a device where Apple Intelligence is not
+    /// available (simulator / CI), `loadModel` throws, and the error is an
+    /// `InferenceError.inferenceFailure` whose message mentions Apple Intelligence.
+    /// Any future refactor that swallows the error, changes the type, or returns
+    /// success on a non-available device trips this test.
+    ///
+    /// Follow-up: #524 tracks adding an `AvailabilityProvider` injection hook so
+    /// the per-reason messages can be asserted.
+    func test_loadModel_whenUnavailable_throwsInferenceFailure() async throws {
+        // Only meaningful when the real system says "unavailable" — otherwise
+        // we'd need the injection hook that #524 exists to track.
+        try XCTSkipIf(
+            FoundationBackend.isAvailable,
+            "Apple Intelligence IS available on this device — cannot exercise the unavailable branch without the availability-provider hook tracked in #524"
+        )
+
+        let url = URL(fileURLWithPath: "/dev/null")
+        do {
+            try await backend.loadModel(from: url, plan: .testStub(effectiveContextSize: 4096))
+            XCTFail("loadModel must throw when SystemLanguageModel availability is not .available")
+        } catch let InferenceError.inferenceFailure(msg) {
+            // Current behaviour: the probe path and the pre-probe availability
+            // check both throw inferenceFailure. Either message is acceptable
+            // for this contract — both reference Apple Intelligence.
+            XCTAssertTrue(
+                msg.localizedCaseInsensitiveContains("Apple Intelligence"),
+                "Error message should mention Apple Intelligence, got: \(msg)"
+            )
+        } catch {
+            XCTFail("Expected InferenceError.inferenceFailure, got \(error)")
+        }
+    }
+
+    // MARK: - Cancellation timing (#525)
+
+    /// Pins the weaker contract that is reachable without injecting a stub
+    /// `LanguageModelSession`: `stopGeneration()` is idempotent, returns
+    /// synchronously, and leaves `isGenerating == false`.
+    ///
+    /// The stronger timing contract — that no `.token` event arrives after the
+    /// caller observes `isGenerating == false` — needs a stub session so a test
+    /// can interleave `continuation.yield(.token(...))` with `stopGeneration()`.
+    /// #525 tracks adding that hook.
+    func test_stopGeneration_idempotent_synchronous_whenIdle() {
+        XCTAssertFalse(backend.isGenerating, "Precondition")
+
+        // Synchronous: stopGeneration returns before the next statement runs.
+        // If it were async (e.g. `await task.value`), this would hang when
+        // generationTask == nil; but it must be safe to call from any context.
+        backend.stopGeneration()
+        backend.stopGeneration()
+        backend.stopGeneration()
+
+        XCTAssertFalse(
+            backend.isGenerating,
+            "stopGeneration() must leave isGenerating == false, even after repeated calls"
+        )
+        XCTAssertFalse(
+            backend.isModelLoaded,
+            "stopGeneration() must not flip isModelLoaded in either direction"
+        )
+    }
+
+    // MARK: - Content diff edge cases (#526)
+
+    /// Pins the capability contract that explains why the character-diff
+    /// algorithm in `FoundationBackend.generate` is safe TODAY.
+    ///
+    /// The loop assumes `partial.content` grows monotonically (`currentText.count >
+    /// previousText.count`). That is only correct as long as Apple's
+    /// `LanguageModelSession.streamResponse` never emits a rewrite — which is
+    /// the case today because the backend does not opt into structured output.
+    ///
+    /// If this test starts failing because `supportsStructuredOutput` flipped to
+    /// `true`, the diff algorithm in `generate()` needs to handle non-monotonic
+    /// payloads (either reset `previousText` on shrink, or switch to an
+    /// event-parts API). #526 tracks the stronger fixture (stubbed partials that
+    /// shrink mid-stream) once a session-injection hook lands.
+    func test_capabilities_structuredOutputDisabled_justifiesMonotonicDiff() {
+        let caps = FoundationBackend().capabilities
+
+        XCTAssertFalse(
+            caps.supportsStructuredOutput,
+            "FoundationBackend.generate assumes partial.content grows monotonically. "
+            + "Enabling structured output requires rewriting the diff loop to handle "
+            + "shrinking payloads — see #526."
+        )
+        XCTAssertFalse(
+            caps.supportsToolCalling,
+            "Tool calling would also produce non-monotonic content-part rewrites — "
+            + "same diff-loop caveat as structured output. See #526."
+        )
+    }
 }
 #endif
