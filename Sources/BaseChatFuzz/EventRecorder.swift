@@ -79,13 +79,20 @@ public struct EventRecorder: Sendable {
                 }
                 memoryTick()
             }
-            // Flush any unterminated thinking buffer (orphan — detector will catch)
-            if !thinkingBuffer.isEmpty {
-                thinkingParts.append(thinkingBuffer)
-            }
         } catch {
             phase = "failed"
             errorString = String(describing: error)
+        }
+
+        // Flush any unterminated thinking buffer so that a throw mid-thinking-block
+        // (network drop, KV decode error, OOM) still preserves the partial reasoning
+        // trace in `thinkingParts`. Without this, detectors like
+        // `unbalanced-thinking-events` and the `looping` thinking-loop sub-check go
+        // blind on mid-stream failures. On the success path the buffer is already
+        // drained by the last `.thinkingComplete`, so this is a no-op.
+        if !thinkingBuffer.isEmpty {
+            thinkingParts.append(thinkingBuffer)
+            thinkingBuffer = ""
         }
 
         let totalMs = start.duration(to: ContinuousClock.now).milliseconds
