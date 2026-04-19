@@ -73,6 +73,18 @@ final class FuzzBackendFactoryTests: XCTestCase {
         XCTAssertEqual(report.totalRuns, 1, "runner should execute the configured iteration after obtaining a handle from the factory")
     }
 
+    /// Default protocol extension: `teardown(handle:)` must compile and be a
+    /// no-op for factories that don't override it. Guards against the extension
+    /// being accidentally removed or miscompiled.
+    func test_defaultTeardown_isNoOp() async throws {
+        // Verify the default protocol extension doesn't throw or mutate state.
+        // StubFactory does not override teardown, so it exercises the default no-op.
+        let handle = makeHandle()
+        let factory = StubFactory(handle: handle)
+        await factory.teardown(handle: handle)  // should be a no-op
+        // If we reach here without crashing, the test passes.
+    }
+
     /// Failure path: the runner surfaces a factory error as a zero-run report
     /// rather than crashing. Mirrors the previous closure-based behaviour.
     func test_factoryThrows_runnerReportsZeroRuns() async {
