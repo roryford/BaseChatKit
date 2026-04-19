@@ -18,12 +18,15 @@ public actor SessionFuzzRunner {
     private let factory: any FuzzBackendFactory
     private let sink: FindingsSink
     private let scripts: [SessionScript]
+    /// `@MainActor` required: `InferenceService.init` is main-actor-isolated, so any
+    /// closure that constructs one must hop to main.
     private let serviceFactory: @MainActor @Sendable (any InferenceBackend, String) -> InferenceService
 
     public init(
         config: FuzzConfig,
         factory: any FuzzBackendFactory,
         scripts: [SessionScript]? = nil,
+        // @MainActor required: closure instantiates a @MainActor-isolated InferenceService.
         serviceFactory: (@MainActor @Sendable (any InferenceBackend, String) -> InferenceService)? = nil
     ) {
         self.config = config
@@ -38,6 +41,7 @@ public actor SessionFuzzRunner {
     /// both build in debug by default, so this is safe; for release builds
     /// the caller must supply a custom `serviceFactory` that wires a factory
     /// via `registerBackendFactory`.
+    // @MainActor required: constructs a @MainActor-isolated InferenceService.
     @MainActor
     public static func defaultServiceFactory(_ backend: any InferenceBackend, _ name: String) -> InferenceService {
         #if DEBUG

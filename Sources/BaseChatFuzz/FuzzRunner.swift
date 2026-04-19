@@ -161,7 +161,6 @@ public actor FuzzRunner {
         return report
     }
 
-    @MainActor
     private func runSingle(
         handle: BackendHandle,
         entry: CorpusEntry,
