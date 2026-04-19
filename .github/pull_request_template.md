@@ -18,6 +18,18 @@
 <!-- How was this tested? Which test targets cover it? -->
 <!-- Note: BaseChatCoreTests and BaseChatUITests run in CI. Hardware-dependent tests (BaseChatBackendsTests, BaseChatE2ETests) run locally. -->
 
+## Sabotage evidence (regression-test PRs only)
+
+<!-- For any PR adding a regression test: temporarily revert the fix / break the
+     code path under test, confirm the new test goes RED, then re-apply the fix
+     and confirm GREEN. Paste the diff and red-run log (or link to a comment
+     that contains them). Exempt: pure refactors, docs-only PRs, dep bumps. -->
+
+- [ ] N/A (not a regression-test PR)
+- [ ] Reverted the fix / broke the path under test
+- [ ] Confirmed the new test went RED (log pasted or linked below)
+- [ ] Re-applied the fix and confirmed GREEN
+
 ## Checklist
 
 - [ ] Tests added or updated for new behaviour
