@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1](https://github.com/roryford/BaseChatKit/compare/v0.10.0...v0.10.1) (2026-04-19)
+
+
+### Features
+
+* **fuzz:** wire Llama, Foundation, and MLX fuzz backends ([8b5681f](https://github.com/roryford/BaseChatKit/commit/8b5681f5d31d484d69d52c6928e9c3604e8e3353))
+
+
+### Bug Fixes
+
+* **fuzz:** add FuzzBackendFactory teardown hook to drain LlamaBackend before exit ([#571](https://github.com/roryford/BaseChatKit/issues/571)) ([5a3fda6](https://github.com/roryford/BaseChatKit/commit/5a3fda6476d098698256856566bfcf2cfef9f079))
+* **fuzz:** gate thinking-classification on declared template markers ([#570](https://github.com/roryford/BaseChatKit/issues/570)) ([240ef34](https://github.com/roryford/BaseChatKit/commit/240ef3491a009790012ff70736c67613573eae28))
+* **fuzz:** suppress template-token-leak when fragment was in prompt input ([#569](https://github.com/roryford/BaseChatKit/issues/569)) ([8991f22](https://github.com/roryford/BaseChatKit/commit/8991f2202fd81f35823b95f4cb83635be82bc476))
+* **llama:** add max-repeat-window early-exit in LlamaGenerationDriver ([#568](https://github.com/roryford/BaseChatKit/issues/568)) ([aea07db](https://github.com/roryford/BaseChatKit/commit/aea07db2af1d16621017f73b6d7353582f0e92bc)), closes [#565](https://github.com/roryford/BaseChatKit/issues/565)
+* **llama:** add phrase-level repetition guard to LlamaGenerationDriver ([d1af7cf](https://github.com/roryford/BaseChatKit/commit/d1af7cf8ee021b9c0ecd4f1a92c8a2870a1b2db3))
+
 ## [0.10.0](https://github.com/roryford/BaseChatKit/compare/v0.9.2...v0.10.0) (2026-04-19)
 
 **Thinking token support and a full chat-fuzzing harness** — two independent workstreams that both ship in this release. Reasoning models (Qwen3, DeepSeek-R1) now route `<think>…</think>` blocks into structured `MessagePart.thinking` parts instead of silently discarding them; they display as a collapsible "Reasoning" disclosure group in the UI and are excluded from the context window on subsequent turns so they don't consume token budget. Both `LlamaBackend` and `MLXBackend` are supported ([#476](https://github.com/roryford/BaseChatKit/issues/476)). A `ThinkingParser` holdback bug that split short visible tokens across chunk boundaries (causing `maxOutputTokens` to fire mid-word) was also fixed ([#558](https://github.com/roryford/BaseChatKit/issues/558)).
