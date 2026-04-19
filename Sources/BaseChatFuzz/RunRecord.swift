@@ -17,6 +17,12 @@ public struct RunRecord: Codable, Sendable, Equatable {
     public var prompt: PromptSnapshot
     public var events: [EventSnapshot]
     public var raw: String
+    /// Historical duplicate of `raw` — retained for one release cycle so external
+    /// record consumers can migrate off it without a hard break. `FuzzRunner` and
+    /// `Replayer` still populate it from `capture.raw`; detectors now read `raw`
+    /// directly. Tracked for removal once the "real UI-transform rendering" path
+    /// is wired up (see follow-up issue).
+    @available(*, deprecated, message: "use raw; rendered will be removed in a later release")
     public var rendered: String
     public var thinkingRaw: String
     public var thinkingParts: [String]
