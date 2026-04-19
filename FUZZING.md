@@ -17,6 +17,7 @@ On its first real-model smoke run against `qwen3.5:4b` via Ollama, the harness l
 - [Adding a New Detector](#adding-a-new-detector)
 - [Real-Bug Rediscovery Recipes](#real-bug-rediscovery-recipes)
 - [Known Gaps](#known-gaps)
+- [CI tiers](#ci-tiers)
 
 ---
 
@@ -275,7 +276,67 @@ These are wired but not yet implemented. Day-one issues will be filed for each.
 - **Slash command** — `/fuzz` shortcut to run `scripts/fuzz.sh` from inside Claude Code.
 - **Multi-backend factory fleet** — `FuzzRunner` now accepts a `FuzzBackendFactory` protocol (landed via [#496](https://github.com/roryford/BaseChatKit/issues/496)). Ship `LlamaFuzzFactory`, `FoundationFuzzFactory`, and `MLXFuzzFactory` to feed `--backend all` ([#501](https://github.com/roryford/BaseChatKit/issues/501)).
 
-The fuzzer does not run in CI by design — it's a pre-release activity, not a gate.
+The fuzzer now runs on three tiers — see [CI tiers](#ci-tiers).
+
+---
+
+## CI tiers
+
+The fuzzer runs on three tiers so each PR pays a small, bounded cost and larger
+investments are scheduled rather than blocking merges.
+
+### PR tier — `.github/workflows/fuzz-pr.yml`
+
+- **When:** every PR that touches `Sources/**`, `Tests/**`, `Package.swift`, the allowlist, or the PR-tier workflow itself.
+- **Runner:** `macos-15` (GitHub-hosted — no self-hosted dependency).
+- **Budget:** 200 iterations at `--seed 1` on the smoke corpus subset, using the `MockInferenceBackend`-backed factory. Typical wall clock: ~60 seconds once the SPM cache is warm.
+- **Backend:** `--backend mock` (zero hardware). `--backend chaos` is also available via the CLI for local experiments with injected failure modes.
+- **Gate:** `scripts/fuzz-ci-gate.sh tmp/fuzz/index.json` compares every finding hash to `.github/fuzz-allowlist.json`. Any finding not on the allowlist, or any allowlist entry whose `expires` date has passed, fails the job.
+- **Goal:** zero flake tolerance. Because the seed and corpus are pinned, a PR that introduces a new finding hash is either a real regression or a new test of nerve for the harness.
+
+**Adding a finding to the allowlist.** Open `.github/fuzz-allowlist.json` and add an object to the `allowlist` array:
+
+```json
+{
+  "allowlist": [
+    {
+      "hash": "abc123def456",
+      "reason": "Known MockInferenceBackend edge case; tracked in #NNN",
+      "expires": "2026-05-19"
+    }
+  ]
+}
+```
+
+The `expires` field is strict — past that date the PR job fails even if the hash still matches, which forces periodic triage. Keep the window short (≤ 30 days) and link a tracking issue in `reason`.
+
+### Nightly tier — `.github/workflows/fuzz-nightly.yml`
+
+- **When:** every day at 05:00 UTC, plus `workflow_dispatch`.
+- **Runner:** `[self-hosted, macos, arm64]` — see [self-hosted runner requirements](#self-hosted-runner-requirements).
+- **Budget:** 10 wall-clock minutes.
+- **Backend:** real Ollama `qwen3.5:4b`. The seed is derived from `github.run_number` so each nightly run samples a different slice of the mutator space.
+- **Gate:** the job fails if `tmp/fuzz/index.json` contains any `confirmed`-severity finding. `flaky`-severity findings are uploaded as artefacts and do not fail the build (they are leads, not regressions).
+- **Artefacts:** the full `tmp/fuzz/` tree uploads to `fuzz-nightly-findings-<run-id>` every run.
+
+### Weekly tier — `.github/workflows/fuzz-weekly.yml`
+
+- **When:** every Sunday at 07:00 UTC, plus `workflow_dispatch`.
+- **Runner:** `[self-hosted, macos, arm64]`.
+- **Budget:** 30 wall-clock minutes.
+- **Backend:** `--backend ollama --model all` — rotates through every installed Ollama model per iteration. This is the explicit sibling-coverage sweep; bugs that only fire on a non-default model surface here.
+- **Gate:** none. The job is report-only: the `INDEX.md` is echoed to the job log and the full findings tree is uploaded to `fuzz-weekly-findings-<run-id>`.
+
+### Self-hosted runner requirements
+
+Nightly and weekly tiers assume a macOS self-hosted runner labelled `self-hosted`, `macos`, and `arm64`. Provisioning checklist:
+
+1. Apple Silicon host (nightly fuzzes Metal-accelerated Ollama inference — x86 emulation will be too slow to hit the 10-minute budget).
+2. Xcode 26.3 and a matching Swift toolchain (same pins as `.github/workflows/ci.yml`).
+3. Ollama installed and reachable on `localhost:11434`. Pull at least `qwen3.5:4b` before the first nightly run (`ollama pull qwen3.5:4b`).
+4. Any additional models the weekly sweep should include — they'll be picked up automatically by `--model all`.
+
+Until a runner is provisioned, the nightly and weekly workflows will queue indefinitely on scheduled trigger. That is intentional — the PR tier does not depend on them, so the absence of a self-hosted runner does not block merges.
 
 ---
 

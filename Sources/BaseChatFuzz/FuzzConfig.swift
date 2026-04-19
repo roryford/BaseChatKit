@@ -6,6 +6,10 @@ public enum BackendChoice: String, Sendable, CaseIterable {
     case foundation
     case mlx
     case all
+    /// Hardware-free `MockInferenceBackend` path. Used by PR-tier CI.
+    case mock
+    /// Hardware-free `ChaosBackend` path for exercising failure-mode plumbing.
+    case chaos
 }
 
 public struct FuzzConfig: Sendable {
@@ -22,6 +26,9 @@ public struct FuzzConfig: Sendable {
     /// ``SessionFuzzRunner`` instead of the single-turn ``FuzzRunner``.
     /// Additive today — the single-turn path is unchanged.
     public let sessionScripts: Bool
+    /// Named corpus subset. Defaults to `.full`. PR-tier CI passes `.smoke`
+    /// for a deterministic, backend-agnostic seed list.
+    public let corpusSubset: Corpus.Subset
 
     public init(
         backend: BackendChoice = .ollama,
@@ -33,7 +40,8 @@ public struct FuzzConfig: Sendable {
         outputDir: URL = URL(fileURLWithPath: "tmp/fuzz", isDirectory: true),
         calibrate: Bool = false,
         quiet: Bool = false,
-        sessionScripts: Bool = false
+        sessionScripts: Bool = false,
+        corpusSubset: Corpus.Subset = .full
     ) {
         self.backend = backend
         self.minutes = minutes
@@ -45,5 +53,6 @@ public struct FuzzConfig: Sendable {
         self.calibrate = calibrate
         self.quiet = quiet
         self.sessionScripts = sessionScripts
+        self.corpusSubset = corpusSubset
     }
 }

@@ -27,6 +27,7 @@ struct FuzzChatCLI {
         var shrinkHash: String?
         var force = false
         var sessionScripts = false
+        var corpusSubset: Corpus.Subset = .full
 
         var i = argv.startIndex
         while i < argv.endIndex {
@@ -82,6 +83,13 @@ struct FuzzChatCLI {
                 force = true
             case "--session-scripts":
                 sessionScripts = true
+            case "--corpus-subset":
+                i = argv.index(after: i)
+                guard i < argv.endIndex else { fail("--corpus-subset requires a value (full|smoke)") }
+                guard let subset = Corpus.Subset(rawValue: argv[i]) else {
+                    fail("--corpus-subset must be one of: full, smoke")
+                }
+                corpusSubset = subset
             default:
                 fail("unknown argument: \(arg)")
             }
@@ -102,6 +110,10 @@ struct FuzzChatCLI {
             } catch {
                 fail(String(describing: error))
             }
+        case .mock:
+            factory = MockFuzzFactory()
+        case .chaos:
+            factory = ChaosFuzzFactory()
         case .llama, .foundation, .mlx, .all:
             fail("\(backend.rawValue) backend not yet wired in v1 (Ollama only).")
         }
@@ -148,7 +160,8 @@ struct FuzzChatCLI {
             outputDir: outputDir,
             calibrate: false,
             quiet: quiet,
-            sessionScripts: sessionScripts
+            sessionScripts: sessionScripts,
+            corpusSubset: corpusSubset
         )
 
         let reporter = TerminalReporter(quiet: quiet)
@@ -330,7 +343,9 @@ struct FuzzChatCLI {
             "Usage: swift run fuzz-chat [options]",
             "",
             "Options:",
-            "  --backend ollama|llama|foundation|mlx|all   default: ollama",
+            "  --backend ollama|mock|chaos|llama|foundation|mlx|all   default: ollama",
+            "                      mock  = MockInferenceBackend (hardware-free, used by PR-tier CI)",
+            "                      chaos = ChaosBackend (hardware-free; injects stream failures)",
             "  --minutes N         time budget (default 5 if neither flag set)",
             "  --iterations N      iteration budget",
             "  --seed N            RNG seed (default random)",
@@ -349,6 +364,9 @@ struct FuzzChatCLI {
             "  --session-scripts   drive bundled multi-turn SessionScripts via",
             "                      InferenceService.enqueue (opt-in for this PR;",
             "                      exercises queue, cancellation, session scoping).",
+            "  --corpus-subset full|smoke  default: full.",
+            "                      `smoke` loads the small deterministic seed set",
+            "                      used by the PR-tier CI fuzz job.",
             "  -h, --help          this help",
         ]
         print(lines.joined(separator: "\n"))

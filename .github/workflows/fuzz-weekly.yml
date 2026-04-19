@@ -1,0 +1,50 @@
+name: Fuzz (weekly rotation)
+
+# Weekly-tier fuzzing: 30 minutes rotating every installed Ollama model on a
+# self-hosted Apple-Silicon runner. Report-only — the job never fails on
+# findings; artefacts are uploaded for review.
+#
+# Requires a self-hosted runner labelled `[self-hosted, macos, arm64]`
+# with Ollama installed and at least one model pulled. See FUZZING.md § CI tiers.
+
+on:
+  schedule:
+    # 07:00 UTC Sunday — off-peak for most contributors.
+    - cron: "0 7 * * 0"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: [self-hosted, macos, arm64]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run fuzz (weekly, 30 min, --model all)
+        run: |
+          swift run fuzz-chat \
+            --backend ollama \
+            --model all \
+            --minutes 30 \
+            --seed ${{ github.run_number }}
+
+      - name: Summarise findings
+        if: always()
+        run: |
+          if [[ -f tmp/fuzz/INDEX.md ]]; then
+            echo "## Weekly fuzz run — $(date -u +%Y-%m-%d)"
+            echo ""
+            cat tmp/fuzz/INDEX.md
+          else
+            echo "Weekly fuzz run produced no INDEX.md."
+          fi
+
+      - name: Upload findings artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-weekly-findings-${{ github.run_id }}
+          path: tmp/fuzz/
+          if-no-files-found: ignore
