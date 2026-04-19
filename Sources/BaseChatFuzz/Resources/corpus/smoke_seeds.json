@@ -1,0 +1,62 @@
+[
+  {
+    "id": "smoke-factual",
+    "category": "factual",
+    "system": null,
+    "turns": [{"role": "user", "text": "What is the capital of France?"}]
+  },
+  {
+    "id": "smoke-math",
+    "category": "math",
+    "system": null,
+    "turns": [{"role": "user", "text": "What is 2 plus 2?"}]
+  },
+  {
+    "id": "smoke-code",
+    "category": "code",
+    "system": null,
+    "turns": [{"role": "user", "text": "Write a one-line Python function that returns its argument."}]
+  },
+  {
+    "id": "smoke-multilingual",
+    "category": "multilingual",
+    "system": null,
+    "turns": [{"role": "user", "text": "Say hello in Japanese."}]
+  },
+  {
+    "id": "smoke-empty",
+    "category": "edge",
+    "system": null,
+    "turns": [{"role": "user", "text": ""}]
+  },
+  {
+    "id": "smoke-whitespace",
+    "category": "edge",
+    "system": null,
+    "turns": [{"role": "user", "text": "   \n\t   "}]
+  },
+  {
+    "id": "smoke-short",
+    "category": "short",
+    "system": null,
+    "turns": [{"role": "user", "text": "Hi."}]
+  },
+  {
+    "id": "smoke-system",
+    "category": "roleplay",
+    "system": "You are a helpful assistant. Reply in one sentence.",
+    "turns": [{"role": "user", "text": "Describe the colour blue."}]
+  },
+  {
+    "id": "smoke-reasoning",
+    "category": "reasoning",
+    "system": null,
+    "turns": [{"role": "user", "text": "If I have three apples and eat one, how many remain?"}]
+  },
+  {
+    "id": "smoke-long-ish",
+    "category": "long",
+    "system": null,
+    "turns": [{"role": "user", "text": "List five primary colours."}]
+  }
+]

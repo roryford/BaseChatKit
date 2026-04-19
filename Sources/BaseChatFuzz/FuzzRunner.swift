@@ -44,7 +44,7 @@ public actor FuzzRunner {
         self.config = config
         self.factory = factory
         self.sink = FindingsSink(outputDir: config.outputDir)
-        self.corpus = Corpus.load()
+        self.corpus = Corpus.load(subset: config.corpusSubset)
         self.rng = SeededRNG(seed: config.seed)
         self.harnessBaseline = HarnessMetadata.snapshot(repoRoot: nil)
     }
