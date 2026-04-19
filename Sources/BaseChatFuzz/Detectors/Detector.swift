@@ -12,6 +12,13 @@ public enum DetectorRegistry {
         ThinkingClassificationDetector(),
         LoopingDetector(),
         EmptyOutputAfterWorkDetector(),
+        TemplateTokenLeakDetector(),
+        MemoryGrowthDetector(),
+        KVCollisionDetector(),
+        EmptyVisibleAfterThinkDetector(),
+        RaceStallDetector(),
+        ContextExhaustionSilentDetector(),
+        TimeoutDetector(),
     ]
 
     public static func resolve(_ filter: Set<String>?) -> [any Detector] {
