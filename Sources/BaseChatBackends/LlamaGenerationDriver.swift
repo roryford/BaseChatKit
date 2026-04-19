@@ -16,6 +16,14 @@ struct LlamaGenerationDriver {
         category: "inference"
     )
 
+    /// Consecutive identical decoded-token run length that triggers an early exit.
+    ///
+    /// Small models (e.g. smollm2-135m) can enter visible repetition loops where the same
+    /// token string is emitted hundreds of times. The existing `LoopingDetector` catches this
+    /// after the fact; this constant lets the generation loop break out as soon as the
+    /// repetition is unambiguous, saving KV-cache cycles and wall time.
+    private static let maxRepeatWindow = 20
+
     // MARK: - Run
 
     /// Executes the generation loop: clears the KV cache, builds the sampler
@@ -176,6 +184,12 @@ struct LlamaGenerationDriver {
         // Flag set when maxThinkingTokens is reached so we can break the outer loop cleanly.
         var thinkingLimitReached = false
 
+        // Repetition-window state: track the last decoded token string and how
+        // many times it has appeared consecutively. Exceeding `maxRepeatWindow`
+        // triggers an early exit — no need to run the loop all the way to maxTokens.
+        var repeatWindowLast = ""
+        var repeatWindowCount = 0
+
         generationLoop: for iteration in 0..<maxTokens {
             if isCancelled() { break }
 
@@ -190,6 +204,19 @@ struct LlamaGenerationDriver {
 
             // Decode token to text and route through ThinkingParser when active.
             if let text = LlamaTokenization.tokenToString(token, vocab: vocab, invalidUTF8Buffer: &invalidUTF8) {
+                // Repetition guard: identical-token run of ≥maxRepeatWindow terminates the loop.
+                // This catches small-model repetition loops (e.g. smollm2-135m) early,
+                // before the existing post-hoc LoopingDetector has to clean them up.
+                if text == repeatWindowLast {
+                    repeatWindowCount += 1
+                    if repeatWindowCount >= Self.maxRepeatWindow {
+                        break generationLoop
+                    }
+                } else {
+                    repeatWindowLast = text
+                    repeatWindowCount = 1
+                }
+
                 let events: [GenerationEvent] = useParser ? thinkingParser.process(text) : [.token(text)]
                 for event in events {
                     if isFirstToken {
