@@ -18,10 +18,13 @@ private enum ContractRecord {
         thinkingCompleteCount: Int = 0,
         phase: String = "done",
         totalMs: Double = 0,
+        firstTokenMs: Double? = nil,
         error: String? = nil,
         markers: RunRecord.MarkerSnapshot? = .init(open: "<think>", close: "</think>"),
         userPrompt: String = "what is two plus two?",
-        stopReason: String? = "naturalStop"
+        stopReason: String? = "naturalStop",
+        memoryBefore: UInt64? = nil,
+        memoryPeak: UInt64? = nil
     ) -> RunRecord {
         RunRecord(
             runId: "contract-fixture",
@@ -63,8 +66,8 @@ private enum ContractRecord {
             thinkingParts: thinkingParts,
             thinkingCompleteCount: thinkingCompleteCount,
             templateMarkers: markers,
-            memory: .init(beforeBytes: nil, peakBytes: nil, afterBytes: nil),
-            timing: .init(firstTokenMs: nil, totalMs: totalMs, tokensPerSec: nil),
+            memory: .init(beforeBytes: memoryBefore, peakBytes: memoryPeak, afterBytes: nil),
+            timing: .init(firstTokenMs: firstTokenMs, totalMs: totalMs, tokensPerSec: nil),
             phase: phase,
             error: error,
             stopReason: stopReason
@@ -375,5 +378,486 @@ final class EmptyOutputAfterWorkContractTests: XCTestCase {
     }
     func test_adversarial() {
         DetectorContractAsserter.assertAdversarial(EmptyOutputAfterWorkContract.self)
+    }
+}
+
+// MARK: - TemplateTokenLeakDetector contract
+
+enum TemplateTokenLeakContract: DetectorContract {
+    static var detector: any Detector { TemplateTokenLeakDetector() }
+
+    /// Positive: ChatML `<|im_start|>` delimiter leaks into raw output —
+    /// the canonical Phi-4-detected-as-ChatML shape.
+    static var positiveFixture: RunRecord {
+        let leaked = "<|im_start|>assistant\nThe answer is 4.<|im_end|>"
+        return ContractRecord.make(rendered: leaked, raw: leaked)
+    }
+
+    /// Negative: plain prose with no template fragments anywhere.
+    static var negativeFixture: RunRecord {
+        let prose = "The answer is four. Two and two make four in standard arithmetic."
+        return ContractRecord.make(rendered: prose, raw: prose)
+    }
+
+    /// Boundary: a single delimiter (`[INST]`) at the very start of the
+    /// raw stream. Tests the regex-anchor behaviour — any substring match
+    /// must fire, regardless of position. Ten inspections must yield the
+    /// same finding.
+    static var boundaryFixture: RunRecord {
+        let leak = "[INST] You are a helpful assistant. [/INST] ok"
+        return ContractRecord.make(rendered: leak, raw: leak)
+    }
+
+    /// Adversarial: a Markdown code block quoting the literal `<|im_start|>`
+    /// token. This is legitimate documentation prose — a naive substring
+    /// scanner would false-positive. The detector strips fenced and
+    /// inline-code spans before scanning.
+    static var adversarialFixture: RunRecord {
+        let doc = """
+        ChatML uses the `<|im_start|>` and `<|im_end|>` tokens to delimit
+        turns. Here is an example:
+
+        ```
+        <|im_start|>user
+        hello
+        <|im_end|>
+        ```
+
+        Most tokenizers consume these silently.
+        """
+        return ContractRecord.make(
+            rendered: doc,
+            raw: doc,
+            userPrompt: "explain chatml delimiters"
+        )
+    }
+}
+
+final class TemplateTokenLeakContractTests: XCTestCase {
+    func test_positive() {
+        DetectorContractAsserter.assertPositive(TemplateTokenLeakContract.self)
+    }
+    func test_negative() {
+        DetectorContractAsserter.assertNegative(TemplateTokenLeakContract.self)
+    }
+    func test_boundary() {
+        DetectorContractAsserter.assertBoundary(TemplateTokenLeakContract.self)
+    }
+    func test_adversarial() {
+        DetectorContractAsserter.assertAdversarial(TemplateTokenLeakContract.self)
+    }
+}
+
+// MARK: - MemoryGrowthDetector contract
+
+enum MemoryGrowthContract: DetectorContract {
+    static var detector: any Detector { MemoryGrowthDetector() }
+
+    /// Positive: backend surfaced a memory-related error. The growth-budget
+    /// branch is disabled today; the error-string path is what fires.
+    static var positiveFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "error",
+            error: "Metal allocation failed: out of memory",
+            stopReason: "error"
+        )
+    }
+
+    /// Negative: normal completion, no error.
+    static var negativeFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "The answer is 4.",
+            raw: "The answer is 4.",
+            totalMs: 500
+        )
+    }
+
+    /// Boundary: an error whose text contains a memory needle in its exact
+    /// lowercased form. Ten inspections must produce the same fingerprint.
+    static var boundaryFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "error",
+            error: "jetsam killed process",
+            stopReason: "error"
+        )
+    }
+
+    /// Adversarial: a non-memory error that happens to mention bytes — the
+    /// detector must NOT fire on token-count or byte-limit discussions.
+    static var adversarialFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "error",
+            error: "invalid UTF-8 byte sequence at offset 42",
+            stopReason: "error"
+        )
+    }
+}
+
+final class MemoryGrowthContractTests: XCTestCase {
+    func test_positive() {
+        DetectorContractAsserter.assertPositive(MemoryGrowthContract.self)
+    }
+    func test_negative() {
+        DetectorContractAsserter.assertNegative(MemoryGrowthContract.self)
+    }
+    func test_boundary() {
+        DetectorContractAsserter.assertBoundary(MemoryGrowthContract.self)
+    }
+    func test_adversarial() {
+        DetectorContractAsserter.assertAdversarial(MemoryGrowthContract.self)
+    }
+}
+
+// MARK: - KVCollisionDetector contract
+
+enum KVCollisionContract: DetectorContract {
+    static var detector: any Detector { KVCollisionDetector() }
+
+    /// Positive: the canonical llama.cpp post-stop decode failure — error
+    /// text matches AND the record records a stop.
+    static var positiveFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "stopped",
+            error: "Decode failed during generation",
+            stopReason: "userStop"
+        )
+    }
+
+    /// Negative: ordinary successful completion — no error at all.
+    static var negativeFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "The answer is 4.",
+            raw: "The answer is 4.",
+            totalMs: 500
+        )
+    }
+
+    /// Boundary: the error text matches exactly AND stopReason is `error`
+    /// (not `userStop`). The detector accepts either indicator, so this
+    /// must fire; determinism means ten inspections produce the same hit.
+    static var boundaryFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "error",
+            error: "Decode failed during generation",
+            stopReason: "error"
+        )
+    }
+
+    /// Adversarial: the model's output itself *renders* the phrase "decode
+    /// failed during generation" as natural-language text (e.g., an agent
+    /// explaining errors to a user). The `error` field stays nil, so the
+    /// detector must not fire.
+    static var adversarialFixture: RunRecord {
+        let echo = "A common llama.cpp error reads: \"Decode failed during generation\". It typically indicates a KV-cache mismatch."
+        return ContractRecord.make(
+            rendered: echo,
+            raw: echo,
+            phase: "done",
+            stopReason: "naturalStop"
+        )
+    }
+}
+
+final class KVCollisionContractTests: XCTestCase {
+    func test_positive() {
+        DetectorContractAsserter.assertPositive(KVCollisionContract.self)
+    }
+    func test_negative() {
+        DetectorContractAsserter.assertNegative(KVCollisionContract.self)
+    }
+    func test_boundary() {
+        DetectorContractAsserter.assertBoundary(KVCollisionContract.self)
+    }
+    func test_adversarial() {
+        DetectorContractAsserter.assertAdversarial(KVCollisionContract.self)
+    }
+}
+
+// MARK: - EmptyVisibleAfterThinkDetector contract
+
+enum EmptyVisibleAfterThinkContract: DetectorContract {
+    static var detector: any Detector { EmptyVisibleAfterThinkDetector() }
+
+    /// Positive: model thought, emitted tokens, rendered is whitespace —
+    /// the classic `hasVisibleContent` bug shape.
+    static var positiveFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "   \n   ",
+            raw: "<think>reasoning here</think>",
+            thinkingRaw: "reasoning here",
+            thinkingParts: ["reasoning here"],
+            thinkingCompleteCount: 1,
+            phase: "done"
+        )
+    }
+
+    /// Negative: model thought AND produced visible output — rendered is
+    /// non-empty, so nothing to flag.
+    static var negativeFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "The answer is 4.",
+            raw: "<think>compute</think>The answer is 4.",
+            thinkingRaw: "compute",
+            thinkingParts: ["compute"],
+            thinkingCompleteCount: 1,
+            phase: "done"
+        )
+    }
+
+    /// Boundary: rendered is exactly one whitespace character with raw and
+    /// thinking both non-empty. The trim check MUST flag this; ten
+    /// inspections return the same finding.
+    static var boundaryFixture: RunRecord {
+        ContractRecord.make(
+            rendered: " ",
+            raw: "<think>x</think>",
+            thinkingRaw: "x",
+            thinkingParts: ["x"],
+            thinkingCompleteCount: 1,
+            phase: "done"
+        )
+    }
+
+    /// Adversarial: empty rendering but empty thinking too — this is the
+    /// `EmptyOutputAfterWorkDetector`'s territory, not ours. The detector
+    /// must stay silent because `thinkingRaw` is empty.
+    static var adversarialFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            thinkingRaw: "",
+            phase: "done",
+            totalMs: 10_000
+        )
+    }
+}
+
+final class EmptyVisibleAfterThinkContractTests: XCTestCase {
+    func test_positive() {
+        DetectorContractAsserter.assertPositive(EmptyVisibleAfterThinkContract.self)
+    }
+    func test_negative() {
+        DetectorContractAsserter.assertNegative(EmptyVisibleAfterThinkContract.self)
+    }
+    func test_boundary() {
+        DetectorContractAsserter.assertBoundary(EmptyVisibleAfterThinkContract.self)
+    }
+    func test_adversarial() {
+        DetectorContractAsserter.assertAdversarial(EmptyVisibleAfterThinkContract.self)
+    }
+}
+
+// MARK: - RaceStallDetector contract
+
+enum RaceStallContract: DetectorContract {
+    static var detector: any Detector { RaceStallDetector() }
+
+    /// Positive: the harness recorded `phase = "stalled"` — unambiguous
+    /// stream-stall signal.
+    static var positiveFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "stalled",
+            totalMs: 120_000,
+            stopReason: "unknown"
+        )
+    }
+
+    /// Negative: fast first token, normal completion — nothing to flag.
+    static var negativeFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "The answer is 4.",
+            raw: "The answer is 4.",
+            phase: "done",
+            totalMs: 800,
+            firstTokenMs: 120
+        )
+    }
+
+    /// Boundary: `firstTokenMs == 60_000` exactly. The detector's tie-break
+    /// rule is strict-greater — 60_000 flat is NOT a stall — so ten
+    /// inspections must return zero findings. The fixture also has
+    /// phase=done, so the stalled-phase branch stays quiet.
+    static var boundaryFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "The answer is 4.",
+            raw: "The answer is 4.",
+            phase: "done",
+            totalMs: 65_000,
+            firstTokenMs: 60_000
+        )
+    }
+
+    /// Adversarial: a genuinely slow cold-start (45s to first token). The
+    /// detector must not fire — legitimate model warm-up is slow but not
+    /// stalled.
+    static var adversarialFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "The answer is 4.",
+            raw: "The answer is 4.",
+            phase: "done",
+            totalMs: 46_000,
+            firstTokenMs: 45_000
+        )
+    }
+}
+
+final class RaceStallContractTests: XCTestCase {
+    func test_positive() {
+        DetectorContractAsserter.assertPositive(RaceStallContract.self)
+    }
+    func test_negative() {
+        DetectorContractAsserter.assertNegative(RaceStallContract.self)
+    }
+    func test_boundary() {
+        DetectorContractAsserter.assertBoundary(RaceStallContract.self)
+    }
+    func test_adversarial() {
+        DetectorContractAsserter.assertAdversarial(RaceStallContract.self)
+    }
+}
+
+// MARK: - ContextExhaustionSilentDetector contract
+
+enum ContextExhaustionSilentContract: DetectorContract {
+    static var detector: any Detector { ContextExhaustionSilentDetector() }
+
+    /// Positive: the canonical `InferenceError.contextExhausted` error
+    /// description. Today the detector has no prompt-token estimate to
+    /// gate on, so any occurrence of this error fires.
+    static var positiveFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "error",
+            error: "Prompt (120 tokens) plus requested output (256 tokens) exceeds context window (8192 tokens).",
+            stopReason: "error"
+        )
+    }
+
+    /// Negative: normal successful completion, no error.
+    static var negativeFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "The answer is 4.",
+            raw: "The answer is 4.",
+            totalMs: 500
+        )
+    }
+
+    /// Boundary: the error message matches exactly, with no trailing text.
+    /// Ten inspections must yield the same finding.
+    static var boundaryFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "error",
+            error: "…exceeds context window…",
+            stopReason: "error"
+        )
+    }
+
+    /// Adversarial: a different error that mentions "context" but not the
+    /// canonical phrase. Must not fire — we match only the exhaustion
+    /// description.
+    static var adversarialFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "",
+            raw: "",
+            phase: "error",
+            error: "Failed to initialize context with size 8192",
+            stopReason: "error"
+        )
+    }
+}
+
+final class ContextExhaustionSilentContractTests: XCTestCase {
+    func test_positive() {
+        DetectorContractAsserter.assertPositive(ContextExhaustionSilentContract.self)
+    }
+    func test_negative() {
+        DetectorContractAsserter.assertNegative(ContextExhaustionSilentContract.self)
+    }
+    func test_boundary() {
+        DetectorContractAsserter.assertBoundary(ContextExhaustionSilentContract.self)
+    }
+    func test_adversarial() {
+        DetectorContractAsserter.assertAdversarial(ContextExhaustionSilentContract.self)
+    }
+}
+
+// MARK: - TimeoutDetector contract
+
+enum TimeoutContract: DetectorContract {
+    static var detector: any Detector { TimeoutDetector() }
+
+    /// Positive: totalMs well over the 60s fallback.
+    static var positiveFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "eventually",
+            raw: "eventually",
+            phase: "done",
+            totalMs: 180_000
+        )
+    }
+
+    /// Negative: a fast run, nowhere near the threshold.
+    static var negativeFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "ok",
+            raw: "ok",
+            phase: "done",
+            totalMs: 500
+        )
+    }
+
+    /// Boundary: totalMs == 60_000 exactly. The detector's comparison is
+    /// strict-greater, so this must NOT fire and must return the same
+    /// (empty) findings across ten inspections.
+    static var boundaryFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "ok",
+            raw: "ok",
+            phase: "done",
+            totalMs: 60_000
+        )
+    }
+
+    /// Adversarial: a long legitimate generation (55s) — still under the
+    /// crude fallback threshold. The real windowed-median design would be
+    /// needed to distinguish outliers from slow-but-valid runs; until
+    /// then, the detector stays silent.
+    static var adversarialFixture: RunRecord {
+        ContractRecord.make(
+            rendered: "a long, thoughtful response",
+            raw: "a long, thoughtful response",
+            phase: "done",
+            totalMs: 55_000
+        )
+    }
+}
+
+final class TimeoutContractTests: XCTestCase {
+    func test_positive() {
+        DetectorContractAsserter.assertPositive(TimeoutContract.self)
+    }
+    func test_negative() {
+        DetectorContractAsserter.assertNegative(TimeoutContract.self)
+    }
+    func test_boundary() {
+        DetectorContractAsserter.assertBoundary(TimeoutContract.self)
+    }
+    func test_adversarial() {
+        DetectorContractAsserter.assertAdversarial(TimeoutContract.self)
     }
 }
