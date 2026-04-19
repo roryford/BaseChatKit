@@ -88,6 +88,15 @@ When Apple ships a new major OS each September, bump both minimums by one and re
 - `FoundationBackend` requires iOS 26 / macOS 26. Gate accordingly.
 - Context window is capped at 512 tokens in the simulator to avoid OOM.
 
+## Tooling
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/test.sh` | Runs the four CI suites and prints an honest summary. |
+| `scripts/example-ui-tests.sh` | `build-for-testing` / `test-without-building` for Example app XCUITests. |
+| `scripts/clean-leaked-test-artifacts.sh` | Removes test fixtures that leaked into `~/Documents/Models/`. |
+| `scripts/fuzz.sh` | Runs the BaseChatFuzz harness (default: 5 min against Ollama). See [FUZZING.md](FUZZING.md). |
+
 ## Pre-push checklist
 
 Before pushing any branch, run all three CI test suites locally and confirm zero failures:
