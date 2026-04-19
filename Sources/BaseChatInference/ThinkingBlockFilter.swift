@@ -46,13 +46,21 @@ public struct ThinkingParser {
             }
         }
 
-        // Hold back bytes that could be the start of a partial open or close tag.
-        // Size = max(open.count, close.count) to handle either partial tag.
-        let holdback = markers.holdback
-        if buffer.count > holdback {
-            let safeCount = buffer.count - holdback
-            let confirmed = String(buffer.prefix(safeCount))
-            buffer = String(buffer.suffix(holdback))
+        // Hold back only the longest suffix of the buffer that could be a
+        // non-empty prefix of the next marker, preventing premature emission of
+        // partial tags while flushing everything else immediately.
+        let nextMarker = depth > 0 ? markers.close : markers.open
+        let maxCheck = min(buffer.count, nextMarker.count - 1)
+        var holdLength = 0
+        for length in stride(from: maxCheck, through: 1, by: -1) {
+            if nextMarker.hasPrefix(String(buffer.suffix(length))) {
+                holdLength = length
+                break
+            }
+        }
+        if buffer.count > holdLength {
+            let confirmed = String(buffer.prefix(buffer.count - holdLength))
+            buffer = holdLength > 0 ? String(buffer.suffix(holdLength)) : ""
             if !confirmed.isEmpty {
                 events.append(depth > 0 ? .thinkingToken(confirmed) : .token(confirmed))
             }
