@@ -277,12 +277,20 @@ final class LlamaBackendTests: XCTestCase {
 
         // Consume a few tokens to ensure generation has actually started
         // (and the KV cache has been populated) before we stop.
+        // Accept either `.token` or `.thinkingToken` — a reasoning GGUF on
+        // the Llama3 template emits `<think>…</think>` content first which
+        // the driver's sniff mode routes to `.thinkingToken`. Either proves
+        // decode reached the loop.
         var tokenCount = 0
         for try await event in stream1.events {
-            if case .token = event {
+            switch event {
+            case .token, .thinkingToken:
                 tokenCount += 1
                 if tokenCount >= 3 { break }
+            default:
+                break
             }
+            if tokenCount >= 3 { break }
         }
         XCTAssertGreaterThan(tokenCount, 0, "Expected at least one token before stopping")
 
@@ -311,8 +319,11 @@ final class LlamaBackendTests: XCTestCase {
 
         var secondRunTokenCount = 0
         for try await event in stream2.events {
-            if case .token = event {
+            switch event {
+            case .token, .thinkingToken:
                 secondRunTokenCount += 1
+            default:
+                break
             }
         }
 
@@ -566,9 +577,16 @@ final class LlamaBackendTests: XCTestCase {
             config: config
         )
 
+        // Accept either `.token` or `.thinkingToken` — the fixture gates on
+        // whether EOG terminated the stream, not on which event bucket the
+        // content went to. Reasoning GGUFs emit `<think>` content first which
+        // the driver's sniff mode routes to `.thinkingToken`.
         var tokenCount = 0
         for try await event in stream.events {
-            if case .token = event { tokenCount += 1 }
+            switch event {
+            case .token, .thinkingToken: tokenCount += 1
+            default: break
+            }
         }
 
         XCTAssertGreaterThan(tokenCount, 0, "EOG fixture must produce at least one token")
@@ -740,18 +758,26 @@ final class LlamaBackendTests: XCTestCase {
 
         // Consume a few tokens so generation has demonstrably entered the
         // decode loop — matching the regression390 test's 3-token warm-up.
+        // Accept either `.token` or `.thinkingToken`: with the non-ChatML
+        // thinking sniffer in place, reasoning models on the Llama3 template
+        // emit `.thinkingToken` first while the visible block is still inside
+        // a `<think>…</think>` region. Either event type proves the decode
+        // loop is running, which is what this fixture gates on.
         var sawToken = false
         var tokenCount = 0
         for try await event in stream.events {
-            if case .token = event {
+            switch event {
+            case .token, .thinkingToken:
                 tokenCount += 1
                 if tokenCount >= 3 {
                     sawToken = true
-                    break
                 }
+            default:
+                break
             }
+            if sawToken { break }
         }
-        XCTAssertTrue(sawToken, "Expected at least three tokens before stopping — generation never reached the decode loop")
+        XCTAssertTrue(sawToken, "Expected at least three tokens (visible or thinking) before stopping — generation never reached the decode loop")
 
         // Fire the stop mid-generation. The generation loop's `isCancelled()`
         // check must pick this up and break on the next iteration.
