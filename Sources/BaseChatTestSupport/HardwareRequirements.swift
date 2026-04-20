@@ -65,13 +65,20 @@ public enum HardwareRequirements {
 
     /// Returns an Ollama model name, preferring one in the given parameter size range.
     ///
-    /// Queries `/api/tags` synchronously. Prefers models whose `parameter_size`
-    /// falls in `preferredSizeRange` (e.g. "7.2B" → 7.2). Falls back to the
-    /// first available model if none match the range. Returns `nil` only if the
+    /// Queries `/api/tags` synchronously. If the `OLLAMA_TEST_MODEL` environment
+    /// variable is set AND names a model that is installed locally, that name
+    /// wins — CI / local runs can pin to a specific fast model without having to
+    /// edit test code. Otherwise prefers models whose `parameter_size` falls in
+    /// `preferredSizeRange` (e.g. "7.2B" → 7.2). Falls back to the first
+    /// available model if none match the range. Returns `nil` only if the
     /// server is unreachable or has no models.
     public static func findOllamaModel(preferredSizeRange: ClosedRange<Double> = 6.5...9.0) -> String? {
         guard let models = fetchOllamaModels() else { return nil }
-        return selectOllamaModel(from: models, preferredSizeRange: preferredSizeRange)
+        return selectOllamaModel(
+            from: models,
+            preferredSizeRange: preferredSizeRange,
+            environment: ProcessInfo.processInfo.environment
+        )
     }
 
     /// Returns the first installed Ollama model whose name contains `substring`,
@@ -99,10 +106,26 @@ public enum HardwareRequirements {
 
     /// Selects the best model from a pre-fetched Ollama model list.
     /// Extracted from `findOllamaModel` for testability.
+    ///
+    /// When `environment` carries `OLLAMA_TEST_MODEL` and the named model is in
+    /// `models`, that name is returned. Otherwise falls through to the existing
+    /// size-based selection logic. Pass an explicit `environment` dictionary
+    /// (e.g. `["OLLAMA_TEST_MODEL": "llama3.1:8b"]`) from tests to avoid
+    /// depending on the real process environment.
     static func selectOllamaModel(
         from models: [[String: Any]],
-        preferredSizeRange: ClosedRange<Double> = 6.5...9.0
+        preferredSizeRange: ClosedRange<Double> = 6.5...9.0,
+        environment: [String: String] = [:]
     ) -> String? {
+        if let override = environment["OLLAMA_TEST_MODEL"], !override.isEmpty {
+            for model in models {
+                if let name = model["name"] as? String, name == override {
+                    return name
+                }
+            }
+            // Override was set but not installed — fall through rather than
+            // returning nil so the suite still runs against whatever is there.
+        }
         for model in models {
             guard let name = model["name"] as? String,
                   let details = model["details"] as? [String: Any],
