@@ -388,20 +388,68 @@ struct OllamaBackendTests {
         }
     }
 
-    // MARK: - Usage Stats (ignored)
+    // MARK: - Usage Stats
 
-    /// The Ollama final chunk carries per-call usage — `prompt_eval_count`,
-    /// `eval_count`, `eval_duration`, `total_duration`. The
-    /// ``OllamaPayloadHandler.extractUsage`` hook returns `nil` today, so
-    /// usage never flows into a `TokenUsageProvider`. This fixture pins that
-    /// "ignored" contract: once usage wiring lands, flip the assertion.
-    /// Closes #508.
-    @Test func payloadHandler_extractUsage_returnsNil_evenWithUsageFields() {
+    /// Ollama's final chunk carries per-call usage — `prompt_eval_count`
+    /// (prompt tokens) and `eval_count` (completion tokens). The
+    /// ``OllamaPayloadHandler.extractUsage`` hook surfaces both so
+    /// `TokenUsageProvider` consumers see exact counts. Closes #508.
+    ///
+    /// Sabotage check (verified locally): reverting `extractUsage` to return
+    /// `nil` fails both assertions.
+    @Test func payloadHandler_extractUsage_parsesDoneLineCounts() {
         let handler = OllamaBackend.OllamaPayloadHandler()
-        let json = #"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":15,"eval_count":42,"eval_duration":1500000000,"total_duration":2200000000}"#
-        // Current contract: usage is not surfaced. Flip to a concrete expectation
-        // once `TokenUsageProvider` wiring lands in OllamaBackend.
-        #expect(handler.extractUsage(from: json) == nil)
+        let json = #"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":42,"eval_count":17,"eval_duration":1500000000,"total_duration":2200000000}"#
+        let usage = try? #require(handler.extractUsage(from: json))
+        #expect(usage?.promptTokens == 42)
+        #expect(usage?.completionTokens == 17)
+    }
+
+    /// Lines without either usage field must return nil so the
+    /// `SSECloudBackend.handleUsage` merge logic isn't called with an empty
+    /// tuple (which would overwrite a prior prompt count with 0 on Claude's
+    /// split-usage path). Pins the "missing fields → nil" contract.
+    @Test func payloadHandler_extractUsage_nonUsageLine_returnsNil() {
+        let handler = OllamaBackend.OllamaPayloadHandler()
+        let midLine = #"{"model":"llama3.2","message":{"role":"assistant","content":"hi"},"done":false}"#
+        #expect(handler.extractUsage(from: midLine) == nil)
+
+        // Malformed JSON also returns nil (parseLine returns nil).
+        #expect(handler.extractUsage(from: "not json") == nil)
+    }
+
+    /// End-to-end: the done-line's `eval_count` / `prompt_eval_count` must
+    /// surface both as a `.usage(prompt:completion:)` event on the stream and
+    /// as `lastUsage` on the backend — mirroring `SSECloudBackend`'s SSE path.
+    /// This is what actually reaches the UI.
+    ///
+    /// Sabotage check (verified locally): removing the `handleUsage` /
+    /// `.usage` yield block from `parseResponseStream` on the done branch
+    /// makes both assertions fail (no `.usage` event, `lastUsage` stays nil).
+    @Test func streaming_doneLine_emitsUsageEventAndSetsLastUsage() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"hi"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":42,"eval_count":17}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+        var usageEvents: [(prompt: Int, completion: Int)] = []
+        for try await event in stream.events {
+            if case .usage(let p, let c) = event {
+                usageEvents.append((prompt: p, completion: c))
+            }
+        }
+
+        #expect(usageEvents.count == 1)
+        #expect(usageEvents.first?.prompt == 42)
+        #expect(usageEvents.first?.completion == 17)
+        #expect(backend.lastUsage?.promptTokens == 42)
+        #expect(backend.lastUsage?.completionTokens == 17)
     }
 
     // MARK: - /api/generate Endpoint Shape
@@ -924,19 +972,15 @@ struct OllamaBackendTests {
         #expect(numPredict == 4096)
     }
 
-    /// Because we doubled the server-side budget, visible output must be
-    /// re-capped client-side. This fixture emits 5 content lines but sets
-    /// `maxOutputTokens = 3`; the consumer must see exactly 3 `.token`
-    /// events, then the stream terminates cleanly (no error thrown, no
-    /// `.thinkingComplete` because no thinking was ever emitted).
+    /// Visible output must be re-capped client-side because the server-side
+    /// budget is doubled to reserve thinking tokens. With no `eval_count` on
+    /// intermediate lines (per Ollama's documented wire format), the cap
+    /// falls back to the NDJSON line counter, so 5 single-line chunks + cap=3
+    /// yields exactly 3 `.token` events before a clean stream termination.
     ///
     /// Sabotage check (verified locally): deleting the `continuation.finish();
     /// return` guard in `parseResponseStream` makes this test fail with
     /// tokens.count == 5.
-    ///
-    /// Known limitation (documented on the PR): `visibleTokenCount` counts
-    /// NDJSON lines, not true tokens. A follow-up will switch to Ollama's
-    /// `eval_count` field for exact accounting.
     @Test func streaming_visibleCap_terminatesStreamCleanly() async throws {
         let (backend, chatURL) = makeConfiguredBackend()
         try await loadBackend(backend)
@@ -968,6 +1012,55 @@ struct OllamaBackendTests {
 
         #expect(tokens == ["a", "b", "c"])
         #expect(!sawThinkingComplete, "no thinking was emitted so no .thinkingComplete should fire")
+    }
+
+    /// When an Ollama-compatible server emits a running `eval_count` on
+    /// intermediate lines, the cap must use it — not the NDJSON line count
+    /// — so multi-word content chunks can't slip extra tokens past the
+    /// `maxOutputTokens` ceiling. This is the PR #586 fixture's key
+    /// limitation made concrete: under the old line-count cap, five
+    /// multi-word lines at `maxOutputTokens=5` would yield 5 lines * multi
+    /// words each. With exact accounting, generation stops the instant
+    /// `eval_count` crosses the cap.
+    ///
+    /// Sabotage check (verified locally): reverting the cap check to
+    /// `visibleLineCount >= limit` (ignoring `parsed.evalCount`) makes this
+    /// test fail because all 5 multi-word lines pass through (the cap isn't
+    /// reached until line 6).
+    @Test func streaming_visibleCap_usesExactEvalCount_overLineCount() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        // Each intermediate line is multi-word content + running eval_count
+        // advancing 2 → 4 → 6 → 8 → 10. With `maxOutputTokens = 5`, the first
+        // line that observes `eval_count >= 5` is the `eval_count:6` line;
+        // cap triggers on its arrival BEFORE emitting the token, so two tokens
+        // (the `eval_count:2` and `eval_count:4` lines) are yielded.
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"hello world"},"done":false,"eval_count":2}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"foo bar"},"done":false,"eval_count":4}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"baz qux"},"done":false,"eval_count":6}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"extra"},"done":false,"eval_count":8}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"more"},"done":false,"eval_count":10}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true,"eval_count":10,"prompt_eval_count":3}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxOutputTokens = 5
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+
+        var tokens: [String] = []
+        for try await event in stream.events {
+            if case .token(let t) = event { tokens.append(t) }
+        }
+
+        // Two tokens emitted (eval_count 2 and 4 were below the cap of 5).
+        // The eval_count=6 line is the first to cross the cap; its content
+        // ("baz qux") must NOT appear. Under the old line-count cap this
+        // assertion would fail because all 5 multi-word lines would pass.
+        #expect(tokens == ["hello world", "foo bar"])
     }
 }
 

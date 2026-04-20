@@ -98,7 +98,10 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         // For thinking models (e.g. gemma4, qwen3), Ollama counts thinking tokens
         // against num_predict. Reserve budget for both thinking and visible output
         // so the model isn't silently cut off mid-think before any content is produced.
-        // maxOutputTokens is enforced client-side in parseResponseStream.
+        // maxOutputTokens is enforced client-side in parseResponseStream using the
+        // server's own `eval_count` when it appears on a line (running count on
+        // intermediate lines where servers emit it, or the final done-line count);
+        // a per-line counter remains as a fallback for servers that don't.
         let visibleBudget = config.maxOutputTokens ?? 2048
         let thinkingBudget = config.maxThinkingTokens ?? 2048
         let options: [String: Any] = [
@@ -167,7 +170,10 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         var thinkingOpen = false
         var thinkingTokenCount = 0
         let thinkingLimit = config.maxThinkingTokens
-        var visibleTokenCount = 0
+        // Fallback per-line counter for servers that don't emit `eval_count`
+        // until the done-line. When a line carries `eval_count`, we prefer it
+        // over this counter for an exact cap.
+        var visibleLineCount = 0
         let visibleLimit = config.maxOutputTokens
 
         func noteEventYielded() throws {
@@ -211,14 +217,20 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             }
 
             if let content = parsed.content, !content.isEmpty {
-                if let limit = visibleLimit, visibleTokenCount >= limit {
-                    // Client-side cap reached; stop the stream cleanly.
-                    continuation.finish()
-                    return
+                // Prefer the server's running `eval_count` when present for an
+                // exact token-count cap; otherwise fall back to the NDJSON line
+                // counter which is an upper bound but may overshoot by one line.
+                if let limit = visibleLimit {
+                    let observed = parsed.evalCount ?? visibleLineCount
+                    if observed >= limit {
+                        // Client-side cap reached; stop the stream cleanly.
+                        continuation.finish()
+                        return
+                    }
                 }
                 try noteEventYielded()
                 continuation.yield(.token(content))
-                visibleTokenCount += 1
+                visibleLineCount += 1
             }
 
             if parsed.done {
@@ -230,6 +242,24 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
                     try noteEventYielded()
                     continuation.yield(.thinkingComplete)
                     thinkingOpen = false
+                }
+
+                // Surface usage from the done-line (`eval_count`,
+                // `prompt_eval_count`). This wires into `handleUsage` (which
+                // populates `lastUsage` for `TokenUsageProvider` consumers) and
+                // emits a `.usage` event on the stream, mirroring the SSE path
+                // in `SSECloudBackend.parseResponseStream`.
+                if parsed.evalCount != nil || parsed.promptEvalCount != nil {
+                    let usage: (promptTokens: Int?, completionTokens: Int?) = (
+                        promptTokens: parsed.promptEvalCount,
+                        completionTokens: parsed.evalCount
+                    )
+                    handleUsage(usage)
+                    if let prompt = usage.promptTokens,
+                       let completion = usage.completionTokens {
+                        try noteEventYielded()
+                        continuation.yield(.usage(prompt: prompt, completion: completion))
+                    }
                 }
             }
         }
@@ -316,10 +346,21 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     ///   `thinking`.
     /// `parseLine` normalises both shapes; consumers read `content` and
     /// `thinking` without caring which endpoint produced the line.
+    ///
+    /// `evalCount` / `promptEvalCount` are the exact token counts reported by
+    /// the Ollama server. Per Ollama's documented API, these appear on the
+    /// terminal `"done":true` line — `eval_count` is the number of tokens the
+    /// model produced this turn and `prompt_eval_count` is the number of tokens
+    /// in the prompt. Some Ollama-compatible servers also emit a running
+    /// `eval_count` on intermediate lines; parsing it unconditionally lets the
+    /// stream cap visible output precisely when available and falls back to a
+    /// line counter when not.
     struct ParsedLine {
         var content: String?
         var thinking: String?
         var done: Bool
+        var evalCount: Int?
+        var promptEvalCount: Int?
     }
 
     /// Parses a single Ollama NDJSON line into a normalised shape.
@@ -353,7 +394,19 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             thinking = topThinking
         }
 
-        return ParsedLine(content: content, thinking: thinking, done: done)
+        // Usage fields — `eval_count` (output tokens) and `prompt_eval_count`
+        // (prompt tokens). Documented as done-line fields but we parse them
+        // unconditionally so a running-count-emitting server is handled too.
+        let evalCount = parsed["eval_count"] as? Int
+        let promptEvalCount = parsed["prompt_eval_count"] as? Int
+
+        return ParsedLine(
+            content: content,
+            thinking: thinking,
+            done: done,
+            evalCount: evalCount,
+            promptEvalCount: promptEvalCount
+        )
     }
 
     /// Extracts the assistant content token from an Ollama NDJSON line.
@@ -416,7 +469,24 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         func extractToken(from payload: String) -> String? {
             OllamaBackend.extractToken(from: payload)
         }
-        func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? { nil }
+
+        /// Extracts Ollama's per-turn usage from a single NDJSON payload.
+        ///
+        /// Ollama's documented API places `eval_count` (completion tokens) and
+        /// `prompt_eval_count` (prompt tokens) on the terminal `"done":true`
+        /// line. Returns `nil` when neither field is present so partial/running
+        /// lines don't pollute a consumer that expects "final usage only".
+        func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)? {
+            guard let parsed = OllamaBackend.parseLine(payload) else { return nil }
+            guard parsed.evalCount != nil || parsed.promptEvalCount != nil else {
+                return nil
+            }
+            return (
+                promptTokens: parsed.promptEvalCount,
+                completionTokens: parsed.evalCount
+            )
+        }
+
         func isStreamEnd(_ payload: String) -> Bool { false }
         func extractStreamError(from payload: String) -> Error? { nil }
     }
