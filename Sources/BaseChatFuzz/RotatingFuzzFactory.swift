@@ -60,4 +60,14 @@ public struct RotatingFuzzFactory: FuzzBackendFactory {
         let idx = counter.nextAndAdvance() % children.count
         return try await children[idx].makeHandle()
     }
+
+    /// Fans out teardown to every child factory so that resource-holding
+    /// factories (e.g. `LlamaFuzzFactory`, `MLXFuzzFactory`) can perform
+    /// ordered shutdown when `RotatingFuzzFactory` is used as the top-level
+    /// factory for `--backend all` or multi-model Ollama rotation.
+    public func teardown() async {
+        for child in children {
+            await child.teardown()
+        }
+    }
 }
