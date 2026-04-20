@@ -19,7 +19,8 @@ final class ResumableDownloadTests: XCTestCase {
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
 
         manager = BackgroundDownloadManager(
-            storageService: ModelStorageService(baseDirectory: tempDirectory)
+            storageService: ModelStorageService(baseDirectory: tempDirectory),
+            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)"
         )
     }
 
