@@ -196,6 +196,59 @@ final class ThinkingBlockFilterTests: XCTestCase {
         // would be emitted immediately and could corrupt subsequent processing.
     }
 
+    // MARK: - Post-think holdback flush — regression for issue #557
+
+    /// Verifies that a post-`</think>` visible token delivered as its own chunk is
+    /// emitted as a single `.token` event, not split across two events.
+    ///
+    /// The old fixed-holdback algorithm held back `max(open.count, close.count)` bytes
+    /// at every chunk boundary. For qwen3 markers that is 8 bytes, which is larger than
+    /// short tokens like "answer" (6 bytes). A 6-byte token arriving after `</think>`
+    /// would sit in the buffer until the next chunk arrived, then the two chunks would
+    /// be concatenated and split at the holdback boundary — producing "an" then "swermore"
+    /// instead of "answer" then "more". This caused `maxOutputTokens` to count "an" as
+    /// the first visible token, fire the limit, and flush "swermore" past the cap via
+    /// `finalize()`.
+    ///
+    /// The suffix-prefix holdback (current algorithm) emits "answer" whole because no
+    /// suffix of "answer" is a non-empty prefix of `<think>` — holdLength stays zero.
+    func test_postThink_visibleToken_emittedAtomically_notSplitByHoldback() {
+        var parser = ThinkingParser()
+
+        // Simulate the per-chunk delivery pattern that triggered the split:
+        // each token arrives as a separate process() call, exactly as a streaming
+        // backend yields individual chunks.
+        let e1 = parser.process("<think>")
+        let e2 = parser.process("a")
+        let e3 = parser.process("b")
+        let e4 = parser.process("</think>")
+        let e5 = parser.process("answer")   // ← must arrive whole, not split
+        let e6 = parser.process("more")
+        let finalEvents = parser.finalize()
+        let allEvents = e1 + e2 + e3 + e4 + e5 + e6 + finalEvents
+
+        // Collect all .token events in order.
+        let visibleTokenEvents = allEvents.compactMap { event -> String? in
+            if case .token(let t) = event { return t } else { return nil }
+        }
+
+        // "answer" must arrive as a single event. If the holdback splitter were
+        // re-introduced, this would be ["an", "swermore"] (or similar) and the
+        // equality would fail.
+        XCTAssertEqual(visibleTokenEvents.first, "answer",
+            "The first visible token after </think> must be the complete word 'answer', not a partial prefix")
+        XCTAssertTrue(visibleTokenEvents.contains("more"),
+            "The subsequent visible token 'more' must also be emitted")
+        // Neither "answer" nor "more" should be split across multiple events.
+        XCTAssertFalse(visibleTokenEvents.contains("an"),
+            "A fixed holdback would split 'answer' and emit 'an' as its own event — this must not happen")
+
+        // Sabotage check: restoring the old `let holdback = markers.holdback` fixed-size
+        // algorithm (holdback = 8 for qwen3) would hold "answer" (6 bytes) back entirely,
+        // then concatenate it with "more" and emit "an" + "swermore" — causing the
+        // `visibleTokenEvents.first == "answer"` assertion to fail.
+    }
+
     // MARK: - Stray close tag in visible mode (regression for PR #472)
 
     /// A bare `</think>` appearing when `depth == 0` (no matching open tag) must
