@@ -82,6 +82,12 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
+        // /api/show thinking-detection probe: best-effort optimization that skips
+        // the 2048-token reserve on non-thinking models. Failures are logged at
+        // info level and fall through to `isThinkingModel = false`, which is the
+        // same safe default we'd pick if the endpoint didn't exist (older Ollama).
+        "BaseChatBackends/OllamaBackend.swift:self.isThinkingModel = (try? await detectThinkingCapability()) ?? false",
+        "BaseChatBackends/OllamaBackend.swift:guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
         "BaseChatBackends/OpenAIBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/SSECloudBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         // MLXBackend.validateArchitecture: best-effort read of the MLX model's

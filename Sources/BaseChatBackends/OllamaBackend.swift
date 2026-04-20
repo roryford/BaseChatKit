@@ -25,6 +25,21 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     /// Default is "30m" (30 minutes). Ollama's own default is "5m".
     public var keepAlive: String = "30m"
 
+    /// Whether the currently-loaded Ollama model advertises thinking/reasoning
+    /// capability. Detected once at `loadModel` time by probing `/api/show`
+    /// for `capabilities: ["thinking"]` or Jinja template markers
+    /// (`<think>`, `{{ if .Thinking }}`, etc.). Defaults to `false` when the
+    /// probe fails or the server returns an unexpected shape — detection is a
+    /// best-effort optimisation, never a blocker.
+    ///
+    /// Consumers: `buildRequest` uses this flag to decide whether
+    /// `maxThinkingTokens == nil` should reserve a 2048-token thinking budget
+    /// (thinking models only) and whether `maxThinkingTokens == 0` should
+    /// forward `"think": false` on the wire (thinking models only; Ollama
+    /// silently ignores the flag on non-thinking models but we omit it for
+    /// clean request bodies).
+    public private(set) var isThinkingModel: Bool = false
+
     // MARK: - Init
 
     /// Creates an Ollama backend.
@@ -68,8 +83,66 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
                 "No base URL configured. Call configure(baseURL:modelName:) first."
             )
         }
+
+        self.isThinkingModel = (try? await detectThinkingCapability()) ?? false
+
         setIsModelLoaded(true)
-        Log.inference.info("OllamaBackend configured for \(self.modelName, privacy: .public) at \(self.baseURL?.host() ?? "unknown", privacy: .public)")
+        Log.inference.info("OllamaBackend configured for \(self.modelName, privacy: .public) at \(self.baseURL?.host() ?? "unknown", privacy: .public) thinking=\(self.isThinkingModel, privacy: .public)")
+    }
+
+    /// Calls Ollama's `/api/show` endpoint and classifies the model as
+    /// thinking-capable or not.
+    ///
+    /// Detection prefers `capabilities: ["thinking", ...]` (surfaced by modern
+    /// Ollama releases) and falls back to scanning the Jinja `template` field
+    /// for `<think>`, `</think>`, or `{{ if .Thinking }}` markers that
+    /// reasoning models ship by convention.
+    ///
+    /// Returns `false` (not `nil`) on HTTP failures other than thrown network
+    /// errors so callers get a clean boolean; `throws` so internal bugs (bad
+    /// URL, serialization failure) still surface for the test harness.
+    private func detectThinkingCapability() async throws -> Bool {
+        guard let baseURL else { return false }
+        let showURL = baseURL.appendingPathComponent("api/show")
+
+        var request = URLRequest(url: showURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["model": modelName])
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await urlSession.data(for: request)
+        } catch {
+            Log.network.info("OllamaBackend /api/show probe failed (\(error.localizedDescription, privacy: .public)) — treating \(self.modelName, privacy: .public) as non-thinking")
+            return false
+        }
+
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            Log.network.info("OllamaBackend /api/show returned HTTP \(http.statusCode, privacy: .public) for \(self.modelName, privacy: .public) — treating as non-thinking")
+            return false
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            Log.network.info("OllamaBackend /api/show returned non-JSON for \(self.modelName, privacy: .public) — treating as non-thinking")
+            return false
+        }
+
+        // Preferred: structured capabilities list.
+        if let caps = json["capabilities"] as? [String],
+           caps.contains(where: { $0.lowercased() == "thinking" }) {
+            return true
+        }
+
+        // Fallback: scan the template for thinking markers.
+        if let template = json["template"] as? String {
+            let markers = ["<think>", "</think>", "{{ if .Thinking }}", "{{if .Thinking}}"]
+            if markers.contains(where: { template.contains($0) }) {
+                return true
+            }
+        }
+
+        return false
     }
 
     // MARK: - Request Building
@@ -95,15 +168,39 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             messages.append(["role": "user", "content": prompt])
         }
 
-        // For thinking models (e.g. gemma4, qwen3), Ollama counts thinking tokens
-        // against num_predict. Reserve budget for both thinking and visible output
-        // so the model isn't silently cut off mid-think before any content is produced.
-        // maxOutputTokens is enforced client-side in parseResponseStream using the
-        // server's own `eval_count` when it appears on a line (running count on
-        // intermediate lines where servers emit it, or the final done-line count);
-        // a per-line counter remains as a fallback for servers that don't.
+        // num_predict has to cover thinking + visible tokens together on
+        // Ollama. The three-state `maxThinkingTokens` semantics below map
+        // directly to the wire:
+        //
+        //   nil → default thinking reserve, *only* on known thinking models
+        //         (was unconditional pre-P4; non-thinking models no longer
+        //         over-provision 2048 unused tokens).
+        //   0   → explicitly disable thinking. Sends `think: false` on
+        //         thinking-capable models; non-thinking models omit the key
+        //         because Ollama treats it as a no-op there.
+        //   N>0 → explicit cap at N thinking tokens; `think` is omitted so
+        //         Ollama honours the model's per-request default and we stay
+        //         forward-compatible with future capability flags.
+        //
+        // Visible output is still re-capped client-side in
+        // parseResponseStream using the server's own `eval_count`, so an
+        // over-generous num_predict can never cause more visible tokens than
+        // `maxOutputTokens` to surface to the caller.
         let visibleBudget = config.maxOutputTokens ?? 2048
-        let thinkingBudget = config.maxThinkingTokens ?? 2048
+        let thinkingBudget: Int
+        let thinkDirective: Bool?
+        switch config.maxThinkingTokens {
+        case .some(0):
+            thinkingBudget = 0
+            thinkDirective = isThinkingModel ? false : nil
+        case .some(let n):
+            thinkingBudget = n
+            thinkDirective = nil
+        case nil:
+            thinkingBudget = isThinkingModel ? 2048 : 0
+            thinkDirective = nil
+        }
+
         let options: [String: Any] = [
             "temperature": config.temperature,
             "top_p": config.topP,
@@ -112,13 +209,16 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             "num_predict": visibleBudget + thinkingBudget,
         ]
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": modelName,
             "messages": messages,
             "stream": true,
             "options": options,
             "keep_alive": keepAlive,
         ]
+        if let think = thinkDirective {
+            body["think"] = think
+        }
 
         var request = URLRequest(url: chatURL)
         request.httpMethod = "POST"

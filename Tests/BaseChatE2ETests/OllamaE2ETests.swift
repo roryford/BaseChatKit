@@ -250,17 +250,7 @@ final class OllamaE2ETests: XCTestCase {
 
     /// Test B — `maxThinkingTokens=0` must suppress reasoning while still
     /// producing visible output.
-    ///
-    // FIXME(P4): This test will fail until OllamaBackend sends `think: false`
-    // when maxThinkingTokens == 0. The `BCK_P4_READY` env gate effectively
-    // skips this test until the P4 wiring lands; removing the gate is the
-    // one-line follow-up that activates the assertion.
     func testThinkingModel_maxThinkingTokensZero_suppressesReasoning() async throws {
-        try XCTSkipIf(
-            ProcessInfo.processInfo.environment["BCK_P4_READY"] == nil,
-            "BCK_P4_READY not set — OllamaBackend does not yet forward `think: false` to Ollama; remove this guard once P4 lands"
-        )
-
         // Probe first with a fresh stream — classify the selected model.
         let isThinkingModel = try await probeModelEmitsThinking()
         try XCTSkipIf(
