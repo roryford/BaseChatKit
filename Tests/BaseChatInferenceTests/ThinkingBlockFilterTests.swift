@@ -232,21 +232,16 @@ final class ThinkingBlockFilterTests: XCTestCase {
             if case .token(let t) = event { return t } else { return nil }
         }
 
-        // "answer" must arrive as a single event. If the holdback splitter were
-        // re-introduced, this would be ["an", "swermore"] (or similar) and the
-        // equality would fail.
-        XCTAssertEqual(visibleTokenEvents.first, "answer",
-            "The first visible token after </think> must be the complete word 'answer', not a partial prefix")
-        XCTAssertTrue(visibleTokenEvents.contains("more"),
-            "The subsequent visible token 'more' must also be emitted")
-        // Neither "answer" nor "more" should be split across multiple events.
-        XCTAssertFalse(visibleTokenEvents.contains("an"),
-            "A fixed holdback would split 'answer' and emit 'an' as its own event — this must not happen")
+        // Exact sequence: "answer" then "more", nothing else. The old fixed-holdback
+        // algorithm would produce ["an", "swermore"] — a different count, a different
+        // first element, and a spurious split — so any regression fails all three checks.
+        XCTAssertEqual(visibleTokenEvents, ["answer", "more"],
+            "Post-</think> visible tokens must arrive atomically: expected [\"answer\", \"more\"] but got a split sequence")
 
-        // Sabotage check: restoring the old `let holdback = markers.holdback` fixed-size
+        // Sabotage check: restoring the old `let holdLength = markers.holdback` fixed-size
         // algorithm (holdback = 8 for qwen3) would hold "answer" (6 bytes) back entirely,
         // then concatenate it with "more" and emit "an" + "swermore" — causing the
-        // `visibleTokenEvents.first == "answer"` assertion to fail.
+        // XCTAssertEqual to fail with ["an", "swermore"] ≠ ["answer", "more"].
     }
 
     // MARK: - Stray close tag in visible mode (regression for PR #472)
