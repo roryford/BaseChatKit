@@ -94,6 +94,20 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             body["system"] = systemPrompt
         }
 
+        // Enable extended thinking when the caller asked for a thinking budget.
+        // Anthropic requires the budget to be strictly less than max_tokens and
+        // temperature to be 1.0 when thinking is enabled; surface a clamped
+        // request rather than silently dropping the parameter.
+        if let budget = config.maxThinkingTokens, budget > 0 {
+            let maxTokens = (body["max_tokens"] as? Int) ?? 2048
+            let clampedBudget = min(budget, max(1024, maxTokens - 1))
+            body["thinking"] = [
+                "type": "enabled",
+                "budget_tokens": clampedBudget
+            ] as [String: Any]
+            body["temperature"] = 1.0
+        }
+
         var request = URLRequest(url: messagesURL)
         request.httpMethod = "POST"
         // Generous timeout for streaming — covers inter-packet gaps during slow generation.
@@ -115,6 +129,90 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             let existing = lastUsage?.promptTokens ?? 0
             lastUsage = (promptTokens: existing, completionTokens: completionTokens)
         }
+    }
+
+    // MARK: - Stream Parsing
+
+    /// Parses Claude's SSE response with extended-thinking support.
+    ///
+    /// Anthropic interleaves reasoning and visible content via typed content
+    /// blocks. A typical extended-thinking response looks like:
+    ///
+    /// ```
+    /// content_block_start {index:0, content_block:{type:"thinking"}}
+    /// content_block_delta {index:0, delta:{type:"thinking_delta", thinking:"..."}}
+    /// content_block_stop  {index:0}
+    /// content_block_start {index:1, content_block:{type:"text"}}
+    /// content_block_delta {index:1, delta:{type:"text_delta",     text:"..."}}
+    /// content_block_stop  {index:1}
+    /// message_stop
+    /// ```
+    ///
+    /// We route `thinking_delta` chunks to ``GenerationEvent/thinkingToken(_:)``
+    /// and emit a single ``GenerationEvent/thinkingComplete`` exactly once — on
+    /// the first transition from a thinking block to any non-thinking event
+    /// (text block start, token, usage, or terminal stop). Non-reasoning
+    /// responses never fire `.thinkingComplete` because no thinking chunk was
+    /// ever observed.
+    public override func parseResponseStream(
+        bytes: URLSession.AsyncBytes,
+        config: GenerationConfig,
+        continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
+    ) async throws {
+        let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
+
+        // `thinkingOpen` flips to true the first time we see a thinking_delta.
+        // It flips back to false — and fires .thinkingComplete exactly once —
+        // the first time we see anything that clearly isn't thinking anymore.
+        var thinkingOpen = false
+
+        func flushThinkingCompleteIfNeeded() {
+            if thinkingOpen {
+                continuation.yield(.thinkingComplete)
+                thinkingOpen = false
+            }
+        }
+
+        for try await payload in tokenStream {
+            if Task.isCancelled { break }
+
+            let eventType = Self.parseEventType(from: payload)
+
+            // Thinking delta: emit as thinkingToken, keep the block open.
+            if eventType == "content_block_delta", let thinking = Self.parseThinkingDelta(from: payload) {
+                continuation.yield(.thinkingToken(thinking))
+                thinkingOpen = true
+                continue
+            }
+
+            // Plain text delta: close any open thinking block first, then yield.
+            if let token = extractToken(from: payload) {
+                flushThinkingCompleteIfNeeded()
+                continuation.yield(.token(token))
+            }
+
+            if let usage = extractUsage(from: payload) {
+                handleUsage(usage)
+                if let prompt = usage.promptTokens,
+                   let completion = usage.completionTokens {
+                    continuation.yield(.usage(prompt: prompt, completion: completion))
+                }
+            }
+
+            if isStreamEnd(payload) {
+                flushThinkingCompleteIfNeeded()
+                break
+            }
+
+            if let error = extractStreamError(from: payload) {
+                throw error
+            }
+        }
+
+        // Safety net: stream ended without a text block or message_stop while
+        // still inside a thinking block (truncated upstream). Close the block
+        // so consumers don't hang in a thinking-only state.
+        flushThinkingCompleteIfNeeded()
     }
 
     // MARK: - HTTP Status Validation
@@ -184,6 +282,32 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     }
 
     // MARK: - JSON Parsing
+
+    /// Returns the `type` field of an Anthropic SSE event payload, if any.
+    static func parseEventType(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return parsed["type"] as? String
+    }
+
+    /// Extracts the `.thinking` text from a `thinking_delta` content-block delta.
+    ///
+    /// Anthropic extended-thinking responses carry reasoning as a separate
+    /// content-block type. The delta shape is
+    /// `{type:"content_block_delta", delta:{type:"thinking_delta", thinking:"..."}}`.
+    static func parseThinkingDelta(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              parsed["type"] as? String == "content_block_delta",
+              let delta = parsed["delta"] as? [String: Any],
+              delta["type"] as? String == "thinking_delta",
+              let thinking = delta["thinking"] as? String else {
+            return nil
+        }
+        return thinking
+    }
 
     /// Extracts a text token from a `content_block_delta` event payload.
     static func parseToken(from json: String) -> String? {

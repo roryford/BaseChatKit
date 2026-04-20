@@ -77,6 +77,9 @@ final class SilentCatchAuditTest: XCTestCase {
 
         // BaseChatBackends
         "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
+        // parseEventType / parseThinkingDelta: SSE payload probes. Malformed
+        // JSON is a non-event (ignore the payload) — same pattern as parseToken.
+        "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/OpenAIBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
