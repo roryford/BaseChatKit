@@ -84,6 +84,13 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/OpenAIBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
         "BaseChatBackends/SSECloudBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
+        // MLXBackend.validateArchitecture: best-effort read of the MLX model's
+        // `config.json`. A missing/unreadable/malformed config is not fatal here
+        // — we deliberately fall through so mlx-swift-lm's own load path produces
+        // the real diagnostic (missing weights, malformed directory, etc.) rather
+        // than masking it with a false architecture error.
+        "BaseChatBackends/MLXBackend.swift:guard let data = try? Data(contentsOf: configURL),",
+        "BaseChatBackends/MLXBackend.swift:let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
 
         // BaseChatFuzz — SessionScript resource loader uses the "try-each-shape-in-order"
         // decoder pattern: each `try?` is a shape probe (single-object vs. array of scripts).

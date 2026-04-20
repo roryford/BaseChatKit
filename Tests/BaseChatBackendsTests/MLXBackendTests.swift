@@ -76,6 +76,74 @@ final class MLXBackendTests: XCTestCase {
         // Full load→unload→verify is covered in BaseChatE2ETests on Apple Silicon.
         throw XCTSkip("Full load→unload cycle covered in BaseChatE2ETests on Apple Silicon")
     }
+
+    // MARK: - Architecture preflight (no hardware gate)
+
+    /// Writes a throwaway `config.json` into a temp directory so we can exercise
+    /// `MLXBackend.validateArchitecture` without invoking the real MLX load path
+    /// (which would trip the metallib guard in `swift test`).
+    private func writeTempConfig(_ json: [String: Any]) throws -> URL {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mlx-arch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(withJSONObject: json)
+        try data.write(to: dir.appendingPathComponent("config.json"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
+    }
+
+    func test_validateArchitecture_acceptsQwen3() throws {
+        let url = try writeTempConfig(["model_type": "qwen3"])
+        XCTAssertNoThrow(try MLXBackend.validateArchitecture(at: url))
+    }
+
+    func test_validateArchitecture_acceptsLlamaViaArchitectures() throws {
+        // HF repos that omit `model_type` but ship `architectures: ["LlamaForCausalLM"]`
+        // must still pass — snake_case prefix match keeps older snapshots working.
+        let url = try writeTempConfig(["architectures": ["LlamaForCausalLM"]])
+        XCTAssertNoThrow(try MLXBackend.validateArchitecture(at: url))
+    }
+
+    func test_validateArchitecture_rejectsVisionEncoder() throws {
+        let url = try writeTempConfig(["model_type": "clip"])
+        XCTAssertThrowsError(try MLXBackend.validateArchitecture(at: url)) { error in
+            guard case InferenceError.unsupportedModelArchitecture(let arch) = error else {
+                return XCTFail("Expected .unsupportedModelArchitecture, got \(error)")
+            }
+            XCTAssertEqual(arch, "clip")
+        }
+        // Sabotage confirmation: adding "clip" to `supportedLMArchitectures`
+        // makes this assertion fail (no throw) — verified locally before commit.
+    }
+
+    func test_validateArchitecture_rejectsEmbeddings() throws {
+        let url = try writeTempConfig(["model_type": "bert"])
+        XCTAssertThrowsError(try MLXBackend.validateArchitecture(at: url)) { error in
+            guard case InferenceError.unsupportedModelArchitecture = error else {
+                return XCTFail("Expected .unsupportedModelArchitecture, got \(error)")
+            }
+        }
+    }
+
+    func test_validateArchitecture_rejectsVisionViaArchitectures() throws {
+        // `model_type` missing, `architectures` says CLIPModel — must still be refused.
+        let url = try writeTempConfig(["architectures": ["CLIPModel"]])
+        XCTAssertThrowsError(try MLXBackend.validateArchitecture(at: url)) { error in
+            guard case InferenceError.unsupportedModelArchitecture = error else {
+                return XCTFail("Expected .unsupportedModelArchitecture, got \(error)")
+            }
+        }
+    }
+
+    func test_validateArchitecture_missingConfigIsNoOp() throws {
+        // A directory with no config.json must not throw — the subsequent MLX load
+        // path will surface the real "missing config" diagnostic instead.
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mlx-arch-empty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertNoThrow(try MLXBackend.validateArchitecture(at: dir))
+    }
 }
 
 // MARK: - Backend Contract

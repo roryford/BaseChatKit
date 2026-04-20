@@ -272,34 +272,41 @@ final class MLXBackendThinkingTests: XCTestCase {
     /// the test is skipped with a pointer to the backend gap so the divergence is visible
     /// in the CI output rather than silently ignored.
     func test_maxThinkingTokens_terminatesGeneration_parity_with_llama() async throws {
-        // FIXME: unskip when MLXBackend honours config.maxThinkingTokens
-        // (tracked in https://github.com/roryford/BaseChatKit/issues/550).
-        //
-        // Target assertions, enabled once the backend fix lands:
-        //
-        //   let mock = MockMLXModelContainer()
-        //   mock.tokensToYield = ["<think>", "a", "b", "c", "d", "</think>", "answer"]
-        //   let backend = MLXBackend()
-        //   backend._inject(mock)
-        //   var config = GenerationConfig(thinkingMarkers: .qwen3)
-        //   config.maxThinkingTokens = 2
-        //   let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
-        //   let events = try await collectAllEvents(from: stream)
-        //   let thinkingTokens = events.compactMap { ev -> String? in
-        //       if case .thinkingToken(let t) = ev { return t } else { return nil }
-        //   }
-        //   let visibleTokens = events.compactMap { ev -> String? in
-        //       if case .token(let t) = ev { return t } else { return nil }
-        //   }
-        //   XCTAssertLessThanOrEqual(thinkingTokens.count, 2)
-        //   XCTAssertFalse(visibleTokens.joined().contains("answer"))
-        //
-        // Sabotage check once unskipped: raising maxThinkingTokens to 10 would let every
-        // thinking token and the full "answer" token through, failing both assertions.
-        throw XCTSkip(
-            "MLXBackend does not yet enforce maxThinkingTokens; see issue #550 for the backend fix. " +
-            "Fixture lands today so the parity gap with LlamaGenerationDriver is documented."
+        let mock = MockMLXModelContainer()
+        // Feed more thinking tokens than the budget allows, then a visible "answer".
+        // With maxThinkingTokens=2 the backend should emit at most 2 .thinkingToken
+        // events and must terminate before the "answer" visible token is yielded.
+        mock.tokensToYield = ["<think>", "a", "b", "c", "d", "</think>", "answer"]
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+
+        var config = GenerationConfig(thinkingMarkers: .qwen3)
+        config.maxThinkingTokens = 2
+
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: config
         )
+
+        let events = try await collectAllEvents(from: stream)
+
+        let thinkingTokens = events.compactMap { ev -> String? in
+            if case .thinkingToken(let t) = ev { return t } else { return nil }
+        }
+        let visibleTokens = events.compactMap { ev -> String? in
+            if case .token(let t) = ev { return t } else { return nil }
+        }
+
+        XCTAssertLessThanOrEqual(thinkingTokens.count, 2,
+            "maxThinkingTokens=2 must cap .thinkingToken events at 2, matching LlamaGenerationDriver")
+        XCTAssertFalse(visibleTokens.joined().contains("answer"),
+            "Generation must terminate before post-think visible tokens are emitted when the budget is exhausted")
+
+        // Sabotage confirmation: removing the `thinkingLimitReached` short-circuit in
+        // MLXBackend.generate (or ignoring config.maxThinkingTokens entirely) would let
+        // all 4 thinking tokens plus "answer" through, failing both assertions.
     }
 }
 #endif
