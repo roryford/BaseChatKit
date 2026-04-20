@@ -583,6 +583,83 @@ final class GenerationCoordinatorTests: XCTestCase {
                        "three count rounds expected: 2 over-budget, 1 under-budget")
     }
 
+    // MARK: - Exact preflight: maxThinkingTokens reservation (issue #587)
+
+    /// `exactPreflightAndTrim` must fold `config.maxThinkingTokens` into the
+    /// reservation so reasoning-model prompts are trimmed aggressively enough
+    /// to leave room for both the visible response and the thinking block.
+    ///
+    /// Scenario:
+    ///   contextSize = 1000, maxOutput = 100, maxThinking = 200.
+    ///   Reserved = 300, so the prompt budget is 700.
+    ///   First countTokens returns 800 → over budget → trim.
+    ///   Second countTokens returns 650 → fits → generate.
+    ///
+    /// Sabotage check: if the reservation ignored `maxThinkingTokens`, the
+    /// first count (800) would fit within (1000 - 100) = 900 and no trim
+    /// would happen — `countTokensCalled` would be 1 and the backend would
+    /// receive the full two-message history.
+    func test_exactPreflightAndTrim_reservesVisiblePlusThinking() async throws {
+        let tcBackend = TokenCountingMockBackend(contextSize: 1000)
+        tcBackend.countTokensResponses = [800, 650]
+        tcBackend.tokensToYield = ["ok"]
+        let tcProvider = TokenCountingFakeProvider(backend: tcBackend)
+
+        let coord = GenerationCoordinator()
+        coord.provider = tcProvider
+
+        let stream = try coord.generate(
+            messages: [
+                (role: "user", content: "oldest — will be trimmed"),
+                (role: "user", content: "latest — will be kept"),
+            ],
+            maxOutputTokens: 100,
+            maxThinkingTokens: 200
+        )
+        for try await _ in stream.events {}
+
+        XCTAssertEqual(tcBackend.countTokensCalled, 2,
+                       "Two count calls expected: first over budget (800+300>1000), "
+                       + "second under after trim (650+300≤1000).")
+        XCTAssertEqual(tcBackend.generateCallCount, 1,
+                       "generate must be called exactly once after the trim round succeeds")
+    }
+
+    /// `exactPreflightAndTrim` must treat `maxThinkingTokens = nil` as a
+    /// zero-token reservation rather than substituting a default (e.g. 2048).
+    ///
+    /// Scenario:
+    ///   contextSize = 1000, maxOutput = 100, maxThinking = nil.
+    ///   Reserved = 100, so the prompt budget is 900.
+    ///   First countTokens returns 800 → fits → generate without trimming.
+    ///
+    /// Sabotage check: if nil were substituted with a 2048 default, the
+    /// reserve would be 2148 (exceeding the 1000-token context), available
+    /// would go negative, and `exactPreflightAndTrim` would throw
+    /// `contextExhausted`. The test would surface as a thrown error rather
+    /// than a successful `generateCallCount == 1`.
+    func test_exactPreflightAndTrim_thinkingNilDoesNotOverReserve() async throws {
+        let tcBackend = TokenCountingMockBackend(contextSize: 1000)
+        tcBackend.countTokensResponses = [800]
+        tcBackend.tokensToYield = ["ok"]
+        let tcProvider = TokenCountingFakeProvider(backend: tcBackend)
+
+        let coord = GenerationCoordinator()
+        coord.provider = tcProvider
+
+        let stream = try coord.generate(
+            messages: [(role: "user", content: "fits without thinking reserve")],
+            maxOutputTokens: 100,
+            maxThinkingTokens: nil
+        )
+        for try await _ in stream.events {}
+
+        XCTAssertEqual(tcBackend.countTokensCalled, 1,
+                       "Only one count call expected — the prompt fits within 1000 - 100 = 900.")
+        XCTAssertEqual(tcBackend.generateCallCount, 1,
+                       "generate must succeed without trimming when thinking reserve is zero.")
+    }
+
     // MARK: - Provider teardown safety
 
     /// Deallocating the provider mid-stream must not crash the coordinator.

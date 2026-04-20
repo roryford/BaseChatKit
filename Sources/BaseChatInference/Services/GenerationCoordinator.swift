@@ -87,18 +87,20 @@ final class GenerationCoordinator {
         temperature: Float = 0.7,
         topP: Float = 0.9,
         repeatPenalty: Float = 1.1,
-        maxOutputTokens: Int? = 2048
+        maxOutputTokens: Int? = 2048,
+        maxThinkingTokens: Int? = nil
     ) throws -> GenerationStream {
         guard let backend = provider?.currentBackend else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
 
-        let config = GenerationConfig(
+        var config = GenerationConfig(
             temperature: temperature,
             topP: topP,
             repeatPenalty: repeatPenalty,
             maxOutputTokens: maxOutputTokens
         )
+        config.maxThinkingTokens = maxThinkingTokens
 
         // Exact-count pre-flight: backends that conform to TokenCountingBackend
         // expose the real tokenizer. Use it to verify the assembled prompt fits
@@ -177,7 +179,20 @@ final class GenerationCoordinator {
         maxTrimAttempts: Int = 20
     ) throws -> ExactPreflightResult {
         let contextSize = Int(backend.capabilities.maxContextTokens)
-        let maxOutput = config.maxOutputTokens ?? 2048
+        // Reserve context for both visible output and (optionally) thinking output.
+        //
+        // Rationale for `?? 0` on the thinking side (not `?? 2048`): the public
+        // semantics of `maxThinkingTokens` today are "cap reasoning output; nil
+        // means no client-side cap." Reserving a fixed slice of the context
+        // window for thinking by default would silently eat that many tokens
+        // from every prompt — including on non-thinking models where it has no
+        // effect on runtime behaviour. Principle of least surprise: only
+        // reserve what the caller explicitly asked for. Callers who know they
+        // are driving a reasoning model can opt in by setting
+        // `maxThinkingTokens: N`, which then becomes the trim reservation.
+        let visibleReserve = config.maxOutputTokens ?? 2048
+        let thinkingReserve = config.maxThinkingTokens ?? 0
+        let maxOutput = visibleReserve + thinkingReserve
         let template = provider?.selectedPromptTemplate ?? .chatML
 
         var workingMessages = messages
@@ -244,6 +259,7 @@ final class GenerationCoordinator {
         topP: Float = 0.9,
         repeatPenalty: Float = 1.1,
         maxOutputTokens: Int? = 2048,
+        maxThinkingTokens: Int? = nil,
         priority: GenerationPriority = .normal,
         sessionID: UUID? = nil
     ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
@@ -263,12 +279,13 @@ final class GenerationCoordinator {
         stream.setPhase(.queued)
         continuations[token] = continuation
 
-        let config = GenerationConfig(
+        var config = GenerationConfig(
             temperature: temperature,
             topP: topP,
             repeatPenalty: repeatPenalty,
             maxOutputTokens: maxOutputTokens
         )
+        config.maxThinkingTokens = maxThinkingTokens
 
         let request = QueuedRequest(
             token: token,
@@ -340,7 +357,8 @@ final class GenerationCoordinator {
                     temperature: next.config.temperature,
                     topP: next.config.topP,
                     repeatPenalty: next.config.repeatPenalty,
-                    maxOutputTokens: next.config.maxOutputTokens
+                    maxOutputTokens: next.config.maxOutputTokens,
+                    maxThinkingTokens: next.config.maxThinkingTokens
                 )
 
                 for try await event in backendStream.events {

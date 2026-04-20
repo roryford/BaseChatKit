@@ -74,6 +74,20 @@ final class GenerationCoordinator {
     /// Returns the current max token budget.
     var contextMaxTokens: () -> Int = { 2048 }
 
+    /// Returns the configured cap on visible output tokens, or `nil` for "no explicit cap".
+    ///
+    /// Wired from `ChatViewModel.maxOutputTokens`. Used by ``trimMessages`` to
+    /// reserve context for the model's response so the prompt is trimmed
+    /// aggressively enough to leave room for it.
+    var maxOutputTokens: () -> Int? = { 2048 }
+
+    /// Returns the configured cap on reasoning tokens, or `nil` for "no explicit cap".
+    ///
+    /// Wired from `ChatViewModel.maxThinkingTokens`. A `nil` value means the
+    /// trim math reserves zero thinking tokens — see issue #587 for why this
+    /// is opt-in rather than a backend default.
+    var maxThinkingTokens: () -> Int? = { nil }
+
     /// Returns the current temperature setting.
     var temperature: () -> Float = { 0.7 }
 
@@ -207,11 +221,21 @@ final class GenerationCoordinator {
             // messages carry over between generation cycles.
             let cachingTokenizer: TokenizerProvider = reusableCachingTokenizer()
 
+            // Reserve context for the model's visible response and (optionally)
+            // its reasoning tokens. `maxThinkingTokens == nil` reserves zero
+            // rather than a default slice so non-thinking models don't silently
+            // lose 2048 tokens of prompt to a reservation they won't use. See
+            // issue #587 and the reservation-policy memo on
+            // ``ContextWindowManager`` for the full rationale.
+            let visibleReserve = maxOutputTokens() ?? 2048
+            let thinkingReserve = maxThinkingTokens() ?? 0
+            let responseBuffer = visibleReserve + thinkingReserve
+
             let trimmed = ContextWindowManager.trimMessages(
                 allMessages,
                 systemPrompt: effectiveSystemPrompt,
                 maxTokens: contextMaxTokens(),
-                responseBuffer: 512,
+                responseBuffer: responseBuffer,
                 tokenizer: cachingTokenizer
             )
             let history: [(role: String, content: String)] = trimmed.map {
@@ -224,6 +248,8 @@ final class GenerationCoordinator {
                 temperature: temperature(),
                 topP: topP(),
                 repeatPenalty: repeatPenalty(),
+                maxOutputTokens: maxOutputTokens(),
+                maxThinkingTokens: maxThinkingTokens(),
                 priority: .userInitiated,
                 sessionID: activeSessionID()
             )
