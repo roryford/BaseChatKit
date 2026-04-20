@@ -2,28 +2,13 @@
 
 ## [0.11.0](https://github.com/roryford/BaseChatKit/compare/v0.10.2...v0.11.0) (2026-04-20)
 
+**Full cross-backend thinking-token support and non-LM model guardrails** — v0.10.0 shipped `ThinkingParser` and wire-up for Ollama and Llama backends; this release extends the same pipeline to every backend and fixes the gaps that live fuzz runs found. `MLXBackend` now enforces `maxThinkingTokens` the same way `LlamaGenerationDriver` does, stopping a runaway reasoning model before it can OOM a 16 GB Mac, and routes all output through `ThinkingParser` so `<think>` blocks stream as structured events rather than raw text ([#591](https://github.com/roryford/BaseChatKit/issues/591)). Cloud backends (`ClaudeBackend` and the OpenAI-compatible adapter) now parse Anthropic extended-thinking content blocks and OpenAI reasoning deltas into the same `GenerationEvent.thinkingToken` / `.thinkingComplete` events, so cloud reasoning responses render in `ThinkingBlockView` without any host-side changes ([#589](https://github.com/roryford/BaseChatKit/issues/589)). `LlamaBackend` gains thinking-marker detection for models that use the Llama 3 prompt template (DeepSeek-R1 and peers), which previously only worked on ChatML-formatted GGUFs ([#592](https://github.com/roryford/BaseChatKit/issues/592)).
 
-### ⚠ BREAKING CHANGES
+Two new guardrails prevent silent crashes when the wrong model type is loaded: both `MLXBackend` and `LlamaBackend` now throw `InferenceError.unsupportedModelArchitecture` at load time if handed a CLIP vision encoder, BERT embedder, Whisper audio model, or other non-LM GGUF — instead of crashing inside the decode loop ([#591](https://github.com/roryford/BaseChatKit/issues/591), [#592](https://github.com/roryford/BaseChatKit/issues/592)).
 
-* `maxThinkingTokens=nil` no longer reserves a thinking budget on non-thinking Ollama models (was always 2048 regardless of model). Callers who want guaranteed thinking-budget reservation on unknown models should pass an explicit `N` value.
+On the Ollama side, `OllamaBackend` now probes `/api/show` at `loadModel` time to classify whether a model is thinking-capable, and `GenerationConfig.maxThinkingTokens = 0` is honoured by forwarding `"think": false` so reasoning-capable models (e.g. `gemma4`, `qwen3`) skip chain-of-thought when the host opts out ([#596](https://github.com/roryford/BaseChatKit/issues/596)). A companion fix ensures `ContextWindowManager` reserves both visible and thinking output budgets in its trim math, preventing reasoning-heavy responses from silently pushing prompt history out of context ([#595](https://github.com/roryford/BaseChatKit/issues/595)). Three new fuzz scenarios — disable thinking, cancel mid-thought, retry after a mid-thinking network flake — each asserting a specific invariant on the consumer's event stream — were added before this shipped to catch regressions the random corpus cannot reach reliably ([#590](https://github.com/roryford/BaseChatKit/issues/590)).
 
-### Features
-
-* **cloud:** parse reasoning content from Anthropic and OpenAI streams into thinking events ([#589](https://github.com/roryford/BaseChatKit/issues/589)) ([9dbaab8](https://github.com/roryford/BaseChatKit/commit/9dbaab8a304fef7b8fb3ccd8f092d681ab20faf8))
-* **fuzz:** add thinking-edge-case scenarios and audit ContextWindowManager reservation policy ([#590](https://github.com/roryford/BaseChatKit/issues/590)) ([bf43455](https://github.com/roryford/BaseChatKit/commit/bf4345566e020039dd353818cdb4f7b010b7583f))
-* honor maxThinkingTokens=0 to disable thinking on Ollama, detect thinking models via /api/show ([#596](https://github.com/roryford/BaseChatKit/issues/596)) ([4bb1493](https://github.com/roryford/BaseChatKit/commit/4bb149382b05439ef118d2a540454b9ddb1d8196))
-* **llama:** preflight GGUF architecture and detect thinking markers outside ChatML ([#592](https://github.com/roryford/BaseChatKit/issues/592)) ([d0fb3da](https://github.com/roryford/BaseChatKit/commit/d0fb3daad9aba248b1216718f722ec568a9875d2))
-* **mlx:** enforce thinking budget, preflight model architecture, route output through ThinkingParser ([#591](https://github.com/roryford/BaseChatKit/issues/591)) ([38b2486](https://github.com/roryford/BaseChatKit/commit/38b24860b63bdafad42dc29967f5bc1ddbfb6a11))
-
-
-### Bug Fixes
-
-* emit post-think holdback flush as single token event ([4976041](https://github.com/roryford/BaseChatKit/commit/4976041dd0935047466ff3bb9b3aec9bf64a003c))
-* isolate BackgroundDownloadIntegrationTests shared state to prevent double-free ([5d0da80](https://github.com/roryford/BaseChatKit/commit/5d0da80e7265ec3ca667d17396817a8ffc8e6f5f))
-* **ollama:** reserve thinking budget so reasoning models emit visible content ([#586](https://github.com/roryford/BaseChatKit/issues/586)) ([662f596](https://github.com/roryford/BaseChatKit/commit/662f5969b223874dee6f8ffa77e3793a45aff2a7))
-* **ollama:** use exact eval_count for visible token cap and usage metadata ([#594](https://github.com/roryford/BaseChatKit/issues/594)) ([aa61716](https://github.com/roryford/BaseChatKit/commit/aa617163032546b6b8e5402270a7fc51b9ffd7d2))
-* reserve maxThinkingTokens in ContextWindowManager trim math ([#595](https://github.com/roryford/BaseChatKit/issues/595)) ([51f49fa](https://github.com/roryford/BaseChatKit/commit/51f49fa91433cab1bed1e896aa2daeb753b64c13))
-* split BaseChatInferenceTests into XCTest and Swift Testing targets ([e841803](https://github.com/roryford/BaseChatKit/commit/e841803659d203a77e14e1d2c8004dd64e7c89e1))
+**Breaking change:** `maxThinkingTokens=nil` no longer reserves a 2048-token thinking budget on non-thinking Ollama models. Callers who want guaranteed budget reservation on unknown models should pass an explicit `N` value.
 
 ## [0.10.2](https://github.com/roryford/BaseChatKit/compare/v0.10.1...v0.10.2) (2026-04-19)
 
