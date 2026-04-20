@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.11.0](https://github.com/roryford/BaseChatKit/compare/v0.10.2...v0.11.0) (2026-04-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* `maxThinkingTokens=nil` no longer reserves a thinking budget on non-thinking Ollama models (was always 2048 regardless of model). Callers who want guaranteed thinking-budget reservation on unknown models should pass an explicit `N` value.
+
+### Features
+
+* **cloud:** parse reasoning content from Anthropic and OpenAI streams into thinking events ([#589](https://github.com/roryford/BaseChatKit/issues/589)) ([9dbaab8](https://github.com/roryford/BaseChatKit/commit/9dbaab8a304fef7b8fb3ccd8f092d681ab20faf8))
+* **fuzz:** add thinking-edge-case scenarios and audit ContextWindowManager reservation policy ([#590](https://github.com/roryford/BaseChatKit/issues/590)) ([bf43455](https://github.com/roryford/BaseChatKit/commit/bf4345566e020039dd353818cdb4f7b010b7583f))
+* honor maxThinkingTokens=0 to disable thinking on Ollama, detect thinking models via /api/show ([#596](https://github.com/roryford/BaseChatKit/issues/596)) ([4bb1493](https://github.com/roryford/BaseChatKit/commit/4bb149382b05439ef118d2a540454b9ddb1d8196))
+* **llama:** preflight GGUF architecture and detect thinking markers outside ChatML ([#592](https://github.com/roryford/BaseChatKit/issues/592)) ([d0fb3da](https://github.com/roryford/BaseChatKit/commit/d0fb3daad9aba248b1216718f722ec568a9875d2))
+* **mlx:** enforce thinking budget, preflight model architecture, route output through ThinkingParser ([#591](https://github.com/roryford/BaseChatKit/issues/591)) ([38b2486](https://github.com/roryford/BaseChatKit/commit/38b24860b63bdafad42dc29967f5bc1ddbfb6a11))
+
+
+### Bug Fixes
+
+* emit post-think holdback flush as single token event ([4976041](https://github.com/roryford/BaseChatKit/commit/4976041dd0935047466ff3bb9b3aec9bf64a003c))
+* isolate BackgroundDownloadIntegrationTests shared state to prevent double-free ([5d0da80](https://github.com/roryford/BaseChatKit/commit/5d0da80e7265ec3ca667d17396817a8ffc8e6f5f))
+* **ollama:** reserve thinking budget so reasoning models emit visible content ([#586](https://github.com/roryford/BaseChatKit/issues/586)) ([662f596](https://github.com/roryford/BaseChatKit/commit/662f5969b223874dee6f8ffa77e3793a45aff2a7))
+* **ollama:** use exact eval_count for visible token cap and usage metadata ([#594](https://github.com/roryford/BaseChatKit/issues/594)) ([aa61716](https://github.com/roryford/BaseChatKit/commit/aa617163032546b6b8e5402270a7fc51b9ffd7d2))
+* reserve maxThinkingTokens in ContextWindowManager trim math ([#595](https://github.com/roryford/BaseChatKit/issues/595)) ([51f49fa](https://github.com/roryford/BaseChatKit/commit/51f49fa91433cab1bed1e896aa2daeb753b64c13))
+* split BaseChatInferenceTests into XCTest and Swift Testing targets ([e841803](https://github.com/roryford/BaseChatKit/commit/e841803659d203a77e14e1d2c8004dd64e7c89e1))
+
 ## [0.10.2](https://github.com/roryford/BaseChatKit/compare/v0.10.1...v0.10.2) (2026-04-19)
 
 **Multi-turn context and special token fixes for local backends** — MLX models now correctly recall prior messages in a conversation. Llama-format models (SmolLM2, Mistral, etc.) no longer generate commentary about `<|im_start|>` tokens — responses are coherent from the first message. MLX model downloads complete reliably and show correct progress. The demo app opens immediately on launch instead of showing a blank screen for several seconds.
