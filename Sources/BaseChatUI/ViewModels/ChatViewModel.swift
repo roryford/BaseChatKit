@@ -251,6 +251,29 @@ public final class ChatViewModel {
         get { sessionController.repeatPenalty }
         set { sessionController.repeatPenalty = newValue }
     }
+    /// Cap on visible response tokens for each generation.
+    ///
+    /// Feeds two places:
+    /// - The trim math in ``GenerationCoordinator`` reserves this many tokens
+    ///   of the context window so the prompt is trimmed enough to leave room
+    ///   for the response (see issue #587).
+    /// - Forwarded to ``InferenceService/enqueue(...)`` as `maxOutputTokens`,
+    ///   which backends enforce as their generation cap.
+    ///
+    /// Defaults to `2048`. Set `nil` to leave generation uncapped (the client
+    /// trim math then falls back to the same `2048` reservation).
+    public var maxOutputTokens: Int? = 2048
+
+    /// Cap on reasoning tokens for each generation.
+    ///
+    /// Only reasoning-capable backends (MLX thinking models, Llama with thinking
+    /// markers, Ollama with `think: true`) enforce this. `nil` means "no
+    /// client-side cap" and reserves **zero** thinking tokens in the trim
+    /// budget — set an explicit `N` when driving a reasoning model so the
+    /// prompt is trimmed aggressively enough to leave room for the full
+    /// advertised visible + thinking output. See issue #587.
+    public var maxThinkingTokens: Int? = nil
+
     /// Minimum interval between batched UI updates during streaming (~30 fps by default).
     public var streamingUpdateInterval: Duration = .milliseconds(33)
     /// Maximum characters to buffer before forcing a UI flush during streaming.
@@ -552,6 +575,8 @@ public final class ChatViewModel {
         genCoordinator.systemPrompt = { [weak self] in self?.systemPrompt ?? "" }
         genCoordinator.systemPromptContext = { [weak self] in self?.systemPromptContext ?? [:] }
         genCoordinator.contextMaxTokens = { [weak self] in self?.contextMaxTokens ?? 2048 }
+        genCoordinator.maxOutputTokens = { [weak self] in self?.maxOutputTokens ?? 2048 }
+        genCoordinator.maxThinkingTokens = { [weak self] in self?.maxThinkingTokens }
         genCoordinator.temperature = { [weak self] in self?.temperature ?? 0.7 }
         genCoordinator.topP = { [weak self] in self?.topP ?? 0.9 }
         genCoordinator.repeatPenalty = { [weak self] in self?.repeatPenalty ?? 1.0 }
