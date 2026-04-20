@@ -103,6 +103,13 @@ let package = Package(
             name: "BaseChatInferenceTests",
             dependencies: ["BaseChatInference", "BaseChatTestSupport"]
         ),
+        // Swift Testing suites split from BaseChatInferenceTests to prevent a
+        // libmalloc double-free SIGABRT that occurs when XCTest and Swift Testing
+        // harnesses both initialise in the same process (~25% of CI runs).
+        .testTarget(
+            name: "BaseChatInferenceSwiftTestingTests",
+            dependencies: ["BaseChatInference", "BaseChatTestSupport"]
+        ),
         .testTarget(
             name: "BaseChatBackendsTests",
             dependencies: [
