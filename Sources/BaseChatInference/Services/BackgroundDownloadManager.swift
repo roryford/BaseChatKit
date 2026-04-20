@@ -107,6 +107,15 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// can read `storageService.modelsDirectory` when moving completed downloads.
     internal let storageService: ModelStorageService
 
+    /// Per-instance background session identifier.
+    ///
+    /// Stored rather than re-derived from `Self.sessionIdentifier` each time so that
+    /// tests can inject a unique identifier per test run. Reusing the same identifier
+    /// across two concurrent `BackgroundDownloadManager` instances causes the OS to
+    /// deliver delegate callbacks to a deallocated object — a double-free crash.
+    @ObservationIgnored
+    private let _sessionIdentifier: String
+
     /// Backing store for the lazily created background URL session.
     ///
     /// Kept as an optional so `deinit` can skip invalidation when the session
@@ -123,7 +132,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     @ObservationIgnored
     private var backgroundSession: URLSession {
         if let existing = _backgroundSession { return existing }
-        let config = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
+        let config = URLSessionConfiguration.background(withIdentifier: _sessionIdentifier)
         config.isDiscretionary = false
         config.sessionSendsLaunchEvents = true
         // Allow cellular for user-initiated downloads.
@@ -175,8 +184,21 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     // MARK: - Init
 
-    public init(storageService: ModelStorageService = ModelStorageService()) {
+    /// Creates a new download manager.
+    ///
+    /// - Parameters:
+    ///   - storageService: Provides the models directory path. Defaults to a standard service.
+    ///   - sessionIdentifier: Background `URLSession` identifier. Defaults to the framework's
+    ///     canonical identifier derived from `BaseChatConfiguration`. Pass a unique value in
+    ///     tests to prevent OS-level session collisions between manager instances — reusing the
+    ///     same identifier while a previous instance is still being torn down causes the OS to
+    ///     deliver callbacks to a deallocated delegate, resulting in a double-free crash.
+    public init(
+        storageService: ModelStorageService = ModelStorageService(),
+        sessionIdentifier: String? = nil
+    ) {
         self.storageService = storageService
+        self._sessionIdentifier = sessionIdentifier ?? Self.sessionIdentifier
         super.init()
     }
 
