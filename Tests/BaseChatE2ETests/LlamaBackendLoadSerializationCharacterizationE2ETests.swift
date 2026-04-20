@@ -229,8 +229,14 @@ final class LlamaBackendLoadSerializationCharacterizationE2ETests: XCTestCase {
         let consumer = Task {
             do {
                 for try await event in stream.events {
-                    if case .token = event {
+                    switch event {
+                    case .token, .thinkingToken:
+                        // Reasoning GGUFs route early output through `.thinkingToken`
+                        // when the driver's non-ChatML sniff detects `<think>`;
+                        // either event counts as decode-loop-is-live.
                         await recorder.recordToken()
+                    default:
+                        break
                     }
                 }
                 await recorder.recordFinish(error: nil)

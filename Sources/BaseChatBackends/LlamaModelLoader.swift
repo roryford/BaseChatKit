@@ -134,6 +134,17 @@ final class LlamaModelLoader: @unchecked Sendable {
         }
         let modelHandle = LlamaModelHandle(rawModel)
 
+        // Preflight architecture check: GGUF files declare their model role via
+        // `general.architecture`. Vision encoders, embedding-only models, and
+        // speech/diffusion checkpoints crash inside `llama_decode` (or silently
+        // produce garbage) because they do not expose a causal-LM decode path.
+        // Throwing here gives callers a typed error instead of a mid-stream crash.
+        // modelHandle owns `rawModel`; throwing lets its deinit call `llama_model_free`.
+        if let architecture = Self.readArchitectureMetadata(model: rawModel),
+           Self.isUnsupportedArchitecture(architecture) {
+            throw InferenceError.unsupportedModelArchitecture(architecture)
+        }
+
         var ctxParams = llama_context_default_params()
         ctxParams.n_ctx = UInt32(effectiveContextSize)
         ctxParams.n_threads = Int32(max(1, min(8, ProcessInfo.processInfo.processorCount - 2)))
@@ -171,6 +182,57 @@ final class LlamaModelLoader: @unchecked Sendable {
             context: contextHandle,
             effectiveContextSize: effectiveContextSize
         )
+    }
+
+    // MARK: - Architecture Preflight
+
+    /// GGUF architecture strings that are NOT causal chat/instruct LMs.
+    ///
+    /// Denylist (vs. allowlist) because the set of legitimate causal-LM
+    /// architectures grows every month (`llama`, `qwen`, `qwen2`, `qwen3`,
+    /// `mistral`, `gemma`, `gemma2`, `gemma3`, `phi`, `phi3`, `falcon`,
+    /// `mamba`, `gptneox`, …) and rejecting by omission would break new
+    /// models the day they land. The known-bad set — vision encoders,
+    /// embedding-only models, speech/diffusion — is small and stable.
+    ///
+    /// Values are lowercased before comparison so `CLIP` / `clip` both match.
+    /// Internal for testability — `LlamaBackendTests.test_unsupportedArchitecture_denylistMatches`
+    /// validates this set without needing a real GGUF.
+    static let unsupportedArchitectures: Set<String> = [
+        "clip",         // vision encoders (CLIP-L/B)
+        "llava",        // multimodal LLaVA fused weights that need the MM projector
+        "mllama",       // Meta multimodal llama variants loaded through llama.cpp's MM path
+        "whisper",      // speech-to-text
+        "bert",         // embedding-only (no decode path)
+        "nomic-bert",   // nomic embedder
+        "jina-bert-v2", // jina embedder variant
+        "t5encoder",    // T5 encoder-only checkpoints
+        "stablediffusion", // diffusion UNet weights
+        "sd3",          // stable-diffusion-3
+    ]
+
+    /// Returns true when `architecture` is on the non-LM denylist.
+    static func isUnsupportedArchitecture(_ architecture: String) -> Bool {
+        unsupportedArchitectures.contains(architecture.lowercased())
+    }
+
+    /// Reads `general.architecture` from the loaded GGUF model's metadata.
+    ///
+    /// Returns `nil` when the key is absent or the metadata read fails —
+    /// callers treat that as "unknown, assume supported" to avoid false
+    /// positives on exotic-but-legitimate LM GGUFs. `llama_model_meta_val_str`
+    /// writes a null-terminated C string into `buf` and returns the byte
+    /// length; a negative return value indicates the key was not found.
+    static func readArchitectureMetadata(model: OpaquePointer) -> String? {
+        let key = "general.architecture"
+        // 256 bytes is ample — real values are short strings like "llama",
+        // "qwen2", "mistral". The C API writes the length-prefixed string.
+        var buffer = [CChar](repeating: 0, count: 256)
+        let written = buffer.withUnsafeMutableBufferPointer { ptr in
+            llama_model_meta_val_str(model, key, ptr.baseAddress, ptr.count)
+        }
+        guard written > 0 else { return nil }
+        return String(cString: buffer)
     }
 }
 #endif
