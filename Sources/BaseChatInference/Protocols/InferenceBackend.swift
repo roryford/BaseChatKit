@@ -30,10 +30,27 @@ public struct GenerationConfig: Sendable, Codable {
     /// calling.  Defaults to ``ToolChoice/auto``.
     public var toolChoice: ToolChoice
 
-    /// Approximate cap on reasoning tokens. Counts thinkingToken events (≈ one per decoded token).
-    /// nil = no limit. Only enforced by LlamaGenerationDriver; MLX ignores this field.
-    /// Note: lives on GenerationConfig as a per-request hint. Will move to BackendCapabilities
-    /// when a backend-level thinking-capability flag is added.
+    /// Cap on reasoning (chain-of-thought) tokens for a single generation.
+    ///
+    /// - `nil` — no client-side cap. Backends reserve a default thinking budget
+    ///   only when the loaded model is known to be a thinking model (Ollama
+    ///   detects this via `/api/show`; Llama uses the prompt template's
+    ///   `thinkingMarkers`). Non-thinking models add no reservation.
+    /// - `0` — **disable thinking entirely.** On supporting backends (Ollama
+    ///   with thinking-capable models, MLX/Llama with reasoning GGUFs), this
+    ///   instructs the model to skip the reasoning phase and emit visible
+    ///   output directly. On non-thinking models this is a no-op.
+    /// - `N > 0` — cap thinking tokens at `N`; additional reasoning tokens are
+    ///   dropped. Visible output is still produced.
+    ///
+    /// See `OllamaBackend` for the wire-level mapping (`"think": false` when
+    /// `0`, `num_predict` reservation when `N`). `LlamaGenerationDriver` also
+    /// enforces the `N`-case cap; backends that do not honour the `0`-case
+    /// today may start the reasoning phase anyway — that's deferred work.
+    ///
+    /// Note: lives on GenerationConfig as a per-request hint. Will move to
+    /// BackendCapabilities when a backend-level thinking-capability flag is
+    /// added.
     public var maxThinkingTokens: Int?
 
     /// Thinking markers for this request's model/template, or nil if the model does not emit

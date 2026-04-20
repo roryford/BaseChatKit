@@ -35,8 +35,30 @@ struct OllamaBackendTests {
         return (backend, baseURL.appendingPathComponent("api/chat"))
     }
 
+    /// Returns both the `/api/chat` URL and the matching `/api/show` URL for
+    /// tests that want to stub the thinking-capability probe explicitly.
+    private func makeConfiguredBackendWithShow() -> (OllamaBackend, chatURL: URL, showURL: URL) {
+        let session = makeMockSession()
+        let backend = OllamaBackend(urlSession: session)
+        let baseURL = URL(string: "http://ollama-\(UUID().uuidString).test")!
+        backend.configure(baseURL: baseURL, modelName: "llama3.2")
+        return (
+            backend,
+            chatURL: baseURL.appendingPathComponent("api/chat"),
+            showURL: baseURL.appendingPathComponent("api/show")
+        )
+    }
+
     private func loadBackend(_ backend: OllamaBackend) async throws {
         try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
+    }
+
+    /// Builds a minimal `/api/show` JSON response body with an explicit
+    /// `capabilities` array (and optional `template` for the fallback-path test).
+    private func apiShowBody(capabilities: [String], template: String? = nil) -> Data {
+        var obj: [String: Any] = ["capabilities": capabilities]
+        if let template { obj["template"] = template }
+        return try! JSONSerialization.data(withJSONObject: obj)
     }
 
     // MARK: - Init & State
@@ -941,12 +963,28 @@ struct OllamaBackendTests {
         #expect(numPredict == 150)
     }
 
-    /// When both caps are `nil` (default `GenerationConfig()`), each side
-    /// defaults to 2048, so `num_predict` must land on `4096`. Pins the
-    /// default-default arithmetic so a future refactor doesn't silently
-    /// shift the server-side ceiling.
-    @Test func generate_numPredict_bothCapsNil_defaultsTo4096() async throws {
-        let (backend, chatURL) = makeConfiguredBackend()
+    /// When both caps are `nil` (default `GenerationConfig()`) on a **thinking
+    /// model**, each side defaults to 2048, so `num_predict` must land on
+    /// `4096`. Pins the default-default arithmetic so a future refactor
+    /// doesn't silently shift the server-side ceiling.
+    ///
+    /// Post-P4 semantics: the 2048 thinking reservation is gated on the
+    /// `/api/show` probe detecting a thinking-capable model. Non-thinking
+    /// models land on 2048 (visible only) — see
+    /// `generate_numPredict_nonThinkingModel_skipsReservation` below.
+    @Test func generate_numPredict_bothCapsNil_thinkingModel_defaultsTo4096() async throws {
+        let (backend, chatURL, showURL) = makeConfiguredBackendWithShow()
+
+        // Thinking-capable `/api/show` so loadModel flips isThinkingModel=true.
+        MockURLProtocol.stub(
+            url: showURL,
+            response: .immediate(
+                data: apiShowBody(capabilities: ["completion", "thinking"]),
+                statusCode: 200
+            )
+        )
+        defer { MockURLProtocol.unstub(url: showURL) }
+
         try await loadBackend(backend)
 
         let chunks: [Data] = [
@@ -970,6 +1008,263 @@ struct OllamaBackendTests {
         let options = try #require(json["options"] as? [String: Any])
         let numPredict = try #require(options["num_predict"] as? Int)
         #expect(numPredict == 4096)
+    }
+
+    // MARK: - P4: /api/show thinking-model detection + maxThinkingTokens semantics
+
+    /// `/api/show` returning `capabilities: ["thinking"]` must flip
+    /// `isThinkingModel = true` and reserve the 2048-token thinking budget
+    /// when `maxThinkingTokens == nil`.
+    @Test func loadModel_detectsThinkingModel_fromCapabilities() async throws {
+        let (backend, chatURL, showURL) = makeConfiguredBackendWithShow()
+
+        MockURLProtocol.stub(
+            url: showURL,
+            response: .immediate(
+                data: apiShowBody(capabilities: ["completion", "thinking"]),
+                statusCode: 200
+            )
+        )
+        defer { MockURLProtocol.unstub(url: showURL) }
+
+        try await loadBackend(backend)
+        #expect(backend.isThinkingModel)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"ok"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxOutputTokens = 100
+        config.maxThinkingTokens = nil
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let options = try #require(json["options"] as? [String: Any])
+        #expect((options["num_predict"] as? Int) == 100 + 2048)
+        // maxThinkingTokens=nil must NOT send a `think` directive (Ollama picks).
+        #expect(json["think"] == nil)
+    }
+
+    /// `/api/show` without `thinking` capability and without `<think>`
+    /// template markers must leave `isThinkingModel = false`, and
+    /// `maxThinkingTokens == nil` must then skip the 2048 reservation
+    /// entirely.
+    @Test func loadModel_detectsNonThinkingModel_skipsReservation() async throws {
+        let (backend, chatURL, showURL) = makeConfiguredBackendWithShow()
+
+        MockURLProtocol.stub(
+            url: showURL,
+            response: .immediate(
+                data: apiShowBody(
+                    capabilities: ["completion"],
+                    template: "{{ .System }}\n{{ .Prompt }}"
+                ),
+                statusCode: 200
+            )
+        )
+        defer { MockURLProtocol.unstub(url: showURL) }
+
+        try await loadBackend(backend)
+        #expect(!backend.isThinkingModel)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"ok"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxOutputTokens = 100
+        config.maxThinkingTokens = nil
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let options = try #require(json["options"] as? [String: Any])
+        // visibleBudget only — no 2048 thinking reserve on non-thinking models.
+        #expect((options["num_predict"] as? Int) == 100)
+        #expect(json["think"] == nil)
+    }
+
+    /// Template-scan fallback: older Ollama builds omit `capabilities` but
+    /// ship a Jinja `template` containing `<think>` on reasoning models.
+    @Test func loadModel_detectsThinkingModel_fromTemplateMarkers() async throws {
+        let (backend, _, showURL) = makeConfiguredBackendWithShow()
+
+        let body = try JSONSerialization.data(withJSONObject: [
+            "template": "{{ .System }}\n{{ .Prompt }}\n<think>\n{{ .Response }}\n</think>"
+        ])
+        MockURLProtocol.stub(
+            url: showURL,
+            response: .immediate(data: body, statusCode: 200)
+        )
+        defer { MockURLProtocol.unstub(url: showURL) }
+
+        try await loadBackend(backend)
+        #expect(backend.isThinkingModel)
+    }
+
+    /// `maxThinkingTokens == 0` on a thinking model must send `"think": false`
+    /// and collapse `num_predict` to just the visible budget.
+    @Test func maxThinkingTokens_zero_sendsThinkFalse_onThinkingModel() async throws {
+        let (backend, chatURL, showURL) = makeConfiguredBackendWithShow()
+
+        MockURLProtocol.stub(
+            url: showURL,
+            response: .immediate(
+                data: apiShowBody(capabilities: ["thinking"]),
+                statusCode: 200
+            )
+        )
+        defer { MockURLProtocol.unstub(url: showURL) }
+
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"ok"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxOutputTokens = 100
+        config.maxThinkingTokens = 0
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let options = try #require(json["options"] as? [String: Any])
+        #expect((options["num_predict"] as? Int) == 100)
+        #expect((json["think"] as? Bool) == false)
+    }
+
+    /// `maxThinkingTokens == 0` on a non-thinking model must NOT send a
+    /// `think` key (Ollama's absent-default behaviour already matches intent,
+    /// and we keep the request body clean). `num_predict` collapses to
+    /// visible-only.
+    @Test func maxThinkingTokens_zero_omitsThink_onNonThinkingModel() async throws {
+        let (backend, chatURL, showURL) = makeConfiguredBackendWithShow()
+
+        MockURLProtocol.stub(
+            url: showURL,
+            response: .immediate(
+                data: apiShowBody(capabilities: ["completion"]),
+                statusCode: 200
+            )
+        )
+        defer { MockURLProtocol.unstub(url: showURL) }
+
+        try await loadBackend(backend)
+        #expect(!backend.isThinkingModel)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"ok"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxOutputTokens = 100
+        config.maxThinkingTokens = 0
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let options = try #require(json["options"] as? [String: Any])
+        #expect((options["num_predict"] as? Int) == 100)
+        #expect(json["think"] == nil)
+    }
+
+    /// `maxThinkingTokens == N > 0` reserves exactly `N` thinking tokens on
+    /// top of the visible budget, regardless of whether the loaded model is
+    /// flagged as thinking-capable. No `think` directive is sent — we let
+    /// Ollama decide per model.
+    @Test func maxThinkingTokens_explicitN_reservesN_regardlessOfModel() async throws {
+        for thinkingCaps in [["thinking"], ["completion"]] {
+            let (backend, chatURL, showURL) = makeConfiguredBackendWithShow()
+
+            MockURLProtocol.stub(
+                url: showURL,
+                response: .immediate(
+                    data: apiShowBody(capabilities: thinkingCaps),
+                    statusCode: 200
+                )
+            )
+            defer { MockURLProtocol.unstub(url: showURL) }
+
+            try await loadBackend(backend)
+
+            let chunks: [Data] = [
+                ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"ok"},"done":false}"#),
+                ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+            ]
+            MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+            defer { MockURLProtocol.unstub(url: chatURL) }
+
+            var config = GenerationConfig()
+            config.maxOutputTokens = 100
+            config.maxThinkingTokens = 50
+            let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+            for try await _ in stream.events { }
+
+            let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+            let body = try extractBody(from: captured)
+            let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let options = try #require(json["options"] as? [String: Any])
+            #expect((options["num_predict"] as? Int) == 150, "thinkingCaps=\(thinkingCaps)")
+            #expect(json["think"] == nil, "thinkingCaps=\(thinkingCaps)")
+        }
+    }
+
+    /// `/api/show` returning HTTP 404 (older Ollama without the endpoint)
+    /// must not throw — loadModel succeeds with `isThinkingModel = false`.
+    @Test func loadModel_apiShowFailure_defaultsToNonThinking_andDoesNotThrow() async throws {
+        let (backend, chatURL, showURL) = makeConfiguredBackendWithShow()
+
+        MockURLProtocol.stub(
+            url: showURL,
+            response: .immediate(data: Data("not found".utf8), statusCode: 404)
+        )
+        defer { MockURLProtocol.unstub(url: showURL) }
+
+        try await loadBackend(backend)
+        #expect(backend.isModelLoaded)
+        #expect(!backend.isThinkingModel)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"ok"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxOutputTokens = 100
+        config.maxThinkingTokens = nil
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let options = try #require(json["options"] as? [String: Any])
+        #expect((options["num_predict"] as? Int) == 100)
     }
 
     /// Visible output must be re-capped client-side because the server-side
