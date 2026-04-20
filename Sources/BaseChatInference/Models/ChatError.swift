@@ -65,6 +65,11 @@ public struct ChatError: Identifiable, Sendable {
                     // The conversation exceeds the model's context window.
                     // Prompt the user to switch to a model with a larger context.
                     recovery = .selectModel
+                case .unsupportedModelArchitecture:
+                    // The loaded model isn't a chat/instruct LM (vision encoder,
+                    // embeddings-only, etc.). The only recovery is picking a
+                    // different model.
+                    recovery = .selectModel
                 default:
                     recovery = .dismissOnly
                 }

@@ -13,6 +13,14 @@ public enum InferenceError: LocalizedError {
     /// can trim history or reduce `maxOutputTokens` instead of seeing an
     /// opaque decode failure mid-stream once the KV cache runs out.
     case contextExhausted(promptTokens: Int, maxOutputTokens: Int, contextSize: Int)
+    /// Thrown by backends when the caller hands them a model whose architecture
+    /// cannot serve chat/instruct completions — e.g. a CLIP vision encoder, a
+    /// BERT embedding model, or a Whisper audio encoder. Callers should surface
+    /// this as a load-time error rather than letting the model crash or emit
+    /// garbage at generation time. The associated value is the raw architecture
+    /// string read from the model (`model_type` in MLX config.json, `general.architecture`
+    /// in a GGUF header, etc.) so UI can display it.
+    case unsupportedModelArchitecture(String)
 
     public var errorDescription: String? {
         switch self {
@@ -32,6 +40,8 @@ public enum InferenceError: LocalizedError {
             return "Generation error: \(message)"
         case .contextExhausted(let promptTokens, let maxOutputTokens, let contextSize):
             return "Prompt (\(promptTokens) tokens) plus requested output (\(maxOutputTokens) tokens) exceeds context window (\(contextSize) tokens)."
+        case .unsupportedModelArchitecture(let arch):
+            return "Unsupported model architecture: \(arch). This backend only supports chat/instruct language models."
         }
     }
 
@@ -45,7 +55,8 @@ public enum InferenceError: LocalizedError {
         case .alreadyGenerating:
             return true
         case .modelNotFound, .modelLoadFailed, .inferenceFailure,
-             .memoryInsufficient, .generationError, .contextExhausted:
+             .memoryInsufficient, .generationError, .contextExhausted,
+             .unsupportedModelArchitecture:
             return false
         }
     }

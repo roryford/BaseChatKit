@@ -98,6 +98,71 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         self.cachePolicy = cachePolicy
     }
 
+    // MARK: - Architecture Allowlist
+
+    /// Canonical `model_type` values that `mlx-swift-lm`'s `LLMTypeRegistry.shared`
+    /// can serve as chat/instruct LMs. Anything outside this set — CLIP, SigLIP,
+    /// Whisper, BERT embeddings, Qwen2-VL vision encoders, etc. — is refused at
+    /// load time via `InferenceError.unsupportedModelArchitecture`.
+    ///
+    /// Sourced from `LLMTypeRegistry.shared` in mlx-swift-lm
+    /// (`Libraries/MLXLLM/LLMModelFactory.swift`). When mlx-swift-lm adds a new
+    /// LM architecture, update this list to match so the preflight doesn't reject
+    /// a freshly supported model.
+    static let supportedLMArchitectures: Set<String> = [
+        "mistral", "llama", "phi", "phi3", "phimoe",
+        "gemma", "gemma2", "gemma3", "gemma3_text", "gemma3n",
+        "qwen2", "qwen3", "qwen3_moe", "qwen3_next",
+        "qwen3_5", "qwen3_5_moe", "qwen3_5_text",
+        "minicpm", "starcoder2", "cohere", "openelm", "internlm2",
+        "deepseek_v3", "granite", "granitemoehybrid",
+        "mimo", "mimo_v2_flash", "minimax",
+        "glm4", "glm4_moe", "glm4_moe_lite",
+        "acereason", "falcon_h1", "bitnet", "smollm3",
+        "ernie4_5", "lfm2", "lfm2_moe",
+        "baichuan_m1", "exaone4", "gpt_oss",
+        "lille-130m", "olmoe", "olmo2", "olmo3",
+        "bailing_moe", "nanochat", "nemotron_h",
+        "afmoe", "jamba_3b", "mistral3", "apertus",
+    ]
+
+    /// Reads `config.json` at `url` and throws
+    /// `InferenceError.unsupportedModelArchitecture` if the declared `model_type`
+    /// is not a chat/instruct LM. If `config.json` is missing or unreadable the
+    /// check is a no-op — mlx-swift-lm's own load path will then surface the
+    /// real error (missing weights, malformed directory, etc.).
+    static func validateArchitecture(at url: URL) throws {
+        let configURL = url.appendingPathComponent("config.json")
+        guard let data = try? Data(contentsOf: configURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // Missing / malformed config.json: let the MLX load path produce the
+            // real diagnostic rather than masking it with a false architecture error.
+            return
+        }
+
+        let modelType = (json["model_type"] as? String)?
+            .lowercased()
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        if !modelType.isEmpty, supportedLMArchitectures.contains(modelType) {
+            return
+        }
+
+        // Some HF repos omit model_type but include an `architectures` array
+        // (e.g. ["LlamaForCausalLM"]). Accept the load if any entry's snake_case
+        // prefix matches the allowlist — this keeps older snapshots working.
+        if let archs = json["architectures"] as? [String] {
+            for arch in archs {
+                let normalized = arch.lowercased()
+                if Self.supportedLMArchitectures.contains(where: { normalized.hasPrefix($0) }) {
+                    return
+                }
+            }
+        }
+
+        let reported = modelType.isEmpty ? (json["architectures"] as? [String])?.joined(separator: ",") ?? "unknown" : modelType
+        throw InferenceError.unsupportedModelArchitecture(reported)
+    }
+
     // MARK: - Model Lifecycle
 
     public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
@@ -107,6 +172,15 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         // here and kept for consistency with the protocol. Future work could honour
         // `plan.effectiveContextSize` to cap generation length.
         unloadModel()
+
+        // Preflight: refuse non-LM architectures up front so a CLIP/SigLIP/Whisper
+        // snapshot can't crash MLX mid-generation or silently produce garbage tokens.
+        // We read config.json directly rather than letting mlx-swift-lm attempt the
+        // load and fail — mlx-swift-lm's own error message ("unsupportedModelType")
+        // surfaces through `modelLoadFailed(underlying:)` and hides the root cause
+        // from the UI. Throwing `.unsupportedModelArchitecture` here makes the reason
+        // explicit and lets `ChatError` map it to `.selectModel`.
+        try Self.validateArchitecture(at: url)
 
         let progressHandler = withStateLock { _loadProgressHandler }
 
@@ -222,11 +296,20 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 var thinkingParser = ThinkingParser(markers: config.thinkingMarkers ?? .qwen3)
                 let useParser = config.thinkingMarkers != nil
 
+                // Enforces `config.maxThinkingTokens` with the same semantics as
+                // LlamaGenerationDriver: a thinking model that runs away on a 16 GB
+                // Mac can OOM mid-generation, so when the configured budget is hit
+                // we stop emitting further thinking tokens and break out of the
+                // MLX stream. Visible `.token` events are never counted toward
+                // this budget. See issue #550.
+                var thinkingTokenCount = 0
+                var thinkingLimitReached = false
+
                 let mlxStream = try await modelContainer.generate(
                     messages: messages,
                     parameters: generateConfig
                 )
-                for await generation in mlxStream {
+                outer: for await generation in mlxStream {
                     if Task.isCancelled { break }
                     if let text = generation.chunk {
                         for event in useParser ? thinkingParser.process(text) : [GenerationEvent.token(text)] {
@@ -241,7 +324,15 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                             // Only count visible output tokens toward maxOutputTokens limit
                             if case .token = event { outputTokenCount += 1 }
                             continuation.yield(event)
+                            if case .thinkingToken = event {
+                                thinkingTokenCount += 1
+                                if let limit = config.maxThinkingTokens, thinkingTokenCount >= limit {
+                                    thinkingLimitReached = true
+                                    break
+                                }
+                            }
                         }
+                        if thinkingLimitReached { break outer }
                         if let limit = outputLimit, outputTokenCount >= limit { break }
                     }
                 }
