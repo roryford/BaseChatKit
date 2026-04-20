@@ -772,7 +772,9 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         try data.write(to: tempURL, options: .atomic)
         if FileManager.default.fileExists(atPath: pendingMetadataFileURL.path) {
             // replaceItemAt atomically swaps tempURL into the destination, removing tempURL.
-            try FileManager.default.replaceItemAt(
+            // The returned URL is the final destination (always pendingMetadataFileURL here);
+            // we discard it because we already know the path.
+            _ = try FileManager.default.replaceItemAt(
                 pendingMetadataFileURL,
                 withItemAt: tempURL,
                 backupItemName: nil,

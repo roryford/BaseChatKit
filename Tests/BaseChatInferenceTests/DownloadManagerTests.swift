@@ -13,7 +13,8 @@ final class DownloadManagerTests: XCTestCase {
             .appendingPathComponent("DownloadManagerTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
         manager = BackgroundDownloadManager(
-            storageService: ModelStorageService(baseDirectory: tempDirectory)
+            storageService: ModelStorageService(baseDirectory: tempDirectory),
+            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)"
         )
     }
 
@@ -203,7 +204,9 @@ final class DownloadManagerTests: XCTestCase {
     // MARK: - Active Downloads Initial State
 
     func test_activeDownloads_initiallyEmpty() {
-        let freshManager = BackgroundDownloadManager()
+        let freshManager = BackgroundDownloadManager(
+            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)"
+        )
         XCTAssertTrue(
             freshManager.activeDownloads.isEmpty,
             "A freshly created manager should have no active downloads"
