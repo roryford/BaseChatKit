@@ -19,6 +19,7 @@
 # Runs in CI — no hardware required (disable default MLX trait to skip heavy deps)
 swift test --filter BaseChatCoreTests --disable-default-traits
 swift test --filter BaseChatInferenceTests --disable-default-traits
+swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits
 swift test --filter BaseChatUITests --disable-default-traits
 swift test --filter BaseChatBackendsTests --disable-default-traits
 
@@ -102,7 +103,7 @@ When Apple ships a new major OS each September, bump both minimums by one and re
 Before pushing any branch, run all three CI test suites locally and confirm zero failures:
 
 ```bash
-swift test --filter BaseChatCoreTests --disable-default-traits && swift test --filter BaseChatInferenceTests --disable-default-traits && swift test --filter BaseChatUITests --disable-default-traits && swift test --filter BaseChatBackendsTests --disable-default-traits
+swift test --filter BaseChatCoreTests --disable-default-traits && swift test --filter BaseChatInferenceTests --disable-default-traits && swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits && swift test --filter BaseChatUITests --disable-default-traits && swift test --filter BaseChatBackendsTests --disable-default-traits
 ```
 
 Never push based on a subset passing. After rebasing, always re-run the full suite before pushing — conflicts can silently break tests that compiled fine before.
@@ -170,6 +171,6 @@ All changes go through PRs — direct pushes to `main` are blocked for everyone.
 4. Report the PR URL — the maintainer reviews and merges manually
 5. Do NOT pass `--auto` or `--merge` — merges require human approval
 
-CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatUITests` + `BaseChatBackendsTests`) before merge is allowed.
+CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatInferenceSwiftTestingTests` + `BaseChatUITests` + `BaseChatBackendsTests`) before merge is allowed.
 
 `BaseChatBackendsTests` runs in CI without hardware traits — only cloud backend and SSE tests execute; MLX and Llama tests are excluded by `#if MLX`/`#if Llama` conditional compilation. Run with `--traits MLX,Llama` locally on Apple Silicon before merging backend changes. `BaseChatE2ETests` requires physical hardware and does not run in CI.
