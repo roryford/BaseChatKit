@@ -117,6 +117,81 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         return request
     }
 
+    // MARK: - Stream Parsing
+
+    /// Parses OpenAI Chat Completions SSE with reasoning-model support.
+    ///
+    /// OpenAI-compatible reasoning models (o1/o3, DeepSeek R1, xAI Grok
+    /// reasoning, hosted Qwen reasoning) expose chain-of-thought text alongside
+    /// visible content via one of two Chat Completions delta shapes:
+    ///
+    /// ```json
+    /// {"choices":[{"delta":{"reasoning_content":"..."}}]}   // DeepSeek / compat
+    /// {"choices":[{"delta":{"reasoning":"..."}}]}           // OpenAI-native
+    /// ```
+    ///
+    /// We route reasoning fragments to ``GenerationEvent/thinkingToken(_:)``
+    /// and emit a single ``GenerationEvent/thinkingComplete`` on the first
+    /// transition from reasoning to visible `content` (or on stream end if
+    /// reasoning never handed off to content — truncated upstream). Streams
+    /// from non-reasoning models (plain gpt-4o-mini, etc.) never observe a
+    /// reasoning chunk and therefore never fire `.thinkingComplete`.
+    public override func parseResponseStream(
+        bytes: URLSession.AsyncBytes,
+        config: GenerationConfig,
+        continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
+    ) async throws {
+        let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
+
+        var thinkingOpen = false
+
+        func flushThinkingCompleteIfNeeded() {
+            if thinkingOpen {
+                continuation.yield(.thinkingComplete)
+                thinkingOpen = false
+            }
+        }
+
+        for try await payload in tokenStream {
+            if Task.isCancelled { break }
+
+            // Reasoning delta: emit as thinkingToken, keep the block open.
+            if let thinking = Self.parseReasoningDelta(from: payload) {
+                continuation.yield(.thinkingToken(thinking))
+                thinkingOpen = true
+                // Fall through — a single chunk may legally carry both
+                // reasoning and content (edge case on some providers), and
+                // usage may still need emitting.
+            }
+
+            // Visible content delta: close thinking first so consumers see a
+            // clean handoff before the first visible token.
+            if let token = extractToken(from: payload) {
+                flushThinkingCompleteIfNeeded()
+                continuation.yield(.token(token))
+            }
+
+            if let usage = extractUsage(from: payload) {
+                handleUsage(usage)
+                if let prompt = usage.promptTokens,
+                   let completion = usage.completionTokens {
+                    continuation.yield(.usage(prompt: prompt, completion: completion))
+                }
+            }
+
+            if isStreamEnd(payload) {
+                flushThinkingCompleteIfNeeded()
+                break
+            }
+
+            if let error = extractStreamError(from: payload) {
+                throw error
+            }
+        }
+
+        flushThinkingCompleteIfNeeded()
+    }
+
     // MARK: - SSE Payload Handler
 
     /// OpenAI-specific SSE payload interpreter for use with `SSEStreamParser.streamTokens`.
@@ -152,6 +227,35 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             return nil
         }
         return content
+    }
+
+    /// Extracts reasoning text from an OpenAI-compatible Chat Completions delta.
+    ///
+    /// Two shapes are recognised:
+    /// ```json
+    /// {"choices":[{"delta":{"reasoning_content":"..."}}]}
+    /// {"choices":[{"delta":{"reasoning":"..."}}]}
+    /// ```
+    /// The `reasoning_content` field is used by DeepSeek R1 and by OpenAI-
+    /// compatible hosts that mirror DeepSeek's convention; `reasoning` is used
+    /// by some newer OpenAI-hosted reasoning deployments. Anything else —
+    /// including plain `content` — returns `nil` so the caller can fall back
+    /// to the standard token extractor.
+    static func parseReasoningDelta(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = parsed["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let delta = firstChoice["delta"] as? [String: Any] else {
+            return nil
+        }
+        if let content = delta["reasoning_content"] as? String, !content.isEmpty {
+            return content
+        }
+        if let content = delta["reasoning"] as? String, !content.isEmpty {
+            return content
+        }
+        return nil
     }
 
     /// Extracts token usage from an OpenAI streaming response chunk.
