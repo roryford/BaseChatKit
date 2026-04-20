@@ -91,6 +91,13 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatFuzz/SessionScript.swift:if let one = try? decoder.decode(SessionScript.self, from: data) {",
         "BaseChatFuzz/SessionScript.swift:if let many = try? decoder.decode([SessionScript].self, from: data) {",
 
+        // BaseChatFuzz/Scenarios — ScenarioTestBackend pauses mid-thinking to give
+        // cancel/retry scenarios a deterministic window. The sleep is best-effort:
+        // if the Task is cancelled during the pause, we deliberately fall through
+        // to the post-thinking emit check (which honours Task.isCancelled on its
+        // own) rather than observing the CancellationError.
+        "BaseChatFuzz/Scenarios/ScenarioTestBackend.swift:try? await Task.sleep(for: pause)",
+
         // BaseChatUI — Task.sleep cancellation is intentionally ignored;
         // parser/rendering fallbacks are benign optional conversions.
         "BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))",
