@@ -12,6 +12,44 @@ import BaseChatInference
 /// is ignored; it simply creates a new session and verifies availability.
 ///
 /// Requires iOS 26+ / macOS 26+.
+///
+/// ## Thinking / reasoning support
+///
+/// BaseChatKit surfaces reasoning tokens from capable models via
+/// ``GenerationEvent/thinkingToken(_:)`` and ``GenerationEvent/thinkingComplete``.
+/// The Ollama and Llama backends emit these events today. **FoundationBackend
+/// does not**, because Apple's public FoundationModels SDK (Xcode 26.4,
+/// module version 1.4.34) exposes no reasoning/thinking surface at all:
+///
+/// - `LanguageModelSession.ResponseStream<String>.Snapshot` carries only
+///   `content: String.PartiallyGenerated` and `rawContent: GeneratedContent`.
+///   There is no reasoning field, no `thinking` channel, no parallel stream.
+/// - `LanguageModelSession.Response<Content>` exposes only `content`,
+///   `rawContent`, and `transcriptEntries` — no reasoning block.
+/// - `Transcript.Entry` is `instructions | prompt | toolCalls | toolOutput | response`.
+///   There is no `reasoning` / `thinking` / `chainOfThought` case.
+/// - `Transcript.Segment` is `text | structure` only.
+/// - `GenerationOptions` exposes only `sampling`, `temperature`,
+///   `maximumResponseTokens`. There is no `reasoningEffort`,
+///   `enableReasoning`, or reasoning-budget knob.
+/// - `SystemLanguageModel.UseCase` offers only `.general` and `.contentTagging`.
+/// - A case-insensitive search of the entire `FoundationModels.swiftinterface`
+///   for `reason|think|chainofthought|cot|scratchpad|deliberat|inner|monolog`
+///   returns zero hits outside `Availability.UnavailableReason` and
+///   `GenerationError.failureReason` (both unrelated to model reasoning).
+///
+/// In other words: whatever chain-of-thought Apple's on-device model performs
+/// happens opaquely inside the generator. The SDK returns only the final
+/// user-visible answer. There is nothing for this backend to map onto
+/// `.thinkingToken` or `.thinkingComplete`, and synthesising fake thinking
+/// events from the visible content would be misleading.
+///
+/// When Apple ships a reasoning surface (e.g. a `reasoning` case on
+/// `Transcript.Segment`, a `reasoningContent` field on `ResponseStream.Snapshot`,
+/// or a reasoning-enabled `UseCase`), this backend should be updated to emit
+/// `.thinkingToken` while reasoning is in flight and `.thinkingComplete`
+/// exactly once at the transition to visible content, matching the pattern
+/// already used by ``OllamaBackend``.
 @available(iOS 26, macOS 26, *)
 public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
