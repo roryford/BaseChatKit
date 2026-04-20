@@ -95,12 +95,18 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             messages.append(["role": "user", "content": prompt])
         }
 
+        // For thinking models (e.g. gemma4, qwen3), Ollama counts thinking tokens
+        // against num_predict. Reserve budget for both thinking and visible output
+        // so the model isn't silently cut off mid-think before any content is produced.
+        // maxOutputTokens is enforced client-side in parseResponseStream.
+        let visibleBudget = config.maxOutputTokens ?? 2048
+        let thinkingBudget = config.maxThinkingTokens ?? 2048
         let options: [String: Any] = [
             "temperature": config.temperature,
             "top_p": config.topP,
             "top_k": config.topK.map { Int($0) } ?? 40,
             "repeat_penalty": config.repeatPenalty,
-            "num_predict": config.maxOutputTokens ?? 2048,
+            "num_predict": visibleBudget + thinkingBudget,
         ]
 
         let body: [String: Any] = [
@@ -161,6 +167,8 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         var thinkingOpen = false
         var thinkingTokenCount = 0
         let thinkingLimit = config.maxThinkingTokens
+        var visibleTokenCount = 0
+        let visibleLimit = config.maxOutputTokens
 
         func noteEventYielded() throws {
             let now = ContinuousClock.now
@@ -203,8 +211,14 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             }
 
             if let content = parsed.content, !content.isEmpty {
+                if let limit = visibleLimit, visibleTokenCount >= limit {
+                    // Client-side cap reached; stop the stream cleanly.
+                    continuation.finish()
+                    return
+                }
                 try noteEventYielded()
                 continuation.yield(.token(content))
+                visibleTokenCount += 1
             }
 
             if parsed.done {

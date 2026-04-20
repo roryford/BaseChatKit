@@ -855,6 +855,120 @@ struct OllamaBackendTests {
         let json = #"{"message":{"role":"assistant","content":"hi"},"done":false}"#
         #expect(OllamaBackend.extractThinking(from: json) == nil)
     }
+
+    // MARK: - num_predict Budget (thinking + visible)
+
+    /// Regression for the gemma4:e4b empty-response bug: Ollama counts
+    /// chain-of-thought tokens against `num_predict`, so a single budget of
+    /// `maxOutputTokens` was being fully consumed inside `<think>` on thinking
+    /// models, leaving zero budget for visible output. The fix splits the
+    /// server-side budget into `visibleBudget + thinkingBudget` and re-caps
+    /// visible output client-side in `parseResponseStream`.
+    ///
+    /// Sabotage check (verified locally): reverting the production change to
+    /// `"num_predict": config.maxOutputTokens ?? 2048` makes this test fail
+    /// with `num_predict == 100` instead of `150`.
+    @Test func generate_numPredict_equalsVisiblePlusThinkingBudget() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"ok"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxOutputTokens = 100
+        config.maxThinkingTokens = 50
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let options = try #require(json["options"] as? [String: Any])
+        let numPredict = try #require(options["num_predict"] as? Int)
+        #expect(numPredict == 150)
+    }
+
+    /// When both caps are `nil` (default `GenerationConfig()`), each side
+    /// defaults to 2048, so `num_predict` must land on `4096`. Pins the
+    /// default-default arithmetic so a future refactor doesn't silently
+    /// shift the server-side ceiling.
+    @Test func generate_numPredict_bothCapsNil_defaultsTo4096() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"ok"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        // GenerationConfig() ships maxOutputTokens = 2048 by default. Null it
+        // out so we exercise the `?? 2048` fallback on both sides.
+        var config = GenerationConfig()
+        config.maxOutputTokens = nil
+        config.maxThinkingTokens = nil
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let options = try #require(json["options"] as? [String: Any])
+        let numPredict = try #require(options["num_predict"] as? Int)
+        #expect(numPredict == 4096)
+    }
+
+    /// Because we doubled the server-side budget, visible output must be
+    /// re-capped client-side. This fixture emits 5 content lines but sets
+    /// `maxOutputTokens = 3`; the consumer must see exactly 3 `.token`
+    /// events, then the stream terminates cleanly (no error thrown, no
+    /// `.thinkingComplete` because no thinking was ever emitted).
+    ///
+    /// Sabotage check (verified locally): deleting the `continuation.finish();
+    /// return` guard in `parseResponseStream` makes this test fail with
+    /// tokens.count == 5.
+    ///
+    /// Known limitation (documented on the PR): `visibleTokenCount` counts
+    /// NDJSON lines, not true tokens. A follow-up will switch to Ollama's
+    /// `eval_count` field for exact accounting.
+    @Test func streaming_visibleCap_terminatesStreamCleanly() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"a"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"b"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"c"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"d"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":"e"},"done":false}"#),
+            ndjsonLine(#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        var config = GenerationConfig()
+        config.maxOutputTokens = 3
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: config)
+
+        var tokens: [String] = []
+        var sawThinkingComplete = false
+        for try await event in stream.events {
+            switch event {
+            case .token(let t): tokens.append(t)
+            case .thinkingComplete: sawThinkingComplete = true
+            default: break
+            }
+        }
+
+        #expect(tokens == ["a", "b", "c"])
+        #expect(!sawThinkingComplete, "no thinking was emitted so no .thinkingComplete should fire")
+    }
 }
 
 // MARK: - OllamaModelListService Tests
