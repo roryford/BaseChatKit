@@ -96,10 +96,6 @@ struct FuzzChatCLI {
             i = argv.index(after: i)
         }
 
-        if backend == .mlx {
-            fail("MLX cannot run via `swift run` (needs Xcode-compiled metallib). Use scripts/fuzz.sh or xcodebuild.")
-        }
-
         let outputDir = URL(fileURLWithPath: "tmp/fuzz", isDirectory: true)
 
         let factory: any FuzzBackendFactory
@@ -130,8 +126,21 @@ struct FuzzChatCLI {
             #else
             fail("Foundation backend requires macOS 26+ with FoundationModels.")
             #endif
-        case .mlx, .all:
-            fail("\(backend.rawValue) backend not yet wired in CLI. Use scripts/fuzz.sh --with-mlx for MLX.")
+        case .mlx:
+            #if MLX
+            guard HardwareRequirements.hasMetalDevice else {
+                fail("MLX backend requires a Metal-capable GPU. Run on Apple Silicon hardware.")
+            }
+            factory = MLXFuzzFactory()
+            #else
+            fail("MLX backend requires the MLX build trait. Build with --traits MLX, or use scripts/fuzz.sh --with-mlx.")
+            #endif
+        case .all:
+            do {
+                factory = try Self.makeAllFactory()
+            } catch {
+                fail(String(describing: error))
+            }
         }
 
         // Shrink mode: greedy-delta-debug the recorded trigger down to a
@@ -230,6 +239,84 @@ struct FuzzChatCLI {
         let sorted = models.sorted()
         let children: [any FuzzBackendFactory] = sorted.map { OllamaFuzzFactory(modelHint: $0) }
         return RotatingFuzzFactory(children: children)
+    }
+
+    /// Builds a `RotatingFuzzFactory` over every backend that is available at
+    /// runtime. Detected in this order:
+    ///
+    /// 1. Ollama — if a local server is reachable and has at least one model, each
+    ///    installed model gets its own `OllamaFuzzFactory` child (same rotation as
+    ///    the default `--backend ollama` path).
+    /// 2. Llama — if the `Llama` build trait is active and a GGUF model is found in
+    ///    `~/Documents/Models/`.
+    /// 3. Foundation — if the `FoundationModels` framework is importable and
+    ///    `FoundationBackend.isAvailable` is `true`.
+    /// 4. MLX — if the `MLX` build trait is active, a Metal device is present, and
+    ///    an MLX model directory is found in `~/Documents/Models/`.
+    ///
+    /// If no backends are available the function throws a `CLIError` with a
+    /// diagnostic listing what was checked, so the caller can surface it via
+    /// `fail(_:)` rather than silently launching a campaign with zero factories.
+    static func makeAllFactory() throws -> any FuzzBackendFactory {
+        var children: [any FuzzBackendFactory] = []
+        var checked: [String] = []
+
+        // 1. Ollama
+        if let models = HardwareRequirements.listOllamaModels(), !models.isEmpty {
+            let sorted = models.sorted()
+            children += sorted.map { OllamaFuzzFactory(modelHint: $0) }
+        } else {
+            checked.append("Ollama (no server at localhost:11434 or no models installed)")
+        }
+
+        // 2. Llama
+        #if Llama
+        if HardwareRequirements.findGGUFModel() != nil {
+            children.append(LlamaFuzzFactory())
+        } else {
+            checked.append("Llama (no GGUF model found in ~/Documents/Models/)")
+        }
+        #else
+        checked.append("Llama (Llama build trait not active)")
+        #endif
+
+        // 3. Foundation
+        #if canImport(FoundationModels)
+        if #available(macOS 26, iOS 26, *) {
+            if FoundationBackend.isAvailable {
+                children.append(FoundationFuzzFactory())
+            } else {
+                checked.append("Foundation (Apple Intelligence not enabled)")
+            }
+        } else {
+            checked.append("Foundation (macOS 26 / iOS 26 required)")
+        }
+        #else
+        checked.append("Foundation (FoundationModels framework not available)")
+        #endif
+
+        // 4. MLX
+        #if MLX
+        if HardwareRequirements.hasMetalDevice, HardwareRequirements.findMLXModelDirectory() != nil {
+            children.append(MLXFuzzFactory())
+        } else if !HardwareRequirements.hasMetalDevice {
+            checked.append("MLX (no Metal device)")
+        } else {
+            checked.append("MLX (no MLX model found in ~/Documents/Models/)")
+        }
+        #else
+        checked.append("MLX (MLX build trait not active)")
+        #endif
+
+        guard !children.isEmpty else {
+            throw CLIError(
+                "--backend all: no backends available. Checked:\n"
+                    + checked.map { "  • " + $0 }.joined(separator: "\n")
+                    + "\nInstall at least one backend to use --backend all."
+            )
+        }
+
+        return children.count == 1 ? children[0] : RotatingFuzzFactory(children: children)
     }
 
     /// Drives the Replayer and maps its `Outcome` to an exit code + summary line.

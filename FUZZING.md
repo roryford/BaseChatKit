@@ -43,7 +43,7 @@ Common flags:
 
 | Flag | Purpose |
 |------|---------|
-| `--backend <name>` | `ollama` (default), `llama`, `foundation`, `mlx`, `all`. Only `ollama` is wired in v1. |
+| `--backend <name>` | `ollama` (default), `llama`, `foundation`, `mlx`, `all`. |
 | `--minutes N` | Wall-clock budget. Default 5. |
 | `--iterations N` | Iteration cap; runs until either budget is hit. |
 | `--single` | One iteration then exit — useful with `--seed`. |
@@ -60,8 +60,9 @@ Common flags:
 |---------|--------|-----------|-------|
 | Ollama | Wired | `curl http://localhost:11434/api/tags` | Default backend in v1. |
 | Llama  | Wired | `~/Documents/Models/**/*.gguf` via `HardwareRequirements` | Single-model only: `llama_backend_init` is a process-global one-shot, so `--model all` is a no-op for this backend. |
-| MLX    | Wired (xcodebuild path) | `~/Documents/Models/<dir>/{config.json,*.safetensors,tokenizer.*}` | Requires the xcodebuild path because MLX Metal shaders only compile under Xcode — see `--with-mlx` below. |
+| MLX    | Wired | `~/Documents/Models/<dir>/{config.json,*.safetensors,tokenizer.*}` | Requires the MLX build trait and a Metal-capable GPU. Direct `swift run fuzz-chat --backend mlx` works when built with `--traits MLX`; the wrapper's `--with-mlx` flag uses the xcodebuild path for Xcode-compiled Metal shaders. |
 | Foundation Models | Wired | `sw_vers -productVersion >= 26` | macOS 26+ only. Requires Apple Intelligence to be enabled; otherwise backend creation fails and the run exits early with an error. |
+| all    | Wired | All of the above, detected at runtime | Builds a `RotatingFuzzFactory` over every available backend. Falls back gracefully: skips any backend whose build trait is inactive, whose hardware is absent, or whose model files are missing. Fails with a diagnostic if no backends are found. |
 
 Backend wiring lives behind the `FuzzBackendFactory` protocol. A factory exposes `makeHandle() async throws -> FuzzRunner.BackendHandle`, where `BackendHandle` carries `(backend: any InferenceBackend, modelId: String, modelURL: URL, backendName: String, templateMarkers: RunRecord.MarkerSnapshot)`. To plug a new backend in, conform a `Sendable` struct to `FuzzBackendFactory` and pass it to `FuzzRunner(config:factory:)` — see `OllamaFuzzFactory` in `Sources/fuzz-chat/` for the canonical example. Detectors operate on the resulting `RunRecord` and don't care which backend produced it. Llama, Foundation, and MLX factory conformances are tracked in [#501](https://github.com/roryford/BaseChatKit/issues/501).
 
