@@ -35,6 +35,7 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             supportsSystemPrompt: true,
             supportsToolCalling: false,
             supportsStructuredOutput: true,
+            supportsNativeJSONMode: false,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
             memoryStrategy: .external,

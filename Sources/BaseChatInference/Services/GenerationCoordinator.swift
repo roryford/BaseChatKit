@@ -88,7 +88,8 @@ final class GenerationCoordinator {
         topP: Float = 0.9,
         repeatPenalty: Float = 1.1,
         maxOutputTokens: Int? = 2048,
-        maxThinkingTokens: Int? = nil
+        maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false
     ) throws -> GenerationStream {
         guard let backend = provider?.currentBackend else {
             throw InferenceError.inferenceFailure("No model loaded")
@@ -98,7 +99,8 @@ final class GenerationCoordinator {
             temperature: temperature,
             topP: topP,
             repeatPenalty: repeatPenalty,
-            maxOutputTokens: maxOutputTokens
+            maxOutputTokens: maxOutputTokens,
+            jsonMode: jsonMode
         )
         config.maxThinkingTokens = maxThinkingTokens
 
@@ -260,6 +262,7 @@ final class GenerationCoordinator {
         repeatPenalty: Float = 1.1,
         maxOutputTokens: Int? = 2048,
         maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false,
         priority: GenerationPriority = .normal,
         sessionID: UUID? = nil
     ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
@@ -283,7 +286,8 @@ final class GenerationCoordinator {
             temperature: temperature,
             topP: topP,
             repeatPenalty: repeatPenalty,
-            maxOutputTokens: maxOutputTokens
+            maxOutputTokens: maxOutputTokens,
+            jsonMode: jsonMode
         )
         config.maxThinkingTokens = maxThinkingTokens
 
@@ -358,7 +362,8 @@ final class GenerationCoordinator {
                     topP: next.config.topP,
                     repeatPenalty: next.config.repeatPenalty,
                     maxOutputTokens: next.config.maxOutputTokens,
-                    maxThinkingTokens: next.config.maxThinkingTokens
+                    maxThinkingTokens: next.config.maxThinkingTokens,
+                    jsonMode: next.config.jsonMode
                 )
 
                 for try await event in backendStream.events {

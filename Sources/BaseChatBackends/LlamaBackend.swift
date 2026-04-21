@@ -50,6 +50,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             supportsSystemPrompt: true,
             supportsToolCalling: false,
             supportsStructuredOutput: false,
+            supportsNativeJSONMode: false,
             cancellationStyle: .explicit,
             supportsTokenCounting: true,
             memoryStrategy: .mappable,

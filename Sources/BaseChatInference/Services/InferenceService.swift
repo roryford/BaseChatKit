@@ -175,7 +175,8 @@ public final class InferenceService {
         topP: Float = 0.9,
         repeatPenalty: Float = 1.1,
         maxOutputTokens: Int? = 2048,
-        maxThinkingTokens: Int? = nil
+        maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false
     ) throws -> GenerationStream {
         ensureProviderWired()
         return try generation.generate(
@@ -185,7 +186,8 @@ public final class InferenceService {
             topP: topP,
             repeatPenalty: repeatPenalty,
             maxOutputTokens: maxOutputTokens,
-            maxThinkingTokens: maxThinkingTokens
+            maxThinkingTokens: maxThinkingTokens,
+            jsonMode: jsonMode
         )
     }
 
@@ -203,6 +205,7 @@ public final class InferenceService {
         repeatPenalty: Float = 1.1,
         maxOutputTokens: Int? = 2048,
         maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false,
         priority: GenerationPriority = .normal,
         sessionID: UUID? = nil
     ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
@@ -215,6 +218,7 @@ public final class InferenceService {
             repeatPenalty: repeatPenalty,
             maxOutputTokens: maxOutputTokens,
             maxThinkingTokens: maxThinkingTokens,
+            jsonMode: jsonMode,
             priority: priority,
             sessionID: sessionID
         )

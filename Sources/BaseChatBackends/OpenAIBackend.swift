@@ -47,6 +47,7 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             supportsSystemPrompt: true,
             supportsToolCalling: false,
             supportsStructuredOutput: true,
+            supportsNativeJSONMode: true,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
             memoryStrategy: .external,
@@ -92,7 +93,7 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             messages.append(["role": "user", "content": prompt])
         }
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": modelName,
             "messages": messages,
             "stream": true,
@@ -101,6 +102,9 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             "top_p": config.topP,
             "max_tokens": config.maxOutputTokens ?? 2048
         ]
+        if config.jsonMode {
+            body["response_format"] = ["type": "json_object"]
+        }
 
         var request = URLRequest(url: completionsURL)
         request.httpMethod = "POST"

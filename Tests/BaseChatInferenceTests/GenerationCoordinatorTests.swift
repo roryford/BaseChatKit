@@ -53,6 +53,18 @@ final class GenerationCoordinatorTests: XCTestCase {
 
     // MARK: - Queue overflow
 
+    func test_generate_jsonMode_forwardsToBackend() async throws {
+        let stream = try coordinator.generate(
+            messages: [("user", "Return JSON")],
+            jsonMode: true
+        )
+
+        for try await _ in stream.events {}
+
+        let config = try XCTUnwrap(provider.backend.lastConfig)
+        XCTAssertTrue(config.jsonMode)
+    }
+
     func test_enqueue_overQueueDepth_throwsQueueFullError() throws {
         // Saturate the coordinator: one active plus eight queued is the hard cap
         // (maxQueueDepth == 8 counts queued requests only).

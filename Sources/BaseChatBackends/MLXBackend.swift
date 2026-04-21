@@ -59,6 +59,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         supportsSystemPrompt: true,
         supportsToolCalling: false,
         supportsStructuredOutput: false,
+        supportsNativeJSONMode: false,
         cancellationStyle: .cooperative,
         supportsTokenCounting: true,
         memoryStrategy: .resident,

@@ -53,13 +53,19 @@ public struct GenerationConfig: Sendable, Codable {
     /// added.
     public var maxThinkingTokens: Int?
 
+    /// Requests backend-specific JSON-object-only generation for this call.
+    ///
+    /// Defaults to `false`. Backends that do not support structured output, or
+    /// have not implemented JSON-mode wiring yet, silently ignore this flag.
+    public var jsonMode: Bool
+
     /// Thinking markers for this request's model/template, or nil if the model does not emit
     /// reasoning blocks. Set by the caller when the selected `PromptTemplate` has
     /// `thinkingMarkers != nil`. Backends use this to activate `ThinkingParser`; backends that
     /// do not support thinking ignore it.
     public var thinkingMarkers: ThinkingMarkers?
 
-    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:) instead.")
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -71,6 +77,7 @@ public struct GenerationConfig: Sendable, Codable {
         tools: [ToolDefinition] = [],
         toolChoice: ToolChoice = .auto,
         maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil
     ) {
         self.temperature = temperature
@@ -83,6 +90,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.tools = tools
         self.toolChoice = toolChoice
         self.maxThinkingTokens = maxThinkingTokens
+        self.jsonMode = jsonMode
         self.thinkingMarkers = thinkingMarkers
     }
 
@@ -96,6 +104,7 @@ public struct GenerationConfig: Sendable, Codable {
         tools: [ToolDefinition] = [],
         toolChoice: ToolChoice = .auto,
         maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil
     ) {
         self.temperature = temperature
@@ -108,6 +117,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.tools = tools
         self.toolChoice = toolChoice
         self.maxThinkingTokens = maxThinkingTokens
+        self.jsonMode = jsonMode
         self.thinkingMarkers = thinkingMarkers
     }
 
@@ -115,7 +125,7 @@ public struct GenerationConfig: Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
-        case tools, toolChoice, maxThinkingTokens
+        case tools, toolChoice, maxThinkingTokens, jsonMode
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,10 +138,11 @@ public struct GenerationConfig: Sendable, Codable {
         topK = try c.decodeIfPresent(Int32.self, forKey: .topK)
         typicalP = try c.decodeIfPresent(Float.self, forKey: .typicalP)
         maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
-        // New fields added in v0.10; absent from payloads serialised before their introduction.
+        // New fields added after the original shape; absent from older payloads.
         tools = (try c.decodeIfPresent([ToolDefinition].self, forKey: .tools)) ?? []
         toolChoice = (try c.decodeIfPresent(ToolChoice.self, forKey: .toolChoice)) ?? .auto
         maxThinkingTokens = try c.decodeIfPresent(Int.self, forKey: .maxThinkingTokens)
+        jsonMode = (try c.decodeIfPresent(Bool.self, forKey: .jsonMode)) ?? false
         // thinkingMarkers is a per-request runtime hint; it is not persisted.
         thinkingMarkers = nil
     }
@@ -148,6 +159,7 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encode(tools, forKey: .tools)
         try c.encode(toolChoice, forKey: .toolChoice)
         try c.encodeIfPresent(maxThinkingTokens, forKey: .maxThinkingTokens)
+        try c.encode(jsonMode, forKey: .jsonMode)
     }
 }
 
