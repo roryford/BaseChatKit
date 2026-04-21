@@ -239,9 +239,15 @@ final class ModelLifecycleCoordinator {
     }
 
     func loadCloudBackend(from endpoint: APIEndpointRecord) async throws {
+        // Validate before unloading the current model so a bad endpoint doesn't
+        // leave the user with no backend at all.
+        try endpoint.validate()
+
         unloadModel()
 
-        guard let url = URL(string: endpoint.baseURL) else {
+        // URL(string:) is guaranteed to succeed after validate(), but force-unwrap
+        // is avoided here in case of future trimming divergence.
+        guard let url = URL(string: endpoint.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw CloudBackendError.invalidURL(endpoint.baseURL)
         }
 

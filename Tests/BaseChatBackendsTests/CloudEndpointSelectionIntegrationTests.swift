@@ -145,13 +145,14 @@ final class CloudEndpointSelectionIntegrationTests: XCTestCase {
 
     func test_sendMessage_streamsCloudResponseViaMockURLProtocol() async throws {
         // UUID hostname isolates this stub from concurrently-running suites.
+        // https:// is required for non-localhost endpoints per endpoint validation.
         let uniqueHost = UUID().uuidString + ".invalid"
 
         try makeSession(title: "Cloud Chat")
         let endpoint = APIEndpoint(
             name: "Local LM Studio",
             provider: .lmStudio,
-            baseURL: "http://\(uniqueHost):1234",
+            baseURL: "https://\(uniqueHost):1234",
             modelName: "local-model"
         )
         try persistEndpoint(endpoint)
@@ -411,10 +412,11 @@ final class CloudEndpointSelectionIntegrationTests: XCTestCase {
                 probeOnLoad: true
             )
         }
+        // https:// is required for non-localhost endpoints per endpoint validation.
         let networkEndpoint = APIEndpoint(
             name: "Flaky Endpoint",
             provider: .ollama,
-            baseURL: "http://\(uniqueHost):11434",
+            baseURL: "https://\(uniqueHost):11434",
             modelName: "llama3.2"
         )
         let networkBaseURL = try XCTUnwrap(URL(string: networkEndpoint.baseURL))
@@ -446,6 +448,100 @@ final class CloudEndpointSelectionIntegrationTests: XCTestCase {
         await successVM.loadCloudEndpoint(networkEndpoint)
         XCTAssertTrue(successVM.isModelLoaded, "With successful stub, loading should succeed")
         MockURLProtocol.unstub(url: networkCompletionsURL)
+    }
+
+    // MARK: - SSRF / Endpoint Validation
+
+    func test_loadCloudEndpoint_privateIPv4_surfacesError() async {
+        let privateURLs = [
+            "https://192.168.1.100",
+            "https://10.0.0.1",
+            "https://172.20.0.1",
+        ]
+        for baseURL in privateURLs {
+            let privateVM = makeViewModel { [cloudSession] _ in
+                ConfiguringOpenAICloudBackend(urlSession: cloudSession!)
+            }
+            let endpoint = APIEndpoint(
+                name: "Private",
+                provider: .custom,
+                baseURL: baseURL,
+                modelName: "model"
+            )
+            await privateVM.loadCloudEndpoint(endpoint)
+
+            XCTAssertNotNil(
+                privateVM.errorMessage,
+                "Private IP \(baseURL) should surface an error"
+            )
+            XCTAssertFalse(privateVM.isModelLoaded)
+        }
+
+        // Sabotage: a valid public HTTPS endpoint must NOT be rejected.
+        let validVM = makeViewModel { [cloudSession] _ in
+            ConfiguringOpenAICloudBackend(urlSession: cloudSession!)
+        }
+        let validEndpoint = APIEndpoint(
+            name: "Valid",
+            provider: .ollama,
+            baseURL: "http://localhost:11434",
+            modelName: "model"
+        )
+        await validVM.loadCloudEndpoint(validEndpoint)
+        XCTAssertNil(validVM.errorMessage, "localhost should not be rejected")
+    }
+
+    func test_loadCloudEndpoint_linkLocalIMDS_surfacesError() async {
+        let imdsVM = makeViewModel { [cloudSession] _ in
+            ConfiguringOpenAICloudBackend(urlSession: cloudSession!)
+        }
+        let imdsEndpoint = APIEndpoint(
+            name: "IMDS",
+            provider: .custom,
+            baseURL: "https://169.254.169.254/latest/meta-data",
+            modelName: "model"
+        )
+        await imdsVM.loadCloudEndpoint(imdsEndpoint)
+
+        let errorMsg = imdsVM.errorMessage ?? ""
+        XCTAssertFalse(errorMsg.isEmpty, "Link-local IMDS address must surface an error")
+        XCTAssertFalse(imdsVM.isModelLoaded)
+    }
+
+    func test_loadCloudEndpoint_insecureRemoteScheme_surfacesError() async {
+        let insecureVM = makeViewModel { [cloudSession] _ in
+            ConfiguringOpenAICloudBackend(urlSession: cloudSession!)
+        }
+        let insecureEndpoint = APIEndpoint(
+            name: "Insecure",
+            provider: .custom,
+            baseURL: "http://api.example.com",
+            modelName: "model"
+        )
+        await insecureVM.loadCloudEndpoint(insecureEndpoint)
+
+        XCTAssertNotNil(insecureVM.errorMessage, "http:// remote endpoint must surface an error")
+        XCTAssertFalse(insecureVM.isModelLoaded)
+
+        // Sabotage: https:// against the same host must NOT be rejected at the
+        // validation layer (it may fail later for other reasons, but not URL validation).
+        let httpsVM = makeViewModel { [cloudSession] _ in
+            ConfiguringOpenAICloudBackend(urlSession: cloudSession!)
+        }
+        let httpsEndpoint = APIEndpoint(
+            name: "Secure",
+            provider: .custom,
+            baseURL: "https://api.example.com",
+            modelName: "model"
+        )
+        await httpsVM.loadCloudEndpoint(httpsEndpoint)
+        if let msg = httpsVM.errorMessage {
+            XCTAssertFalse(
+                msg.localizedCaseInsensitiveContains("scheme")
+                || msg.localizedCaseInsensitiveContains("http"),
+                "https:// must not fail URL-scheme validation, got: \(msg)"
+            )
+        }
     }
 }
 

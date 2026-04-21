@@ -31,10 +31,13 @@ extension InferenceService {
 
     /// Loads a cloud API backend from a SwiftData `APIEndpoint`.
     ///
-    /// Convenience overload that converts the model to an `APIEndpointRecord`
-    /// before delegating to the storage-agnostic core API.
+    /// Convenience overload that validates the endpoint URL using the canonical
+    /// ``APIEndpoint/validate()`` check — blocking private/link-local SSRF targets,
+    /// insecure schemes, and malformed URLs — before converting to an
+    /// `APIEndpointRecord` and delegating to the storage-agnostic core API.
     @MainActor
     public func loadCloudBackend(from endpoint: APIEndpoint) async throws {
+        try endpoint.validate().get()
         try await loadCloudBackend(from: endpoint.record)
     }
 }

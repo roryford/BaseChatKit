@@ -60,6 +60,8 @@ public final class OllamaModelListService: Sendable {
     /// - Returns: An array of available models, sorted alphabetically by name.
     /// - Throws: ``CloudBackendError`` on HTTP or network failure.
     public func fetchModels(from baseURL: URL) async throws -> [RemoteModelInfo] {
+        try await DNSRebindingGuard.validate(url: baseURL)
+
         let tagsURL = baseURL.appendingPathComponent("api/tags")
         var request = URLRequest(url: tagsURL)
         request.httpMethod = "GET"

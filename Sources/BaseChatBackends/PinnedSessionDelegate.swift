@@ -6,7 +6,10 @@ import BaseChatInference
 ///
 /// Validates the server's leaf certificate SPKI (Subject Public Key Info) SHA-256
 /// hash against a set of known pins for Anthropic and OpenAI APIs. Connections to
-/// unknown hosts (custom endpoints) fall through to default trust evaluation.
+/// unknown hosts (custom endpoints) are governed by
+/// ``BaseChatConfiguration/customHostTrustPolicy``: the default
+/// (``.platformDefault``) falls through to OS trust evaluation; ``.requireExplicitPins``
+/// rejects any host without configured pins (fail-closed).
 /// Localhost hosts always bypass pinning.
 ///
 /// Pin rotation: when a provider rotates certificates, update the pin sets below.
@@ -143,10 +146,16 @@ final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate 
             }
         }
 
-        // If no pins are configured for a custom host, fall back to default trust.
+        // If no pins are configured for a custom host, apply the configured trust policy.
         guard let expectedPins = pins, !expectedPins.isEmpty else {
-            Log.network.warning("PinnedSessionDelegate: no pins configured for custom host \(host, privacy: .public). Falling back to default trust evaluation.")
-            completionHandler(.performDefaultHandling, nil)
+            switch BaseChatConfiguration.shared.customHostTrustPolicy {
+            case .platformDefault:
+                Log.network.warning("PinnedSessionDelegate: no pins configured for custom host \(host, privacy: .public). Falling back to default trust evaluation.")
+                completionHandler(.performDefaultHandling, nil)
+            case .requireExplicitPins:
+                Log.network.error("PinnedSessionDelegate: no certificate pins configured for custom host \(host, privacy: .public) and requireExplicitPins policy is active. Cancelling authentication challenge (fail-closed).")
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
             return
         }
         

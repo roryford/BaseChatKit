@@ -153,6 +153,110 @@ final class InferenceServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - loadCloudBackend endpoint validation (SSRF guard)
+
+    func test_loadCloudBackend_privateIPv4_throwsInvalidURL() async {
+        let service = InferenceService()
+        let cases = [
+            "https://192.168.1.100/api",
+            "https://10.0.0.1/api",
+            "https://172.20.0.1/api",
+        ]
+        for baseURL in cases {
+            let endpoint = APIEndpointRecord(name: "Private", provider: .custom, baseURL: baseURL)
+            do {
+                try await service.loadCloudBackend(from: endpoint)
+                XCTFail("Expected CloudBackendError.invalidURL for \(baseURL)")
+            } catch CloudBackendError.invalidURL {
+                // expected
+            } catch {
+                XCTFail("Expected CloudBackendError.invalidURL for \(baseURL), got \(error)")
+            }
+        }
+    }
+
+    func test_loadCloudBackend_linkLocalIPv4_throwsInvalidURL() async {
+        let service = InferenceService()
+        let endpoint = APIEndpointRecord(
+            name: "IMDS",
+            provider: .custom,
+            baseURL: "https://169.254.169.254/latest/meta-data"
+        )
+        do {
+            try await service.loadCloudBackend(from: endpoint)
+            XCTFail("Expected CloudBackendError.invalidURL for link-local address")
+        } catch CloudBackendError.invalidURL {
+            // expected
+        } catch {
+            XCTFail("Expected CloudBackendError.invalidURL, got \(error)")
+        }
+
+        // Sabotage: a public HTTPS endpoint should NOT be rejected at this stage.
+        let publicEndpoint = APIEndpointRecord(
+            name: "Public",
+            provider: .custom,
+            baseURL: "https://api.example.com"
+        )
+        do {
+            try await service.loadCloudBackend(from: publicEndpoint)
+        } catch CloudBackendError.invalidURL(let url) {
+            XCTFail("Public endpoint should not be rejected as invalid URL, got \(url)")
+        } catch {
+            // Other errors (no factory, etc.) are acceptable here — the point is
+            // the endpoint was NOT rejected as an invalid URL.
+        }
+    }
+
+    func test_loadCloudBackend_insecureRemoteScheme_throwsInvalidURL() async {
+        let service = InferenceService()
+        let endpoint = APIEndpointRecord(
+            name: "Insecure Remote",
+            provider: .custom,
+            baseURL: "http://api.example.com"
+        )
+        do {
+            try await service.loadCloudBackend(from: endpoint)
+            XCTFail("Expected CloudBackendError.invalidURL for http:// remote endpoint")
+        } catch CloudBackendError.invalidURL {
+            // expected
+        } catch {
+            XCTFail("Expected CloudBackendError.invalidURL, got \(error)")
+        }
+    }
+
+    func test_loadCloudBackend_localhostHTTP_isNotRejectedByURLValidation() async {
+        let service = InferenceService()
+        let endpoint = APIEndpointRecord(
+            name: "Local Ollama",
+            provider: .ollama,
+            baseURL: "http://localhost:11434"
+        )
+        do {
+            try await service.loadCloudBackend(from: endpoint)
+        } catch CloudBackendError.invalidURL(let url) {
+            XCTFail("Localhost http:// should not fail URL validation, got invalidURL(\(url))")
+        } catch {
+            // Other errors (no factory, etc.) are expected — localhost was accepted.
+        }
+    }
+
+    func test_loadCloudBackend_ipv6LinkLocal_throwsInvalidURL() async {
+        let service = InferenceService()
+        let endpoint = APIEndpointRecord(
+            name: "IPv6 Link-Local",
+            provider: .custom,
+            baseURL: "https://[fe80::1]/api"
+        )
+        do {
+            try await service.loadCloudBackend(from: endpoint)
+            XCTFail("Expected CloudBackendError.invalidURL for IPv6 link-local address")
+        } catch CloudBackendError.invalidURL {
+            // expected
+        } catch {
+            XCTFail("Expected CloudBackendError.invalidURL, got \(error)")
+        }
+    }
+
     func test_loadCloudBackend_noFactoryRegistered_throwsError() async {
         let service = InferenceService()
         let endpoint = APIEndpointRecord(name: "Ollama", provider: .ollama)

@@ -10,7 +10,7 @@ BaseChatKit provides a complete, production-ready chat UI with pluggable inferen
 - **Latest-wins model handoff** — racing model loads can't corrupt active state. If the user taps model A, then model B before A finishes, A is discarded and B wins deterministically.
 - **Memory admission and pressure handling** — `ModelLoadPlan` estimates resident + KV memory before a load commits and returns an `allow`/`warn`/`deny` verdict; `InferenceService.denyPolicy` decides whether to fail fast, warn and proceed, or hand off to a custom hook. The drop-in `ChatViewModel` stops generation and unloads the model on critical memory pressure.
 - **Mock backend for app-level testing** — `MockInferenceBackend` implements the full streaming contract so your app's tests can exercise BCK without loading a real model.
-- **Certificate pinning with fail-closed defaults** — `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing or empty, while custom hosts use platform trust unless you configure pins.
+- **Certificate pinning with fail-closed defaults** — `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing or empty; custom hosts use platform trust by default or can be hardened to fail-closed via `BaseChatConfiguration.shared.customHostTrustPolicy = .requireExplicitPins`.
 
 For the exact source-backed contract, see [docs/RELIABILITY.md](docs/RELIABILITY.md).
 See [docs/SCOPE_DECISION.md](docs/SCOPE_DECISION.md) for the scoping rationale behind BCK 0.6.0.
@@ -340,7 +340,7 @@ See the [Security Model](Sources/BaseChatCore/BaseChatCore.docc/Articles/Securit
 
 - API keys stored in Keychain with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
 - Keys read just-in-time from Keychain, never held as stored properties
-- Certificate pinning support via `PinnedSessionDelegate` — configure `pinnedHosts` with SPKI SHA-256 hashes; `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing/empty, while localhost and custom hosts retain existing bypass/default-trust behavior
+- Certificate pinning support via `PinnedSessionDelegate` — configure `pinnedHosts` with SPKI SHA-256 hashes; `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing/empty; custom hosts use platform trust by default or can be set to fail-closed via `BaseChatConfiguration.shared.customHostTrustPolicy = .requireExplicitPins`
 - HTTPS enforced for non-localhost endpoints
 - User content sanitised in prompt templates to prevent injection
 - Sensitive data uses `privacy: .private` in os.Logger calls
