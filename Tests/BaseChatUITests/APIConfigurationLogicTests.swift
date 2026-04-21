@@ -103,6 +103,71 @@ final class APIConfigurationLogicTests: XCTestCase {
         XCTAssertFalse(trimmed.isEmpty)
     }
 
+    func test_draftValidation_acceptsLocalhostHTTP() {
+        switch APIEndpointDraftValidator.validate(
+            provider: .ollama,
+            baseURL: "http://localhost:11434",
+            modelName: "llama3.2"
+        ) {
+        case .success:
+            break
+        case .failure(let reason):
+            XCTFail("Expected localhost URL to pass canonical validation, got \(reason)")
+        }
+    }
+
+    func test_draftValidation_rejectsPrivateIPv4() {
+        switch APIEndpointDraftValidator.validate(
+            provider: .custom,
+            baseURL: "https://192.168.1.10",
+            modelName: "model"
+        ) {
+        case .success:
+            XCTFail("Expected RFC1918 address to be rejected")
+        case .failure(let reason):
+            XCTAssertEqual(reason, .privateHost)
+        }
+    }
+
+    func test_draftValidation_rejectsLinkLocalMetadataHost() {
+        switch APIEndpointDraftValidator.validate(
+            provider: .custom,
+            baseURL: "https://169.254.169.254",
+            modelName: "model"
+        ) {
+        case .success:
+            XCTFail("Expected IMDS address to be rejected")
+        case .failure(let reason):
+            XCTAssertEqual(reason, .linkLocalHost)
+        }
+    }
+
+    func test_draftValidation_rejectsRemoteHTTPDNSHost() {
+        switch APIEndpointDraftValidator.validate(
+            provider: .custom,
+            baseURL: "http://example.com",
+            modelName: "model"
+        ) {
+        case .success:
+            XCTFail("Expected remote HTTP endpoint to be rejected")
+        case .failure(let reason):
+            XCTAssertEqual(reason, .insecureScheme)
+        }
+    }
+
+    func test_draftValidation_emptyURLUsesProviderDefault() {
+        switch APIEndpointDraftValidator.validate(
+            provider: .openAI,
+            baseURL: "",
+            modelName: "gpt-4o-mini"
+        ) {
+        case .success:
+            break
+        case .failure(let reason):
+            XCTFail("Expected provider default URL to validate, got \(reason)")
+        }
+    }
+
     // MARK: - Provider switching populates defaults
 
     /// When the user switches providers in the editor (and is NOT editing an existing endpoint),

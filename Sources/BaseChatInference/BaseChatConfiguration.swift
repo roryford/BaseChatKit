@@ -74,6 +74,20 @@ public struct BaseChatConfiguration: Sendable {
     /// namespace independently and don't want their fixtures reaped.
     public var keychainReaperEnabled: Bool
 
+    /// Controls how ``PinnedSessionDelegate`` treats custom hosts that have no
+    /// pins configured in ``PinnedSessionDelegate/pinnedHosts``.
+    ///
+    /// - ``CustomHostTrustPolicy/platformDefault`` *(default)*: unknown hosts
+    ///   fall back to the OS trust evaluation, matching pre-existing behaviour.
+    /// - ``CustomHostTrustPolicy/requireExplicitPins``: connections to any
+    ///   non-localhost host without configured pins are **rejected** (fail-closed).
+    ///   Use this in security-sensitive deployments where all remote hosts must
+    ///   be explicitly allowlisted via `PinnedSessionDelegate.pinnedHosts`.
+    ///
+    /// Known production hosts (`api.openai.com`, `api.anthropic.com`) always
+    /// fail-closed regardless of this setting.
+    public var customHostTrustPolicy: CustomHostTrustPolicy
+
     public init(
         appName: String = "BaseChatKit",
         bundleIdentifier: String = "com.basechatkit",
@@ -81,7 +95,8 @@ public struct BaseChatConfiguration: Sendable {
         features: Features = Features(),
         fileProtectionClass: FileProtectionType? = .completeUntilFirstUserAuthentication,
         sseStreamLimits: SSEStreamLimits = .default,
-        keychainReaperEnabled: Bool = true
+        keychainReaperEnabled: Bool = true,
+        customHostTrustPolicy: CustomHostTrustPolicy = .platformDefault
     ) {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
@@ -90,6 +105,7 @@ public struct BaseChatConfiguration: Sendable {
         self.fileProtectionClass = fileProtectionClass
         self.sseStreamLimits = sseStreamLimits
         self.keychainReaperEnabled = keychainReaperEnabled
+        self.customHostTrustPolicy = customHostTrustPolicy
     }
 
     // MARK: - Derived identifiers
@@ -220,5 +236,39 @@ extension BaseChatConfiguration {
             self.showCloudAPIManagement = showCloudAPIManagement
             self.showUpgradeHint = showUpgradeHint
         }
+    }
+}
+
+// MARK: - CustomHostTrustPolicy
+
+extension BaseChatConfiguration {
+
+    /// Determines how ``PinnedSessionDelegate`` handles TLS challenges from
+    /// custom hosts that have no pins configured in
+    /// ``PinnedSessionDelegate/pinnedHosts``.
+    ///
+    /// This policy does **not** affect known production hosts
+    /// (`api.openai.com`, `api.anthropic.com`) — those always fail-closed
+    /// when their pin sets are absent or empty. Localhost addresses
+    /// (`localhost`, `127.0.0.1`, `::1`) always bypass pinning entirely.
+    public enum CustomHostTrustPolicy: Sendable {
+
+        /// Unknown custom hosts fall back to the OS platform trust evaluation
+        /// when no pins are configured for them.
+        ///
+        /// This is the default. It matches pre-existing BaseChatKit behaviour
+        /// and is appropriate for most deployments where custom endpoints are
+        /// trusted via standard CA-signed certificates.
+        case platformDefault
+
+        /// Connections to custom hosts that have no configured pins are
+        /// **rejected** (fail-closed).
+        ///
+        /// Use this in security-sensitive deployments where every remote host
+        /// must be explicitly allowlisted by adding SPKI hashes to
+        /// ``PinnedSessionDelegate/pinnedHosts`` before the first request.
+        /// Any host without configured pins will have its authentication
+        /// challenge cancelled.
+        case requireExplicitPins
     }
 }

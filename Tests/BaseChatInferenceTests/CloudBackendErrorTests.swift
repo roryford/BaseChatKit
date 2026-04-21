@@ -71,6 +71,7 @@ final class CloudBackendErrorTests: XCTestCase {
             .streamInterrupted,
             .backendDeallocated,
             .timeout(.seconds(120)),
+            .blockedAddress("Hostname evil.com resolved to 10.0.0.1"),
         ]
 
         for error in errors {
@@ -94,6 +95,7 @@ final class CloudBackendErrorTests: XCTestCase {
             .streamInterrupted,
             .backendDeallocated,
             .timeout(.seconds(60)),
+            .blockedAddress("10.0.0.1"),
         ]
 
         for error in errors {
@@ -116,5 +118,27 @@ final class CloudBackendErrorTests: XCTestCase {
 
     func test_streamInterrupted_isRetryable() {
         XCTAssertTrue(CloudBackendError.streamInterrupted.isRetryable)
+    }
+
+    // MARK: - blockedAddress
+
+    func test_blockedAddress_isNotRetryable() {
+        // Sabotage check: adding blockedAddress to the retryable cases causes this to fail.
+        XCTAssertFalse(CloudBackendError.blockedAddress("10.0.0.1").isRetryable,
+                       "A blocked-address error must never be retried — the address is still private")
+    }
+
+    func test_blockedAddress_descriptionContainsDetail() {
+        let detail = "Hostname evil.example.com resolved to 192.168.1.1"
+        let error = CloudBackendError.blockedAddress(detail)
+        let description = error.errorDescription ?? ""
+        XCTAssertTrue(description.contains(detail),
+                      "errorDescription should contain the blocking detail: \(description)")
+    }
+
+    func test_allCases_includeBlockedAddress_haveNonEmptyDescription() {
+        let error = CloudBackendError.blockedAddress("test detail")
+        XCTAssertNotNil(error.errorDescription)
+        XCTAssertFalse(error.errorDescription?.isEmpty ?? true)
     }
 }

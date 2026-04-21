@@ -143,20 +143,30 @@ public struct APIEndpointEditorView: View {
         guard !trimmedName.isEmpty else { return }
 
         let trimmedURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedModelName = trimmedModelName.isEmpty ? provider.defaultModelName : trimmedModelName
 
-        if let error = validateURL(trimmedURL) {
-            validationError = error
+        switch APIEndpointDraftValidator.validate(
+            provider: provider,
+            baseURL: trimmedURL,
+            modelName: resolvedModelName
+        ) {
+        case .failure(let reason):
+            validationError = reason.errorDescription
             return
+        case .success:
+            break
         }
 
         validationError = nil
+        var createdEndpoint: APIEndpoint?
 
         if let endpoint {
             // Update existing
             endpoint.name = trimmedName
             endpoint.provider = provider
             endpoint.baseURL = trimmedURL.isEmpty ? provider.defaultBaseURL : trimmedURL
-            endpoint.modelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+            endpoint.modelName = resolvedModelName
 
             if !apiKey.isEmpty {
                 do {
@@ -175,9 +185,10 @@ public struct APIEndpointEditorView: View {
                 name: trimmedName,
                 provider: provider,
                 baseURL: trimmedURL.isEmpty ? nil : trimmedURL,
-                modelName: modelName.isEmpty ? nil : modelName
+                modelName: resolvedModelName
             )
             modelContext.insert(newEndpoint)
+            createdEndpoint = newEndpoint
 
             if !apiKey.isEmpty {
                 do {
@@ -193,38 +204,17 @@ public struct APIEndpointEditorView: View {
             }
         }
 
-        try? modelContext.save()
-        dismiss()
-    }
-
-    /// Returns an error message if the URL is invalid, or `nil` if it passes validation.
-    private func validateURL(_ urlString: String) -> String? {
-        // Empty URL is allowed — the provider default will be used
-        guard !urlString.isEmpty else { return nil }
-
-        guard let url = URL(string: urlString),
-              let scheme = url.scheme?.lowercased(),
-              url.host != nil else {
-            return "Enter a valid URL (e.g. https://api.example.com)."
-        }
-
-        guard scheme == "http" || scheme == "https" else {
-            return "URL must use http:// or https://."
-        }
-
-        // Allow plain HTTP only for localhost / loopback addresses
-        if scheme == "http" {
-            let host = url.host?.lowercased() ?? ""
-            let isLocal = host == "localhost"
-                || host == "127.0.0.1"
-                || host == "::1"
-                || host.hasSuffix(".local")
-            if !isLocal {
-                return "Remote servers must use HTTPS. Plain HTTP is only allowed for localhost."
+        do {
+            try modelContext.save()
+            dismiss()
+        } catch {
+            if let createdEndpoint {
+                modelContext.delete(createdEndpoint)
             }
+            validationError = error.localizedDescription.isEmpty
+                ? "Failed to save the endpoint configuration."
+                : error.localizedDescription
         }
-
-        return nil
     }
 }
 

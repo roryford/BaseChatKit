@@ -309,6 +309,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         let capturedStrategy = retryStrategy
         let session = self.urlSession
         let capturedTimeout = streamIdleTimeout
+        let capturedBaseURL = baseURL
 
         // The Task needs to set phases on the GenerationStream, but GenerationStream
         // wraps the stream (chicken-and-egg). Use a WeakBox that the Task captures;
@@ -334,6 +335,13 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                 }
 
                 do {
+                    // DNS rebinding guard: verify the endpoint's hostname does not
+                    // resolve to a private/reserved address before connecting.
+                    // Runs outside the retry block — a blocked address is not retryable.
+                    if let url = capturedBaseURL {
+                        try await DNSRebindingGuard.validate(url: url)
+                    }
+
                     // Retry wraps only the HTTP connection phase — not SSE parsing.
                     // Mid-stream failures propagate immediately, preserving
                     // already-yielded tokens.

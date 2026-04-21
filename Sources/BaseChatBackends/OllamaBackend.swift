@@ -95,11 +95,15 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
 
     // Plan is informational for cloud backends.
     public override func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
-        guard baseURL != nil else {
+        guard let configuredBaseURL = baseURL else {
             throw CloudBackendError.invalidURL(
                 "No base URL configured. Call configure(baseURL:modelName:) first."
             )
         }
+
+        // Validate the configured host against DNS rebinding / SSRF before
+        // any network I/O fires — must run before /api/show probe below.
+        try await DNSRebindingGuard.validate(url: configuredBaseURL)
 
         // Ollama v0.18.0+ routes any model tag ending in `:cloud` to remote
         // inference (Ollama's hosted service) rather than the local server.

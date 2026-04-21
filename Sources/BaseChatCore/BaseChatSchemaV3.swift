@@ -330,12 +330,11 @@ public enum BaseChatSchemaV3: VersionedSchema {
 
         /// Checks if the URL points to a local server.
         ///
-        /// Only the explicit loopback literals are matched — broader `127.x.x.x`
-        /// and IPv4-mapped IPv6 loopback (`::ffff:127.0.0.1`) are intentionally
-        /// excluded because they are easy SSRF bypass vectors.
+        /// Delegates to ``PrivateIPClassifier/isLocalhostURL(_:)``. Only the three
+        /// explicit loopback literals (`localhost`, `127.0.0.1`, `::1`) match —
+        /// broader `127.x.x.x` and IPv4-mapped IPv6 loopback are excluded.
         static func isLocalhost(_ url: URL) -> Bool {
-            guard let host = url.host()?.lowercased() else { return false }
-            return host == "localhost" || host == "127.0.0.1" || host == "::1"
+            PrivateIPClassifier.isLocalhostURL(url)
         }
 
         /// Classifies a URL's host as pointing at a private, link-local, or
@@ -344,161 +343,28 @@ public enum BaseChatSchemaV3: VersionedSchema {
         ///
         /// Only IP literals are inspected. DNS names are not resolved — validation
         /// is called synchronously from SwiftUI settings forms and must stay fast.
-        /// DNS rebinding is therefore out of scope for this layer and should be
-        /// mitigated at the request layer (e.g. by pinning resolution or by
-        /// rejecting private IPs returned by `URLSession` host resolution) if a
-        /// deployment needs that guarantee.
+        /// DNS rebinding is mitigated at the request layer by
+        /// `BaseChatBackends.DNSRebindingGuard`, which resolves hostnames and
+        /// rejects connections to private/reserved addresses at connect time.
         ///
-        /// Blocked IPv4 ranges:
-        /// - `0.0.0.0/8` (non-routable "this host") → `.multicastReserved`
-        /// - `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC1918) → `.privateHost`
-        /// - `127.0.0.0/8` except `127.0.0.1` (alternate loopback encodings) → `.multicastReserved`
-        /// - `169.254.0.0/16` (link-local incl. AWS/GCP/Azure metadata at `169.254.169.254`) → `.linkLocalHost`
-        /// - `224.0.0.0/4` (multicast), `240.0.0.0/4` (reserved / future use) → `.multicastReserved`
-        ///
-        /// Blocked IPv6 ranges:
-        /// - `fc00::/7` (unique local addresses) → `.ipv6UniqueLocal`
-        /// - `fe80::/10` (link-local) → `.linkLocalHost`
-        /// - `::ffff:0:0/96` (IPv4-mapped; would otherwise bypass the IPv4 filter) → `.ipv4MappedLoopback`
+        /// Classification logic is shared with ``PrivateIPClassifier`` to ensure a
+        /// single source of truth for blocked IP ranges across both validation layers.
         static func classifyDisallowedPrivateHost(_ url: URL) -> APIEndpointValidationReason? {
             guard let rawHost = url.host()?.lowercased() else { return nil }
-
-            // FQDN form with a trailing dot (e.g. `192.168.1.1.`) resolves
-            // identically to the dotless form on every mainstream resolver, so
-            // treat it as equivalent for IP-literal classification. Without
-            // this, `https://192.168.1.1.` would bypass the private-range
-            // gate and reach a LAN host under HTTPS.
             let host = rawHost.hasSuffix(".") ? String(rawHost.dropLast()) : rawHost
 
-            if let octets = parseIPv4Literal(host) {
-                return classifyIPv4(octets)
+            guard let category = PrivateIPClassifier.classifyIPLiteral(host) else {
+                // DNS names pass through — request-layer guard handles them.
+                return nil
             }
 
-            if let words = parseIPv6Literal(host) {
-                return classifyIPv6(words)
+            switch category {
+            case .privateHost:        return .privateHost
+            case .linkLocalHost:      return .linkLocalHost
+            case .ipv6UniqueLocal:    return .ipv6UniqueLocal
+            case .ipv4MappedLoopback: return .ipv4MappedLoopback
+            case .multicastReserved:  return .multicastReserved
             }
-
-            // DNS names reach here. Do not resolve synchronously — return nil
-            // and rely on the HTTPS-required rule plus any higher-layer mitigation.
-            return nil
-        }
-
-        // MARK: IPv4
-
-        /// Parses a dotted-quad IPv4 literal into four octets.
-        ///
-        /// Returns `nil` for anything that isn't exactly four 0-255 components
-        /// (including shorthand forms like `127.1`, which `inet_aton` would accept
-        /// but modern URL parsers reject).
-        private static func parseIPv4Literal(_ host: String) -> [UInt8]? {
-            let parts = host.split(separator: ".", omittingEmptySubsequences: false)
-            guard parts.count == 4 else { return nil }
-            var octets: [UInt8] = []
-            octets.reserveCapacity(4)
-            for part in parts {
-                guard !part.isEmpty, part.allSatisfy(\.isASCII),
-                      let value = UInt16(part), value <= 255 else {
-                    return nil
-                }
-                octets.append(UInt8(value))
-            }
-            return octets
-        }
-
-        private static func classifyIPv4(_ octets: [UInt8]) -> APIEndpointValidationReason? {
-            let a = octets[0]
-            let b = octets[1]
-
-            // 10.0.0.0/8 — RFC1918
-            if a == 10 { return .privateHost }
-            // 172.16.0.0/12 — RFC1918
-            if a == 172 && (16...31).contains(b) { return .privateHost }
-            // 192.168.0.0/16 — RFC1918
-            if a == 192 && b == 168 { return .privateHost }
-            // 169.254.0.0/16 — link-local (AWS/GCP/Azure IMDS sits here)
-            if a == 169 && b == 254 { return .linkLocalHost }
-            // 0.0.0.0/8 — "this host" / any-address
-            if a == 0 { return .multicastReserved }
-            // 127.0.0.0/8 — loopback; the exact 127.0.0.1 is approved by
-            // isLocalhost before this helper is called, so any 127.x.x.x
-            // reaching here is an alternate loopback encoding.
-            if a == 127 { return .multicastReserved }
-            // 224.0.0.0/4 — multicast
-            if (224...239).contains(a) { return .multicastReserved }
-            // 240.0.0.0/4 — reserved / future use (includes 255.255.255.255 broadcast)
-            if a >= 240 { return .multicastReserved }
-
-            return nil
-        }
-
-        // MARK: IPv6
-
-        /// Parses an IPv6 literal (as returned by `URL.host()` — without the
-        /// surrounding brackets) into eight 16-bit words.
-        ///
-        /// Supports `::` zero-run compression and embedded IPv4 suffixes
-        /// (e.g. `::ffff:127.0.0.1`). Zone identifiers (`fe80::1%en0`) are
-        /// stripped before parsing.
-        private static func parseIPv6Literal(_ host: String) -> [UInt16]? {
-            // Strip IPv6 zone identifier if present.
-            let bare = host.split(separator: "%", maxSplits: 1).first.map(String.init) ?? host
-            guard bare.contains(":") else { return nil }
-
-            // Split on "::" which represents a run of zero words.
-            let doubleColonParts = bare.components(separatedBy: "::")
-            guard doubleColonParts.count <= 2 else { return nil }
-
-            func expand(_ segment: String) -> [UInt16]? {
-                if segment.isEmpty { return [] }
-                let groups = segment.split(separator: ":", omittingEmptySubsequences: false)
-                var words: [UInt16] = []
-                for (i, group) in groups.enumerated() {
-                    if group.contains(".") {
-                        // Embedded IPv4 — only legal as the last group.
-                        guard i == groups.count - 1,
-                              let v4 = parseIPv4Literal(String(group)) else { return nil }
-                        let high = (UInt16(v4[0]) << 8) | UInt16(v4[1])
-                        let low = (UInt16(v4[2]) << 8) | UInt16(v4[3])
-                        words.append(high)
-                        words.append(low)
-                    } else {
-                        guard !group.isEmpty, group.count <= 4,
-                              let value = UInt16(group, radix: 16) else { return nil }
-                        words.append(value)
-                    }
-                }
-                return words
-            }
-
-            let head = expand(doubleColonParts[0])
-            let tail = doubleColonParts.count == 2 ? expand(doubleColonParts[1]) : []
-            guard let headWords = head, let tailWords = tail else { return nil }
-
-            let total = headWords.count + tailWords.count
-            if doubleColonParts.count == 2 {
-                guard total <= 8 else { return nil }
-                let zeros = Array(repeating: UInt16(0), count: 8 - total)
-                return headWords + zeros + tailWords
-            } else {
-                guard total == 8 else { return nil }
-                return headWords
-            }
-        }
-
-        private static func classifyIPv6(_ words: [UInt16]) -> APIEndpointValidationReason? {
-            guard words.count == 8 else { return nil }
-
-            // fc00::/7 — unique local addresses (first 7 bits are 1111110).
-            if (words[0] & 0xfe00) == 0xfc00 { return .ipv6UniqueLocal }
-            // fe80::/10 — link-local (first 10 bits are 1111111010).
-            if (words[0] & 0xffc0) == 0xfe80 { return .linkLocalHost }
-            // ::ffff:0:0/96 — IPv4-mapped IPv6. Reject so mapped loopback /
-            // mapped RFC1918 can't bypass the IPv4 filter.
-            let isIPv4Mapped = words[0] == 0 && words[1] == 0 && words[2] == 0
-                && words[3] == 0 && words[4] == 0 && words[5] == 0xffff
-            if isIPv4Mapped { return .ipv4MappedLoopback }
-
-            return nil
         }
     }
 

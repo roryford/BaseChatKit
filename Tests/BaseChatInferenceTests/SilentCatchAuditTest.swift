@@ -119,7 +119,6 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))",
         "BaseChatUI/Views/Chat/AssistantMarkdownView.swift:if let parsed = try? AttributedString(",
         "BaseChatUI/Views/Chat/TypingIndicatorView.swift:try? await Task.sleep(for: .milliseconds(400))",
-        "BaseChatUI/Views/Settings/APIEndpointEditorView.swift:try? modelContext.save()",
 
         // BaseChatTestSupport — test-only helpers, not production paths.
         "BaseChatTestSupport/TestHelpers.swift:try? FileManager.default.removeItem(at: url)",

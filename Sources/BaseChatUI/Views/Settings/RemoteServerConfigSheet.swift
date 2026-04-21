@@ -107,7 +107,7 @@ public struct RemoteServerConfigSheet: View {
 
     private var connectionSection: some View {
         Section {
-            TextField("Server URL", text: $serverURL, prompt: Text("http://192.168.1.10:\(backendType.defaultPort)"))
+            TextField("Server URL", text: $serverURL, prompt: Text("http://localhost:\(backendType.defaultPort)"))
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.URL)
@@ -145,19 +145,34 @@ public struct RemoteServerConfigSheet: View {
     // MARK: - Validation & Save
 
     private var isValid: Bool {
-        let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        return URL(string: trimmed)?.host != nil
+        let resolvedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty ?? backendType.apiProvider.defaultModelName
+        if case .success = APIEndpointDraftValidator.validate(
+            provider: backendType.apiProvider,
+            baseURL: serverURL,
+            modelName: resolvedModel
+        ) {
+            return true
+        }
+        return false
     }
 
     private func save() {
         let trimmedURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let _ = URL(string: trimmedURL)?.host else {
-            errorMessage = "Enter a valid server URL."
-            return
-        }
-
         let resolvedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
             .nonEmpty ?? backendType.apiProvider.defaultModelName
+
+        switch APIEndpointDraftValidator.validate(
+            provider: backendType.apiProvider,
+            baseURL: trimmedURL,
+            modelName: resolvedModel
+        ) {
+        case .failure(let reason):
+            errorMessage = reason.errorDescription
+            return
+        case .success:
+            break
+        }
 
         let endpoint = APIEndpoint(
             name: "\(backendType.rawValue) — \(resolvedModel)",
