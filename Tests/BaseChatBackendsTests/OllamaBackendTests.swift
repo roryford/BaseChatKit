@@ -118,6 +118,36 @@ struct OllamaBackendTests {
         #expect(!OllamaBackend().capabilities.requiresPromptTemplate)
     }
 
+    @Test func capabilities_supportsNativeJSONMode() {
+        #expect(OllamaBackend().capabilities.supportsNativeJSONMode)
+    }
+
+    @Test func buildRequest_jsonModeEnabled_addsFormat() throws {
+        let (backend, _) = makeConfiguredBackend()
+        let request = try backend.buildRequest(
+            prompt: "hello",
+            systemPrompt: nil,
+            config: GenerationConfig(jsonMode: true)
+        )
+
+        let body = try #require(request.httpBody)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["format"] as? String == "json")
+    }
+
+    @Test func buildRequest_jsonModeDisabled_omitsFormat() throws {
+        let (backend, _) = makeConfiguredBackend()
+        let request = try backend.buildRequest(
+            prompt: "hello",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        )
+
+        let body = try #require(request.httpBody)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["format"] == nil)
+    }
+
     // MARK: - Streaming
 
     @Test func streaming_yieldsTokens() async throws {

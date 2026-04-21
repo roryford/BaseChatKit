@@ -65,6 +65,7 @@ final class BackendCapabilitiesTests: XCTestCase {
 
         XCTAssertFalse(caps.supportsToolCalling)
         XCTAssertFalse(caps.supportsStructuredOutput)
+        XCTAssertFalse(caps.supportsNativeJSONMode)
         XCTAssertEqual(caps.cancellationStyle, .cooperative)
         XCTAssertFalse(caps.supportsTokenCounting)
     }
@@ -79,6 +80,7 @@ final class BackendCapabilitiesTests: XCTestCase {
             supportsSystemPrompt: true,
             supportsToolCalling: true,
             supportsStructuredOutput: true,
+            supportsNativeJSONMode: true,
             cancellationStyle: .explicit,
             supportsTokenCounting: true
         )
@@ -89,6 +91,7 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertTrue(caps.supportsSystemPrompt)
         XCTAssertTrue(caps.supportsToolCalling)
         XCTAssertTrue(caps.supportsStructuredOutput)
+        XCTAssertTrue(caps.supportsNativeJSONMode)
         XCTAssertEqual(caps.cancellationStyle, .explicit)
         XCTAssertTrue(caps.supportsTokenCounting)
     }
@@ -224,6 +227,7 @@ final class BackendCapabilitiesTests: XCTestCase {
             supportsSystemPrompt: true,
             supportsToolCalling: true,
             supportsStructuredOutput: true,
+            supportsNativeJSONMode: true,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
             memoryStrategy: .external,
@@ -235,6 +239,7 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(caps.maxOutputTokens, 8192)
         XCTAssertTrue(caps.supportsStreaming)
         XCTAssertTrue(caps.isRemote)
+        XCTAssertTrue(caps.supportsNativeJSONMode)
     }
 
     func test_fullInitializer_newFieldsDefaultValues() {
@@ -251,6 +256,7 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(caps.maxOutputTokens, 4096)
         XCTAssertTrue(caps.supportsStreaming)
         XCTAssertFalse(caps.isRemote)
+        XCTAssertFalse(caps.supportsNativeJSONMode)
     }
 
     // MARK: - Codable round-trip
@@ -263,6 +269,7 @@ final class BackendCapabilitiesTests: XCTestCase {
             supportsSystemPrompt: true,
             supportsToolCalling: true,
             supportsStructuredOutput: true,
+            supportsNativeJSONMode: true,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
             memoryStrategy: .external,
@@ -279,6 +286,7 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(decoded.maxOutputTokens, 16_384)
         XCTAssertTrue(decoded.supportsStreaming)
         XCTAssertTrue(decoded.isRemote)
+        XCTAssertTrue(decoded.supportsNativeJSONMode)
     }
 
     func test_codable_roundTrip_allMemoryStrategies() throws {
@@ -315,6 +323,7 @@ final class BackendCapabilitiesTests: XCTestCase {
             "supportsStreaming": true,
             "supportsToolCalling": true,
             "supportsStructuredOutput": true,
+            "supportsNativeJSONMode": true,
             "cancellationStyle": "cooperative",
             "supportsTokenCounting": true,
             "memoryStrategy": "external",
@@ -335,10 +344,34 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertTrue(decoded.supportsStreaming)
         XCTAssertTrue(decoded.supportsToolCalling)
         XCTAssertTrue(decoded.supportsStructuredOutput)
+        XCTAssertTrue(decoded.supportsNativeJSONMode)
         XCTAssertEqual(decoded.cancellationStyle, .cooperative)
         XCTAssertTrue(decoded.supportsTokenCounting)
         XCTAssertEqual(decoded.memoryStrategy, .external)
         XCTAssertFalse(decoded.isRemote)
+    }
+
+    func test_codable_missingSupportsNativeJSONMode_defaultsFalse() throws {
+        let json = """
+        {
+            "supportedParameters": ["temperature"],
+            "maxContextTokens": 4096,
+            "maxOutputTokens": 2048,
+            "requiresPromptTemplate": false,
+            "supportsSystemPrompt": true,
+            "supportsStreaming": true,
+            "supportsToolCalling": false,
+            "supportsStructuredOutput": false,
+            "cancellationStyle": "cooperative",
+            "supportsTokenCounting": false,
+            "memoryStrategy": "resident",
+            "isRemote": false
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(BackendCapabilities.self, from: json)
+
+        XCTAssertFalse(decoded.supportsNativeJSONMode)
     }
 
     // MARK: - PromptAssembler reads contextWindowSize from capabilities
@@ -378,6 +411,7 @@ final class BackendCapabilitiesTests: XCTestCase {
         XCTAssertTrue(caps.supportsSystemPrompt)
         XCTAssertFalse(caps.supportsToolCalling)
         XCTAssertFalse(caps.supportsStructuredOutput)
+        XCTAssertFalse(caps.supportsNativeJSONMode)
         XCTAssertEqual(caps.cancellationStyle, .cooperative)
         XCTAssertFalse(caps.supportsTokenCounting)
         XCTAssertEqual(caps.memoryStrategy, .resident)

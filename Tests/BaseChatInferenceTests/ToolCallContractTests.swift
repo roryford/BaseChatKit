@@ -133,7 +133,7 @@ final class ToolCallContractTests: XCTestCase {
     }
 
     func test_generationConfig_existingProperties_unaffected() throws {
-        // Adding tools/toolChoice fields must not break existing serialised GenerationConfig values.
+        // Adding tools/toolChoice/jsonMode fields must not break existing serialised GenerationConfig values.
         let config = GenerationConfig(temperature: 0.8, topP: 0.95, maxOutputTokens: 512)
 
         let encoded = try JSONEncoder().encode(config)
@@ -145,11 +145,26 @@ final class ToolCallContractTests: XCTestCase {
         // Defaults must survive the round-trip
         XCTAssertTrue(decoded.tools.isEmpty)
         XCTAssertEqual(decoded.toolChoice, .auto)
+        XCTAssertFalse(decoded.jsonMode)
+    }
+
+    func test_generationConfig_roundTrips_jsonMode() throws {
+        let config = GenerationConfig(
+            temperature: 0.8,
+            topP: 0.95,
+            maxOutputTokens: 512,
+            jsonMode: true
+        )
+
+        let encoded = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(GenerationConfig.self, from: encoded)
+
+        XCTAssertTrue(decoded.jsonMode)
     }
 
     func test_generationConfig_decodesLegacyJSON_withoutToolsOrToolChoice() throws {
-        // Payloads serialised before the tools/toolChoice fields were introduced must
-        // decode successfully, falling back to the canonical defaults ([] and .auto).
+        // Payloads serialised before the tools/toolChoice/jsonMode fields were introduced must
+        // decode successfully, falling back to the canonical defaults ([] / .auto / false).
         // Sabotage check: using `decode` instead of `decodeIfPresent` in init(from:)
         // causes a keyNotFound DecodingError here.
         let legacyJSON = """
@@ -161,6 +176,7 @@ final class ToolCallContractTests: XCTestCase {
         XCTAssertEqual(decoded.temperature, 0.7, accuracy: 0.001)
         XCTAssertTrue(decoded.tools.isEmpty, "Missing 'tools' key must default to []")
         XCTAssertEqual(decoded.toolChoice, .auto, "Missing 'toolChoice' key must default to .auto")
+        XCTAssertFalse(decoded.jsonMode, "Missing 'jsonMode' key must default to false")
     }
 
     // MARK: - MockInferenceBackend emits scripted tool calls

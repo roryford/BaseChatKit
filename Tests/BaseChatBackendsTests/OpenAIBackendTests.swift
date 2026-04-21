@@ -35,6 +35,10 @@ final class OpenAIBackendTests: XCTestCase {
         XCTAssertTrue(backend.capabilities.supportsSystemPrompt)
     }
 
+    func test_capabilities_supportsNativeJSONMode() {
+        XCTAssertTrue(OpenAIBackend().capabilities.supportsNativeJSONMode)
+    }
+
     // MARK: - Model Lifecycle
 
     func test_loadModel_withoutConfiguration_throws() async {
@@ -133,6 +137,45 @@ final class OpenAIBackendTests: XCTestCase {
                      "plan.effectiveContextSize must not appear in the request body")
         XCTAssertNil(json["context_size"],
                      "plan.effectiveContextSize must not appear in the request body")
+    }
+
+    func test_buildRequest_jsonModeEnabled_addsResponseFormat() throws {
+        let backend = OpenAIBackend()
+        backend.configure(
+            baseURL: URL(string: "https://api.openai.com")!,
+            apiKey: "sk-test",
+            modelName: "gpt-4o-mini"
+        )
+
+        let request = try backend.buildRequest(
+            prompt: "hello",
+            systemPrompt: nil,
+            config: GenerationConfig(jsonMode: true)
+        )
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let responseFormat = try XCTUnwrap(json["response_format"] as? [String: Any])
+
+        XCTAssertEqual(responseFormat["type"] as? String, "json_object")
+    }
+
+    func test_buildRequest_jsonModeDisabled_omitsResponseFormat() throws {
+        let backend = OpenAIBackend()
+        backend.configure(
+            baseURL: URL(string: "https://api.openai.com")!,
+            apiKey: "sk-test",
+            modelName: "gpt-4o-mini"
+        )
+
+        let request = try backend.buildRequest(
+            prompt: "hello",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        )
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        XCTAssertNil(json["response_format"])
     }
 
     // MARK: - Token Extraction (indirect via SSE + JSON)
@@ -311,4 +354,3 @@ extension OpenAIBackendTests {
         BackendContractChecks.assertAllInvariants { OpenAIBackend() }
     }
 }
-

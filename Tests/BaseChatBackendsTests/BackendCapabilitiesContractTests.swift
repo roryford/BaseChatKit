@@ -44,6 +44,15 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                       "OpenAIBackend supports structured output via json_schema")
     }
 
+    func test_backends_nativeJSONModeCapabilities() {
+        XCTAssertFalse(ClaudeBackend().capabilities.supportsNativeJSONMode,
+                       "ClaudeBackend does not advertise a dedicated native JSON mode")
+        XCTAssertTrue(OpenAIBackend().capabilities.supportsNativeJSONMode,
+                      "OpenAIBackend supports response_format json_object")
+        XCTAssertTrue(OllamaBackend().capabilities.supportsNativeJSONMode,
+                      "OllamaBackend supports format=json")
+    }
+
     // MARK: - Local backends
 
 #if Llama
@@ -64,6 +73,15 @@ final class BackendCapabilitiesContractTests: XCTestCase {
         XCTAssertFalse(LlamaBackend().capabilities.supportsToolCalling,
                        "LlamaBackend does not support tool calling natively")
     }
+
+    func test_llamaBackend_doesNotSupportNativeJSONMode() throws {
+        try XCTSkipUnless(HardwareRequirements.isPhysicalDevice,
+                          "LlamaBackend requires Metal (unavailable in simulator)")
+        try XCTSkipUnless(HardwareRequirements.isAppleSilicon,
+                          "LlamaBackend requires Apple Silicon")
+        XCTAssertFalse(LlamaBackend().capabilities.supportsNativeJSONMode,
+                       "LlamaBackend does not expose a native JSON mode")
+    }
 #endif
 
 #if MLX
@@ -72,6 +90,8 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                           "MLXBackend requires Apple Silicon")
         XCTAssertFalse(MLXBackend().capabilities.isRemote,
                        "MLXBackend runs on-device — isRemote must be false")
+        XCTAssertFalse(MLXBackend().capabilities.supportsNativeJSONMode,
+                       "MLXBackend does not expose a native JSON mode")
     }
 #endif
 
@@ -86,6 +106,12 @@ final class BackendCapabilitiesContractTests: XCTestCase {
     func test_foundationBackend_doesNotSupportToolCalling() {
         XCTAssertFalse(FoundationBackend().capabilities.supportsToolCalling,
                        "FoundationBackend does not expose tool calling in this version")
+    }
+
+    @available(iOS 26, macOS 26, *)
+    func test_foundationBackend_doesNotSupportNativeJSONMode() {
+        XCTAssertFalse(FoundationBackend().capabilities.supportsNativeJSONMode,
+                       "FoundationBackend does not expose a native JSON mode in this version")
     }
 #endif
 }

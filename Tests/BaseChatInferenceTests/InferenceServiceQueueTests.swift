@@ -26,6 +26,7 @@ final class InferenceServiceQueueTests: XCTestCase {
         /// Each call to generate() appends a continuation here. Tests release
         /// tokens by calling `release(at:tokens:)` or `releaseAll()`.
         var gates: [AsyncThrowingStream<GenerationEvent, Error>.Continuation] = []
+        var receivedConfigs: [GenerationConfig] = []
         var generateCallCount = 0
         var stopCallCount = 0
 
@@ -39,6 +40,7 @@ final class InferenceServiceQueueTests: XCTestCase {
             config: GenerationConfig
         ) throws -> GenerationStream {
             generateCallCount += 1
+            receivedConfigs.append(config)
             isGenerating = true
             let stream = AsyncThrowingStream<GenerationEvent, Error> { [weak self] continuation in
                 self?.gates.append(continuation)
@@ -167,6 +169,35 @@ final class InferenceServiceQueueTests: XCTestCase {
             }
         }
         XCTAssertEqual(collected, ["b"])
+    }
+
+    func test_enqueue_jsonMode_survivesQueueHandoff() async throws {
+        let (service, mock) = makeService()
+
+        let (_, firstStream) = try service.enqueue(
+            messages: [("user", "first")],
+            jsonMode: false,
+            priority: .normal
+        )
+        let (_, secondStream) = try service.enqueue(
+            messages: [("user", "second")],
+            jsonMode: true,
+            priority: .normal
+        )
+
+        await Task.yield()
+        mock.release(at: 0, tokens: ["a"])
+        for try await _ in firstStream.events {}
+
+        let firstConfig = try XCTUnwrap(mock.receivedConfigs.first)
+        XCTAssertFalse(firstConfig.jsonMode)
+
+        await Task.yield()
+        mock.release(at: 1, tokens: ["b"])
+        for try await _ in secondStream.events {}
+
+        XCTAssertEqual(mock.receivedConfigs.count, 2)
+        XCTAssertTrue(mock.receivedConfigs[1].jsonMode)
     }
 
     // MARK: - 3. Priority: userInitiated jumps ahead
@@ -763,4 +794,3 @@ final class InferenceServiceQueueTests: XCTestCase {
         }
     }
 }
-

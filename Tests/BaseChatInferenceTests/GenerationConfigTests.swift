@@ -26,6 +26,11 @@ final class GenerationConfigTests: XCTestCase {
         XCTAssertEqual(config.maxOutputTokens, 2048)
     }
 
+    func test_defaultInit_jsonMode() {
+        let config = GenerationConfig()
+        XCTAssertFalse(config.jsonMode)
+    }
+
     // MARK: - Custom Init
 
     func test_customInit_propagatesAllValues() {
@@ -33,13 +38,15 @@ final class GenerationConfigTests: XCTestCase {
             temperature: 1.2,
             topP: 0.95,
             repeatPenalty: 1.5,
-            maxOutputTokens: 2048
+            maxOutputTokens: 2048,
+            jsonMode: true
         )
 
         XCTAssertEqual(config.temperature, 1.2, accuracy: 0.001)
         XCTAssertEqual(config.topP, 0.95, accuracy: 0.001)
         XCTAssertEqual(config.repeatPenalty, 1.5, accuracy: 0.001)
         XCTAssertEqual(config.maxOutputTokens, 2048)
+        XCTAssertTrue(config.jsonMode)
     }
 
     func test_customInit_partialOverride() {
@@ -65,6 +72,12 @@ final class GenerationConfigTests: XCTestCase {
         var config = GenerationConfig()
         config.maxOutputTokens = 512
         XCTAssertEqual(config.maxOutputTokens, 512)
+    }
+
+    func test_jsonMode_isMutable() {
+        var config = GenerationConfig()
+        config.jsonMode = true
+        XCTAssertTrue(config.jsonMode)
     }
 
     // MARK: - Mock Backend Captures maxOutputTokens

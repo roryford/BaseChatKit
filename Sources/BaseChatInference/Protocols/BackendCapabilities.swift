@@ -64,6 +64,9 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
     /// Whether the backend supports structured (JSON schema) output.
     public let supportsStructuredOutput: Bool
 
+    /// Whether the backend supports a native JSON-object generation mode.
+    public let supportsNativeJSONMode: Bool
+
     /// How the backend handles generation cancellation.
     public let cancellationStyle: CancellationStyle
 
@@ -89,6 +92,7 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         supportsSystemPrompt: Bool = true,
         supportsToolCalling: Bool = false,
         supportsStructuredOutput: Bool = false,
+        supportsNativeJSONMode: Bool = false,
         cancellationStyle: CancellationStyle = .cooperative,
         supportsTokenCounting: Bool = false,
         memoryStrategy: MemoryStrategy = .resident,
@@ -102,11 +106,62 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         self.supportsSystemPrompt = supportsSystemPrompt
         self.supportsToolCalling = supportsToolCalling
         self.supportsStructuredOutput = supportsStructuredOutput
+        self.supportsNativeJSONMode = supportsNativeJSONMode
         self.cancellationStyle = cancellationStyle
         self.supportsTokenCounting = supportsTokenCounting
         self.memoryStrategy = memoryStrategy
         self.maxOutputTokens = maxOutputTokens
         self.supportsStreaming = supportsStreaming
         self.isRemote = isRemote
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case supportedParameters
+        case maxContextTokens
+        case maxOutputTokens
+        case requiresPromptTemplate
+        case supportsSystemPrompt
+        case supportsStreaming
+        case supportsToolCalling
+        case supportsStructuredOutput
+        case supportsNativeJSONMode
+        case cancellationStyle
+        case supportsTokenCounting
+        case memoryStrategy
+        case isRemote
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        supportedParameters = try c.decode(Set<GenerationParameter>.self, forKey: .supportedParameters)
+        maxContextTokens = try c.decode(Int32.self, forKey: .maxContextTokens)
+        maxOutputTokens = try c.decode(Int.self, forKey: .maxOutputTokens)
+        requiresPromptTemplate = try c.decode(Bool.self, forKey: .requiresPromptTemplate)
+        supportsSystemPrompt = try c.decode(Bool.self, forKey: .supportsSystemPrompt)
+        supportsStreaming = try c.decode(Bool.self, forKey: .supportsStreaming)
+        supportsToolCalling = try c.decode(Bool.self, forKey: .supportsToolCalling)
+        supportsStructuredOutput = try c.decode(Bool.self, forKey: .supportsStructuredOutput)
+        supportsNativeJSONMode = (try c.decodeIfPresent(Bool.self, forKey: .supportsNativeJSONMode)) ?? false
+        cancellationStyle = try c.decode(CancellationStyle.self, forKey: .cancellationStyle)
+        supportsTokenCounting = try c.decode(Bool.self, forKey: .supportsTokenCounting)
+        memoryStrategy = try c.decode(MemoryStrategy.self, forKey: .memoryStrategy)
+        isRemote = try c.decode(Bool.self, forKey: .isRemote)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(supportedParameters, forKey: .supportedParameters)
+        try c.encode(maxContextTokens, forKey: .maxContextTokens)
+        try c.encode(maxOutputTokens, forKey: .maxOutputTokens)
+        try c.encode(requiresPromptTemplate, forKey: .requiresPromptTemplate)
+        try c.encode(supportsSystemPrompt, forKey: .supportsSystemPrompt)
+        try c.encode(supportsStreaming, forKey: .supportsStreaming)
+        try c.encode(supportsToolCalling, forKey: .supportsToolCalling)
+        try c.encode(supportsStructuredOutput, forKey: .supportsStructuredOutput)
+        try c.encode(supportsNativeJSONMode, forKey: .supportsNativeJSONMode)
+        try c.encode(cancellationStyle, forKey: .cancellationStyle)
+        try c.encode(supportsTokenCounting, forKey: .supportsTokenCounting)
+        try c.encode(memoryStrategy, forKey: .memoryStrategy)
+        try c.encode(isRemote, forKey: .isRemote)
     }
 }

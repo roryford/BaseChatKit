@@ -79,6 +79,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         supportsSystemPrompt: true,
         supportsToolCalling: false,
         supportsStructuredOutput: false,
+        supportsNativeJSONMode: false,
         cancellationStyle: .cooperative,
         supportsTokenCounting: false,
         memoryStrategy: .external,

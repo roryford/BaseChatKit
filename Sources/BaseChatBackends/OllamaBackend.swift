@@ -81,6 +81,7 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             supportsSystemPrompt: true,
             supportsToolCalling: false,
             supportsStructuredOutput: false,
+            supportsNativeJSONMode: true,
             cancellationStyle: .cooperative,
             supportsTokenCounting: false,
             memoryStrategy: .external,
@@ -265,6 +266,9 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             "options": options,
             "keep_alive": keepAlive,
         ]
+        if config.jsonMode {
+            body["format"] = "json"
+        }
         if let think = thinkDirective {
             body["think"] = think
         }
