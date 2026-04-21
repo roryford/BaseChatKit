@@ -153,44 +153,72 @@ final class OllamaE2ETests: XCTestCase {
     stations are 300 miles apart. At what time do they meet?
     """
 
+    /// Process-lifetime cache keyed by model name so the probe runs at most
+    /// once per `swift test` invocation. Tests B and C both classify the same
+    /// model; `setUp` creates a fresh instance per test, so instance-level
+    /// caching would be useless. The classification is a property of the
+    /// MODEL (selected by `HardwareRequirements.findOllamaModel()`), not the
+    /// backend instance, so cross-instance caching is correct. Each entry is
+    /// a `Task` so the first caller triggers the probe and later callers
+    /// await the same result without racing.
+    private static var cachedProbes: [String: Task<Bool, Error>] = [:]
+
     /// Drives a probe generation to classify the selected model as thinking or
     /// non-thinking by checking whether any `.thinkingToken` event arrives
     /// before the first `.token`. Returns `true` when the model emits thinking.
     ///
+    /// Result is memoized per model name (see `cachedProbes`) so repeat calls
+    /// within the same test process return immediately.
+    ///
     /// Uses a short `maxOutputTokens` budget so the probe terminates quickly
     /// even for chatty models.
     private func probeModelEmitsThinking() async throws -> Bool {
-        let config = GenerationConfig(
-            temperature: 0.3,
-            maxOutputTokens: 64
-        )
-        let stream = try backend.generate(
-            prompt: Self.reasoningPrompt,
-            systemPrompt: nil,
-            config: config
-        )
-        var sawThinking = false
-        for try await event in stream.events {
-            switch event {
-            case .thinkingToken:
-                sawThinking = true
-            case .token:
-                // First visible token — we've classified the model.
-                return sawThinking
-            default:
-                continue
-            }
+        let model = modelName!
+        if let existing = Self.cachedProbes[model] {
+            return try await existing.value
         }
-        // Stream finished without ever emitting a visible token. If we saw
-        // thinking first, still classify as thinking; otherwise the probe is
-        // inconclusive and we treat the model as non-thinking.
-        return sawThinking
+        // Capture the backend reference on the main actor before entering the
+        // detached task — `self.backend` is an isolated property.
+        let backendRef = backend!
+        let task = Task<Bool, Error> { @MainActor in
+            let config = GenerationConfig(
+                temperature: 0.3,
+                maxOutputTokens: 64
+            )
+            let stream = try backendRef.generate(
+                prompt: Self.reasoningPrompt,
+                systemPrompt: nil,
+                config: config
+            )
+            var sawThinking = false
+            for try await event in stream.events {
+                switch event {
+                case .thinkingToken:
+                    sawThinking = true
+                case .token:
+                    // First visible token — we've classified the model.
+                    return sawThinking
+                default:
+                    continue
+                }
+            }
+            // Stream finished without ever emitting a visible token. If we saw
+            // thinking first, still classify as thinking; otherwise the probe
+            // is inconclusive and we treat the model as non-thinking.
+            return sawThinking
+        }
+        Self.cachedProbes[model] = task
+        return try await task.value
     }
 
     /// Test A — Thinking models must emit `.thinkingToken` events and fire
     /// exactly one `.thinkingComplete` before the first visible `.token`.
     func testThinkingModel_emitsThinkingEventsBeforeVisibleOutput() async throws {
-        let config = GenerationConfig(temperature: 0.3)
+        // 256 tokens is enough for a compact reasoning trace plus at least one
+        // visible token on the train-meeting prompt — the assertions only need
+        // `firstTokenAfterThinkingComplete == true` and non-empty visible text,
+        // so we just need reasoning AND the first post-thinking token to fit.
+        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 256)
         let stream = try backend.generate(
             prompt: Self.reasoningPrompt,
             systemPrompt: nil,
@@ -258,9 +286,11 @@ final class OllamaE2ETests: XCTestCase {
             "selected model '\(modelName!)' does not produce thinking tokens — maxThinkingTokens=0 assertion is vacuous"
         )
 
+        // Reasoning is suppressed here, so 256 tokens is plenty for the
+        // visible answer alone — test only asserts visibleText is non-empty.
         let config = GenerationConfig(
             temperature: 0.3,
-            maxOutputTokens: nil,
+            maxOutputTokens: 256,
             maxThinkingTokens: 0
         )
         let stream = try backend.generate(
@@ -313,9 +343,16 @@ final class OllamaE2ETests: XCTestCase {
             "selected model '\(modelName!)' does not produce thinking tokens — cap assertion is vacuous"
         )
 
+        // OllamaBackend drops thinking chunks client-side once the 5th event
+        // arrives, but the server still generates the full reasoning trace —
+        // `num_predict` on the wire is `maxOutputTokens + maxThinkingTokens`,
+        // so the budget has to cover server-side reasoning PLUS a non-empty
+        // visible answer. 1536 gives gemma4:e4b room to finish reasoning and
+        // emit visible text for this prompt while still saving wall-clock vs
+        // leaving `maxOutputTokens` at the 2048 default.
         let config = GenerationConfig(
             temperature: 0.3,
-            maxOutputTokens: nil,
+            maxOutputTokens: 1536,
             maxThinkingTokens: 5
         )
         let stream = try backend.generate(
