@@ -307,13 +307,20 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     /// Fallback for models that leak reasoning into content: some Ollama
     /// models (e.g. Qwen3 tags that don't populate `message.thinking` on this
     /// server) emit `<think>…</think>` blocks inline in `content` instead.
-    /// When we never see a populated `thinking` field on the stream and the
-    /// first content chunk contains `<think>`, content is routed through
+    /// When we never see a populated `thinking` field on the stream and a
+    /// content chunk contains the opening marker, content is routed through
     /// ``ThinkingParser`` so callers still receive
     /// ``GenerationEvent/thinkingToken(_:)`` /
     /// ``GenerationEvent/thinkingComplete`` events rather than the raw tags.
     /// The ``GenerationConfig/maxThinkingTokens`` cap still applies; visible
     /// content emerges from the parser as ``GenerationEvent/token(_:)``.
+    ///
+    /// Limitation: engagement is per-chunk, so an opening marker split across
+    /// two NDJSON content chunks (e.g. `<th` + `ink>`) would miss detection
+    /// and yield raw tag fragments as visible tokens. In practice Ollama
+    /// emits `message.content` in coarse line-sized chunks, so the opening
+    /// tag lands in a single chunk. Once engaged, the parser's own buffering
+    /// correctly reassembles a closing tag split across chunks.
     public override func parseResponseStream(
         bytes: URLSession.AsyncBytes,
         config: GenerationConfig,

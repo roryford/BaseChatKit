@@ -1514,6 +1514,23 @@ struct OllamaBackendTests {
         #expect(!backend.isModelLoaded,
                 "backend must not mark itself loaded after :cloud rejection")
     }
+
+    /// The :cloud guard is a `hasSuffix` check, so tag names that merely
+    /// *contain* `:cloud` as a substring or end with a superstring (e.g.
+    /// `:cloudlike`, `:cloud-beta`) must be allowed through — only Ollama's
+    /// exact `:cloud` suffix routes to remote inference. This locks the
+    /// boundary so a future refactor to `contains(":cloud")` would be
+    /// caught immediately.
+    @Test func loadModel_cloudSubstringButNotSuffix_doesNotThrow() async throws {
+        for tag in ["qwen3:cloudlike", "qwen3:cloud-beta", "qwen3-cloud", "cloud-qwen3"] {
+            let backend = OllamaBackend(urlSession: makeMockSession())
+            let baseURL = URL(string: "http://ollama-\(UUID().uuidString).test")!
+            backend.configure(baseURL: baseURL, modelName: tag)
+            try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
+            #expect(backend.isModelLoaded,
+                    "tag '\(tag)' contains 'cloud' but does not end in ':cloud' — must load normally")
+        }
+    }
 }
 
 // MARK: - OllamaModelListService Tests
