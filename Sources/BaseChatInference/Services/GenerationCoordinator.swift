@@ -30,6 +30,17 @@ final class GenerationCoordinator {
     /// non-isolated so it is safe under Swift 6 strict concurrency.
     private let thermalStateProvider: @Sendable () -> ProcessInfo.ThermalState
 
+    // MARK: - Test Seam
+
+    /// Test-only hook invoked alongside `Log.inference.warning` when
+    /// `jsonMode=true` is requested on a backend whose capabilities report
+    /// `supportsNativeJSONMode == false`. Receives `(backendTypeName, message)`.
+    ///
+    /// Production callers never set this; it exists so unit tests can verify
+    /// the silent-ignore warning is emitted without standing up an OSLogStore
+    /// reader. Tests must reset it in `tearDown` to avoid cross-test leakage.
+    nonisolated(unsafe) static var jsonModeUnsupportedWarningHook: (@Sendable (String, String) -> Void)?
+
     // MARK: - Queue Types (Private)
 
     private struct QueuedRequest {
@@ -93,6 +104,19 @@ final class GenerationCoordinator {
     ) throws -> GenerationStream {
         guard let backend = provider?.currentBackend else {
             throw InferenceError.inferenceFailure("No model loaded")
+        }
+
+        // Single pre-dispatch chokepoint for the native-JSON-mode capability
+        // check. Backends without native JSON-mode support silently ignore
+        // the flag and return plain text, so we warn once per request here
+        // rather than in each backend. Callers can branch on
+        // `backend.capabilities.supportsNativeJSONMode` programmatically to
+        // suppress the warning by not setting the flag in the first place.
+        if jsonMode && !backend.capabilities.supportsNativeJSONMode {
+            let backendType = String(describing: type(of: backend))
+            let message = "GenerationCoordinator: jsonMode=true requested but \(backendType) does not support native JSON mode (capabilities.supportsNativeJSONMode == false); the flag will be ignored and the response will be plain text. Check `backend.capabilities.supportsNativeJSONMode` before setting `config.jsonMode`."
+            Log.inference.warning("\(message, privacy: .public)")
+            Self.jsonModeUnsupportedWarningHook?(backendType, message)
         }
 
         var config = GenerationConfig(

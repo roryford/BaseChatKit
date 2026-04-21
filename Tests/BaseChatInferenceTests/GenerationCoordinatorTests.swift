@@ -65,6 +65,101 @@ final class GenerationCoordinatorTests: XCTestCase {
         XCTAssertTrue(config.jsonMode)
     }
 
+    // MARK: - jsonMode silent-ignore warning (PR #615 review fix)
+
+    /// When `jsonMode=true` is passed and the active backend reports
+    /// `supportsNativeJSONMode == false`, the coordinator must emit a warning
+    /// before dispatching so callers have a signal that the flag is being
+    /// ignored. The test observes the warning via an internal hook; real
+    /// traffic also goes to `Log.inference.warning`, which OSLog renders to
+    /// Console.app.
+    ///
+    /// Sabotage check: deleting the warning branch in `GenerationCoordinator.generate`
+    /// leaves `captured` empty and this assertion fails.
+    func test_generate_jsonMode_unsupportedBackend_emitsWarning() async throws {
+        // MockInferenceBackend defaults to supportsNativeJSONMode == false.
+        let captured = WarningCapture()
+        GenerationCoordinator.jsonModeUnsupportedWarningHook = { backendType, message in
+            captured.record(backendType: backendType, message: message)
+        }
+        defer { GenerationCoordinator.jsonModeUnsupportedWarningHook = nil }
+
+        let stream = try coordinator.generate(
+            messages: [("user", "Return JSON")],
+            jsonMode: true
+        )
+        for try await _ in stream.events {}
+
+        let entries = captured.snapshot()
+        XCTAssertEqual(entries.count, 1, "warning must fire exactly once per request")
+        let first = try XCTUnwrap(entries.first)
+        XCTAssertEqual(first.backendType, "MockInferenceBackend",
+                       "warning must name the active backend type")
+        XCTAssertTrue(first.message.contains("jsonMode=true"),
+                      "warning message must mention the flag")
+        XCTAssertTrue(first.message.contains("supportsNativeJSONMode"),
+                      "warning must reference the capability flag so callers can check it programmatically")
+
+        // Silent-ignore must remain silent in the failure sense: the backend
+        // still receives the flag; the warning is additive, not blocking.
+        let config = try XCTUnwrap(provider.backend.lastConfig)
+        XCTAssertTrue(config.jsonMode)
+    }
+
+    /// When `jsonMode=false`, the warning must never fire regardless of the
+    /// backend's capability. This guards against a future regression that
+    /// accidentally flips the condition.
+    func test_generate_jsonModeFalse_neverWarns() async throws {
+        let captured = WarningCapture()
+        GenerationCoordinator.jsonModeUnsupportedWarningHook = { backendType, message in
+            captured.record(backendType: backendType, message: message)
+        }
+        defer { GenerationCoordinator.jsonModeUnsupportedWarningHook = nil }
+
+        let stream = try coordinator.generate(
+            messages: [("user", "Return plain")],
+            jsonMode: false
+        )
+        for try await _ in stream.events {}
+
+        XCTAssertTrue(captured.snapshot().isEmpty,
+                      "warning must not fire when jsonMode is disabled")
+    }
+
+    /// When the backend DOES support native JSON mode, the warning must not
+    /// fire. Simulated here by swapping in a capability set with
+    /// `supportsNativeJSONMode = true`.
+    func test_generate_jsonMode_supportedBackend_noWarning() async throws {
+        let captured = WarningCapture()
+        GenerationCoordinator.jsonModeUnsupportedWarningHook = { backendType, message in
+            captured.record(backendType: backendType, message: message)
+        }
+        defer { GenerationCoordinator.jsonModeUnsupportedWarningHook = nil }
+
+        provider.backend.capabilities = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 4096,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: false,
+            supportsStructuredOutput: true,
+            supportsNativeJSONMode: true,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false
+        )
+
+        let stream = try coordinator.generate(
+            messages: [("user", "Return JSON")],
+            jsonMode: true
+        )
+        for try await _ in stream.events {}
+
+        XCTAssertTrue(captured.snapshot().isEmpty,
+                      "warning must not fire when the backend supports native JSON mode")
+        let config = try XCTUnwrap(provider.backend.lastConfig)
+        XCTAssertTrue(config.jsonMode)
+    }
+
     func test_enqueue_overQueueDepth_throwsQueueFullError() throws {
         // Saturate the coordinator: one active plus eight queued is the hard cap
         // (maxQueueDepth == 8 counts queued requests only).
@@ -700,6 +795,33 @@ final class GenerationCoordinatorTests: XCTestCase {
         // generation.
         XCTAssertFalse(coord.isGenerating)
         XCTAssertNil(coord.provider as? SlowFakeProvider)
+    }
+}
+
+// MARK: - Warning capture (PR #615 review fix)
+
+/// Thread-safe collector for the `jsonModeUnsupportedWarningHook` on
+/// `GenerationCoordinator`. The hook is `@Sendable` and may fire from any
+/// isolation; an `NSLock` keeps recorded entries race-free without
+/// introducing actor hops into the test.
+private final class WarningCapture: @unchecked Sendable {
+    struct Entry {
+        let backendType: String
+        let message: String
+    }
+    private let lock = NSLock()
+    private var entries: [Entry] = []
+
+    func record(backendType: String, message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        entries.append(Entry(backendType: backendType, message: message))
+    }
+
+    func snapshot() -> [Entry] {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries
     }
 }
 
