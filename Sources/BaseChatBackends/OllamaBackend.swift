@@ -40,6 +40,22 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     /// clean request bodies).
     public private(set) var isThinkingModel: Bool = false
 
+    /// Conservative floor for `num_ctx` when the caller did not plumb a real
+    /// context budget via `ModelLoadPlan` (`.cloud()` default is `1`).
+    /// Ollama's server-side `OLLAMA_CONTEXT_LENGTH` defaults to 2048 tokens,
+    /// which silently truncates multi-turn conversations with no error signal.
+    /// 8192 matches what most mainstream local models are happy with and keeps
+    /// multi-turn chat working even when the caller forgot to size the plan.
+    static let defaultNumCtxFloor: Int = 8192
+
+    /// Effective context size derived from the `ModelLoadPlan` passed to
+    /// `loadModel(from:plan:)`. Used to populate Ollama's `options.num_ctx` in
+    /// every request body so the server doesn't fall back to its 2048-token
+    /// default (the silent-truncation footgun). Falls back to
+    /// ``defaultNumCtxFloor`` when the plan carries a non-meaningful size
+    /// (the `.cloud()` factory defaults to `1`).
+    private var effectiveNumCtx: Int = defaultNumCtxFloor
+
     // MARK: - Init
 
     /// Creates an Ollama backend.
@@ -84,10 +100,30 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             )
         }
 
+        // Ollama v0.18.0+ routes any model tag ending in `:cloud` to remote
+        // inference (Ollama's hosted service) rather than the local server.
+        // BaseChatKit positions itself as local-first, so silently sending
+        // prompts off-device would violate the caller's expectation — throw a
+        // descriptive error at load time rather than leak conversation content
+        // to a remote endpoint the user didn't consciously opt into.
+        if modelName.hasSuffix(":cloud") {
+            throw CloudBackendError.invalidURL(
+                "Ollama model '\(modelName)' is a :cloud-suffixed tag that routes to remote inference. BaseChatKit is local-first — strip the :cloud suffix or switch to a cloud backend (ClaudeBackend, OpenAIBackend) if remote inference is intended."
+            )
+        }
+
+        // Honour the plan's effective context size so Ollama's `num_ctx`
+        // matches what BCK's `ContextWindowManager` budgets against. If the
+        // caller used the `.cloud()` factory (which defaults to 1), fall back
+        // to the floor — Ollama's own 2048 default is a documented footgun
+        // that silently truncates multi-turn conversations.
+        let planned = plan.effectiveContextSize
+        effectiveNumCtx = planned > Self.defaultNumCtxFloor ? planned : Self.defaultNumCtxFloor
+
         self.isThinkingModel = (try? await detectThinkingCapability()) ?? false
 
         setIsModelLoaded(true)
-        Log.inference.info("OllamaBackend configured for \(self.modelName, privacy: .public) at \(self.baseURL?.host() ?? "unknown", privacy: .public) thinking=\(self.isThinkingModel, privacy: .public)")
+        Log.inference.info("OllamaBackend configured for \(self.modelName, privacy: .public) at \(self.baseURL?.host() ?? "unknown", privacy: .public) thinking=\(self.isThinkingModel, privacy: .public) num_ctx=\(self.effectiveNumCtx, privacy: .public)")
     }
 
     /// Calls Ollama's `/api/show` endpoint and classifies the model as
@@ -207,8 +243,21 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             "top_k": config.topK.map { Int($0) } ?? 40,
             "repeat_penalty": config.repeatPenalty,
             "num_predict": visibleBudget + thinkingBudget,
+            // Ollama's server-side default is `OLLAMA_CONTEXT_LENGTH` (2048).
+            // Multi-turn conversations with long history or tool results get
+            // silently truncated at that ceiling with no error signal. Set
+            // `num_ctx` explicitly to BCK's effective context size so the
+            // server honours whatever budget we decided on at load time.
+            "num_ctx": effectiveNumCtx,
         ]
 
+        // TODO(#55): Tool calling for Ollama requires `stream: false`. Ollama
+        // streaming silently drops `tool_calls` delta chunks, so when
+        // `config.tools` is non-empty and tools land for this backend, this
+        // body must switch `"stream"` to `false` and `parseResponseStream`
+        // gains a non-streaming branch. See the Ollama tracking issue — the
+        // workaround is well-documented upstream. Today `supportsToolCalling
+        // == false` so `config.tools` is ignored by contract.
         var body: [String: Any] = [
             "model": modelName,
             "messages": messages,
@@ -254,6 +303,17 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     /// accumulator is still open. ``GenerationConfig/maxThinkingTokens``
     /// caps reasoning emission; once exceeded subsequent thinking content is
     /// dropped and only visible ``GenerationEvent/token(_:)`` events continue.
+    ///
+    /// Fallback for models that leak reasoning into content: some Ollama
+    /// models (e.g. Qwen3 tags that don't populate `message.thinking` on this
+    /// server) emit `<think>…</think>` blocks inline in `content` instead.
+    /// When we never see a populated `thinking` field on the stream and the
+    /// first content chunk contains `<think>`, content is routed through
+    /// ``ThinkingParser`` so callers still receive
+    /// ``GenerationEvent/thinkingToken(_:)`` /
+    /// ``GenerationEvent/thinkingComplete`` events rather than the raw tags.
+    /// The ``GenerationConfig/maxThinkingTokens`` cap still applies; visible
+    /// content emerges from the parser as ``GenerationEvent/token(_:)``.
     public override func parseResponseStream(
         bytes: URLSession.AsyncBytes,
         config: GenerationConfig,
@@ -276,6 +336,15 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         var visibleLineCount = 0
         let visibleLimit = config.maxOutputTokens
 
+        // Inline `<think>` fallback state. Engaged only when the server never
+        // populates `message.thinking` / top-level `thinking` and a content
+        // chunk carries `<think>`. Once engaged it stays engaged for the rest
+        // of the stream so partial tags split across chunks are held back
+        // correctly by the parser's own buffering.
+        var sawThinkingField = false
+        let fallbackMarkers = config.thinkingMarkers ?? .qwen3
+        var contentParser: ThinkingParser?
+
         func noteEventYielded() throws {
             let now = ContinuousClock.now
             if now - rateWindowStart >= .seconds(1) {
@@ -289,12 +358,50 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             }
         }
 
+        // Yield a single parser-produced event while honouring the per-stream
+        // caps used elsewhere. Returns `false` when the visible-token cap was
+        // hit and the caller should stop producing further output on this
+        // line. Only handles the events `ThinkingParser` actually emits
+        // (`.token`, `.thinkingToken`, `.thinkingComplete`); anything else is
+        // forwarded verbatim.
+        func emit(_ event: GenerationEvent) throws -> Bool {
+            switch event {
+            case .thinkingToken(let text):
+                if let limit = thinkingLimit, thinkingTokenCount >= limit {
+                    return true // Drop silently — cap reached.
+                }
+                try noteEventYielded()
+                continuation.yield(.thinkingToken(text))
+                thinkingOpen = true
+                thinkingTokenCount += 1
+                return true
+            case .thinkingComplete:
+                try noteEventYielded()
+                continuation.yield(.thinkingComplete)
+                thinkingOpen = false
+                return true
+            case .token(let text):
+                if let limit = visibleLimit, visibleLineCount >= limit {
+                    continuation.finish()
+                    return false
+                }
+                try noteEventYielded()
+                continuation.yield(.token(text))
+                visibleLineCount += 1
+                return true
+            default:
+                continuation.yield(event)
+                return true
+            }
+        }
+
         func handleLine(_ line: String) throws {
             guard let parsed = Self.parseLine(line) else { return }
 
             // Route thinking field (if any) first so downstream consumers see
             // reasoning before visible content for a given NDJSON record.
             if let thinking = parsed.thinking, !thinking.isEmpty {
+                sawThinkingField = true
                 if let limit = thinkingLimit, thinkingTokenCount >= limit {
                     // Cap reached — drop this thinking chunk silently.
                 } else {
@@ -307,10 +414,12 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
                     // coarser grain of the wire format.
                     thinkingTokenCount += 1
                 }
-            } else if thinkingOpen {
+            } else if thinkingOpen && contentParser == nil {
                 // Transition from thinking → content. Fire .thinkingComplete
                 // exactly once on the first empty-thinking line we see after
-                // any non-empty thinking was emitted.
+                // any non-empty thinking was emitted. Skipped when the
+                // fallback parser is driving state — the parser closes its
+                // own thinking block via its own `.thinkingComplete`.
                 try noteEventYielded()
                 continuation.yield(.thinkingComplete)
                 thinkingOpen = false
@@ -328,12 +437,49 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
                         return
                     }
                 }
-                try noteEventYielded()
-                continuation.yield(.token(content))
-                visibleLineCount += 1
+
+                // Engage the fallback `<think>`-in-content parser when the
+                // server has never populated a dedicated thinking field on
+                // this stream and the incoming content carries the opening
+                // tag. Once engaged, every subsequent content chunk flows
+                // through the parser so a tag split across two NDJSON lines
+                // is held in the parser's own buffer.
+                if contentParser == nil,
+                   !sawThinkingField,
+                   content.contains(fallbackMarkers.open) {
+                    contentParser = ThinkingParser(markers: fallbackMarkers)
+                }
+
+                if var parser = contentParser {
+                    for event in parser.process(content) {
+                        if try !emit(event) {
+                            contentParser = parser
+                            return
+                        }
+                    }
+                    contentParser = parser
+                } else {
+                    try noteEventYielded()
+                    continuation.yield(.token(content))
+                    visibleLineCount += 1
+                }
             }
 
             if parsed.done {
+                // Flush any remaining buffered content from the fallback
+                // parser first — held-back bytes (e.g. an unmatched prefix
+                // of `<`) must be emitted before we decide whether thinking
+                // is still open.
+                if var parser = contentParser {
+                    for event in parser.finalize() {
+                        if try !emit(event) {
+                            contentParser = parser
+                            return
+                        }
+                    }
+                    contentParser = parser
+                }
+
                 // Ollama can terminate with `"done":true` while thinking is
                 // still the only content emitted (e.g. reasoning model hits
                 // num_predict mid-think). Flush .thinkingComplete so
@@ -391,6 +537,16 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         if !lineBuffer.isEmpty,
            let line = String(data: lineBuffer, encoding: .utf8) {
             try handleLine(line)
+        }
+
+        // Drain any bytes still held back inside the fallback parser. A stream
+        // that ends without a trailing done-chunk (network cut, malformed
+        // last line) would otherwise swallow the final held-back suffix.
+        if var parser = contentParser {
+            for event in parser.finalize() {
+                _ = try emit(event)
+            }
+            contentParser = parser
         }
 
         // Safety net: if the stream ends while thinking is still "open"

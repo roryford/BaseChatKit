@@ -1357,6 +1357,163 @@ struct OllamaBackendTests {
         // assertion would fail because all 5 multi-word lines would pass.
         #expect(tokens == ["hello world", "foo bar"])
     }
+
+    // MARK: - <think>-in-content fallback
+
+    /// Some Ollama tags (notably certain Qwen3 deployments) don't populate
+    /// the dedicated `message.thinking` field — reasoning leaks directly
+    /// into `message.content` as a `<think>…</think>` block. When no
+    /// dedicated thinking field is ever seen on the stream and content
+    /// contains `<think>`, the backend must route content through
+    /// `ThinkingParser` so callers still receive the usual thinkingToken /
+    /// thinkingComplete / token event shape instead of raw tags baked into
+    /// visible output.
+    @Test func streaming_thinkingInContentFallback_emitsThinkingEvents() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        // `message.thinking` absent on every line. `<think>reasoning</think>answer`
+        // is split across two chunks so the parser has to hold back the
+        // partial closing tag and reassemble across NDJSON boundaries.
+        let chunks: [Data] = [
+            ndjsonLine(#"{"message":{"role":"assistant","content":"<think>reasoning"},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","content":"</think>answer"},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+        var events: [GenerationEvent] = []
+        for try await event in stream.events { events.append(event) }
+
+        let thinkingText = events.compactMap { event -> String? in
+            if case .thinkingToken(let t) = event { return t } else { return nil }
+        }.joined()
+        let visibleText = events.compactMap { event -> String? in
+            if case .token(let t) = event { return t } else { return nil }
+        }.joined()
+        let completeCount = events.filter {
+            if case .thinkingComplete = $0 { return true } else { return false }
+        }.count
+
+        #expect(thinkingText == "reasoning")
+        #expect(visibleText == "answer")
+        #expect(completeCount == 1, "expected exactly one .thinkingComplete (got \(completeCount))")
+
+        // No raw `<think>` tags may leak into either event type.
+        for event in events {
+            switch event {
+            case .thinkingToken(let t):
+                #expect(!t.contains("<think>") && !t.contains("</think>"),
+                        "thinkingToken must not carry raw tags (got \(t))")
+            case .token(let t):
+                #expect(!t.contains("<think>") && !t.contains("</think>"),
+                        "visible .token must not carry raw tags (got \(t))")
+            default: break
+            }
+        }
+    }
+
+    /// When the dedicated `message.thinking` field IS populated, the
+    /// fallback parser must stay dormant so reasoning isn't double-parsed
+    /// and a literal `<think>` in visible content passes through unchanged.
+    @Test func streaming_thinkingFieldPresent_fallbackParserDormant() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        // message.thinking populated on the first line; the second line's
+        // content contains the literal string `<think>` which would
+        // otherwise trip the fallback. Because the first line latched
+        // sawThinkingField, the fallback stays disengaged and content
+        // passes through verbatim.
+        let chunks: [Data] = [
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"dedicated","content":""},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","thinking":"","content":"pre <think> post"},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+        var events: [GenerationEvent] = []
+        for try await event in stream.events { events.append(event) }
+
+        let thinkingTokens = events.compactMap { event -> String? in
+            if case .thinkingToken(let t) = event { return t } else { return nil }
+        }
+        let tokens = events.compactMap { event -> String? in
+            if case .token(let t) = event { return t } else { return nil }
+        }
+
+        #expect(thinkingTokens == ["dedicated"],
+                "only the dedicated thinking field should surface as .thinkingToken")
+        #expect(tokens.joined() == "pre <think> post",
+                "raw <think> in visible content must NOT be re-parsed once the dedicated field was seen")
+    }
+
+    // MARK: - num_ctx request option (Ollama OLLAMA_CONTEXT_LENGTH footgun)
+
+    /// Ollama's server-side `OLLAMA_CONTEXT_LENGTH` defaults to 2048 tokens
+    /// and silently truncates multi-turn conversations that exceed it with
+    /// no error signal. Every request must set `options.num_ctx` explicitly
+    /// so we stop relying on the server default. When `loadModel` was
+    /// called with a `.cloud()` plan (requested=1), the backend must still
+    /// fall back to the conservative floor so chat stays usable.
+    @Test func requestBody_alwaysSetsNumCtx_atOrAboveFloor() async throws {
+        let (backend, chatURL) = makeConfiguredBackend()
+        try await loadBackend(backend)
+
+        let chunks: [Data] = [
+            ndjsonLine(#"{"message":{"role":"assistant","content":"ok"},"done":false}"#),
+            ndjsonLine(#"{"message":{"role":"assistant","content":""},"done":true}"#),
+        ]
+        MockURLProtocol.stub(url: chatURL, response: .sse(chunks: chunks, statusCode: 200))
+        defer { MockURLProtocol.unstub(url: chatURL) }
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: .init())
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == chatURL })
+        let body = try extractBody(from: captured)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let options = try #require(json["options"] as? [String: Any])
+        let numCtx = try #require(options["num_ctx"] as? Int,
+                                  "options.num_ctx must be present on every request to override Ollama's 2048 server default")
+        #expect(numCtx >= OllamaBackend.defaultNumCtxFloor,
+                "num_ctx must be at or above the floor (got \(numCtx))")
+    }
+
+    // MARK: - :cloud model tag guard
+
+    /// Ollama v0.18.0+ routes `:cloud`-suffixed model IDs to remote
+    /// inference (Ollama's hosted service) rather than the local server.
+    /// BaseChatKit is local-first, so silently forwarding prompts off-device
+    /// would leak conversation content the user didn't consciously opt into.
+    /// `loadModel` must reject the tag with a descriptive error.
+    @Test func loadModel_cloudSuffixedTag_throws() async throws {
+        let backend = OllamaBackend(urlSession: makeMockSession())
+        let baseURL = URL(string: "http://ollama-\(UUID().uuidString).test")!
+        backend.configure(baseURL: baseURL, modelName: "qwen3:cloud")
+
+        do {
+            try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
+            Issue.record("Expected throw for :cloud-suffixed model tag")
+        } catch {
+            guard let cloudError = extractCloudError(error) else {
+                Issue.record("Expected CloudBackendError, got \(error)")
+                return
+            }
+            switch cloudError {
+            case .invalidURL(let message):
+                #expect(message.contains(":cloud"),
+                        "error message should mention :cloud so the user knows why the load failed (got: \(message))")
+            default:
+                Issue.record("Expected .invalidURL, got \(cloudError)")
+            }
+        }
+        #expect(!backend.isModelLoaded,
+                "backend must not mark itself loaded after :cloud rejection")
+    }
 }
 
 // MARK: - OllamaModelListService Tests
