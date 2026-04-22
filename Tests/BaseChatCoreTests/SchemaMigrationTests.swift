@@ -63,8 +63,17 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertNotNil(container)
     }
 
-    func test_containerFactory_currentSchema_isV3() {
-        XCTAssertEqual(ObjectIdentifier(ModelContainerFactory.currentSchema), ObjectIdentifier(BaseChatSchemaV3.self))
+    func test_containerFactory_currentSchema_isV4() {
+        XCTAssertEqual(ObjectIdentifier(ModelContainerFactory.currentSchema), ObjectIdentifier(BaseChatSchemaV4.self))
+    }
+
+    func test_containerFactory_migrationPlan_includesV3AndV4() {
+        let plan = ModelContainerFactory.migrationPlan
+        XCTAssertEqual(plan.schemas.count, 2)
+        let ids = plan.schemas.map { ObjectIdentifier($0) }
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV3.self)))
+        XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV4.self)))
+        XCTAssertEqual(plan.stages.count, 1, "V3 → V4 is the only stage")
     }
 
     func test_containerFactory_reopensPersistedStore() throws {
