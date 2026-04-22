@@ -15,6 +15,8 @@ let package = Package(
         .library(name: "BaseChatUI", targets: ["BaseChatUI"]),
         .library(name: "BaseChatFuzz", targets: ["BaseChatFuzz"]),
         .executable(name: "fuzz-chat", targets: ["fuzz-chat"]),
+        .library(name: "BaseChatTools", targets: ["BaseChatTools"]),
+        .executable(name: "bck-tools", targets: ["bck-tools"]),
     ],
     traits: [
         .default(enabledTraits: ["MLX", "Llama"]),
@@ -184,6 +186,36 @@ let package = Package(
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+            ]
+        ),
+        // BaseChatTools: end-to-end tool-calling validation harness.
+        // Ships a fixed reference toolset (now, calc, read_file, list_dir,
+        // http_get_fixture), a declarative scenario runner, and a JSONL
+        // transcript logger. Library target so the test suite can exercise
+        // the runner against in-process scripted backends; the CLI lives in
+        // the `bck-tools` executable target below.
+        .target(
+            name: "BaseChatTools",
+            dependencies: [
+                "BaseChatInference",
+            ],
+            path: "Sources/BaseChatTools"
+        ),
+        .executableTarget(
+            name: "bck-tools",
+            dependencies: [
+                "BaseChatTools",
+                "BaseChatBackends",
+                "BaseChatInference",
+            ],
+            path: "Sources/bck-tools"
+        ),
+        .testTarget(
+            name: "BaseChatToolsTests",
+            dependencies: [
+                "BaseChatTools",
+                "BaseChatInference",
+                "BaseChatTestSupport",
             ]
         ),
         // Xcode-only: real MLX model inference requiring Metal shader library.

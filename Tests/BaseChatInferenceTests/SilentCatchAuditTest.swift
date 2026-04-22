@@ -148,6 +148,15 @@ final class SilentCatchAuditTest: XCTestCase {
         // for a log message after the upstream request already failed.
         // A truncated body is better than crashing the error handler.
         "BaseChatBackends/ClaudeBackend.swift:} catch {",
+
+        // BaseChatTools — bck-tools CLI harness. Two benign catches:
+        //   - TranscriptLogger.deinit can't propagate a close() failure and
+        //     the file is about to be reaped with the process anyway.
+        //   - NowTool.EmptyArgs.init(from:) probes the keyed container so
+        //     it accepts both `{}` and `null`; a missing container is a
+        //     valid zero-argument payload and not an error condition.
+        "BaseChatTools/TranscriptLogger.swift:} catch {",
+        "BaseChatTools/ReferenceTools/NowTool.swift:} catch {",
     ]
 
     func test_sourcesDirectoryContainsNoUnapprovedSilentSwallows() throws {
