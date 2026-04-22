@@ -1,0 +1,3 @@
+{"event":"toolCall","tool_name":"get_weather","arguments_contains":"Paris"}
+{"event":"toolCall","tool_name":"get_current_time","arguments_contains":"{}"}
+{"event":"usage","prompt":55,"completion":31}

@@ -15,7 +15,14 @@ public protocol JSONSchemaValidating: Sendable {
 
     /// Returns `nil` when `value` satisfies `schema`, or a human-readable
     /// error description when it does not.
-    func validate(_ value: JSONSchemaValue, against schema: JSONSchemaValue) -> String?
+    ///
+    /// Named `validateAgainst(...)` rather than `validate(...)` so the
+    /// protocol method does not collide with
+    /// ``JSONSchemaValidator/validate(_:against:)-ValidationFailure`` at
+    /// direct call sites that hold the concrete validator type. The registry
+    /// always routes through this protocol method and sees a single
+    /// unambiguous signature.
+    func validateAgainst(_ schema: JSONSchemaValue, value: JSONSchemaValue) -> String?
 }
 
 // MARK: - ToolRegistry
@@ -67,6 +74,12 @@ public protocol JSONSchemaValidating: Sendable {
     /// Each tool is registered in order, so later entries override earlier
     /// ones on name collision (with the same override warning emitted from
     /// ``register(_:)``).
+    ///
+    /// ``validator`` defaults to `nil` on a freshly-constructed registry; the
+    /// generation coordinator installs a default ``JSONSchemaValidator`` on
+    /// first dispatch when one has not been wired explicitly. Tests that need
+    /// the no-validator behaviour can keep using this initializer without
+    /// opting out of the protocol.
     public init(tools: [any ToolExecutor] = []) {
         for tool in tools {
             register(tool)
@@ -166,7 +179,7 @@ public protocol JSONSchemaValidating: Sendable {
 
         // 3. Optional schema validation (wave 2 wiring).
         if let validator,
-           let message = validator.validate(parsedArguments, against: executor.definition.parameters) {
+           let message = validator.validateAgainst(executor.definition.parameters, value: parsedArguments) {
             return ToolResult(
                 callId: call.id,
                 content: "arguments failed schema validation: \(message)",

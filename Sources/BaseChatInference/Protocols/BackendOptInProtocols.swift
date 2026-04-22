@@ -16,6 +16,63 @@ public protocol ConversationHistoryReceiver: AnyObject {
     func setConversationHistory(_ messages: [(role: String, content: String)])
 }
 
+/// One entry in a tool-aware conversation history.
+///
+/// Extends the plain `(role, content)` shape that ``ConversationHistoryReceiver``
+/// accepts with the tool-calling fields the Ollama and OpenAI-compatible
+/// `/api/chat` wire contracts require:
+///
+/// - `toolCalls` — attached to `role: "assistant"` entries that preceded a
+///   tool invocation. Each element carries the backend-assigned call id,
+///   the tool name, and the raw JSON arguments string the model emitted.
+/// - `toolCallId` — attached to `role: "tool"` entries that feed a
+///   ``ToolResult`` back into the conversation. Must match the corresponding
+///   ``ToolCall/id`` so the server can thread the result into the right slot.
+///
+/// Plain text turns leave both fields `nil`; the adapter collapses back to
+/// the classic `(role, content)` shape when no tool context is present.
+public struct ToolAwareHistoryEntry: Sendable, Equatable, Hashable {
+
+    /// `"user"`, `"assistant"`, `"system"`, or `"tool"`.
+    public let role: String
+
+    /// Visible message content. Tool calls still carry an empty string here
+    /// (the model's textual preamble, if any); tool results carry the
+    /// serialised result payload.
+    public let content: String
+
+    /// Tool calls emitted by the model in this assistant turn, in emission
+    /// order. `nil` on non-assistant turns or assistant turns without calls.
+    public let toolCalls: [ToolCall]?
+
+    /// Call id this tool-role entry responds to. `nil` on non-tool turns.
+    public let toolCallId: String?
+
+    public init(
+        role: String,
+        content: String,
+        toolCalls: [ToolCall]? = nil,
+        toolCallId: String? = nil
+    ) {
+        self.role = role
+        self.content = content
+        self.toolCalls = toolCalls
+        self.toolCallId = toolCallId
+    }
+}
+
+/// Adopted by backends that can accept a tool-aware conversation history on
+/// each generation request.
+///
+/// Implemented by the Ollama adapter so the coordinator can feed
+/// `role: "tool"` entries (carrying a ``ToolCall/id`` back to the server) and
+/// `role: "assistant"` entries annotated with the `toolCalls` the model
+/// previously emitted. Backends without tool-call wire support keep the
+/// classic ``ConversationHistoryReceiver`` contract.
+public protocol ToolCallingHistoryReceiver: AnyObject {
+    func setToolAwareHistory(_ messages: [ToolAwareHistoryEntry])
+}
+
 /// Adopted by cloud backends that track token usage per response.
 public protocol TokenUsageProvider: AnyObject {
     var lastUsage: (promptTokens: Int, completionTokens: Int)? { get }

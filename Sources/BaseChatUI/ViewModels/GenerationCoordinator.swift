@@ -337,6 +337,23 @@ final class GenerationCoordinator {
                                     msg.contentParts.insert(.thinking(block), at: insertAt)
                                 }
                             }
+
+                        case .appendToolResult(let result):
+                            // Append the dispatched tool result as a first-class
+                            // part so the transcript records the full call →
+                            // result round trip alongside any visible text. UI
+                            // renders these via MessagePartsView's tool-call
+                            // switch branch.
+                            self.onMutateMessage(messageID) { msg in
+                                msg.contentParts.append(.toolResult(result))
+                            }
+
+                        case .toolLoopLimitReached(let iterations):
+                            // The orchestrator stopped the dispatch loop before
+                            // the model produced a final visible answer. Surface
+                            // an error so the user isn't left staring at an
+                            // empty bubble.
+                            self.onSetErrorMessage("Tool-call loop stopped after \(iterations) iterations.")
                         }
                     }
                 } catch {

@@ -30,6 +30,12 @@ public struct GenerationStreamConsumer: Sendable {
 
         case .thinkingComplete:
             return .finalizeThinking
+
+        case .toolResult(let result):
+            return .appendToolResult(result)
+
+        case .toolLoopLimitReached(let iterations):
+            return .toolLoopLimitReached(iterations: iterations)
         }
     }
 
@@ -55,5 +61,10 @@ public struct GenerationStreamConsumer: Sendable {
         case appendThinkingText(String)
         /// Reasoning block complete — finalize and store the accumulated thinking content.
         case finalizeThinking
+        /// Append a dispatched ``ToolResult`` to the current assistant message's parts.
+        case appendToolResult(ToolResult)
+        /// The orchestrator stopped the tool-dispatch loop because the
+        /// ``GenerationConfig/maxToolIterations`` budget was exhausted.
+        case toolLoopLimitReached(iterations: Int)
     }
 }

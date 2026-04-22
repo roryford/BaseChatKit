@@ -29,6 +29,24 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     /// the full stream event sequence without wiring up a real backend.
     public var scriptedToolCalls: [ToolCall] = []
 
+    /// Per-turn tool calls for tests that exercise the orchestrator's
+    /// tool-dispatch loop.
+    ///
+    /// Each call to ``generate(prompt:systemPrompt:config:)`` pops the first
+    /// entry (its elements become `scriptedToolCalls` for that one call).
+    /// When this queue is non-empty it takes precedence over the flat
+    /// ``scriptedToolCalls`` property; once the queue is drained the backend
+    /// emits no further tool calls even if ``scriptedToolCalls`` was seeded.
+    /// This mirrors the real-world pattern where a model emits a tool call on
+    /// turn N and then finalises visible text on turn N+1.
+    public var scriptedToolCallsPerTurn: [[ToolCall]] = []
+
+    /// Tokens the backend will yield on turn N, when
+    /// ``scriptedToolCallsPerTurn`` is driving the conversation. Entries are
+    /// popped in step with the per-turn tool-call queue. Empty queue falls
+    /// back to the flat ``tokensToYield`` property.
+    public var tokensToYieldPerTurn: [[String]] = []
+
     // Track calls
     public var loadModelCallCount = 0
     public var generateCallCount = 0
@@ -83,8 +101,21 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         guard isModelLoaded else { throw InferenceError.inferenceFailure("No model loaded") }
 
         isGenerating = true
-        let tokens = tokensToYield
-        let toolCalls = scriptedToolCalls
+        // Per-turn scripting takes precedence when configured. Pop from the
+        // front so successive generate() calls drive different turns.
+        let toolCalls: [ToolCall]
+        let tokens: [String]
+        if !scriptedToolCallsPerTurn.isEmpty {
+            toolCalls = scriptedToolCallsPerTurn.removeFirst()
+            if !tokensToYieldPerTurn.isEmpty {
+                tokens = tokensToYieldPerTurn.removeFirst()
+            } else {
+                tokens = tokensToYield
+            }
+        } else {
+            toolCalls = scriptedToolCalls
+            tokens = tokensToYield
+        }
 
         let thinkingTokens = thinkingTokensToYield
 

@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "get_weather",
+  "arguments_contains": "Berlin",
+  "should_log_warning": false,
+  "notes": "Flat {name, arguments} shape at the tool_call level (no `function` wrapper) — observed from some Ollama 0.3.x builds."
+}

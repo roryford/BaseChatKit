@@ -1,0 +1,9 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "get_weather",
+  "arguments_contains": "Paris",
+  "expected_call_count": 2,
+  "should_log_warning": false,
+  "notes": "Ollama occasionally emits two tool_calls in one assistant delta. Parser must emit BOTH .toolCall events in order. The replay harness checks `expected_call_count` when set; `tool_name` + `arguments_contains` describe the FIRST call for compat with the simpler assertions."
+}

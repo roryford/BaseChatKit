@@ -1,0 +1,1 @@
+{"model":"llama3.1","message":{"role":"assistant","content":"","tool_calls":[{"id":null,"function":{"name":"get_weather","arguments":{"city":"Paris"}}}]},"done":false}

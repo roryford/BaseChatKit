@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "translate",
+  "arguments_contains": "مرحبا",
+  "should_log_warning": false,
+  "notes": "Arabic RTL text, emoji (U+1F44B), and a combining-character French letter must all round-trip verbatim."
+}

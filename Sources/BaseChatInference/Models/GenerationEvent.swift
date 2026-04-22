@@ -23,4 +23,21 @@ public enum GenerationEvent: Sendable, Equatable {
 
     /// Reasoning block complete (depth 1→0 transition). Finalize accumulated thinking content.
     case thinkingComplete
+
+    /// The orchestrator terminated a tool-dispatch loop because the per-request
+    /// iteration budget (``GenerationConfig/maxToolIterations``) was reached.
+    ///
+    /// Emitted exactly once per turn when the loop stops for this reason. The
+    /// associated value is the iteration count that ran before termination, so
+    /// UI surfaces can differentiate a budget hit from an organic stop.
+    case toolLoopLimitReached(iterations: Int)
+
+    /// Result of a tool dispatched by the orchestrator in response to a
+    /// ``toolCall(_:)`` event.
+    ///
+    /// Emitted after the coordinator has routed a ``ToolCall`` through the
+    /// registered ``ToolRegistry`` and produced a ``ToolResult``. Downstream
+    /// consumers (chat UIs, transcripts) use this to append the tool result to
+    /// the assistant turn before the next generation round begins.
+    case toolResult(ToolResult)
 }

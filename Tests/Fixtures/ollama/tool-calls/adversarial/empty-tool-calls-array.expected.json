@@ -1,0 +1,8 @@
+{
+  "should_emit": false,
+  "event_type": null,
+  "tool_name": null,
+  "arguments_contains": null,
+  "should_log_warning": false,
+  "notes": "Empty `tool_calls` array is not an error — the model simply didn't invoke a tool on this delta. Parser must not emit a .toolCall event. Content-text is emitted separately via the existing content path."
+}

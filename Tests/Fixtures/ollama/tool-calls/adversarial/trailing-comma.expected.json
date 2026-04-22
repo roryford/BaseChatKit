@@ -1,0 +1,8 @@
+{
+  "should_emit": false,
+  "event_type": null,
+  "tool_name": null,
+  "arguments_contains": null,
+  "should_log_warning": true,
+  "notes": "JSONSerialization rejects trailing commas — this is a malformed line. parseLine returns nil, no event emitted, parser logs a warning."
+}

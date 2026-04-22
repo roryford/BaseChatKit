@@ -751,3 +751,44 @@ No other `*Tests.swift` file is clearly mislabeled. The remaining suspicions cal
 4. This section added to TESTING.md.
 
 No other relocations were needed. The audit confirms the `BaseChatE2ETests` suite is honestly named under the project's documented Layer 4 definition, and that `BaseChatBackendsTests` no longer contains any file that loads real model weights.
+
+---
+
+## Ollama tool-call fixture corpus
+
+Two fixture corpora live at `Tests/Fixtures/ollama/tool-calls/`:
+
+- `adversarial/` — 15+ hand-crafted NDJSON lines, each with an
+  `.expected.json` sibling describing the outcome a compliant parser must
+  produce (emit / no-emit, tool_name, arguments substring, warning
+  behaviour). Covers wire-format drift observed in the wild: `arguments`
+  as object vs string, missing `id`, OpenAI-compat vs flat shape,
+  unicode, surrogate pairs, long payloads, malformed JSON, Python
+  literals.
+- `<OLLAMA_VERSION>/` (currently `0.3.12/`) — full NDJSON stream captures
+  (`<scenario>.sse` + `<scenario>.expected.jsonl`) representing real
+  server traces at a pinned Ollama version. A `VERSION.md` sibling
+  documents the pin and the re-capture procedure.
+
+### CI version pinning
+
+The real-daemon E2E job sets `OLLAMA_VERSION=0.3.12` and asserts that
+`ollama --version` contains that string before running any fixtures. When
+Ollama is bumped:
+
+1. Re-capture the `.sse` fixtures against the new version — see
+   `Tests/Fixtures/ollama/tool-calls/0.3.12/VERSION.md` for the procedure.
+2. Rename the directory to the new version.
+3. Update `OLLAMA_VERSION` in the CI workflow (or in `TESTING.md` here if
+   the workflow doesn't yet exist).
+4. Delete the old directory only after the new fixtures are green.
+
+### Replay test harnesses
+
+- `OllamaAdversarialJSONTests` — walks the `adversarial/` corpus.
+- `OllamaToolCallLiveReplayTests` — walks the pinned-version `.sse`
+  captures.
+
+Both gate tool-call assertions on
+`OllamaBackend().capabilities.supportsToolCalling` so they activate
+automatically when Ollama tool-call emission lands in `OllamaBackend`.

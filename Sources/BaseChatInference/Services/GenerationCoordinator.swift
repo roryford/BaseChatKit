@@ -190,6 +190,73 @@ final class GenerationCoordinator {
         )
     }
 
+    // MARK: - Generation (Config-preserving entry for tool-dispatch)
+
+    /// Generates from a message history using a caller-supplied
+    /// ``GenerationConfig``, preserving every field including `tools`,
+    /// `toolChoice`, and `maxToolIterations`.
+    ///
+    /// The primary `generate(messages:...)` entry reconstructs a config from
+    /// individual parameters, which drops the tool-related fields. The
+    /// tool-dispatch loop in `drainQueue` uses this entry instead so the
+    /// backend sees the full config authored by the caller.
+    func generateWithConfig(
+        messages: [(role: String, content: String)],
+        systemPrompt: String?,
+        config: GenerationConfig
+    ) throws -> GenerationStream {
+        guard let backend = provider?.currentBackend else {
+            throw InferenceError.inferenceFailure("No model loaded")
+        }
+
+        if config.jsonMode && !backend.capabilities.supportsNativeJSONMode {
+            let backendType = String(describing: type(of: backend))
+            let message = "GenerationCoordinator: jsonMode=true requested but \(backendType) does not support native JSON mode (capabilities.supportsNativeJSONMode == false); the flag will be ignored and the response will be plain text. Check `backend.capabilities.supportsNativeJSONMode` before setting `config.jsonMode`."
+            Log.inference.warning("\(message, privacy: .public)")
+            Self.jsonModeUnsupportedWarningHook?(backendType, message)
+        }
+
+        if let counter = backend as? TokenCountingBackend,
+           backend.capabilities.requiresPromptTemplate {
+            let result = try exactPreflightAndTrim(
+                counter: counter,
+                backend: backend,
+                messages: messages,
+                systemPrompt: systemPrompt,
+                config: config
+            )
+            if let historyReceiver = backend as? ConversationHistoryReceiver {
+                historyReceiver.setConversationHistory(result.trimmedMessages)
+            }
+            return try backend.generate(
+                prompt: result.prompt,
+                systemPrompt: nil,
+                config: config
+            )
+        }
+
+        let assembledPrompt: String
+        let effectiveSystemPrompt: String?
+        if backend.capabilities.requiresPromptTemplate {
+            let template = provider?.selectedPromptTemplate ?? .chatML
+            assembledPrompt = template.format(messages: messages, systemPrompt: systemPrompt)
+            effectiveSystemPrompt = nil
+        } else {
+            assembledPrompt = messages.last(where: { $0.role == "user" })?.content ?? ""
+            effectiveSystemPrompt = systemPrompt
+        }
+
+        if let historyReceiver = backend as? ConversationHistoryReceiver {
+            historyReceiver.setConversationHistory(messages)
+        }
+
+        return try backend.generate(
+            prompt: assembledPrompt,
+            systemPrompt: effectiveSystemPrompt,
+            config: config
+        )
+    }
+
     // MARK: - Exact Pre-flight (Private)
 
     private struct ExactPreflightResult {
@@ -295,6 +362,9 @@ final class GenerationCoordinator {
         maxOutputTokens: Int? = 2048,
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
+        tools: [ToolDefinition] = [],
+        toolChoice: ToolChoice = .auto,
+        maxToolIterations: Int = 10,
         priority: GenerationPriority = .normal,
         sessionID: UUID? = nil
     ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
@@ -319,7 +389,10 @@ final class GenerationCoordinator {
             topP: topP,
             repeatPenalty: repeatPenalty,
             maxOutputTokens: maxOutputTokens,
-            jsonMode: jsonMode
+            tools: tools,
+            toolChoice: toolChoice,
+            jsonMode: jsonMode,
+            maxToolIterations: maxToolIterations
         )
         config.maxThinkingTokens = maxThinkingTokens
 
@@ -387,25 +460,7 @@ final class GenerationCoordinator {
             }
 
             do {
-                let backendStream = try self.generate(
-                    messages: next.messages,
-                    systemPrompt: next.systemPrompt,
-                    temperature: next.config.temperature,
-                    topP: next.config.topP,
-                    repeatPenalty: next.config.repeatPenalty,
-                    maxOutputTokens: next.config.maxOutputTokens,
-                    maxThinkingTokens: next.config.maxThinkingTokens,
-                    jsonMode: next.config.jsonMode
-                )
-
-                for try await event in backendStream.events {
-                    guard !Task.isCancelled else { break }
-                    if case .token = event, next.stream.phase != .streaming {
-                        next.stream.setPhase(.streaming)
-                    }
-                    // wave 2 dispatches via toolRegistry here
-                    self.continuations[next.token]?.yield(event)
-                }
+                try await self.runToolDispatchLoop(request: next)
 
                 if Task.isCancelled {
                     next.stream.setPhase(.failed("Cancelled"))
@@ -420,6 +475,192 @@ final class GenerationCoordinator {
                     next.stream.setPhase(.failed(error.localizedDescription))
                 }
             }
+        }
+    }
+
+    // MARK: - Tool Dispatch Loop
+
+    /// Upper bound on cumulative bytes of tool-result content that can be
+    /// fed back into a single generation request.
+    ///
+    /// Tool results flow directly into the next-turn prompt, so a runaway
+    /// tool (imagine one that mirrors an entire wiki article) can exhaust
+    /// the KV cache on the server side just as surely as a misbehaving
+    /// prompt. 512 KiB is deliberately generous for typical tool output
+    /// (seconds-of-weather JSON, search snippets) but still well under the
+    /// memory floor that would put an Ollama / local-llama deployment at
+    /// risk. Overflow short-circuits the loop with a `.permanent`
+    /// synthetic result rather than running another turn.
+    private static let toolResultByteBudget: Int = 512 * 1024
+
+    /// Drives the backend through an entire tool-dispatch loop for one
+    /// queued request.
+    ///
+    /// On each iteration the backend is invoked with the current message
+    /// history (original + any tool-call / tool-result entries accumulated
+    /// from prior iterations). Events flow through to the request's
+    /// continuation untouched *except* for `.toolCall(_:)` events, which
+    /// are intercepted when a registry is present:
+    ///
+    /// 1. The call is dispatched via `toolRegistry.dispatch(_:)`.
+    /// 2. A `.toolResult(_:)` event is emitted so UIs can render the
+    ///    outcome alongside the call.
+    /// 3. The `(call, result)` pair is appended to the tool-aware history
+    ///    for the next iteration.
+    ///
+    /// Termination conditions:
+    /// - The backend's stream finishes without emitting any new tool call
+    ///   → normal completion.
+    /// - `config.maxToolIterations` reached → emit `.toolLoopLimitReached`
+    ///   and stop.
+    /// - Cumulative tool-result bytes exceed ``toolResultByteBudget`` →
+    ///   synthesise a `.permanent` error result and stop.
+    /// - Backend emits an identical `(toolName, arguments)` pair twice in
+    ///   a row → short-circuit the executor and feed a synthetic
+    ///   "already-called-with-identical-args" result back so the model
+    ///   can recover without another identical round trip.
+    private func runToolDispatchLoop(request: QueuedRequest) async throws {
+        // First-time-only wiring: make sure the registry has a schema
+        // validator installed so tools with non-trivial parameter schemas
+        // get argument validation without requiring the host to know about
+        // the `JSONSchemaValidating` protocol.
+        if let registry = toolRegistry, registry.validator == nil {
+            registry.validator = JSONSchemaValidator()
+        }
+
+        let currentMessages = request.messages
+        // `toolAwareHistory` is maintained in parallel for tool-call turns.
+        // Seeded lazily on the first tool dispatch so plain-text turns keep
+        // using the classic `setConversationHistory` path and existing
+        // backends that don't know about tool-aware history see no change.
+        var toolAwareHistory: [ToolAwareHistoryEntry]?
+        var lastCallSignature: (toolName: String, arguments: String)?
+        var toolResultByteTotal = 0
+        var iterations = 0
+        let limit = max(1, request.config.maxToolIterations)
+
+        while true {
+            iterations += 1
+            if iterations > limit {
+                // Cap reached — loop terminated before invoking the backend
+                // with the next turn's request.
+                Log.inference.warning(
+                    "GenerationCoordinator: tool-dispatch loop hit maxToolIterations=\(limit, privacy: .public); terminating."
+                )
+                self.continuations[request.token]?.yield(
+                    .toolLoopLimitReached(iterations: limit)
+                )
+                return
+            }
+
+            // Feed the tool-aware history to the backend when one is
+            // available. Non-tool backends ignore the cast and fall back to
+            // the plain conversation history via `generateWithConfig`.
+            if let toolAwareHistory,
+               let receiver = provider?.currentBackend as? ToolCallingHistoryReceiver {
+                receiver.setToolAwareHistory(toolAwareHistory)
+            }
+
+            let stream = try self.generateWithConfig(
+                messages: currentMessages,
+                systemPrompt: request.systemPrompt,
+                config: request.config
+            )
+
+            var dispatchedInThisTurn: [(ToolCall, ToolResult)] = []
+
+            for try await event in stream.events {
+                guard !Task.isCancelled else { return }
+
+                if case .token = event, request.stream.phase != .streaming {
+                    request.stream.setPhase(.streaming)
+                }
+
+                switch event {
+                case .toolCall(let call) where toolRegistry != nil:
+                    // Forward the call event so UI surfaces can render it
+                    // alongside the pending result.
+                    self.continuations[request.token]?.yield(.toolCall(call))
+
+                    let result: ToolResult
+                    if let prev = lastCallSignature,
+                       prev.toolName == call.toolName,
+                       prev.arguments == call.arguments {
+                        // Identical repeat — don't re-invoke the executor.
+                        Log.inference.warning(
+                            "GenerationCoordinator: tool '\(call.toolName, privacy: .public)' called twice in a row with identical arguments; short-circuiting to previous result."
+                        )
+                        let prevContent = dispatchedInThisTurn.last?.1.content ?? ""
+                        result = ToolResult(
+                            callId: call.id,
+                            content: "tool already called this turn with identical arguments — previous result was: \(prevContent)",
+                            errorKind: .permanent
+                        )
+                    } else if toolResultByteTotal >= Self.toolResultByteBudget {
+                        Log.inference.warning(
+                            "GenerationCoordinator: tool-result byte budget (\(Self.toolResultByteBudget, privacy: .public)) exhausted before dispatching '\(call.toolName, privacy: .public)'; terminating loop."
+                        )
+                        result = ToolResult(
+                            callId: call.id,
+                            content: "tool result budget exhausted",
+                            errorKind: .permanent
+                        )
+                    } else {
+                        result = await toolRegistry!.dispatch(call)
+                    }
+
+                    toolResultByteTotal += result.content.utf8.count
+                    lastCallSignature = (toolName: call.toolName, arguments: call.arguments)
+                    dispatchedInThisTurn.append((call, result))
+
+                    // Emit the result so the UI can render it; downstream
+                    // consumers thread `.toolResult` into the current
+                    // assistant bubble before the next turn begins.
+                    self.continuations[request.token]?.yield(.toolResult(result))
+
+                    // Overflow after this dispatch — synthesise a terminal
+                    // marker and exit before running another turn.
+                    if toolResultByteTotal >= Self.toolResultByteBudget {
+                        return
+                    }
+
+                default:
+                    self.continuations[request.token]?.yield(event)
+                }
+            }
+
+            // If no tool calls were dispatched this turn, generation is
+            // complete.
+            if dispatchedInThisTurn.isEmpty {
+                return
+            }
+
+            // Otherwise augment the tool-aware history with the tool-call +
+            // tool-result pairs the model produced this turn, then loop.
+            var nextHistory = toolAwareHistory ?? currentMessages.map {
+                ToolAwareHistoryEntry(role: $0.role, content: $0.content)
+            }
+            nextHistory.append(
+                ToolAwareHistoryEntry(
+                    role: "assistant",
+                    content: "",
+                    toolCalls: dispatchedInThisTurn.map(\.0)
+                )
+            )
+            for (call, result) in dispatchedInThisTurn {
+                nextHistory.append(
+                    ToolAwareHistoryEntry(
+                        role: "tool",
+                        content: result.content,
+                        toolCallId: call.id
+                    )
+                )
+            }
+            toolAwareHistory = nextHistory
+            // Keep `currentMessages` in sync so backends without
+            // tool-aware support at least see the user-side history.
+            // Tool/assistant-tool-call entries are omitted from the plain
+            // path because `(role, content)` can't carry call ids faithfully.
         }
     }
 
