@@ -61,13 +61,14 @@ final class ToolCallContractTests: XCTestCase {
     }
 
     func test_toolResult_roundTrips_error() throws {
-        let result = ToolResult(callId: "call-2", content: "City not found", isError: true)
+        let result = ToolResult(callId: "call-2", content: "City not found", errorKind: .notFound)
 
         let encoded = try JSONEncoder().encode(result)
         let decoded = try JSONDecoder().decode(ToolResult.self, from: encoded)
 
-        // Sabotage check: defaulting `isError` to `false` in the init causes this to fail
+        // Sabotage check: defaulting `errorKind` to `nil` in the init causes this to fail
         XCTAssertTrue(decoded.isError)
+        XCTAssertEqual(decoded.errorKind, .notFound)
         XCTAssertEqual(decoded.content, "City not found")
     }
 

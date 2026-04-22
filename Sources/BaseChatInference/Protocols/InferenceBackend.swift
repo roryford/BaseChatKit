@@ -65,7 +65,22 @@ public struct GenerationConfig: Sendable, Codable {
     /// do not support thinking ignore it.
     public var thinkingMarkers: ThinkingMarkers?
 
-    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:) instead.")
+    /// Maximum number of tool-call iterations permitted inside a single
+    /// generation request.
+    ///
+    /// When the coordinator detects a ``ToolCall`` in the stream it dispatches
+    /// the call, appends the ``ToolResult``, and re-prompts the model. Each
+    /// round trip is one "iteration". This cap bounds runaway tool-call loops
+    /// where a misbehaving model keeps requesting tools without finalising a
+    /// user-visible response.
+    ///
+    /// Defaults to `10`. Values `<= 0` are silently clamped to `1` — a zero
+    /// budget would prevent any tool dispatch at all and is never the intent.
+    public var maxToolIterations: Int {
+        didSet { if maxToolIterations < 1 { maxToolIterations = 1 } }
+    }
+
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -78,7 +93,8 @@ public struct GenerationConfig: Sendable, Codable {
         toolChoice: ToolChoice = .auto,
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
-        thinkingMarkers: ThinkingMarkers? = nil
+        thinkingMarkers: ThinkingMarkers? = nil,
+        maxToolIterations: Int = 10
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -92,6 +108,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.maxThinkingTokens = maxThinkingTokens
         self.jsonMode = jsonMode
         self.thinkingMarkers = thinkingMarkers
+        self.maxToolIterations = max(1, maxToolIterations)
     }
 
     public init(
@@ -105,7 +122,8 @@ public struct GenerationConfig: Sendable, Codable {
         toolChoice: ToolChoice = .auto,
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
-        thinkingMarkers: ThinkingMarkers? = nil
+        thinkingMarkers: ThinkingMarkers? = nil,
+        maxToolIterations: Int = 10
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -119,13 +137,14 @@ public struct GenerationConfig: Sendable, Codable {
         self.maxThinkingTokens = maxThinkingTokens
         self.jsonMode = jsonMode
         self.thinkingMarkers = thinkingMarkers
+        self.maxToolIterations = max(1, maxToolIterations)
     }
 
     // MARK: Codable
 
     private enum CodingKeys: String, CodingKey {
         case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
-        case tools, toolChoice, maxThinkingTokens, jsonMode
+        case tools, toolChoice, maxThinkingTokens, jsonMode, maxToolIterations
     }
 
     public init(from decoder: Decoder) throws {
@@ -143,6 +162,10 @@ public struct GenerationConfig: Sendable, Codable {
         toolChoice = (try c.decodeIfPresent(ToolChoice.self, forKey: .toolChoice)) ?? .auto
         maxThinkingTokens = try c.decodeIfPresent(Int.self, forKey: .maxThinkingTokens)
         jsonMode = (try c.decodeIfPresent(Bool.self, forKey: .jsonMode)) ?? false
+        // maxToolIterations landed after the original shape; default to 10 when absent and
+        // clamp any persisted zero/negative value to the minimum of 1.
+        let decodedIterations = (try c.decodeIfPresent(Int.self, forKey: .maxToolIterations)) ?? 10
+        maxToolIterations = max(1, decodedIterations)
         // thinkingMarkers is a per-request runtime hint; it is not persisted.
         thinkingMarkers = nil
     }
@@ -160,6 +183,7 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encode(toolChoice, forKey: .toolChoice)
         try c.encodeIfPresent(maxThinkingTokens, forKey: .maxThinkingTokens)
         try c.encode(jsonMode, forKey: .jsonMode)
+        try c.encode(maxToolIterations, forKey: .maxToolIterations)
     }
 }
 
