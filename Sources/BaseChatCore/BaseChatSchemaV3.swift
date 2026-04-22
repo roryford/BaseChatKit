@@ -417,6 +417,3 @@ public enum BaseChatSchemaV3: VersionedSchema {
         }
     }
 }
-
-/// Public typealias so host code uses `ModelBenchmarkCache` without schema qualification.
-public typealias ModelBenchmarkCache = BaseChatSchemaV3.ModelBenchmarkCache

@@ -35,6 +35,11 @@ struct MessagePartsView: View {
             // as soon as reasoning is complete, even while visible tokens are still
             // arriving.
             ThinkingBlockView(text: text, isThinkingStreaming: text.isEmpty && isStreaming)
+
+        case .toolCall, .toolResult:
+            // Rendering is owned by #437. Silently skip for now so mixed-content
+            // messages still display their text/image/thinking parts.
+            EmptyView()
         }
     }
 
