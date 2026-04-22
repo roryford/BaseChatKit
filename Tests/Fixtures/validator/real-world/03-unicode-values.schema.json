@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": ["name", "city"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "city": {"type": "string"}
+  }
+}
