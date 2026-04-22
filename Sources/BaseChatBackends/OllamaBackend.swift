@@ -863,9 +863,18 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     /// the tool name plus a counter suffix when absent so downstream
     /// call/result pairing still works.
     static func decodeToolCall(_ raw: [String: Any]) -> ToolCall? {
-        guard let function = raw["function"] as? [String: Any],
-              let name = function["name"] as? String,
-              !name.isEmpty else {
+        // Two observed shapes on the wire:
+        //   A) {id, type: "function", function: {name, arguments}}  — documented
+        //   B) {id, name, arguments}                                 — some 0.3.x builds
+        // Prefer the nested `function` envelope; fall back to the flat shape
+        // when it's absent so lenient Ollama forks still produce tool events.
+        let nameSource: [String: Any]
+        if let function = raw["function"] as? [String: Any] {
+            nameSource = function
+        } else {
+            nameSource = raw
+        }
+        guard let name = nameSource["name"] as? String, !name.isEmpty else {
             return nil
         }
 
@@ -879,9 +888,9 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         }
 
         let argumentsString: String
-        if let raw = function["arguments"] as? String {
+        if let raw = nameSource["arguments"] as? String {
             argumentsString = raw
-        } else if let dict = function["arguments"] as? [String: Any] {
+        } else if let dict = nameSource["arguments"] as? [String: Any] {
             argumentsString = Self.serialiseArgumentDictionary(dict)
         } else {
             argumentsString = "{}"

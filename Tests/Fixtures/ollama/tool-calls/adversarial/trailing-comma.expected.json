@@ -1,8 +1,8 @@
 {
-  "should_emit": false,
-  "event_type": null,
-  "tool_name": null,
-  "arguments_contains": null,
-  "should_log_warning": true,
-  "notes": "JSONSerialization rejects trailing commas — this is a malformed line. parseLine returns nil, no event emitted, parser logs a warning."
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "get_weather",
+  "arguments_contains": "Paris",
+  "should_log_warning": false,
+  "notes": "Apple's JSONSerialization is lenient and accepts trailing commas in object literals, so the line parses successfully and the parser emits the tool call. Empirically verified on macOS; behaviour is platform-specific."
 }
