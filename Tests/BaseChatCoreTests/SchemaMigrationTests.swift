@@ -32,12 +32,29 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertTrue(ids.contains(ObjectIdentifier(BaseChatSchemaV3.ModelBenchmarkCache.self)))
     }
 
-    func test_publicTypealiases_matchV3ModelTypes() {
-        XCTAssertEqual(ObjectIdentifier(ChatMessage.self), ObjectIdentifier(BaseChatSchemaV3.ChatMessage.self))
-        XCTAssertEqual(ObjectIdentifier(ChatSession.self), ObjectIdentifier(BaseChatSchemaV3.ChatSession.self))
-        XCTAssertEqual(ObjectIdentifier(SamplerPreset.self), ObjectIdentifier(BaseChatSchemaV3.SamplerPreset.self))
-        XCTAssertEqual(ObjectIdentifier(APIEndpoint.self), ObjectIdentifier(BaseChatSchemaV3.APIEndpoint.self))
-        XCTAssertEqual(ObjectIdentifier(ModelBenchmarkCache.self), ObjectIdentifier(BaseChatSchemaV3.ModelBenchmarkCache.self))
+    func test_publicTypealiases_matchCurrentSchemaModelTypes() {
+        // Public aliases resolve to the *current* schema's model classes. V4
+        // physically redeclares V3's models (see
+        // ``BaseChatSchemaV4`` docs — SwiftData checksum uniqueness forbids
+        // sharing the same class across two VersionedSchema cases), so these
+        // aliases moved from V3 to V4 with the V3→V4 migration.
+        XCTAssertEqual(ObjectIdentifier(ChatMessage.self), ObjectIdentifier(BaseChatSchemaV4.ChatMessage.self))
+        XCTAssertEqual(ObjectIdentifier(ChatSession.self), ObjectIdentifier(BaseChatSchemaV4.ChatSession.self))
+        XCTAssertEqual(ObjectIdentifier(SamplerPreset.self), ObjectIdentifier(BaseChatSchemaV4.SamplerPreset.self))
+        XCTAssertEqual(ObjectIdentifier(APIEndpoint.self), ObjectIdentifier(BaseChatSchemaV4.APIEndpoint.self))
+        XCTAssertEqual(ObjectIdentifier(ModelBenchmarkCache.self), ObjectIdentifier(BaseChatSchemaV4.ModelBenchmarkCache.self))
+    }
+
+    func test_v4ModelTypes_areDistinctFromV3() {
+        // SwiftData computes per-VersionedSchema checksums from the listed
+        // model types. Sharing the same @Model class across V3 and V4 would
+        // collide — guard that we never regress the V4 redeclaration back to
+        // a typealias re-export of V3.
+        XCTAssertNotEqual(ObjectIdentifier(BaseChatSchemaV4.ChatMessage.self), ObjectIdentifier(BaseChatSchemaV3.ChatMessage.self))
+        XCTAssertNotEqual(ObjectIdentifier(BaseChatSchemaV4.ChatSession.self), ObjectIdentifier(BaseChatSchemaV3.ChatSession.self))
+        XCTAssertNotEqual(ObjectIdentifier(BaseChatSchemaV4.SamplerPreset.self), ObjectIdentifier(BaseChatSchemaV3.SamplerPreset.self))
+        XCTAssertNotEqual(ObjectIdentifier(BaseChatSchemaV4.APIEndpoint.self), ObjectIdentifier(BaseChatSchemaV3.APIEndpoint.self))
+        XCTAssertNotEqual(ObjectIdentifier(BaseChatSchemaV4.ModelBenchmarkCache.self), ObjectIdentifier(BaseChatSchemaV3.ModelBenchmarkCache.self))
     }
 
     // MARK: - ModelContainerFactory
@@ -110,7 +127,10 @@ final class SchemaMigrationTests: XCTestCase {
         let container = try ModelContainerFactory.makeInMemoryContainer()
         let context = ModelContext(container)
 
-        let nestedMessage = BaseChatSchemaV3.ChatMessage(role: .user, content: "alias check", sessionID: UUID())
+        // The public ``ChatMessage`` alias and the current-schema
+        // ``BaseChatSchemaV4/ChatMessage`` type must refer to the same class,
+        // so a row inserted via one is fetchable via the other.
+        let nestedMessage = BaseChatSchemaV4.ChatMessage(role: .user, content: "alias check", sessionID: UUID())
         context.insert(nestedMessage)
         try context.save()
         let nestedMessageID = nestedMessage.id
