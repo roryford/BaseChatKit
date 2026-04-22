@@ -1,0 +1,2 @@
+{"event":"toolCall","tool_name":"get_weather","arguments_contains":"Paris"}
+{"event":"usage","prompt":42,"completion":18}

@@ -1,0 +1,5 @@
+{"event":"token","text":"The"}
+{"event":"token","text":" capital"}
+{"event":"token","text":" of France"}
+{"event":"token","text":" is Paris."}
+{"event":"usage","prompt":30,"completion":7}

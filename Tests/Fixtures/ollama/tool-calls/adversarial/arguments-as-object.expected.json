@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "get_weather",
+  "arguments_contains": "Paris",
+  "should_log_warning": false,
+  "notes": "Ollama sometimes emits `arguments` as a JSON object instead of a stringified JSON. Parser must re-serialise to a string so ToolCall.arguments is always a String (matching the Swift model)."
+}

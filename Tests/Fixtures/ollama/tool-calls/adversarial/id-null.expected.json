@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "get_weather",
+  "arguments_contains": "Paris",
+  "should_log_warning": false,
+  "notes": "Same as id-missing — explicit null is treated as absent. Synthesise an id."
+}

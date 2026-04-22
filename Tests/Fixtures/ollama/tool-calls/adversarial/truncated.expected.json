@@ -1,0 +1,8 @@
+{
+  "should_emit": false,
+  "event_type": null,
+  "tool_name": null,
+  "arguments_contains": null,
+  "should_log_warning": false,
+  "notes": "Incomplete JSON — simulates a mid-stream chunk cut short. The NDJSON stream parser already handles line-boundaries so a partial line never reaches parseLine; if it did reach, parseLine would return nil without emitting. No warning: this is a normal transient condition, not a wire-format drift."
+}

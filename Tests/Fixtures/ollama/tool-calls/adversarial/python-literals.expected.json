@@ -1,0 +1,8 @@
+{
+  "should_emit": false,
+  "event_type": null,
+  "tool_name": null,
+  "arguments_contains": null,
+  "should_log_warning": true,
+  "notes": "`True`/`None` are Python literals, not JSON. JSONSerialization rejects — parseLine returns nil. Observed in the wild from some quantised Llama variants that inherit Python training data. Log warning."
+}

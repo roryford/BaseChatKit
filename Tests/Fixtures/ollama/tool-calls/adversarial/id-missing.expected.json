@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "get_weather",
+  "arguments_contains": "Paris",
+  "should_log_warning": false,
+  "notes": "Ollama doesn't always emit a tool_call id. Parser must synthesise a stable non-empty id (UUID-like) so ToolResult.callId routing works. We assert only that emission succeeds; id value is parser-internal."
+}
