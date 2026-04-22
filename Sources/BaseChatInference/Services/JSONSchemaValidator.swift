@@ -495,6 +495,18 @@ public struct JSONSchemaValidator: Sendable {
         return text
     }
 
+    // MARK: - Protocol bridge
+
+    // `JSONSchemaValidating` lives in `ToolRegistry.swift` to keep the
+    // registry's dependency surface minimal. The concrete validator opts into
+    // that protocol here by adapting its richer `ValidationFailure?` return
+    // shape to the protocol's `String?` contract. Consumers of
+    // `ToolRegistry.validator` only see the stringified message; call sites
+    // that need the structured path can still use the concrete type directly.
+    //
+    // Kept adjacent to `lift`/the main type so the file reads top-to-bottom
+    // without needing to jump to a separate bridge file.
+
     // MARK: - Foundation JSON -> JSONSchemaValue bridge
 
     /// Convert the `Any` graph returned by `JSONSerialization.jsonObject` into
@@ -522,5 +534,21 @@ public struct JSONSchemaValidator: Sendable {
         // Unknown Foundation type — represent as null so the validator reports
         // a clean type mismatch rather than crashing on an unexpected kind.
         return .null
+    }
+}
+
+// MARK: - JSONSchemaValidating conformance
+
+/// Adapts `JSONSchemaValidator` to the protocol `ToolRegistry` depends on.
+///
+/// The protocol shape (`String?`) flattens a successful validation to `nil`
+/// and flattens a failure to its model-readable message; the structural path
+/// is discarded at this boundary because the registry feeds the message back
+/// to the model verbatim and has no use for pointer-style paths.
+extension JSONSchemaValidator: JSONSchemaValidating {
+
+    public func validateAgainst(_ schema: JSONSchemaValue, value: JSONSchemaValue) -> String? {
+        let failure: ValidationFailure? = validate(value, against: schema)
+        return failure?.modelReadableMessage
     }
 }

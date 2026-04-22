@@ -356,4 +356,30 @@ final class JSONSchemaValidatorTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - JSONSchemaValidating protocol conformance
+
+    /// The concrete `JSONSchemaValidator` conforms to `JSONSchemaValidating`
+    /// so `ToolRegistry` can hold the validator via the protocol without
+    /// depending on the concrete type. This test exercises the adapter method
+    /// on both a valid and an invalid payload to pin the contract (returns
+    /// `nil` on pass, returns a non-empty diagnostic string on fail).
+    ///
+    /// Sabotage check: forcing the adapter to unconditionally return `nil`
+    /// leaves `invalidMessage` at `nil` and the second assertion fails.
+    func test_jsonSchemaValidating_conformance_returnsNilOnValid_andMessageOnInvalid() {
+        let schema = json(#"{"type":"object","required":["city"],"properties":{"city":{"type":"string"}}}"#)
+
+        let protocolValidator: any JSONSchemaValidating = validator
+
+        let validMessage = protocolValidator.validateAgainst(schema, value: json(#"{"city":"Rome"}"#))
+        XCTAssertNil(validMessage, "Valid payload must produce nil under the protocol signature")
+
+        let invalidMessage = protocolValidator.validateAgainst(schema, value: json(#"{}"#))
+        XCTAssertNotNil(invalidMessage, "Missing required field must surface as a non-nil protocol message")
+        XCTAssertTrue(
+            invalidMessage?.contains("city") ?? false,
+            "Protocol message should mention the missing field; got: \(invalidMessage ?? "nil")"
+        )
+    }
 }

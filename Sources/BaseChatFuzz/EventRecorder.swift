@@ -75,6 +75,10 @@ public struct EventRecorder: Sendable {
                     events.append(.init(t: t, kind: "usage", v: "\(p)/\(c)"))
                 case .toolCall(let call):
                     events.append(.init(t: t, kind: "toolCall", v: call.toolName))
+                case .toolResult(let result):
+                    events.append(.init(t: t, kind: "toolResult", v: result.callId))
+                case .toolLoopLimitReached(let iterations):
+                    events.append(.init(t: t, kind: "toolLoopLimitReached", v: "\(iterations)"))
                 }
                 memoryTick()
             }

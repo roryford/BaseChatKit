@@ -206,6 +206,9 @@ public final class InferenceService {
         maxOutputTokens: Int? = 2048,
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
+        tools: [ToolDefinition] = [],
+        toolChoice: ToolChoice = .auto,
+        maxToolIterations: Int = 10,
         priority: GenerationPriority = .normal,
         sessionID: UUID? = nil
     ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
@@ -219,6 +222,9 @@ public final class InferenceService {
             maxOutputTokens: maxOutputTokens,
             maxThinkingTokens: maxThinkingTokens,
             jsonMode: jsonMode,
+            tools: tools,
+            toolChoice: toolChoice,
+            maxToolIterations: maxToolIterations,
             priority: priority,
             sessionID: sessionID
         )
@@ -274,6 +280,27 @@ public final class InferenceService {
         self.generation = GenerationCoordinator()
         // Provider wiring happens lazily via ensureProviderWired() on first use,
         // since `self` is not available inside a nonisolated init.
+    }
+
+    /// Creates the service with a pre-populated ``ToolRegistry``.
+    ///
+    /// Pass the registry when the host app has tools to expose on the model's
+    /// next generation. The coordinator dispatches ``ToolCall`` events through
+    /// the registry and threads ``ToolResult`` payloads back into the
+    /// conversation before the next turn. See `GenerationConfig.tools` and
+    /// `GenerationConfig.toolChoice` for per-request wire-level control, and
+    /// `GenerationConfig.maxToolIterations` for the per-request loop cap.
+    public nonisolated init(toolRegistry: ToolRegistry) {
+        self.lifecycle = ModelLifecycleCoordinator()
+        self.generation = GenerationCoordinator(toolRegistry: toolRegistry)
+    }
+
+    /// The ``ToolRegistry`` this service dispatches through, or `nil` when
+    /// tool calling was not configured at init time. Register additional
+    /// tools by calling ``ToolRegistry/register(_:)`` on the returned
+    /// instance; the coordinator re-reads the registry on every turn.
+    public var toolRegistry: ToolRegistry? {
+        generation.toolRegistry
     }
 
     #if DEBUG
