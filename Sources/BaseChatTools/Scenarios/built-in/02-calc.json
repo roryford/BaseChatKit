@@ -1,0 +1,27 @@
+{
+  "id": "02-calc",
+  "description": "Arithmetic probe — answer is out-of-priors so a pass implies the tool ran.",
+  "systemPrompt": "You have tools. When a tool can answer, call it. Never perform arithmetic in your head — always call `calc` and quote its answer.",
+  "userPrompt": "What is 7823 multiplied by 41? Reply with only the number the tool returns.",
+  "requiredTools": ["calc"],
+  "assertions": [
+    {
+      "kind": "toolInvoked",
+      "value": "calc",
+      "message": "Scenario requires `calc` to actually be dispatched"
+    },
+    {
+      "kind": "containsLiteral",
+      "value": "320743",
+      "message": "Final answer should quote the calc result 320743"
+    }
+  ],
+  "backend": {
+    "kind": "ollama",
+    "model": "llama3.1:8b",
+    "fallbackModel": "qwen2.5:7b-instruct",
+    "temperature": 0.0,
+    "seed": 42,
+    "topK": 1
+  }
+}

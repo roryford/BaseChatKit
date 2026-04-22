@@ -1,0 +1,27 @@
+{
+  "id": "03-read",
+  "description": "File-read probe — proves the model can ingest tool output and echo a nonce.",
+  "systemPrompt": "You have tools. When the user asks about a file, always call `read_file` and quote the file's contents verbatim in your reply. Never guess file contents.",
+  "userPrompt": "Read the file example.txt in the fixtures sandbox and reply with exactly its contents.",
+  "requiredTools": ["read_file"],
+  "assertions": [
+    {
+      "kind": "toolInvoked",
+      "value": "read_file",
+      "message": "Scenario requires `read_file` to actually be dispatched"
+    },
+    {
+      "kind": "containsLiteral",
+      "value": "NONCE-example-2026-04-22",
+      "message": "Final answer should echo the nonce embedded in example.txt"
+    }
+  ],
+  "backend": {
+    "kind": "ollama",
+    "model": "llama3.1:8b",
+    "fallbackModel": "qwen2.5:7b-instruct",
+    "temperature": 0.0,
+    "seed": 42,
+    "topK": 1
+  }
+}

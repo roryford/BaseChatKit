@@ -1,0 +1,27 @@
+{
+  "id": "04-list",
+  "description": "Directory-listing probe — proves the model can enumerate tool output.",
+  "systemPrompt": "You have tools. When the user asks what is inside a directory, always call `list_dir` with dir=\".\" and then list every filename it returns, one per line. Never invent filenames.",
+  "userPrompt": "List everything in the fixtures sandbox. Include every filename the tool returns.",
+  "requiredTools": ["list_dir"],
+  "assertions": [
+    {
+      "kind": "toolInvoked",
+      "value": "list_dir",
+      "message": "Scenario requires list_dir to actually be dispatched"
+    },
+    {
+      "kind": "containsAll",
+      "values": ["a.txt", "b.txt", "c.txt"],
+      "message": "Final answer should enumerate all three seeded filenames"
+    }
+  ],
+  "backend": {
+    "kind": "ollama",
+    "model": "llama3.1:8b",
+    "fallbackModel": "qwen2.5:7b-instruct",
+    "temperature": 0.0,
+    "seed": 42,
+    "topK": 1
+  }
+}
