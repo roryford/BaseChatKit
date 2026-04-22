@@ -24,17 +24,17 @@ final class BackendCapabilitiesContractTests: XCTestCase {
     // MARK: - Tool Calling
 
     func test_cloudBackends_toolCallingCapabilities() {
-        // Tool calling was removed from BCK ahead of the 0.6.0 API freeze.
-        // Every backend must report `false` until a stable cross-backend
-        // contract is reintroduced. The capability flag itself is kept
-        // (separate breaking change) so consumers that branch on it
-        // continue to compile.
+        // Ollama advertises tool calling since Wave 2 dispatch wiring (PR #640)
+        // — it emits OpenAI-compatible `tool_calls` over NDJSON and the
+        // orchestrator loop in GenerationCoordinator dispatches them. Claude
+        // and OpenAI backends remain without tool calling until their
+        // per-vendor wire-format work lands (tracked under #435).
         XCTAssertFalse(ClaudeBackend().capabilities.supportsToolCalling,
-                       "ClaudeBackend no longer advertises tool calling — the public API was removed")
+                       "ClaudeBackend tool calling wiring is tracked under #435")
         XCTAssertFalse(OpenAIBackend().capabilities.supportsToolCalling,
-                       "OpenAIBackend no longer advertises tool calling — the public API was removed")
-        XCTAssertFalse(OllamaBackend().capabilities.supportsToolCalling,
-                       "OllamaBackend does not support tool calling")
+                       "OpenAIBackend tool calling wiring is tracked under #435")
+        XCTAssertTrue(OllamaBackend().capabilities.supportsToolCalling,
+                      "OllamaBackend advertises tool calling since Wave 2 dispatch wiring")
     }
 
     func test_cloudBackends_structuredOutputCapabilities() {
