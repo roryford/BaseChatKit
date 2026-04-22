@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "ping",
+  "arguments_contains": "{}",
+  "should_log_warning": false,
+  "notes": "Empty object `{}` for arguments — zero-arg tool. Must emit cleanly with ToolCall.arguments == \"{}\"."
+}

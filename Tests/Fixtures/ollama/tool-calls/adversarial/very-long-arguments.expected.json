@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "bulk",
+  "arguments_contains": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "should_log_warning": false,
+  "notes": "100KB arguments payload (single very-long string). Parser must not truncate arguments silently — confirms SSE byte-limit in OllamaBackend accommodates at least 128KB per line for tool-heavy use cases."
+}

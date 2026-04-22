@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "quote",
+  "arguments_contains": "hello",
+  "should_log_warning": false,
+  "notes": "Escaped double-quotes inside argument string values must survive the re-serialisation round-trip."
+}

@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "get_weather",
+  "arguments_contains": "{}",
+  "should_log_warning": false,
+  "notes": "`arguments` key absent — parser must default ToolCall.arguments to the empty JSON object string '{}' so consumers can always JSON-decode."
+}

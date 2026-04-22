@@ -1,0 +1,8 @@
+{
+  "should_emit": false,
+  "event_type": null,
+  "tool_name": null,
+  "arguments_contains": null,
+  "should_log_warning": true,
+  "notes": "`tool_calls` as an object instead of an array is a wire-format violation. Parser must not emit, but must log so the drift is observable in telemetry."
+}

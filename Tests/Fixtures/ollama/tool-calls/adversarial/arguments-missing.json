@@ -1,0 +1,1 @@
+{"model":"llama3.1","message":{"role":"assistant","content":"","tool_calls":[{"id":"call-1","function":{"name":"get_weather"}}]},"done":false}

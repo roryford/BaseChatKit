@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "note",
+  "arguments_contains": "🌍",
+  "should_log_warning": false,
+  "notes": "Emoji encoded as UTF-16 surrogate pairs must round-trip without mangling (no replacement characters, no escaped \\uD83D\\uDC4B leaking through)."
+}

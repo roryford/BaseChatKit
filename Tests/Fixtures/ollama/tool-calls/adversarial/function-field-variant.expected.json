@@ -1,0 +1,8 @@
+{
+  "should_emit": true,
+  "event_type": "toolCall",
+  "tool_name": "get_weather",
+  "arguments_contains": "Paris",
+  "should_log_warning": false,
+  "notes": "OpenAI-compatible shape with `type:function` + stringified `arguments`. Ollama-compat endpoints in OpenAI mode use this form. Parser must accept both `function.name/arguments` and flat `name/arguments`."
+}
