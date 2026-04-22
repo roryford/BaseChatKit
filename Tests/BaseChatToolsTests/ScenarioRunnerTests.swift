@@ -19,15 +19,47 @@ final class ScenarioRunnerTests: XCTestCase {
         XCTAssertFalse(outcome.passed, "evaluator should fail when literal is absent")
     }
 
-    func test_containsAnyAssertion_requiresAllValues() {
+    func test_containsAllAssertion_requiresEveryValue() {
         let assertion = Scenario.Assertion(
-            kind: "containsAny",
+            kind: "containsAll",
             value: nil,
             values: ["a.txt", "b.txt"],
             message: nil
         )
         XCTAssertTrue(AssertionEvaluator.evaluate(assertion, finalAnswer: "a.txt b.txt").passed)
         XCTAssertFalse(AssertionEvaluator.evaluate(assertion, finalAnswer: "a.txt only").passed)
+    }
+
+    func test_toolInvokedAssertion_passesWhenToolDispatched() {
+        let assertion = Scenario.Assertion(
+            kind: "toolInvoked",
+            value: "now",
+            values: nil,
+            message: nil
+        )
+        XCTAssertTrue(
+            AssertionEvaluator.evaluate(assertion, finalAnswer: "anything", toolsInvoked: ["now"]).passed,
+            "toolInvoked should pass when the named tool appears in toolsInvoked"
+        )
+    }
+
+    func test_toolInvokedAssertion_failsWhenToolMissing() {
+        // Honesty gate: the final answer matches the expected nonce, but the
+        // tool was never called. Without this assertion kind, the harness
+        // would pass a purely-hallucinated answer.
+        let assertion = Scenario.Assertion(
+            kind: "toolInvoked",
+            value: "now",
+            values: nil,
+            message: nil
+        )
+        let outcome = AssertionEvaluator.evaluate(
+            assertion,
+            finalAnswer: "2099-01-01T00:00:00Z",
+            toolsInvoked: []  // model answered without calling the tool
+        )
+        XCTAssertFalse(outcome.passed)
+        XCTAssertTrue(outcome.message.contains("never dispatched"))
     }
 
     func test_unknownAssertionKind_fails() {

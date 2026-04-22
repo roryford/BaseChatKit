@@ -6,6 +6,11 @@
   "requiredTools": ["now"],
   "assertions": [
     {
+      "kind": "toolInvoked",
+      "value": "now",
+      "message": "Scenario requires `now` to actually be dispatched"
+    },
+    {
       "kind": "containsLiteral",
       "value": "2099-01-01T00:00:00Z",
       "message": "Final answer should quote the OOD timestamp from `now`"

@@ -28,7 +28,14 @@ public struct Scenario: Codable, Sendable, Equatable {
     }
 
     public struct Assertion: Codable, Sendable, Equatable {
-        public let kind: String            // "containsLiteral" | "equalsLiteral" | "containsAny"
+        /// One of:
+        /// - `"containsLiteral"` — final-answer text must contain `value` as a substring.
+        /// - `"equalsLiteral"` — final-answer text must equal `value` exactly.
+        /// - `"containsAll"` — final-answer text must contain every string in `values` as substrings.
+        /// - `"toolInvoked"` — the scenario must have dispatched the tool named `value` at least once.
+        ///   This is the honesty gate: a scenario that only asserts `containsLiteral` can silently
+        ///   pass when a model hallucinates the expected answer without actually calling the tool.
+        public let kind: String
         public let value: String?
         public let values: [String]?
         public let message: String?
@@ -52,7 +59,11 @@ public struct AssertionOutcome: Equatable, Sendable {
 /// directly with canned strings without spinning up a backend.
 public enum AssertionEvaluator {
 
-    public static func evaluate(_ assertion: Scenario.Assertion, finalAnswer: String) -> AssertionOutcome {
+    public static func evaluate(
+        _ assertion: Scenario.Assertion,
+        finalAnswer: String,
+        toolsInvoked: [String] = []
+    ) -> AssertionOutcome {
         switch assertion.kind {
         case "containsLiteral":
             guard let value = assertion.value else {
@@ -71,13 +82,22 @@ public enum AssertionEvaluator {
             let label = assertion.message ?? "equals '\(value)'"
             return AssertionOutcome(passed: passed, message: label)
 
-        case "containsAny":
+        case "containsAll":
             guard let values = assertion.values, !values.isEmpty else {
-                return AssertionOutcome(passed: false, message: "containsAny missing 'values'")
+                return AssertionOutcome(passed: false, message: "containsAll missing 'values'")
             }
             let passed = values.allSatisfy { finalAnswer.contains($0) }
             let label = assertion.message ?? "contains all of \(values)"
             return AssertionOutcome(passed: passed, message: label)
+
+        case "toolInvoked":
+            guard let name = assertion.value else {
+                return AssertionOutcome(passed: false, message: "toolInvoked missing 'value'")
+            }
+            let passed = toolsInvoked.contains(name)
+            let detail = passed ? "dispatched" : "never dispatched — final answer may be hallucinated"
+            let label = assertion.message ?? "tool '\(name)' invoked"
+            return AssertionOutcome(passed: passed, message: "\(label) — \(detail)")
 
         default:
             return AssertionOutcome(

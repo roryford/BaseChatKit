@@ -27,6 +27,15 @@ struct CLI {
         return cwd.appendingPathComponent("tmp/bck-tools/\(TranscriptLogger.defaultFilename())")
     }
 
+    /// Argument errors exit with status 2. We use `exit(2)` + stderr rather
+    /// than `precondition` / `fatalError` because those trap with SIGABRT in
+    /// debug builds, producing a confusing stack trace instead of the clean
+    /// "bad arguments" exit code the usage text documents.
+    private static func fail(_ message: String) -> Never {
+        FileHandle.standardError.write(Data("bck-tools: \(message)\n".utf8))
+        exit(2)
+    }
+
     static func parse(_ argv: [String]) -> CLI {
         var cli = CLI()
         var i = 0
@@ -35,22 +44,22 @@ struct CLI {
             switch arg {
             case "--scenario":
                 i += 1
-                precondition(i < argv.count, "--scenario requires a value")
+                guard i < argv.count else { fail("--scenario requires a value") }
                 cli.scenarioFilter = argv[i]
             case "--backend":
                 i += 1
-                precondition(i < argv.count, "--backend requires a value")
+                guard i < argv.count else { fail("--backend requires a value") }
                 guard let b = BackendChoice(rawValue: argv[i]) else {
-                    fatalError("unknown backend '\(argv[i])' — must be ollama or mock")
+                    fail("unknown backend '\(argv[i])' — must be ollama or mock")
                 }
                 cli.backend = b
             case "--model":
                 i += 1
-                precondition(i < argv.count, "--model requires a value")
+                guard i < argv.count else { fail("--model requires a value") }
                 cli.modelOverrides = argv[i].split(separator: ",").map(String.init)
             case "--output":
                 i += 1
-                precondition(i < argv.count, "--output requires a value")
+                guard i < argv.count else { fail("--output requires a value") }
                 cli.output = URL(fileURLWithPath: argv[i])
             case "--list":
                 cli.list = true
@@ -58,14 +67,16 @@ struct CLI {
                 cli.realNetwork = true
             case "--ollama-base-url":
                 i += 1
-                precondition(i < argv.count, "--ollama-base-url requires a value")
-                if let u = URL(string: argv[i]) { cli.ollamaBaseURL = u }
+                guard i < argv.count else { fail("--ollama-base-url requires a value") }
+                guard let u = URL(string: argv[i]), let scheme = u.scheme, !scheme.isEmpty else {
+                    fail("--ollama-base-url value '\(argv[i])' is not a valid URL (missing scheme?)")
+                }
+                cli.ollamaBaseURL = u
             case "--help", "-h":
                 printUsage()
                 exit(0)
             default:
-                FileHandle.standardError.write(Data("unknown argument: \(arg)\n".utf8))
-                exit(2)
+                fail("unknown argument: \(arg)")
             }
             i += 1
         }

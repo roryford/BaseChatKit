@@ -6,6 +6,11 @@
   "requiredTools": ["read_file"],
   "assertions": [
     {
+      "kind": "toolInvoked",
+      "value": "read_file",
+      "message": "Scenario requires `read_file` to actually be dispatched"
+    },
+    {
       "kind": "containsLiteral",
       "value": "NONCE-example-2026-04-22",
       "message": "Final answer should echo the nonce embedded in example.txt"

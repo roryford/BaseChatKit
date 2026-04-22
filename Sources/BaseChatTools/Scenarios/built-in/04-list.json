@@ -6,7 +6,12 @@
   "requiredTools": ["list_dir"],
   "assertions": [
     {
-      "kind": "containsAny",
+      "kind": "toolInvoked",
+      "value": "list_dir",
+      "message": "Scenario requires list_dir to actually be dispatched"
+    },
+    {
+      "kind": "containsAll",
       "values": ["a.txt", "b.txt", "c.txt"],
       "message": "Final answer should enumerate all three seeded filenames"
     }

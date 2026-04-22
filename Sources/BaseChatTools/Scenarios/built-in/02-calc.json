@@ -6,6 +6,11 @@
   "requiredTools": ["calc"],
   "assertions": [
     {
+      "kind": "toolInvoked",
+      "value": "calc",
+      "message": "Scenario requires `calc` to actually be dispatched"
+    },
+    {
       "kind": "containsLiteral",
       "value": "320743",
       "message": "Final answer should quote the calc result 320743"

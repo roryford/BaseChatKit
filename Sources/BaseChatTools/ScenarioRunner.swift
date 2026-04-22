@@ -130,7 +130,11 @@ public final class ScenarioRunner {
 
         var assertionOutcomes: [AssertionOutcome] = []
         for assertion in scenario.assertions {
-            let outcome = AssertionEvaluator.evaluate(assertion, finalAnswer: accumulatedText)
+            let outcome = AssertionEvaluator.evaluate(
+                assertion,
+                finalAnswer: accumulatedText,
+                toolsInvoked: toolCallsExecuted
+            )
             assertionOutcomes.append(outcome)
             logger?.append(.assertion(scenarioId: scenario.id, passed: outcome.passed, message: outcome.message))
         }
