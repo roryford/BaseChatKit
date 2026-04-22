@@ -10,10 +10,12 @@ with the line terminated by `"done":true` on the next chunk.
 
 ```json
 {
-  "should_emit": true | false,          // whether a .toolCall event is emitted
+  "should_emit": true | false,          // whether any .toolCall event is emitted
   "event_type": "toolCall" | null,       // event kind (room for future kinds)
   "tool_name": "get_weather" | null,     // for .toolCall: the tool invoked
   "arguments_contains": "city" | null,   // substring that must appear in arguments
+  "expected_call_count": 2 | null,       // for multi-call fixtures (e.g. two-calls-one-line);
+                                         // null means "1 if should_emit else 0"
   "should_log_warning": true | false,    // whether parser should log a warning
   "notes": "optional free-form explanation"
 }
