@@ -86,6 +86,11 @@ public final class ScenarioRunner {
                     logger?.append(.toolCall(scenarioId: scenario.id, name: call.toolName, arguments: call.arguments))
                 case .usage, .thinkingToken, .thinkingComplete:
                     continue
+                case .toolResult, .toolLoopLimitReached:
+                    // ScenarioRunner calls backend.generate() directly and owns
+                    // dispatch below, so it never receives GenerationCoordinator's
+                    // orchestrator events on this path. Stay exhaustive for growth.
+                    continue
                 }
             }
 
