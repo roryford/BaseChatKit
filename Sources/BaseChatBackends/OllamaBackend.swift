@@ -19,7 +19,7 @@ import BaseChatInference
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
 /// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
-public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigurable, @unchecked Sendable {
+public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigurable, ToolCallingHistoryReceiver, @unchecked Sendable {
 
     /// How long Ollama should keep the model loaded in VRAM after a request.
     /// Default is "30m" (30 minutes). Ollama's own default is "5m".
@@ -79,7 +79,14 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             maxContextTokens: 128_000,
             requiresPromptTemplate: false,
             supportsSystemPrompt: true,
-            supportsToolCalling: false,
+            // Tool calling wiring: Ollama's native /api/chat endpoint accepts an
+            // OpenAI-shaped `tools` array and emits `message.tool_calls` on the
+            // wire (streaming delivers each tool_call in its own NDJSON line).
+            // The coordinator dispatches calls through `ToolRegistry`; this
+            // backend is responsible only for serialising `tools` /
+            // `tool_choice` on the request and parsing `tool_calls` into
+            // `GenerationEvent.toolCall`.
+            supportsToolCalling: true,
             supportsStructuredOutput: false,
             supportsNativeJSONMode: true,
             cancellationStyle: .cooperative,
@@ -90,6 +97,14 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             isRemote: true
         )
     }
+
+    // MARK: - Tool-Aware Conversation History
+
+    /// Cached tool-aware history from the most recent
+    /// `setToolAwareHistory(_:)` call. Consumed once by `buildRequest` and
+    /// cleared after use so a subsequent non-tool generation falls back to the
+    /// plain string history in `conversationHistory`.
+    private var toolAwareHistory: [ToolAwareHistoryEntry]?
 
     // MARK: - Model Lifecycle
 
@@ -199,11 +214,23 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
 
         let chatURL = baseURL.appendingPathComponent("api/chat")
 
-        var messages: [[String: String]] = []
+        // Build the messages array. When tool-aware history is present (set
+        // by the orchestrator in the middle of a tool-dispatch loop), we emit
+        // the OpenAI-compatible shape Ollama expects:
+        //   - assistant entries optionally carry a `tool_calls` array with
+        //     {id, type: "function", function: {name, arguments}} entries.
+        //   - tool entries carry `tool_call_id` alongside role and content.
+        // When tool-aware history is absent we fall back to the classic
+        // ConversationHistoryReceiver string tuples — this preserves the
+        // shape every existing OllamaBackend test asserts on.
+        var messages: [[String: Any]] = []
         if let systemPrompt, !systemPrompt.isEmpty {
             messages.append(["role": "system", "content": systemPrompt])
         }
-        if let history = conversationHistory {
+        let snapshotToolHistory: [ToolAwareHistoryEntry]? = withStateLock { self.toolAwareHistory }
+        if let toolHistory = snapshotToolHistory {
+            messages.append(contentsOf: toolHistory.map(Self.encodeToolAwareEntry))
+        } else if let history = conversationHistory {
             messages.append(contentsOf: history.map { ["role": $0.role, "content": $0.content] })
         } else {
             messages.append(["role": "user", "content": prompt])
@@ -256,13 +283,11 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             "num_ctx": effectiveNumCtx,
         ]
 
-        // TODO(#55): Tool calling for Ollama requires `stream: false`. Ollama
-        // streaming silently drops `tool_calls` delta chunks, so when
-        // `config.tools` is non-empty and tools land for this backend, this
-        // body must switch `"stream"` to `false` and `parseResponseStream`
-        // gains a non-streaming branch. See the Ollama tracking issue — the
-        // workaround is well-documented upstream. Today `supportsToolCalling
-        // == false` so `config.tools` is ignored by contract.
+        // Ollama's modern `/api/chat` returns `tool_calls` inside
+        // `message.tool_calls` on streaming NDJSON lines. Earlier versions
+        // required `stream: false`, but as of the v0.1.x+ API that BCK
+        // targets tool_calls stream inline alongside content. Leave
+        // `stream: true` and parse tool_calls in `parseResponseStream`.
         var body: [String: Any] = [
             "model": modelName,
             "messages": messages,
@@ -275,6 +300,28 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         }
         if let think = thinkDirective {
             body["think"] = think
+        }
+        // Tool definitions — serialise the BCK `ToolDefinition` list into
+        // OpenAI's `tools` envelope, which Ollama accepts natively.
+        // `tool_choice` maps one-to-one: `.auto` omits the field so Ollama's
+        // default (let-the-model-decide) takes effect; `.none` / `.required`
+        // are passed through as literal strings; `.tool(name:)` produces the
+        // function-selection object Ollama expects for forced selection.
+        if !config.tools.isEmpty {
+            body["tools"] = config.tools.map(Self.encodeToolDefinition)
+            switch config.toolChoice {
+            case .auto:
+                break
+            case .none:
+                body["tool_choice"] = "none"
+            case .required:
+                body["tool_choice"] = "required"
+            case .tool(let name):
+                body["tool_choice"] = [
+                    "type": "function",
+                    "function": ["name": name],
+                ]
+            }
         }
 
         var request = URLRequest(url: chatURL)
@@ -412,6 +459,17 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
 
         func handleLine(_ line: String) throws {
             guard let parsed = Self.parseLine(line) else { return }
+
+            // Tool calls first: Ollama can emit multiple tool_calls in a
+            // single assistant message. Dispatch them in emission order so
+            // the coordinator's serial dispatch loop sees them in the same
+            // order the model produced them.
+            if let toolCalls = parsed.toolCalls, !toolCalls.isEmpty {
+                for call in toolCalls {
+                    try noteEventYielded()
+                    continuation.yield(.toolCall(call))
+                }
+            }
 
             // Route thinking field (if any) first so downstream consumers see
             // reasoning before visible content for a given NDJSON record.
@@ -632,6 +690,11 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         var done: Bool
         var evalCount: Int?
         var promptEvalCount: Int?
+        /// Tool calls emitted by the assistant this line, in emission order.
+        /// `nil` when the line carries no `tool_calls` field; an empty array
+        /// is normalised to `nil` so downstream callers can short-circuit on
+        /// `parsed.toolCalls != nil`.
+        var toolCalls: [ToolCall]?
     }
 
     /// Parses a single Ollama NDJSON line into a normalised shape.
@@ -648,11 +711,16 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
 
         var content: String?
         var thinking: String?
+        var toolCalls: [ToolCall]?
 
         if let message = parsed["message"] as? [String: Any] {
             // `/api/chat` shape.
             content = message["content"] as? String
             thinking = message["thinking"] as? String
+            if let rawCalls = message["tool_calls"] as? [[String: Any]], !rawCalls.isEmpty {
+                toolCalls = rawCalls.compactMap(Self.decodeToolCall)
+                if toolCalls?.isEmpty == true { toolCalls = nil }
+            }
         }
 
         // `/api/generate` shape — top-level `response` and `thinking`. If both
@@ -676,8 +744,194 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             thinking: thinking,
             done: done,
             evalCount: evalCount,
-            promptEvalCount: promptEvalCount
+            promptEvalCount: promptEvalCount,
+            toolCalls: toolCalls
         )
+    }
+
+    // MARK: - Tool-Call Encoding / Decoding Helpers
+
+    /// Serialise a ``ToolDefinition`` into the OpenAI `tools` envelope shape
+    /// Ollama accepts:
+    ///
+    /// ```json
+    /// { "type": "function",
+    ///   "function": { "name": "...", "description": "...", "parameters": {...} } }
+    /// ```
+    ///
+    /// `parameters` round-trips through a JSON encode/decode so the
+    /// `JSONSchemaValue` tree emerges as a plain dictionary/array graph —
+    /// `JSONSerialization` accepts only Foundation primitives and chokes on
+    /// the enum otherwise.
+    static func encodeToolDefinition(_ tool: ToolDefinition) -> [String: Any] {
+        var function: [String: Any] = [
+            "name": tool.name,
+            "description": tool.description,
+        ]
+        if let parameters = Self.foundationJSON(from: tool.parameters) {
+            function["parameters"] = parameters
+        } else {
+            function["parameters"] = ["type": "object", "properties": [String: Any]()]
+        }
+        return [
+            "type": "function",
+            "function": function,
+        ]
+    }
+
+    /// Serialise a ``ToolAwareHistoryEntry`` into Ollama's message shape.
+    ///
+    /// Assistant entries with `toolCalls` get a `tool_calls` array; tool-role
+    /// entries get `tool_call_id`. Plain turns collapse to the same
+    /// `{role, content}` shape the classic history path produces.
+    static func encodeToolAwareEntry(_ entry: ToolAwareHistoryEntry) -> [String: Any] {
+        var obj: [String: Any] = [
+            "role": entry.role,
+            "content": entry.content,
+        ]
+        if let calls = entry.toolCalls, !calls.isEmpty {
+            obj["tool_calls"] = calls.map(Self.encodeToolCall)
+        }
+        if let callId = entry.toolCallId {
+            obj["tool_call_id"] = callId
+        }
+        return obj
+    }
+
+    /// Serialise a single ``ToolCall`` into the OpenAI streaming-compatible
+    /// shape Ollama uses in `message.tool_calls`.
+    ///
+    /// Ollama's server validator parses `arguments` as a JSON object when the
+    /// tool call is fed back in an assistant history entry, so we
+    /// re-hydrate the stored JSON string into a Foundation dictionary before
+    /// emitting. When parsing fails we fall back to an empty object rather
+    /// than shipping a malformed payload — the server will reject the
+    /// request either way, and a clean empty-args call surfaces a more
+    /// actionable error for the host.
+    static func encodeToolCall(_ call: ToolCall) -> [String: Any] {
+        let argumentsValue: Any = Self.parseArgumentString(call.arguments)
+        return [
+            "id": call.id,
+            "type": "function",
+            "function": [
+                "name": call.toolName,
+                "arguments": argumentsValue,
+            ] as [String: Any],
+        ]
+    }
+
+    /// Parse a `ToolCall.arguments` JSON string into the primitive graph
+    /// Ollama expects inside an assistant `tool_calls[]` entry. Falls back
+    /// to an empty object with a log warning on malformed input rather than
+    /// swallowing the error.
+    static func parseArgumentString(_ arguments: String) -> Any {
+        guard let data = arguments.data(using: .utf8) else {
+            Log.inference.warning(
+                "OllamaBackend: tool arguments string was not valid UTF-8 — substituting empty object in history."
+            )
+            return [String: Any]()
+        }
+        do {
+            return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        } catch {
+            Log.inference.warning(
+                "OllamaBackend: tool arguments string was not valid JSON — substituting empty object in history. error=\(error.localizedDescription, privacy: .public)"
+            )
+            return [String: Any]()
+        }
+    }
+
+    /// Decode one `tool_calls[]` entry from a parsed NDJSON line.
+    ///
+    /// Ollama's streaming format follows the OpenAI shape:
+    /// `{id, type: "function", function: {name, arguments}}`. The `arguments`
+    /// field is sometimes a JSON string (the documented wire shape) and
+    /// sometimes a pre-parsed dictionary (observed on some Ollama builds);
+    /// the decoder handles both and always produces a ``ToolCall`` whose
+    /// `arguments` property is a valid JSON string.
+    ///
+    /// `id` is optional on the wire — some Ollama builds omit it for the
+    /// first tool call in a turn. Synthesise a deterministic fallback from
+    /// the tool name plus a counter suffix when absent so downstream
+    /// call/result pairing still works.
+    static func decodeToolCall(_ raw: [String: Any]) -> ToolCall? {
+        guard let function = raw["function"] as? [String: Any],
+              let name = function["name"] as? String,
+              !name.isEmpty else {
+            return nil
+        }
+
+        let id: String
+        if let wireId = raw["id"] as? String, !wireId.isEmpty {
+            id = wireId
+        } else {
+            // Deterministic fallback: ids are only used for id→result pairing
+            // inside one turn, so a name-based placeholder is sufficient.
+            id = "ollama-\(name)-\(UUID().uuidString.prefix(8))"
+        }
+
+        let argumentsString: String
+        if let raw = function["arguments"] as? String {
+            argumentsString = raw
+        } else if let dict = function["arguments"] as? [String: Any] {
+            argumentsString = Self.serialiseArgumentDictionary(dict)
+        } else {
+            argumentsString = "{}"
+        }
+
+        return ToolCall(id: id, toolName: name, arguments: argumentsString)
+    }
+
+    /// Encode a ``JSONSchemaValue`` into the primitive graph
+    /// `JSONSerialization` accepts. Returns `nil` if encoding fails — callers
+    /// are expected to substitute a conservative default.
+    static func foundationJSON(from value: JSONSchemaValue) -> Any? {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(value)
+        } catch {
+            Log.inference.warning(
+                "OllamaBackend: failed to encode JSONSchemaValue for tools payload — substituting empty object. error=\(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+        do {
+            return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        } catch {
+            Log.inference.warning(
+                "OllamaBackend: failed to re-parse encoded schema for tools payload — substituting empty object. error=\(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+    }
+
+    /// Serialise an already-parsed arguments dictionary to a JSON string,
+    /// normalising Ollama builds that emit structured `arguments` instead of
+    /// the documented stringified form. Falls back to `"{}"` when
+    /// serialisation fails so ``ToolCall/arguments`` always contains valid
+    /// JSON the registry can decode.
+    static func serialiseArgumentDictionary(_ dict: [String: Any]) -> String {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: dict)
+            if let text = String(data: data, encoding: .utf8) {
+                return text
+            }
+            Log.inference.warning(
+                "OllamaBackend: tool arguments dictionary serialised to non-UTF8 bytes — substituting empty object."
+            )
+            return "{}"
+        } catch {
+            Log.inference.warning(
+                "OllamaBackend: failed to serialise parsed tool arguments — substituting empty object. error=\(error.localizedDescription, privacy: .public)"
+            )
+            return "{}"
+        }
+    }
+
+    // MARK: - ToolCallingHistoryReceiver
+
+    public func setToolAwareHistory(_ messages: [ToolAwareHistoryEntry]) {
+        withStateLock { self.toolAwareHistory = messages }
     }
 
     /// Extracts the assistant content token from an Ollama NDJSON line.

@@ -44,6 +44,7 @@ final class SilentCatchAuditTest: XCTestCase {
         // on either line; the audit's substring scan is not AST-aware.
         "BaseChatInference/Services/GenerationCoordinator.swift:let toolRegistry: ToolRegistry?",
         "BaseChatInference/Services/GenerationCoordinator.swift:toolRegistry: ToolRegistry? = nil",
+        "BaseChatInference/Services/InferenceService.swift:public var toolRegistry: ToolRegistry? {",
         // JSONSchemaValue uses the standard "try-each-type-in-order" decoder pattern for
         // heterogeneous JSON. Each `try?` is bound to a named constant and the result is
         // used immediately; there is no silent discard — the next branch handles the miss.

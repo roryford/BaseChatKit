@@ -38,6 +38,8 @@ private func categorise(_ event: GenerationEvent) -> EventCategory? {
     case .token(let t): return .token(t)
     case .usage: return .usage
     case .toolCall: return nil
+    case .toolResult: return nil
+    case .toolLoopLimitReached: return nil
     }
 }
 
