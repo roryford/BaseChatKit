@@ -15,7 +15,7 @@ import Foundation
 /// when JSON decoding fails. Historically this meant pre-removal rows that
 /// contained ``toolCall`` / ``toolResult`` discriminators degraded gracefully
 /// to text bubbles.  Those discriminators are now first-class cases again
-/// (see ``BaseChatSchemaV4``), so such rows decode correctly as their actual
+/// (see ``BaseChatSchemaV3``), so such rows decode correctly as their actual
 /// cases. The `.text` fallback remains as a safety net for genuinely
 /// malformed JSON until V5.
 public enum MessagePart: Codable, Hashable, Sendable {

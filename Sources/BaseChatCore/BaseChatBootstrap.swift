@@ -11,7 +11,7 @@ import BaseChatInference
 /// hooks wired automatically and should not call these directly.
 public enum BaseChatBootstrap {
 
-    /// Removes Keychain items whose owning ``BaseChatSchemaV4/APIEndpoint`` row
+    /// Removes Keychain items whose owning ``BaseChatSchemaV3/APIEndpoint`` row
     /// no longer exists.
     ///
     /// Orphans accumulate when an endpoint row is deleted while the matching
@@ -36,7 +36,7 @@ public enum BaseChatBootstrap {
 
         let validAccounts: Set<String>
         do {
-            let descriptor = FetchDescriptor<BaseChatSchemaV4.APIEndpoint>()
+            let descriptor = FetchDescriptor<BaseChatSchemaV3.APIEndpoint>()
             let endpoints = try modelContext.fetch(descriptor)
             validAccounts = Set(endpoints.map(\.keychainAccount))
         } catch {

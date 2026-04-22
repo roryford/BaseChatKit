@@ -25,13 +25,7 @@ import BaseChatInference
 public enum ModelContainerFactory {
     /// The current schema version.
     public static var currentSchema: any VersionedSchema.Type {
-        BaseChatSchemaV4.self
-    }
-
-    /// The migration plan chaining every historical schema version to the
-    /// current one. Stores opened with an older shape are upgraded in place.
-    public static var migrationPlan: any SchemaMigrationPlan.Type {
-        BaseChatMigrationPlan.self
+        BaseChatSchemaV3.self
     }
 
     /// Returns an on-disk `ModelContainer` configured with the current schema.
@@ -45,7 +39,6 @@ public enum ModelContainerFactory {
     ) throws -> ModelContainer {
         let container = try ModelContainer(
             for: Schema(versionedSchema: currentSchema),
-            migrationPlan: migrationPlan,
             configurations: configurations
         )
         applyFileProtection(to: configurations)
