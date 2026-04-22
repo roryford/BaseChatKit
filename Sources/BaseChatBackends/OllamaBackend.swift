@@ -227,7 +227,15 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         if let systemPrompt, !systemPrompt.isEmpty {
             messages.append(["role": "system", "content": systemPrompt])
         }
-        let snapshotToolHistory: [ToolAwareHistoryEntry]? = withStateLock { self.toolAwareHistory }
+        // Snapshot and clear: tool-aware history is a one-shot payload supplied
+        // by the orchestrator loop. If a subsequent non-tool generation runs on
+        // the same backend instance, it must fall back to `conversationHistory`
+        // rather than replaying stale tool-result messages.
+        let snapshotToolHistory: [ToolAwareHistoryEntry]? = withStateLock {
+            let snapshot = self.toolAwareHistory
+            self.toolAwareHistory = nil
+            return snapshot
+        }
         if let toolHistory = snapshotToolHistory {
             messages.append(contentsOf: toolHistory.map(Self.encodeToolAwareEntry))
         } else if let history = conversationHistory {

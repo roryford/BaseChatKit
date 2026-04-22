@@ -287,4 +287,49 @@ final class OllamaToolCallingTests: XCTestCase {
         XCTAssertEqual(toolEntry["tool_call_id"] as? String, "t-1")
         XCTAssertEqual(toolEntry["content"] as? String, "2099-01-01T00:00:00Z")
     }
+
+    /// Regression: `setToolAwareHistory` is a one-shot payload. Once consumed
+    /// by `buildRequest`, a second `buildRequest` with only `conversationHistory`
+    /// set must fall back to the plain string history, not replay stale tool
+    /// messages. Without the snapshot-and-clear at the read site, a tool-calling
+    /// turn silently poisons every subsequent non-tool generation on the same
+    /// backend instance.
+    func test_toolAwareHistory_isClearedAfterBuildRequest() throws {
+        let (backend, _) = makeBackend()
+        backend.setToolAwareHistory([
+            ToolAwareHistoryEntry(role: "user", content: "what time?"),
+            ToolAwareHistoryEntry(
+                role: "assistant",
+                content: "",
+                toolCalls: [ToolCall(id: "t-1", toolName: "now", arguments: "{}")]
+            ),
+            ToolAwareHistoryEntry(
+                role: "tool",
+                content: "2099-01-01T00:00:00Z",
+                toolCallId: "t-1"
+            ),
+        ])
+        backend.setConversationHistory([
+            (role: "user", content: "plain follow-up with no tools"),
+        ])
+
+        // First request consumes the tool-aware history.
+        _ = try backend.buildRequest(
+            prompt: "ignored", systemPrompt: nil, config: GenerationConfig()
+        )
+
+        // Second request must see only the plain string history. If the
+        // one-shot isn't cleared, stale tool_calls / tool-role entries leak in.
+        let second = try backend.buildRequest(
+            prompt: "ignored again", systemPrompt: nil, config: GenerationConfig()
+        )
+        let body = try XCTUnwrap(second.httpBody)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.count, 1, "second request should see only the plain history, not replayed tool messages")
+        XCTAssertEqual(messages[0]["role"] as? String, "user")
+        XCTAssertEqual(messages[0]["content"] as? String, "plain follow-up with no tools")
+        XCTAssertNil(messages[0]["tool_calls"])
+        XCTAssertNil(messages[0]["tool_call_id"])
+    }
 }
