@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": ["city"],
+  "properties": {
+    "city": {"type": "string"},
+    "units": {"type": "string", "enum": ["metric", "imperial"]}
+  }
+}
