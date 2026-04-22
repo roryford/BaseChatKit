@@ -30,6 +30,12 @@ final class GenerationCoordinator {
     /// non-isolated so it is safe under Swift 6 strict concurrency.
     private let thermalStateProvider: @Sendable () -> ProcessInfo.ThermalState
 
+    /// Optional registry used to dispatch model-emitted ``ToolCall`` events.
+    ///
+    /// Stored here in wave 1 so the coordinator's init surface is stable for
+    /// downstream wiring; the actual dispatch site lands in wave 2 Agent D.
+    let toolRegistry: ToolRegistry?
+
     // MARK: - Test Seam
 
     /// Test-only hook invoked alongside `Log.inference.warning` when
@@ -73,9 +79,11 @@ final class GenerationCoordinator {
     // MARK: - Initializers
 
     nonisolated init(
-        thermalStateProvider: @Sendable @escaping () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState }
+        thermalStateProvider: @Sendable @escaping () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState },
+        toolRegistry: ToolRegistry? = nil
     ) {
         self.thermalStateProvider = thermalStateProvider
+        self.toolRegistry = toolRegistry
     }
 
     // MARK: - Generation (Non-Queued)
@@ -395,6 +403,7 @@ final class GenerationCoordinator {
                     if case .token = event, next.stream.phase != .streaming {
                         next.stream.setPhase(.streaming)
                     }
+                    // wave 2 dispatches via toolRegistry here
                     self.continuations[next.token]?.yield(event)
                 }
 

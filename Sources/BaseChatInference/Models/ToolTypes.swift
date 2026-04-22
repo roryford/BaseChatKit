@@ -176,6 +176,33 @@ public struct ToolCall: Sendable, Codable, Equatable, Hashable {
 /// into its final response.
 public struct ToolResult: Sendable, Codable, Equatable, Hashable {
 
+    /// Categorises why a tool call failed.
+    ///
+    /// ``ToolResult/errorKind`` is `nil` on success. When non-`nil` it classifies
+    /// the failure so backends, orchestrators, and UI surfaces can decide whether
+    /// to retry, surface a permission prompt, feed the error back to the model,
+    /// or abort the loop. The string raw values are stable on the wire.
+    public enum ErrorKind: String, Sendable, Codable, Equatable, Hashable {
+        /// Arguments did not parse as JSON or failed schema validation.
+        case invalidArguments
+        /// The caller lacks permission to run the tool (user denied, missing scope).
+        case permissionDenied
+        /// A resource referenced by the tool (file, record, URL) does not exist.
+        case notFound
+        /// The tool exceeded its time budget.
+        case timeout
+        /// The tool or an underlying service applied back-pressure.
+        case rateLimited
+        /// The tool execution was cancelled by the caller.
+        case cancelled
+        /// A transient failure — safe to retry without changing inputs.
+        case transient
+        /// A permanent failure — retrying with the same inputs will not help.
+        case permanent
+        /// The tool name did not match any registered executor.
+        case unknownTool
+    }
+
     /// The ``ToolCall/id`` this result corresponds to.
     public let callId: String
 
@@ -184,22 +211,73 @@ public struct ToolResult: Sendable, Codable, Equatable, Hashable {
     /// For structured data, JSON-encode it before assigning.
     public let content: String
 
+    /// Failure classification, or `nil` on success.
+    ///
+    /// Use this to drive retry/abort decisions in the orchestration loop and
+    /// to render friendlier error messages in UI. The legacy boolean
+    /// ``isError`` flag is derived from this field.
+    public let errorKind: ErrorKind?
+
     /// `true` when the tool execution failed.
     ///
+    /// Computed from ``errorKind`` — `errorKind != nil` means the call failed.
     /// Backends that support error context (e.g. OpenAI) surface this flag
     /// so the model can reason about the failure and potentially retry.
-    public let isError: Bool
+    public var isError: Bool { errorKind != nil }
 
     /// Creates a tool result.
     ///
     /// - Parameters:
     ///   - callId: The ``ToolCall/id`` this result belongs to.
     ///   - content: The tool's output string.
-    ///   - isError: Whether the execution failed. Defaults to `false`.
-    public init(callId: String, content: String, isError: Bool = false) {
+    ///   - errorKind: Failure classification, or `nil` on success. Defaults to `nil`.
+    public init(callId: String, content: String, errorKind: ErrorKind? = nil) {
         self.callId = callId
         self.content = content
-        self.isError = isError
+        self.errorKind = errorKind
+    }
+
+    /// Legacy initializer retained for backwards compatibility.
+    ///
+    /// Maps `isError == true` to ``ErrorKind/permanent`` and `isError == false`
+    /// to `nil`. New code should pass an explicit ``ErrorKind`` via the primary
+    /// initializer so the failure class is preserved on the wire.
+    @available(*, deprecated, renamed: "init(callId:content:errorKind:)")
+    public init(callId: String, content: String, isError: Bool) {
+        self.callId = callId
+        self.content = content
+        self.errorKind = isError ? .permanent : nil
+    }
+
+    // MARK: Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case callId, content, errorKind, isError
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        callId = try c.decode(String.self, forKey: .callId)
+        content = try c.decode(String.self, forKey: .content)
+        // errorKind is authoritative when present. Otherwise fall back to the
+        // legacy `isError` boolean: true → .permanent, false → nil. This lets
+        // pre-v4 persisted ToolResults decode into the new shape without loss.
+        if let kind = try c.decodeIfPresent(ErrorKind.self, forKey: .errorKind) {
+            errorKind = kind
+        } else if let legacyIsError = try c.decodeIfPresent(Bool.self, forKey: .isError) {
+            errorKind = legacyIsError ? .permanent : nil
+        } else {
+            errorKind = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(callId, forKey: .callId)
+        try c.encode(content, forKey: .content)
+        try c.encodeIfPresent(errorKind, forKey: .errorKind)
+        // `isError` is intentionally NOT encoded — it is derived from errorKind
+        // and emitting it would put two sources of truth on the wire.
     }
 }
 
