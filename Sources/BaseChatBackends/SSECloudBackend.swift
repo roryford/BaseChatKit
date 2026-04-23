@@ -90,6 +90,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
 
     private var currentTask: Task<Void, Never>?
     private var _generationID: UInt64 = 0
+    private var _activeEventIDTracker: SSEEventIDTracker?
 
     public let urlSession: URLSession
 
@@ -324,6 +325,9 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
             return _generationID
         }
 
+        let eventIDTracker = SSEEventIDTracker()
+        withStateLock { _activeEventIDTracker = eventIDTracker }
+
         let capturedStrategy = retryStrategy
         let session = self.urlSession
         let capturedTimeout = streamIdleTimeout
@@ -348,6 +352,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                     self?.withStateLock {
                         if self?._generationID == genID {
                             self?._isGenerating = false
+                            self?._activeEventIDTracker = nil
                         }
                     }
                 }
@@ -369,7 +374,11 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                             await MainActor.run { streamBox.value?.setPhase(.retrying(attempt: attempt - 1, of: maxRetries)) }
                         }
 
-                        let (bytes, response) = try await session.bytes(for: request)
+                        var attemptRequest = request
+                        if let lastID = eventIDTracker.lastEventID {
+                            attemptRequest.setValue(lastID, forHTTPHeaderField: "Last-Event-ID")
+                        }
+                        let (bytes, response) = try await session.bytes(for: attemptRequest)
 
                         guard let httpResponse = response as? HTTPURLResponse else {
                             throw CloudBackendError.networkError(
@@ -440,7 +449,11 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         bytes: URLSession.AsyncBytes,
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
     ) async throws {
-        let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
+        let tokenStream = SSEStreamParser.parse(
+            bytes: bytes,
+            limits: effectiveSSEStreamLimits,
+            eventIDTracker: withStateLock { _activeEventIDTracker }
+        )
         // Tracks whether the last emitted content event was a
         // `.thinkingToken`. When the next payload produces a `.token` (plain
         // text), we inject a single `.thinkingComplete` so downstream

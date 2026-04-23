@@ -190,6 +190,26 @@ extension SSEPayloadHandler {
     }
 }
 
+/// Thread-safe holder for the last SSE event ID seen in a stream.
+/// Passed optionally to ``SSEStreamParser/parse(bytes:limits:eventIDTracker:)``
+/// so callers can inject the stored ID as ``Last-Event-ID`` on reconnect.
+package final class SSEEventIDTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _lastEventID: String?
+
+    package init() {}
+
+    /// The last `id:` field value received, or `nil` if none has been seen
+    /// or the most recent `id:` field was empty (spec: empty id resets to null).
+    package var lastEventID: String? {
+        lock.withLock { _lastEventID }
+    }
+
+    package func update(_ id: String?) {
+        lock.withLock { _lastEventID = id }
+    }
+}
+
 package struct SSEStreamParser {
 
     /// Parses an `AsyncSequence` of bytes into an `AsyncThrowingStream` of SSE data lines.
@@ -205,9 +225,12 @@ package struct SSEStreamParser {
     ///   - bytes: The raw byte stream.
     ///   - limits: Caps that defend against hostile upstreams. Defaults to
     ///     `BaseChatConfiguration.shared.sseStreamLimits`.
+    ///   - eventIDTracker: Optional tracker updated whenever an `id:` field is
+    ///     parsed. Callers pass this to inject `Last-Event-ID` on reconnect.
     package static func parse<S: AsyncSequence & Sendable>(
         bytes: S,
-        limits: SSEStreamLimits = BaseChatConfiguration.shared.sseStreamLimits
+        limits: SSEStreamLimits = BaseChatConfiguration.shared.sseStreamLimits,
+        eventIDTracker: SSEEventIDTracker? = nil
     ) -> AsyncThrowingStream<String, Error> where S.Element == UInt8 {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -278,8 +301,12 @@ package struct SSEStreamParser {
                                     }
                                     continuation.yield(payload)
                                 }
+                            } else if line.hasPrefix("id:") {
+                                let id = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                                // Per spec, an empty id: field resets the last event ID to null.
+                                eventIDTracker?.update(id.isEmpty ? nil : id)
                             }
-                            // Ignore event:, id:, retry:, and comment lines
+                            // event:, retry:, and comment lines are still intentionally ignored.
                         } else {
                             byteBuffer.append(byte)
                             if byteBuffer.count > limits.maxEventBytes {
