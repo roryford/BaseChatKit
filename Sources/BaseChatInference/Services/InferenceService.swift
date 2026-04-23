@@ -290,9 +290,30 @@ public final class InferenceService {
     /// conversation before the next turn. See `GenerationConfig.tools` and
     /// `GenerationConfig.toolChoice` for per-request wire-level control, and
     /// `GenerationConfig.maxToolIterations` for the per-request loop cap.
+    ///
+    /// The tool approval gate defaults to ``AutoApproveGate`` — every tool
+    /// call dispatches without prompting. Use
+    /// ``init(toolRegistry:toolApprovalGate:)`` to install a custom gate
+    /// (e.g. a UI-driven approval sheet).
     public nonisolated init(toolRegistry: ToolRegistry) {
         self.lifecycle = ModelLifecycleCoordinator()
         self.generation = GenerationCoordinator(toolRegistry: toolRegistry)
+    }
+
+    /// Creates the service with a pre-populated ``ToolRegistry`` and a
+    /// custom ``ToolApprovalGate``.
+    ///
+    /// The gate is consulted before every ``ToolCall`` is dispatched. When
+    /// the gate returns ``ToolApprovalDecision/denied(reason:)`` the
+    /// coordinator synthesises a ``ToolResult`` with
+    /// ``ToolResult/ErrorKind/permissionDenied`` and continues the stream
+    /// — generation is not cancelled.
+    public nonisolated init(toolRegistry: ToolRegistry, toolApprovalGate: any ToolApprovalGate) {
+        self.lifecycle = ModelLifecycleCoordinator()
+        self.generation = GenerationCoordinator(
+            toolRegistry: toolRegistry,
+            toolApprovalGate: toolApprovalGate
+        )
     }
 
     /// The ``ToolRegistry`` this service dispatches through, or `nil` when

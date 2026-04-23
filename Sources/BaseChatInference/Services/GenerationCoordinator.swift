@@ -36,6 +36,18 @@ final class GenerationCoordinator {
     /// downstream wiring; the actual dispatch site lands in wave 2 Agent D.
     let toolRegistry: ToolRegistry?
 
+    /// Gate consulted before dispatching every ``ToolCall`` through
+    /// ``toolRegistry``. Defaults to ``AutoApproveGate`` so hosts that have
+    /// not opted into per-call approval see unchanged behaviour.
+    ///
+    /// The gate is invoked on the *finalized* ``ToolCall`` — streaming
+    /// argument deltas are merged by the backend before the coordinator
+    /// observes the call event. On ``ToolApprovalDecision/denied(reason:)``
+    /// the coordinator synthesises a ``ToolResult`` with
+    /// ``ToolResult/ErrorKind/permissionDenied`` and continues the stream
+    /// rather than cancelling generation.
+    let toolApprovalGate: any ToolApprovalGate
+
     // MARK: - Test Seam
 
     /// Test-only hook invoked alongside `Log.inference.warning` when
@@ -80,10 +92,12 @@ final class GenerationCoordinator {
 
     nonisolated init(
         thermalStateProvider: @Sendable @escaping () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState },
-        toolRegistry: ToolRegistry? = nil
+        toolRegistry: ToolRegistry? = nil,
+        toolApprovalGate: any ToolApprovalGate = AutoApproveGate()
     ) {
         self.thermalStateProvider = thermalStateProvider
         self.toolRegistry = toolRegistry
+        self.toolApprovalGate = toolApprovalGate
     }
 
     // MARK: - Generation (Non-Queued)
@@ -606,7 +620,26 @@ final class GenerationCoordinator {
                             errorKind: .permanent
                         )
                     } else {
-                        result = await toolRegistry!.dispatch(call)
+                        // User-approval gate: invoked on the finalized ToolCall,
+                        // after the repeat / byte-budget guards (which both
+                        // synthesize their own results without touching the
+                        // registry). On `.denied` we emit a `.permissionDenied`
+                        // ToolResult and continue the loop — the backend sees a
+                        // structured refusal and the model usually apologises
+                        // and asks what to do next.
+                        switch await toolApprovalGate.approve(call) {
+                        case .approved:
+                            result = await toolRegistry!.dispatch(call)
+                        case .denied(let reason):
+                            Log.inference.info(
+                                "GenerationCoordinator: tool '\(call.toolName, privacy: .public)' denied by ToolApprovalGate"
+                            )
+                            result = ToolResult(
+                                callId: call.id,
+                                content: reason ?? "user denied tool execution",
+                                errorKind: .permissionDenied
+                            )
+                        }
                     }
 
                     toolResultByteTotal += result.content.utf8.count
