@@ -121,11 +121,10 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
                 }
                 self.unregisterActiveTempPath(tempURL)
                 self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
-                do {
-                    try FileManager.default.removeItem(at: tempURL)
-                } catch {
-                    Log.download.error("Failed to remove temp download \(tempURL.lastPathComponent): \(error.localizedDescription)")
-                }
+                // Use try? — the file may already have been removed in a guard
+                // block above (e.g. path-traversal rejection), so a "not found"
+                // error here is expected and should not be logged as a failure.
+                try? FileManager.default.removeItem(at: tempURL)
             }
         }
     }

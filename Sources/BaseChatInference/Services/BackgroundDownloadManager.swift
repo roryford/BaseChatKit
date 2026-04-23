@@ -415,10 +415,10 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         restorePendingDownloads()
 
         // Reclaim disk from any temp files leaked by a prior crash. Capture the
-        // active-path snapshot on MainActor, then hand it off so the filesystem
-        // scan runs without blocking MainActor.
+        // active-path snapshot here on @MainActor, then run the filesystem scan
+        // in a low-priority task so it does not delay the session reconnect path.
         let excluded = activeTempPaths
-        Task.detached(priority: .utility) { [weak self] in
+        Task(priority: .utility) { [weak self] in
             self?.cleanupStaleTempFiles(now: Date(), excluding: excluded)
         }
     }
@@ -956,7 +956,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// - Files whose attributes cannot be read (logged and skipped).
     ///
     /// Runs on launch from ``reconnectBackgroundSession()``.
-    public func cleanupStaleTempFiles() {
+    @MainActor public func cleanupStaleTempFiles() {
         cleanupStaleTempFiles(now: Date(), excluding: activeTempPaths)
     }
 
