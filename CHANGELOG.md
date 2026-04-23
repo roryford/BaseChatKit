@@ -126,13 +126,42 @@ See [#595](https://github.com/roryford/BaseChatKit/issues/595), [#596](https://g
 
 ## [0.10.2](https://github.com/roryford/BaseChatKit/compare/v0.10.1...v0.10.2) (2026-04-19)
 
-**Multi-turn context and special token fixes for local backends** — MLX models now correctly recall prior messages in a conversation. Llama-format models (SmolLM2, Mistral, etc.) no longer generate commentary about `<|im_start|>` tokens — responses are coherent from the first message. MLX model downloads complete reliably and show correct progress. The demo app opens immediately on launch instead of showing a blank screen for several seconds.
+### Fixes
+
+- **mlx:** multi-turn conversations now correctly recall prior messages
+- **llama:** Llama-format models (SmolLM2, Mistral, and peers) no longer generate commentary about `<|im_start|>` tokens — responses are coherent from the first message
+- **downloads:** MLX model downloads complete reliably and show correct progress
+- **demo:** the demo app opens immediately on launch instead of showing a blank screen for several seconds
 
 ## [0.10.1](https://github.com/roryford/BaseChatKit/compare/v0.10.0...v0.10.1) (2026-04-19)
 
-**Fuzz harness hardened against false positives and small-model repetition loops** — live fuzz runs against Llama, Foundation, and MLX backends surfaced two classes of detector noise and two generation pathologies that this release fixes. Two fuzz detectors were flagging false positives: `ThinkingClassificationDetector` was firing on models that don't emit `<think>` markers (they have no reasoning blocks to leak), and `TemplateTokenLeakDetector` was flagging template fragments that the model correctly echoed back from the prompt input ([#570](https://github.com/roryford/BaseChatKit/issues/570), [#569](https://github.com/roryford/BaseChatKit/issues/569)). Both detectors now gate on the relevant precondition before raising a finding.
+### Highlights
 
-On the generation side, `LlamaGenerationDriver` gains two repetition guards that break the token loop early instead of running to `maxTokens`: a single-token window (20-token identical-token run) catches trivial space/punctuation spam from small models like smollm2-135m ([#568](https://github.com/roryford/BaseChatKit/issues/568), closes [#565](https://github.com/roryford/BaseChatKit/issues/565)), and a phrase-level sliding window (phrases 2–20 tokens, 3 consecutive repeats required) catches multi-token loops such as echoed prompts, HTML timestamp blocks, and ASCII-art sequences that the single-token guard misses. The `FuzzBackendFactory` teardown hook ensures `LlamaBackend.unloadAndWait()` completes before the CLI process exits, preventing the SIGABRT from ggml-metal's resource-set assertion ([#571](https://github.com/roryford/BaseChatKit/issues/571)). This release also wires the Llama, Foundation, and MLX native backends into the fuzz harness so campaigns can run against all three without Ollama.
+#### Fuzz detectors stop crying wolf on non-reasoning models
+
+Live fuzz runs against Llama, Foundation, and MLX surfaced two detectors that flagged false positives. `ThinkingClassificationDetector` was firing on models that don't emit `<think>` markers — they have no reasoning blocks to leak. `TemplateTokenLeakDetector` was flagging template fragments that the model correctly echoed back from prompt input. Both now gate on the relevant precondition before raising a finding.
+
+See [#569](https://github.com/roryford/BaseChatKit/issues/569), [#570](https://github.com/roryford/BaseChatKit/issues/570).
+
+#### Small models can't get stuck in repetition loops anymore
+
+`LlamaGenerationDriver` gains two repetition guards that break the token loop early instead of running to `maxTokens`. A single-token window catches trivial space/punctuation spam from tiny models like `smollm2-135m` (20 identical tokens in a row). A phrase-level sliding window catches multi-token loops — echoed prompts, HTML timestamp blocks, ASCII-art sequences — that the single-token guard misses (phrases 2–20 tokens, 3 consecutive repeats).
+
+```swift
+// Both guards run inside LlamaGenerationDriver's decode loop and
+// terminate the stream cleanly with a .stopped event — no config
+// flag needed; they just fire when the pattern is obvious.
+```
+
+See [#568](https://github.com/roryford/BaseChatKit/issues/568) (closes [#565](https://github.com/roryford/BaseChatKit/issues/565)).
+
+### Fixes
+
+- **fuzz:** `FuzzBackendFactory` teardown hook ensures `LlamaBackend.unloadAndWait()` completes before the CLI process exits, preventing the SIGABRT from ggml-metal's resource-set assertion ([#571](https://github.com/roryford/BaseChatKit/issues/571))
+
+### Internal
+
+- Llama, Foundation, and MLX native backends wired into the fuzz harness, so campaigns can run against all three without Ollama
 
 ## [0.10.0](https://github.com/roryford/BaseChatKit/compare/v0.9.2...v0.10.0) (2026-04-19)
 
@@ -144,12 +173,61 @@ The fuzzing harness (`swift run fuzz-chat`, `scripts/fuzz.sh`) exercises real ba
 
 ## [0.9.2](https://github.com/roryford/BaseChatKit/compare/v0.9.1...v0.9.2) (2026-04-18)
 
-**Gemma 4 support and prompt-template detection polish** — This release closes the last gaps in GGUF prompt-template detection. First-class Gemma 4 support lands via a dedicated `.gemma4` template with the correct `<|turn>` / `<|end_of_turn>` delimiters and an explicit `<|turn>system` turn ([#461](https://github.com/roryford/BaseChatKit/issues/461)); loading a Gemma 4 GGUF previously fell through to ChatML and emitted `<|im_start|>` tokens the model had never seen, producing garbage output. Detection of `gemma3` architectures also gets wired up — they now map to the existing `.gemma` template rather than falling through to ChatML. Relatedly, `PromptTemplateDetector.detect(from:)` now lets an unambiguous model architecture (phi, gemma, mistral) win over a conflicting Jinja chat template, because some phi3/phi4 GGUFs include `<|im_start|>` tokens in their template's compatibility branches and were being misidentified as ChatML (fixes [#464](https://github.com/roryford/BaseChatKit/issues/464)). Finally, the Device Info popover now surfaces the actual loaded model name above the backend engine row ([#466](https://github.com/roryford/BaseChatKit/issues/466)), so users can confirm which model is active at a glance.
+### Highlights
+
+#### Gemma 4 works, and architecture wins over Jinja when they disagree
+
+First-class Gemma 4 support lands via a dedicated `.gemma4` template with the correct `<|turn>` / `<|end_of_turn>` delimiters and an explicit `<|turn>system` turn. Loading a Gemma 4 GGUF previously fell through to ChatML and emitted `<|im_start|>` tokens the model had never seen — producing garbage output. `gemma3` architectures also get wired up, mapping to the existing `.gemma` template.
+
+```swift
+let detected = PromptTemplateDetector.detect(from: metadata)
+// detected == .gemma4 when general.architecture == "gemma4"
+// even if metadata also carries a generic ChatML chat_template.
+```
+
+`PromptTemplateDetector.detect(from:)` now lets an unambiguous model architecture (phi, gemma, mistral) win over a conflicting Jinja chat template — because some phi3/phi4 GGUFs include `<|im_start|>` tokens in their template's compatibility branches and were being misidentified as ChatML.
+
+See [#461](https://github.com/roryford/BaseChatKit/issues/461), fixes [#464](https://github.com/roryford/BaseChatKit/issues/464).
+
+### Fixes
+
+- **ui:** Device Info popover surfaces the actual loaded model name above the backend engine row, so users can confirm which model is active at a glance ([#466](https://github.com/roryford/BaseChatKit/issues/466))
 
 
 ## [0.9.1](https://github.com/roryford/BaseChatKit/compare/v0.9.0...v0.9.1) (2026-04-18)
 
-**Tool-calling contracts, capability predicates, and a llama.cpp stability pass** — This release introduces the inference-layer building blocks for tool-calling: a generic `ToolCall` / `ToolResult` value type in `BaseChatInference` ([#433](https://github.com/roryford/BaseChatKit/issues/433)) gives host apps a typed, backend-agnostic channel for function-calling, and `ModelCapabilityTier` gains predicate-based query methods ([#447](https://github.com/roryford/BaseChatKit/issues/447)) so model-selection UIs can filter by device capability without manual tier comparisons. iPad's model management sheet now uses system popovers and a medium detent ([#345](https://github.com/roryford/BaseChatKit/issues/345), [#346](https://github.com/roryford/BaseChatKit/issues/346)), matching the platform's expected presentation style for content management. Four llama.cpp fixes close out the stability pass from v0.9.0: `stopGeneration()` is now thread-safe against the decode loop ([#418](https://github.com/roryford/BaseChatKit/issues/418)), context overflow in long multi-turn sessions is guarded at the prefill boundary ([#417](https://github.com/roryford/BaseChatKit/issues/417)), in-flight generation is aborted when the OS sends a memory pressure notification to prevent Metal buffer revocation from crashing the process ([#415](https://github.com/roryford/BaseChatKit/issues/415)), and the `.mappable` load strategy now correctly rejects models whose file size cannot plausibly fit available device memory rather than returning a silent `.allow` that only fails later inside llama.cpp ([#448](https://github.com/roryford/BaseChatKit/issues/448)).
+### Highlights
+
+#### Building blocks for tool calling land in the inference layer
+
+Generic `ToolCall` and `ToolResult` value types in `BaseChatInference` give host apps a typed, backend-agnostic channel for function-calling. The full orchestrator arrives in v0.11.2 — this release ships the primitives underneath.
+
+```swift
+let call = ToolCall(id: "call_1", name: "weather", arguments: ["city": "Tokyo"])
+let result = ToolResult.success(id: call.id, content: .text("24°C, clear"))
+```
+
+See [#433](https://github.com/roryford/BaseChatKit/issues/433).
+
+#### Device-capability queries without manual tier math
+
+Model-selection UIs can now ask "can this device run a model at tier X?" without inspecting weights directly. New helpers on `DeviceCapability` wrap the existing `ModelCapabilityTier` and `FrameworkCapabilityService` plumbing with a concise public surface.
+
+```swift
+if DeviceCapability.supports(tier: .balanced) { /* show bigger variants */ }
+let top = DeviceCapability.highestSupportedTier(for: .gguf)
+guard DeviceCapability.canLoadModel(estimatedMemoryMB: 4_200) else { return }
+```
+
+See [#447](https://github.com/roryford/BaseChatKit/issues/447).
+
+#### Llama.cpp stability pass closes out four sharp edges
+
+Four fixes that finish the stability work started in v0.9.0. `stopGeneration()` is now thread-safe against the decode loop ([#418](https://github.com/roryford/BaseChatKit/issues/418)). Context overflow in long multi-turn sessions is guarded at the prefill boundary ([#417](https://github.com/roryford/BaseChatKit/issues/417)). In-flight generation is aborted when the OS sends a memory-pressure notification — preventing Metal buffer revocation from crashing the process ([#415](https://github.com/roryford/BaseChatKit/issues/415)). And the `.mappable` load strategy rejects models whose file size can't plausibly fit available device memory, instead of returning a silent `.allow` that only fails later inside llama.cpp ([#448](https://github.com/roryford/BaseChatKit/issues/448)).
+
+### Fixes
+
+- **ipad:** model management sheet uses system popovers and a medium detent, matching the platform's expected presentation style for content management ([#345](https://github.com/roryford/BaseChatKit/issues/345), [#346](https://github.com/roryford/BaseChatKit/issues/346))
 
 ## [0.9.0](https://github.com/roryford/BaseChatKit/compare/v0.8.4...v0.9.0) (2026-04-18)
 
