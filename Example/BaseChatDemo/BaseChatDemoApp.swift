@@ -40,7 +40,10 @@ struct BaseChatDemoApp: App {
         // Populate curated model recommendations
         CuratedModel.all = Self.curatedModels
 
-        let inferenceService = InferenceService()
+        let toolRegistry = ToolRegistry()
+        DemoTools.register(on: toolRegistry)
+
+        let inferenceService = InferenceService(toolRegistry: toolRegistry)
         DefaultBackends.register(with: inferenceService)
         self.inferenceService = inferenceService
 
