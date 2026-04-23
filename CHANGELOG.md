@@ -2,11 +2,46 @@
 
 ## [0.11.2](https://github.com/roryford/BaseChatKit/compare/v0.11.1...v0.11.2) (2026-04-23)
 
-**Tool calling lands end-to-end on Ollama, and three backends now honor `maxThinkingTokens=0`** — The headline of this release is a complete, opt-in tool-calling stack. `MessagePart` grows `.toolCall` and `.toolResult` cases so transcripts can carry structured tool invocations without a parallel schema ([#634](https://github.com/roryford/BaseChatKit/issues/634)). A new `ToolRegistry` owns `ToolDefinition` registration, `TypedToolExecutor` provides a strongly-typed dispatch surface that decodes arguments from `ToolCall.arguments` into a host-owned Swift type, and `ToolResult.errorKind` classifies failures into a small taxonomy (`notFound`, `invalidArguments`, `toolThrew`, `cancelled`, `timeout`) so orchestrators can react differently to "the model asked for a tool that doesn't exist" vs. "the tool threw" ([#635](https://github.com/roryford/BaseChatKit/issues/635), closes [#618](https://github.com/roryford/BaseChatKit/issues/618) and [#624](https://github.com/roryford/BaseChatKit/issues/624)). A `JSONSchemaValidator` implementing a practical Draft 2020-12 subset validates tool arguments before dispatch, giving executors a clean "this call cannot run as-specified" signal instead of letting malformed JSON reach user code ([#636](https://github.com/roryford/BaseChatKit/issues/636)). On top of that, `GenerationCoordinator` gains a tool-call dispatch loop that reads `.toolCall` events off the model stream, executes through the registry, appends `.toolResult` to the transcript, and re-prompts — and `OllamaBackend` is the first backend wired to drive it, using the non-streaming endpoint so `tool_calls` chunks don't get dropped ([#640](https://github.com/roryford/BaseChatKit/issues/640)). The loop stays opt-in: existing callers that never register tools see no behaviour change.
+### Highlights
 
-The second cluster fixes a correctness gap that slipped through [#596](https://github.com/roryford/BaseChatKit/issues/596). `GenerationConfig.maxThinkingTokens`'s doc-comment promised that the value `0` disables reasoning entirely on every supporting backend, but only Ollama honored it. MLX and Llama silently treated `0` like `nil` and continued running their `ThinkingParser` — so callers trying to suppress reasoning saw `<think>` content leak into the visible stream. `LlamaGenerationDriver` and `MLXBackend` now short-circuit the parser when `maxThinkingTokens == 0`, routing any model-emitted reasoning directly to `.token` events ([#642](https://github.com/roryford/BaseChatKit/issues/642)). `ClaudeBackend` was independently audited — its existing `budget > 0` gate already suppressed the `thinking` request block correctly, so the fix locked that behaviour in with three new regression tests rather than changing code. Alongside, `OllamaE2ETests` stops failing silently against reasoning models like `qwen3.5:4b`: the helper's default visible-token budget jumped from 64 to 256, the two baseline tests now classify on `backend.isThinkingModel` and accept either visible output or a complete thinking trace as evidence, and heavy-reasoner tests were bumped enough to let the model finish thinking and surface a visible answer in the same run ([#602](https://github.com/roryford/BaseChatKit/issues/602), [#643](https://github.com/roryford/BaseChatKit/issues/643)).
+#### Tool calling lands end-to-end on Ollama
 
-Internal build hygiene: `fuzz-chat` no longer links MLX/Llama/Foundation backends when the `Fuzz` package trait is off, keeping the default `swift build` off the Metal-shader compile path, and `BaseChatTools` now declares its built-in scenario JSON as package resources so `scripts/fuzz.sh` invocations resolve fixtures deterministically ([#648](https://github.com/roryford/BaseChatKit/issues/648)).
+`MessagePart` now carries `.toolCall` and `.toolResult` cases, so transcripts hold structured tool invocations without a parallel schema. A new `ToolRegistry` owns definitions, `TypedToolExecutor` decodes arguments into your own Swift types, and `GenerationCoordinator` drives the loop — model → tool call → execute → feed result → model — with Ollama wired as the first backend.
+
+```swift
+let registry = ToolRegistry()
+registry.register(WeatherTool())
+
+let service = InferenceService(backend: OllamaBackend(), tools: registry)
+let stream = try service.generate(prompt: "What's the weather in Tokyo?")
+```
+
+Errors are classified (`.notFound`, `.invalidArguments`, `.toolThrew`, `.cancelled`, `.timeout`) so orchestrators can tell "model asked for a tool that doesn't exist" apart from "the tool threw." Opt-in: existing callers that never register tools see no change.
+
+See [#634](https://github.com/roryford/BaseChatKit/issues/634), [#635](https://github.com/roryford/BaseChatKit/issues/635), [#636](https://github.com/roryford/BaseChatKit/issues/636), [#640](https://github.com/roryford/BaseChatKit/issues/640).
+
+#### `maxThinkingTokens = 0` now actually disables reasoning
+
+The doc comment promised it worked on every backend. Only Ollama did. MLX and Llama silently treated `0` like `nil` and kept running their `ThinkingParser`, so `<think>` content leaked into the visible stream for anyone trying to suppress it.
+
+```swift
+let config = GenerationConfig(maxThinkingTokens: 0) // now honored on all backends
+```
+
+Fixed on `LlamaGenerationDriver` and `MLXBackend`. `ClaudeBackend` was already correct and got three regression tests to lock it in. See [#642](https://github.com/roryford/BaseChatKit/issues/642).
+
+### Features
+
+- **core:** add `MessagePart.toolCall` and `.toolResult` cases ([#634](https://github.com/roryford/BaseChatKit/issues/634))
+- **inference:** `ToolRegistry`, `TypedToolExecutor`, and `ToolResult.errorKind` taxonomy ([#635](https://github.com/roryford/BaseChatKit/issues/635), closes [#618](https://github.com/roryford/BaseChatKit/issues/618) and [#624](https://github.com/roryford/BaseChatKit/issues/624))
+- **inference:** `JSONSchemaValidator` with a practical JSON Schema Draft 2020-12 subset ([#636](https://github.com/roryford/BaseChatKit/issues/636))
+- **inference:** tool-call dispatch loop + Ollama tool wiring ([#640](https://github.com/roryford/BaseChatKit/issues/640))
+
+### Fixes
+
+- **backends:** honor `maxThinkingTokens=0` on MLX, Llama, and Anthropic ([#642](https://github.com/roryford/BaseChatKit/issues/642))
+- **tests:** raise `OllamaE2ETests` budget for thinking models — 64 tokens was consumed entirely by `<think>` blocks on qwen3.5, so the baseline tests now classify on `backend.isThinkingModel` and accept visible output or a complete thinking trace as evidence ([#643](https://github.com/roryford/BaseChatKit/issues/643), closes [#602](https://github.com/roryford/BaseChatKit/issues/602))
+- gate `fuzz-chat` backends on the `Fuzz` trait and declare `BaseChatTools` resources ([#648](https://github.com/roryford/BaseChatKit/issues/648))
 
 ## [0.11.1](https://github.com/roryford/BaseChatKit/compare/v0.11.0...v0.11.1) (2026-04-21)
 
