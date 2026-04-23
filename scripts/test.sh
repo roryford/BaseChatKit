@@ -43,7 +43,7 @@ echo ""
 # We merge both so signal-crash lines (stderr) land alongside test lines (stdout).
 cd "$PACKAGE_DIR"
 set +e
-swift test 2>&1 | tee "$OUTPUT_FILE"
+swift test "$@" 2>&1 | tee "$OUTPUT_FILE"
 SWIFT_EXIT=${PIPESTATUS[0]}
 set -e
 
@@ -161,6 +161,9 @@ elif [[ $total_crashed_count -gt 0 ]]; then
 elif [[ $SWIFT_EXIT -ne 0 ]]; then
     echo "  RESULT: FAILED (swift test exit code $SWIFT_EXIT)"
     FINAL_EXIT=$SWIFT_EXIT
+elif [[ $total_passed -eq 0 && $total_skipped -gt 0 && $total_failed -eq 0 && $total_crashed_count -eq 0 ]]; then
+    echo "  RESULT: TRIPWIRE — 0 tests passed, $total_skipped skipped (entire suite silently skipped)"
+    FINAL_EXIT=3
 else
     echo "  RESULT: PASSED"
 fi

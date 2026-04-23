@@ -174,7 +174,7 @@ final class ReplayTests: XCTestCase {
     }
 
     /// Trigger string looping detector will emit — see LoopingDetector.swift
-    /// (`trigger: String(r.rendered.suffix(120))`).
+    /// (`trigger: String(r.raw.suffix(120))`).
     private func loopingTrigger() -> String {
         String(String(repeating: "ha ", count: 60).suffix(120))
     }

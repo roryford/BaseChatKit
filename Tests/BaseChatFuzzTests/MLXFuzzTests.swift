@@ -1,4 +1,4 @@
-#if MLX
+#if MLX && Fuzz
 import XCTest
 @testable import BaseChatFuzz
 import BaseChatBackends
@@ -103,4 +103,4 @@ private struct MLXFuzzFactory: FuzzBackendFactory {
         )
     }
 }
-#endif
+#endif // MLX && Fuzz

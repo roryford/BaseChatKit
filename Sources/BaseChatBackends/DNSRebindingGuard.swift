@@ -117,7 +117,8 @@ public enum DNSRebindingGuard {
                     nil, 0,
                     NI_NUMERICHOST
                 ) == 0 {
-                    addresses.append(String(cString: host))
+                    let nullIdx = host.firstIndex(of: 0) ?? host.endIndex
+                    addresses.append(String(decoding: host[..<nullIdx].map { UInt8(bitPattern: $0) }, as: UTF8.self))
                 }
                 current = info.pointee.ai_next
             }

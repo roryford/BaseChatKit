@@ -22,7 +22,8 @@ public struct RunRecord: Codable, Sendable, Equatable {
     /// `Replayer` still populate it from `capture.raw`; detectors now read `raw`
     /// directly. Tracked for removal once the "real UI-transform rendering" path
     /// is wired up (see follow-up issue).
-    @available(*, deprecated, message: "use raw; rendered will be removed in a later release")
+    ///
+    /// - Deprecated: use `raw` instead; `rendered` will be removed in a later release.
     public var rendered: String
     public var thinkingRaw: String
     public var thinkingParts: [String]

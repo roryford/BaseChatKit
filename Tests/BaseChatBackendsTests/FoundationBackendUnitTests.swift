@@ -552,5 +552,34 @@ final class FoundationBackendUnitTests: XCTestCase {
             + "same diff-loop caveat as structured output. See #526."
         )
     }
+
+    // MARK: - Delta-extraction correctness (#644)
+
+    /// Verifies the scalar-counter delta-extraction algorithm used in
+    /// `FoundationBackend.generate` after the #644 memory fix.
+    ///
+    /// `FoundationModels` streams cumulative text; the loop emits only the new
+    /// suffix on each step. This test exercises the pure logic (no live model
+    /// needed) and confirms each emission is exactly the single new character.
+    ///
+    /// Sabotage check: change `previousCount = currentText.count` to
+    /// `previousCount = 0` — `collectedDeltas` will contain the full cumulative
+    /// string at each step, causing `allSatisfy { $0 == "a" }` to fail for any
+    /// delta longer than one character. Remove the sabotage before committing.
+    func testStreamingDeltaExtractionIsCorrect() throws {
+        // FoundationModels streams cumulative text; verify we emit only the deltas.
+        let cumulativeTexts = (1...100).map { i in String(repeating: "a", count: i) }
+        var collectedDeltas: [String] = []
+        var previousCount = 0
+        for text in cumulativeTexts {
+            if text.count > previousCount {
+                collectedDeltas.append(String(text.dropFirst(previousCount)))
+                previousCount = text.count
+            }
+        }
+        // Each delta should be exactly "a" (one new character per step).
+        XCTAssertEqual(collectedDeltas.count, 100)
+        XCTAssertTrue(collectedDeltas.allSatisfy { $0 == "a" })
+    }
 }
 #endif

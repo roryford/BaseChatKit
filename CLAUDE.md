@@ -37,6 +37,13 @@ scripts/example-ui-tests.sh test-without-building -only-testing:BaseChatDemoUITe
 
 # Real Ollama server E2E (requires Ollama running at localhost:11434)
 swift test --filter OllamaE2ETests --disable-default-traits
+
+# Fuzz harness — requires Ollama running at localhost:11434
+# The Fuzz trait gates real inference backends; without it, fuzz-chat builds mock-only.
+# Always use #if Fuzz in addition to the backend trait (#if MLX, #if Llama) when
+# writing tests that depend on real inference — keeps them out of --disable-default-traits CI runs.
+scripts/fuzz.sh                    # 5-minute Ollama run (default)
+scripts/fuzz.sh --with-llama --minutes 2  # Llama GGUF run
 ```
 
 When writing hardware-gated tests, add `XCTSkipIf` guards at the top of the test rather than assuming the environment.
@@ -96,7 +103,7 @@ When Apple ships a new major OS each September, bump both minimums by one and re
 | `scripts/test.sh` | Runs the four CI suites and prints an honest summary. |
 | `scripts/example-ui-tests.sh` | `build-for-testing` / `test-without-building` for Example app XCUITests. |
 | `scripts/clean-leaked-test-artifacts.sh` | Removes test fixtures that leaked into `~/Documents/Models/`. |
-| `scripts/fuzz.sh` | Runs the BaseChatFuzz harness (default: 5 min against Ollama). See [FUZZING.md](FUZZING.md). |
+| `scripts/fuzz.sh` | Runs the BaseChatFuzz harness (default: 5 min against Ollama). Passes `--traits Fuzz,MLX,Llama` automatically. See [FUZZING.md](FUZZING.md). |
 
 ## Pre-push checklist
 
