@@ -45,21 +45,84 @@ Fixed on `LlamaGenerationDriver` and `MLXBackend`. `ClaudeBackend` was already c
 
 ## [0.11.1](https://github.com/roryford/BaseChatKit/compare/v0.11.0...v0.11.1) (2026-04-21)
 
-**Security hardening, Ollama reliability, and native JSON-mode responses** — This release tightens three orthogonal gaps that an external documentation audit surfaced. On the remote path, `BaseChatConfiguration` now enforces canonical endpoint validation on the actual cloud-connect code path (not just the UI save flow), a new `DNSRebindingGuard` blocks requests whose DNS resolves to RFC1918, link-local, multicast, IMDS, or other reserved addresses at request time, and a `CustomHostTrustPolicy` lets apps opt into fail-closed TLS trust for custom hosts that requires explicit pins ([#613](https://github.com/roryford/BaseChatKit/issues/613)). The platform-default compatibility mode is preserved unless the caller explicitly tightens it, so existing apps see no behavior change until they opt in.
+### Highlights
 
-On the local-first path, `OllamaBackend` gains four hardening changes motivated by silent-failure modes in Ollama's wire contract ([#610](https://github.com/roryford/BaseChatKit/issues/610)). The backend now derives `options.num_ctx` from the `ModelLoadPlan` on every request — with an 8192-token floor for the `.cloud()` default — closing the footgun where Ollama's server-side 2048-token default would truncate multi-turn conversations with no error signal. When a Qwen3-style model emits reasoning inline as `<think>…</think>` in `message.content` instead of populating the dedicated `thinking` field, `ThinkingParser` now engages as a fallback so the existing thinking UI treats it correctly instead of rendering raw tags. Model tags ending in `:cloud` — which Ollama v0.18.0+ silently routes to its hosted cloud service — are now rejected at load time with a descriptive error, so a local-first configuration can't accidentally leak prompts off-device. A follow-up `TODO(#55)` is pinned in `buildRequest` so the next author wiring tool calling flips the stream mode correctly, since Ollama's streaming drops `tool_calls` delta chunks.
+#### Remote-endpoint hardening closes SSRF and DNS-rebinding gaps
 
-Callers can now request JSON-formatted responses in a backend-agnostic way via `GenerationConfig.jsonMode` and `BackendCapabilities.supportsNativeJSONMode` ([#615](https://github.com/roryford/BaseChatKit/issues/615)). The flag maps to OpenAI's `response_format: { type: "json_object" }` and Ollama's `format: "json"` where supported; backends without native JSON mode (Claude, Llama, MLX, Foundation) now emit a `Log.inference.warning` naming the backend and the capability flag, so callers can branch on `backend.capabilities.supportsNativeJSONMode` rather than silently getting plain-text back.
+Canonical endpoint validation moves onto the actual cloud-connect code path (not just the UI save flow), a new `DNSRebindingGuard` blocks requests whose DNS resolves to RFC1918, link-local, multicast, IMDS, or other reserved addresses at request time, and `CustomHostTrustPolicy` lets apps opt into fail-closed TLS trust that requires explicit pins.
+
+```swift
+let config = BaseChatConfiguration(
+    customHostTrustPolicy: .requireExplicitPins
+)
+// Register SPKI pins via PinnedSessionDelegate.pinnedHosts
+// before the first request. Unpinned hosts are rejected.
+```
+
+`.platformDefault` stays the default, so existing apps see no behavior change until they opt in. See [#613](https://github.com/roryford/BaseChatKit/issues/613).
+
+#### `OllamaBackend` stops silently losing context and leaking prompts
+
+Four fixes motivated by silent-failure modes in Ollama's wire contract. `options.num_ctx` is now derived from `ModelLoadPlan` on every request with an 8192-token floor on `.cloud()`, closing the footgun where Ollama's server-side 2048-token default truncated multi-turn conversations with no error signal. Qwen3-style models that emit reasoning inline as `<think>…</think>` in `message.content` (instead of populating the dedicated `thinking` field) now route through `ThinkingParser` as a fallback. And model tags ending in `:cloud` — which Ollama v0.18.0+ silently routes to its hosted cloud service — are rejected at load time, so a local-first configuration can't accidentally leak prompts off-device.
+
+See [#610](https://github.com/roryford/BaseChatKit/issues/610).
+
+#### Backend-agnostic JSON mode
+
+```swift
+let config = GenerationConfig(jsonMode: true)
+guard backend.capabilities.supportsNativeJSONMode else { return }
+```
+
+Maps to OpenAI's `response_format: { type: "json_object" }` and Ollama's `format: "json"` where supported. Backends without native JSON mode (Claude, Llama, MLX, Foundation) emit a `Log.inference.warning` naming the backend and the capability flag — callers branch on `backend.capabilities.supportsNativeJSONMode` rather than silently getting plain-text back. See [#615](https://github.com/roryford/BaseChatKit/issues/615).
 
 ## [0.11.0](https://github.com/roryford/BaseChatKit/compare/v0.10.2...v0.11.0) (2026-04-20)
 
-**Full cross-backend thinking-token support and non-LM model guardrails** — v0.10.0 shipped `ThinkingParser` and wire-up for Ollama and Llama backends; this release extends the same pipeline to every backend and fixes the gaps that live fuzz runs found. `MLXBackend` now enforces `maxThinkingTokens` the same way `LlamaGenerationDriver` does, stopping a runaway reasoning model before it can OOM a 16 GB Mac, and routes all output through `ThinkingParser` so `<think>` blocks stream as structured events rather than raw text ([#591](https://github.com/roryford/BaseChatKit/issues/591)). Cloud backends (`ClaudeBackend` and the OpenAI-compatible adapter) now parse Anthropic extended-thinking content blocks and OpenAI reasoning deltas into the same `GenerationEvent.thinkingToken` / `.thinkingComplete` events, so cloud reasoning responses render in `ThinkingBlockView` without any host-side changes ([#589](https://github.com/roryford/BaseChatKit/issues/589)). `LlamaBackend` gains thinking-marker detection for models that use the Llama 3 prompt template (DeepSeek-R1 and peers), which previously only worked on ChatML-formatted GGUFs ([#592](https://github.com/roryford/BaseChatKit/issues/592)).
+### ⚠️ Breaking change
 
-Two new guardrails prevent silent crashes when the wrong model type is loaded: both `MLXBackend` and `LlamaBackend` now throw `InferenceError.unsupportedModelArchitecture` at load time if handed a CLIP vision encoder, BERT embedder, Whisper audio model, or other non-LM GGUF — instead of crashing inside the decode loop ([#591](https://github.com/roryford/BaseChatKit/issues/591), [#592](https://github.com/roryford/BaseChatKit/issues/592)).
+`maxThinkingTokens = nil` no longer reserves a 2048-token thinking budget on non-thinking Ollama models. Callers who want guaranteed budget reservation on unknown models should pass an explicit `N`.
 
-On the Ollama side, `OllamaBackend` now probes `/api/show` at `loadModel` time to classify whether a model is thinking-capable, and `GenerationConfig.maxThinkingTokens = 0` is honoured by forwarding `"think": false` so reasoning-capable models (e.g. `gemma4`, `qwen3`) skip chain-of-thought when the host opts out ([#596](https://github.com/roryford/BaseChatKit/issues/596)). A companion fix ensures `ContextWindowManager` reserves both visible and thinking output budgets in its trim math, preventing reasoning-heavy responses from silently pushing prompt history out of context ([#595](https://github.com/roryford/BaseChatKit/issues/595)). Three new fuzz scenarios — disable thinking, cancel mid-thought, retry after a mid-thinking network flake — each asserting a specific invariant on the consumer's event stream — were added before this shipped to catch regressions the random corpus cannot reach reliably ([#590](https://github.com/roryford/BaseChatKit/issues/590)).
+### Highlights
 
-**Breaking change:** `maxThinkingTokens=nil` no longer reserves a 2048-token thinking budget on non-thinking Ollama models. Callers who want guaranteed budget reservation on unknown models should pass an explicit `N` value.
+#### Thinking tokens work on every backend
+
+v0.10.0 shipped `ThinkingParser` for Ollama and Llama. This release extends the same pipeline to MLX and cloud, so `<think>` blocks from any backend stream as structured `GenerationEvent.thinkingToken` / `.thinkingComplete` events — and `ThinkingBlockView` renders them without any host-side changes.
+
+```swift
+for try await event in stream.events {
+    switch event {
+    case .thinkingToken(let text): /* reasoning chunk */
+    case .thinkingComplete:        /* reasoning finished */
+    case .token(let text):         /* visible output */
+    }
+}
+```
+
+`MLXBackend` now enforces `maxThinkingTokens` the same way `LlamaGenerationDriver` does, stopping a runaway reasoning model before it can OOM a 16 GB Mac. `ClaudeBackend` parses Anthropic extended-thinking content blocks, the OpenAI-compatible adapter parses reasoning deltas, and `LlamaBackend` gains thinking-marker detection for Llama 3 prompt templates (DeepSeek-R1 and peers), which previously only worked on ChatML-formatted GGUFs.
+
+See [#589](https://github.com/roryford/BaseChatKit/issues/589), [#591](https://github.com/roryford/BaseChatKit/issues/591), [#592](https://github.com/roryford/BaseChatKit/issues/592).
+
+#### Non-LM models fail fast at load instead of crashing mid-decode
+
+```swift
+do {
+    try await backend.loadModel(from: url, plan: plan)
+} catch InferenceError.unsupportedModelArchitecture(let kind) {
+    // CLIP vision encoder, BERT embedder, Whisper, …
+}
+```
+
+Both `MLXBackend` and `LlamaBackend` now throw `InferenceError.unsupportedModelArchitecture` at load time if handed a CLIP vision encoder, BERT embedder, Whisper audio model, or other non-LM weights — instead of crashing inside the decode loop. See [#591](https://github.com/roryford/BaseChatKit/issues/591), [#592](https://github.com/roryford/BaseChatKit/issues/592).
+
+#### Ollama reasoning controls you can actually turn off
+
+`OllamaBackend` probes `/api/show` at `loadModel` time to classify whether a model is thinking-capable, and `GenerationConfig.maxThinkingTokens = 0` is honored by forwarding `"think": false` — so reasoning-capable models like `gemma4` and `qwen3` skip chain-of-thought when the host opts out. `ContextWindowManager` reserves both visible and thinking budgets in its trim math, preventing reasoning-heavy responses from silently pushing prompt history out of context.
+
+See [#595](https://github.com/roryford/BaseChatKit/issues/595), [#596](https://github.com/roryford/BaseChatKit/issues/596).
+
+### Internal
+
+- Three new fuzz scenarios (disable thinking, cancel mid-thought, retry after mid-thinking network flake) assert specific invariants on the consumer's event stream, catching regressions the random corpus can't reach reliably ([#590](https://github.com/roryford/BaseChatKit/issues/590)).
 
 ## [0.10.2](https://github.com/roryford/BaseChatKit/compare/v0.10.1...v0.10.2) (2026-04-19)
 
