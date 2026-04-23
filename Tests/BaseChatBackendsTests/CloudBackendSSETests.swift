@@ -785,9 +785,8 @@ struct SSEHazardTests {
         let (backend, url) = makeBackend(handler: handler)
         backend.retryStrategy = ExponentialBackoffStrategy(
             maxRetries: 1,
-            initialDelay: 0,
-            multiplier: 1,
-            jitter: 0
+            baseDelay: 0,
+            maxTotalDelay: 0
         )
 
         // First response: delivers id: field but returns 503 so backend retries.
