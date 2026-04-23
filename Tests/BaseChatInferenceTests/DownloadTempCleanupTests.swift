@@ -16,11 +16,22 @@ final class DownloadTempCleanupTests: XCTestCase {
     /// Files we created during a test run — removed in tearDown regardless of outcome.
     private var createdURLs: [URL] = []
 
+    /// Fresh manager per test — session identifier is unique to prevent OS-level collisions.
+    private var manager: BackgroundDownloadManager!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        manager = BackgroundDownloadManager(
+            sessionIdentifier: "com.basechatkit.test.cleanup.\(UUID().uuidString)"
+        )
+    }
+
     override func tearDown() async throws {
         for url in createdURLs {
             try? FileManager.default.removeItem(at: url)
         }
         createdURLs.removeAll()
+        manager = nil
         try await super.tearDown()
     }
 
@@ -70,7 +81,7 @@ final class DownloadTempCleanupTests: XCTestCase {
         // 48h old — well past the 24h threshold.
         let staleURL = try makeTempDownloadFile(age: 48 * 60 * 60)
 
-        BackgroundDownloadManager.cleanupStaleTempFiles()
+        manager.cleanupStaleTempFiles()
 
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: staleURL.path),
@@ -82,7 +93,7 @@ final class DownloadTempCleanupTests: XCTestCase {
         // 1h old — well inside the 24h threshold.
         let freshURL = try makeTempDownloadFile(age: 60 * 60)
 
-        BackgroundDownloadManager.cleanupStaleTempFiles()
+        manager.cleanupStaleTempFiles()
 
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: freshURL.path),
@@ -96,7 +107,7 @@ final class DownloadTempCleanupTests: XCTestCase {
         let unrelatedURL = try makeUnrelatedTempFile(age: 48 * 60 * 60)
         let managedURL = try makeTempDownloadFile(age: 48 * 60 * 60)
 
-        BackgroundDownloadManager.cleanupStaleTempFiles()
+        manager.cleanupStaleTempFiles()
 
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: unrelatedURL.path),
@@ -114,7 +125,7 @@ final class DownloadTempCleanupTests: XCTestCase {
         let borderlineURL = try makeTempDownloadFile(age: 12 * 60 * 60)
         let forcedFuture = Date().addingTimeInterval(48 * 60 * 60)
 
-        BackgroundDownloadManager.cleanupStaleTempFiles(now: forcedFuture)
+        manager.cleanupStaleTempFiles(now: forcedFuture)
 
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: borderlineURL.path),
@@ -130,7 +141,7 @@ final class DownloadTempCleanupTests: XCTestCase {
         _ = try makeTempDownloadFile(age: 48 * 60 * 60, contents: payload)
         let forcedFuture = Date()
 
-        let result = BackgroundDownloadManager.cleanupStaleTempFiles(now: forcedFuture)
+        let result = manager.cleanupStaleTempFiles(now: forcedFuture)
 
         XCTAssertGreaterThanOrEqual(
             result.removed, 2,
@@ -146,12 +157,46 @@ final class DownloadTempCleanupTests: XCTestCase {
         // Second run with no matching files should be a silent no-op.
         let freshURL = try makeTempDownloadFile(age: 60 * 60)
 
-        BackgroundDownloadManager.cleanupStaleTempFiles()
-        BackgroundDownloadManager.cleanupStaleTempFiles()
+        manager.cleanupStaleTempFiles()
+        manager.cleanupStaleTempFiles()
 
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: freshURL.path),
             "Repeated cleanup calls must not alter state for fresh files"
+        )
+    }
+
+    // MARK: - Active Temp Path Exclusion
+
+    func test_cleanup_preservesRegisteredActiveTempPath() throws {
+        // A stale-aged file that is currently registered as an active temp path
+        // (i.e. the delegate is mid-flight with it) must NOT be swept.
+        let activeURL = try makeTempDownloadFile(age: 48 * 60 * 60)
+
+        manager.registerActiveTempPath(activeURL)
+        defer { manager.unregisterActiveTempPath(activeURL) }
+
+        manager.cleanupStaleTempFiles()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: activeURL.path),
+            "A temp path registered as active must be excluded from the sweep regardless of age"
+        )
+    }
+
+    func test_cleanup_sweepsPathAfterUnregister() throws {
+        // Once unregistered the path falls back to normal age-based rules and
+        // a stale file should then be removed on the next sweep.
+        let staleURL = try makeTempDownloadFile(age: 48 * 60 * 60)
+
+        manager.registerActiveTempPath(staleURL)
+        manager.unregisterActiveTempPath(staleURL)
+
+        manager.cleanupStaleTempFiles()
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: staleURL.path),
+            "After unregistering, a stale temp file should be swept on the next cleanup run"
         )
     }
 
