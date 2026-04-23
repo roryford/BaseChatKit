@@ -218,6 +218,38 @@ final class SSEStreamParserTests: XCTestCase {
         XCTAssertEqual(count, 6_000, "Flood should pass with rate cap raised 100x")
     }
 
+    // MARK: - Event ID Tracking
+
+    func testParsesEventID() async throws {
+        let sseData = "id: evt-001\ndata: hello\n\ndata: world\n\n"
+        let bytes = AsyncStream<UInt8> { continuation in
+            for byte in sseData.utf8 { continuation.yield(byte) }
+            continuation.finish()
+        }
+        let tracker = SSEEventIDTracker()
+        var payloads: [String] = []
+        for try await payload in SSEStreamParser.parse(bytes: bytes, eventIDTracker: tracker) {
+            payloads.append(payload)
+        }
+        XCTAssertEqual(payloads, ["hello", "world"])
+        XCTAssertEqual(tracker.lastEventID, "evt-001")
+    }
+
+    func testEmptyIDResetsToNil() async throws {
+        let sseData = "id: abc\ndata: first\n\nid:\ndata: second\n\n"
+        let bytes = AsyncStream<UInt8> { continuation in
+            for byte in sseData.utf8 { continuation.yield(byte) }
+            continuation.finish()
+        }
+        let tracker = SSEEventIDTracker()
+        var payloads: [String] = []
+        for try await payload in SSEStreamParser.parse(bytes: bytes, eventIDTracker: tracker) {
+            payloads.append(payload)
+        }
+        XCTAssertEqual(payloads, ["first", "second"])
+        XCTAssertNil(tracker.lastEventID, "Empty id: should reset lastEventID to nil")
+    }
+
     // MARK: - BaseChatConfiguration wiring
 
     func test_config_sseStreamLimits_defaultIsShared() {
