@@ -158,6 +158,14 @@ final class SilentCatchAuditTest: XCTestCase {
         //     valid zero-argument payload and not an error condition.
         "BaseChatTools/TranscriptLogger.swift:} catch {",
         "BaseChatTools/ReferenceTools/NowTool.swift:} catch {",
+        // SampleRepoSearchTool walks the sandbox directory skipping files it
+        // cannot read (binary data with a text extension, permission races,
+        // non-UTF-8 encodings). Surfacing these as errors would make a noisy
+        // search tool that fails on a single bad file instead of returning
+        // the matches it did find. Mirrors the pattern in BackgroundDownloadManager
+        // and ModelStorageService for directory walkers.
+        "BaseChatTools/ReferenceTools/SampleRepoSearchTool.swift:let values = try? url.resourceValues(forKeys: Set(keys))",
+        "BaseChatTools/ReferenceTools/SampleRepoSearchTool.swift:guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }",
     ]
 
     func test_sourcesDirectoryContainsNoUnapprovedSilentSwallows() throws {
