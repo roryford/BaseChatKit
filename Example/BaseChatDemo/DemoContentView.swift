@@ -17,6 +17,7 @@ struct DemoContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var preferredCompactColumn: NavigationSplitViewColumn = .detail
     @State private var isModelManagementPresented = false
+    @State private var isToolPolicyPresented = false
 
     let inferenceService: InferenceService
 
@@ -25,13 +26,20 @@ struct DemoContentView: View {
     var skipAutoModelLoad: Bool = false
 
     var body: some View {
-        NavigationSplitView(
+        // Read the gate's pending queue so SwiftUI observes changes and the
+        // `.sheet(item:)` binding below re-evaluates when a new approval
+        // is enqueued. Without this the binding's `get` closure is stale.
+        let _ = viewModel.toolApprovalGate?.pending.count
+
+        return NavigationSplitView(
             columnVisibility: $columnVisibility,
             preferredCompactColumn: $preferredCompactColumn
         ) {
             sidebar
         } detail: {
-            ChatView(showModelManagement: $isModelManagementPresented)
+            ChatView(showModelManagement: $isModelManagementPresented) {
+                ChatEmptyStateView()
+            }
                 .toolbar {
                     // .topBarLeading is iOS-only; macOS NavigationSplitView manages
                     // sidebar visibility via its own controls so this button is not
@@ -55,6 +63,22 @@ struct DemoContentView: View {
             ModelManagementSheet()
                 .environment(viewModel)
                 .environment(managementViewModel)
+        }
+        .sheet(isPresented: $isToolPolicyPresented) {
+            ToolPolicyView()
+                .environment(viewModel)
+        }
+        .sheet(isPresented: approvalSheetIsPresented) {
+            if let call = viewModel.toolApprovalGate?.pending.first {
+                ToolApprovalSheet(call: call)
+                    .environment(viewModel)
+            } else {
+                // Belt-and-braces: the binding only flips to `true` when
+                // ``pending.first`` exists, but a race during dismiss can
+                // leave the queue empty while the sheet closes. Emit a
+                // drop-down so we don't present an empty sheet shell.
+                Color.clear.frame(width: 1, height: 1)
+            }
         }
         .onAppear {
             if horizontalSizeClass == .compact {
@@ -193,6 +217,21 @@ struct DemoContentView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
+
+                Button {
+                    isToolPolicyPresented = true
+                } label: {
+                    HStack {
+                        Label("Tool approval", systemImage: "checkmark.shield")
+                            .font(.caption)
+                        Spacer()
+                        Text(policyLabel(viewModel.toolApprovalPolicy))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("sidebar-tool-policy-button")
             }
             .padding()
         }
@@ -226,4 +265,36 @@ struct DemoContentView: View {
         .automatic
         #endif
     }
+
+    /// Drives the presentation of the approval sheet off the gate's pending
+    /// queue. Kept as a computed `Binding<Bool>` so `@Observable` tracking on
+    /// the gate re-evaluates the binding whenever the queue mutates — a
+    /// `.sheet(item:)` binding with `Binding(get:set:)` would not re-read
+    /// without another observed property driving the re-render.
+    private var approvalSheetIsPresented: Binding<Bool> {
+        Binding(
+            get: { (viewModel.toolApprovalGate?.pending.first) != nil },
+            set: { newValue in
+                guard !newValue else { return }
+                // Drag-dismiss (iOS) is a dismiss without an explicit
+                // decision; treat it as a denial so the pending queue
+                // drains and the model recovers with a structured error.
+                if let first = viewModel.toolApprovalGate?.pending.first {
+                    viewModel.toolApprovalGate?.resolve(
+                        callId: first.id,
+                        with: .denied(reason: "dismissed")
+                    )
+                }
+            }
+        )
+    }
+
+    private func policyLabel(_ policy: UIToolApprovalGate.Policy) -> String {
+        switch policy {
+        case .alwaysAsk: return "Always ask"
+        case .askOncePerSession: return "Once / session"
+        case .autoApprove: return "Auto"
+        }
+    }
 }
+

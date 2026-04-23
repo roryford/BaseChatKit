@@ -23,6 +23,10 @@ extension ChatViewModel {
         // Discard any queued requests that belong to a different session.
         inferenceService.discardRequests(notMatching: session.id)
 
+        // Clear any still-pending tool approvals and the once-per-session
+        // latch so approvals from the prior session do not leak into this one.
+        toolApprovalGate?.resetForNewSession()
+
         // Cancel any in-flight post-generation background tasks from the prior session.
         backgroundTask?.cancel()
         backgroundTask = nil
