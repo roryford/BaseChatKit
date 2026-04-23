@@ -107,7 +107,7 @@ public actor SessionScriptRunner {
                 // detectors care about the record field directly, but the
                 // message array needs to stay consistent so subsequent
                 // edit/delete indices are stable).
-                messages.append(.init(role: "assistant", text: record.rendered))
+                messages.append(.init(role: "assistant", text: record.raw))
                 steps.append(.init(
                     index: index,
                     step: step,
@@ -128,7 +128,7 @@ public actor SessionScriptRunner {
                     stepIndex: index,
                     step: step
                 )
-                messages.append(.init(role: "assistant", text: record.rendered))
+                messages.append(.init(role: "assistant", text: record.raw))
                 steps.append(.init(
                     index: index,
                     step: step,

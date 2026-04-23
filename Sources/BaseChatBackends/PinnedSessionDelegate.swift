@@ -14,7 +14,7 @@ import BaseChatInference
 ///
 /// Pin rotation: when a provider rotates certificates, update the pin sets below.
 /// Include at least one backup pin per host to avoid lockout during rotation.
-final class PinnedSessionDelegate: NSObject, @preconcurrency URLSessionDelegate {
+final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
 
     // MARK: - Pin Sets
 
