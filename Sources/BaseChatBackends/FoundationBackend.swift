@@ -260,25 +260,20 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
 
                 let outputLimit = config.maxOutputTokens
                 var outputTokenCount = 0
-                var previousText = ""
+                var previousCount = 0
                 var isFirstToken = true
                 for try await partial in responseStream {
                     if Task.isCancelled { break }
 
                     let currentText = partial.content
-                    if currentText.count > previousText.count {
-                        let newContent = String(
-                            currentText[currentText.index(
-                                currentText.startIndex,
-                                offsetBy: previousText.count
-                            )...]
-                        )
+                    if currentText.count > previousCount {
+                        let newContent = String(currentText.dropFirst(previousCount))
                         if isFirstToken {
                             await MainActor.run { generationStream.setPhase(.streaming) }
                             isFirstToken = false
                         }
                         continuation.yield(.token(newContent))
-                        previousText = currentText
+                        previousCount = currentText.count
 
                         // Approximate token count using the conservative 3-char heuristic.
                         // Stops runaway generation for open-ended prompts.
