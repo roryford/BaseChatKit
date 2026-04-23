@@ -308,5 +308,62 @@ final class MLXBackendThinkingTests: XCTestCase {
         // MLXBackend.generate (or ignoring config.maxThinkingTokens entirely) would let
         // all 4 thinking tokens plus "answer" through, failing both assertions.
     }
+
+    // MARK: - 6. maxThinkingTokens == 0 disables thinking entirely (#597)
+
+    /// Verifies that `GenerationConfig.maxThinkingTokens == 0` short-circuits
+    /// the `ThinkingParser` on MLX so zero `.thinkingToken` / `.thinkingComplete`
+    /// events are emitted, and visible output still flows.
+    ///
+    /// Even with `thinkingMarkers = .qwen3` (which would normally activate the
+    /// parser), `maxThinkingTokens == 0` is the caller's opt-out. Every chunk —
+    /// including raw `<think>` / `</think>` substrings the model emits — must
+    /// surface as `.token` events rather than being split into reasoning events.
+    func test_maxThinkingTokens_zero_disablesThinkingEntirely_regression597() async throws {
+        let mock = MockMLXModelContainer()
+        // A thinking-capable stream: the mock would normally have these routed
+        // through ThinkingParser and produce `.thinkingToken` + `.thinkingComplete`.
+        mock.tokensToYield = ["<think>", "reason", "</think>", "answer"]
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+
+        // thinkingMarkers is set (template advertises thinking) but maxThinkingTokens = 0.
+        var config = GenerationConfig(thinkingMarkers: .qwen3)
+        config.maxThinkingTokens = 0
+
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: config
+        )
+
+        let events = try await collectAllEvents(from: stream)
+
+        let thinkingTokenCount = events.reduce(0) { acc, ev in
+            if case .thinkingToken = ev { return acc + 1 }
+            return acc
+        }
+        let thinkingCompleteCount = events.reduce(0) { acc, ev in
+            if case .thinkingComplete = ev { return acc + 1 }
+            return acc
+        }
+        let visibleText = events.compactMap { ev -> String? in
+            if case .token(let t) = ev { return t } else { return nil }
+        }.joined()
+
+        XCTAssertEqual(thinkingTokenCount, 0,
+            "maxThinkingTokens=0 must suppress every .thinkingToken event (#597)")
+        XCTAssertEqual(thinkingCompleteCount, 0,
+            "maxThinkingTokens=0 must suppress .thinkingComplete — no thinking phase entered")
+        XCTAssertFalse(visibleText.isEmpty,
+            "Visible output must still appear when thinking is disabled — \"answer\" should reach .token")
+        XCTAssertTrue(visibleText.contains("answer"),
+            "Post-</think> content must route to .token when thinking is disabled")
+
+        // Sabotage check (verified manually before commit): removing
+        // `!thinkingDisabled &&` from the `useParser` initialiser in MLXBackend
+        // lets the parser engage and both assertions fire.
+    }
 }
 #endif

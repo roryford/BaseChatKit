@@ -294,8 +294,14 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 // Use the caller-configured markers when provided; fall back to .qwen3 (Qwen3/DeepSeek-R1).
                 // mlx-swift-lm exposes no tokenizer API to auto-detect markers at generation time.
                 // TODO: expose thinkingMarkers as a generate() parameter when Gemma 4 / other models land.
+                //
+                // `config.maxThinkingTokens == 0` disables thinking entirely (issue #597). Even when
+                // `thinkingMarkers` is set, the parser stays off and every chunk flows through as
+                // `.token`. Raw `<think>` / `</think>` substrings surface as visible text rather
+                // than being split into `.thinkingToken` events.
+                let thinkingDisabled = config.maxThinkingTokens == 0
                 var thinkingParser = ThinkingParser(markers: config.thinkingMarkers ?? .qwen3)
-                let useParser = config.thinkingMarkers != nil
+                let useParser = !thinkingDisabled && config.thinkingMarkers != nil
 
                 // Enforces `config.maxThinkingTokens` with the same semantics as
                 // LlamaGenerationDriver: a thinking model that runs away on a 16 GB

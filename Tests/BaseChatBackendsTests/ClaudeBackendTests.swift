@@ -315,6 +315,101 @@ extension ClaudeBackendTests {
     }
 }
 
+// MARK: - maxThinkingTokens request-body gating (#597)
+
+extension ClaudeBackendTests {
+
+    /// Helper: decodes the captured Claude `/v1/messages` request body into JSON.
+    private func capturedMessagesBody(host: String) throws -> [String: Any] {
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url?.host == host })
+        let body: Data
+        if let direct = captured?.httpBody {
+            body = direct
+        } else if let bodyStream = captured?.httpBodyStream {
+            var bodyData = Data()
+            bodyStream.open()
+            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
+            defer { buffer.deallocate() }
+            while bodyStream.hasBytesAvailable {
+                let read = bodyStream.read(buffer, maxLength: 4096)
+                if read > 0 { bodyData.append(buffer, count: read) }
+            }
+            bodyStream.close()
+            body = bodyData
+        } else {
+            XCTFail("Captured request has no body")
+            return [:]
+        }
+        return try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    }
+
+    /// Executes a one-shot generate() against a MockURLProtocol-backed Claude
+    /// endpoint and returns the captured request JSON. The response is a trivial
+    /// `message_stop` — we only care about the outbound body.
+    private func captureRequestJSON(
+        configMutator: (inout GenerationConfig) -> Void
+    ) async throws -> [String: Any] {
+        let sessionConfig = URLSessionConfiguration.ephemeral
+        sessionConfig.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: sessionConfig)
+        let backend = ClaudeBackend(urlSession: session)
+        let url = URL(string: "https://claude-thinking-\(UUID().uuidString).test")!
+        backend.configure(baseURL: url, apiKey: "sk-ant-test", modelName: "claude-sonnet-4-20250514")
+        try await backend.loadModel(from: URL(string: "unused:")!, plan: .cloud())
+
+        let chunk = Data("data: {\"type\":\"message_stop\"}\n\n".utf8)
+        MockURLProtocol.stub(url: url, response: .sse(chunks: [chunk], statusCode: 200))
+        defer { MockURLProtocol.unstub(url: url) }
+
+        var cfg = GenerationConfig()
+        configMutator(&cfg)
+
+        let stream = try backend.generate(prompt: "hi", systemPrompt: nil, config: cfg)
+        for try await _ in stream.events { }
+
+        return try capturedMessagesBody(host: url.host!)
+    }
+
+    /// Closes #597 (Anthropic half) — `maxThinkingTokens == 0` must omit the
+    /// `thinking` request block entirely. Anthropic's API has no "budget = 0"
+    /// equivalent (thinking is either enabled or not), so the only correct
+    /// translation of "disable thinking" is to leave the parameter off.
+    ///
+    /// Sabotage check: change `budget > 0` to `budget >= 0` in
+    /// `ClaudeBackend.buildRequest`. The body gains a `"thinking"` key with
+    /// `budget_tokens: 0`, Anthropic rejects the request, and this test fails.
+    func test_maxThinkingTokens_zero_omitsThinkingBlockFromRequest_regression597() async throws {
+        let json = try await captureRequestJSON { cfg in
+            cfg.maxThinkingTokens = 0
+        }
+        XCTAssertNil(json["thinking"],
+            "maxThinkingTokens=0 must not send a `thinking` block — "
+            + "Anthropic has no budget-zero equivalent and only 'enabled' is valid (#597)")
+    }
+
+    /// Companion to the zero-case test: `maxThinkingTokens == nil` must also omit
+    /// the thinking block. Together these lock in "thinking is opt-in via N > 0".
+    func test_maxThinkingTokens_nil_omitsThinkingBlockFromRequest() async throws {
+        let json = try await captureRequestJSON { cfg in
+            cfg.maxThinkingTokens = nil
+        }
+        XCTAssertNil(json["thinking"],
+            "maxThinkingTokens=nil must not send a `thinking` block")
+    }
+
+    /// Positive control: `maxThinkingTokens = N > 0` must include the `thinking`
+    /// block with `type: enabled` and a clamped `budget_tokens`.
+    func test_maxThinkingTokens_positive_includesThinkingBlockInRequest() async throws {
+        let json = try await captureRequestJSON { cfg in
+            cfg.maxThinkingTokens = 4096
+        }
+        let thinking = try XCTUnwrap(json["thinking"] as? [String: Any],
+            "maxThinkingTokens=N>0 must send a `thinking` block")
+        XCTAssertEqual(thinking["type"] as? String, "enabled")
+        XCTAssertNotNil(thinking["budget_tokens"] as? Int)
+    }
+}
+
 // MARK: - Backend Contract
 
 extension ClaudeBackendTests {
