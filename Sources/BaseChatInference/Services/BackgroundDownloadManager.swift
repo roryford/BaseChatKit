@@ -68,6 +68,16 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     // MARK: - Private State
 
+    /// Paths of temp files actively being processed by the download delegate.
+    ///
+    /// Registered immediately after `didFinishDownloadingTo` moves URLSession's
+    /// ephemeral file to our named temp location, and unregistered once the file
+    /// has been moved to its final destination (or deleted on failure).  The
+    /// launch-time sweep reads this set and skips any path it finds here,
+    /// preventing a concurrent cleanup from deleting a file that is mid-flight
+    /// in the same process.
+    private var activeTempPaths: Set<URL> = []
+
     // internal: required by BackgroundDownloadManager+URLSessionDelegate.swift
     internal struct TaskContext: Codable, Sendable {
         let modelID: String
@@ -404,12 +414,38 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         // Re-populate activeDownloads from persisted pending downloads.
         restorePendingDownloads()
 
-        // Reclaim disk from any temp files leaked by a prior crash. Runs on a
-        // detached task because the scan walks the process temp directory with
-        // filesystem calls that can block — keeping the main actor free.
-        Task.detached(priority: .utility) {
-            Self.cleanupStaleTempFiles()
+        // Reclaim disk from any temp files leaked by a prior crash. Capture the
+        // active-path snapshot on MainActor, then hand it off so the filesystem
+        // scan runs without blocking MainActor.
+        let excluded = activeTempPaths
+        Task.detached(priority: .utility) { [weak self] in
+            self?.cleanupStaleTempFiles(now: Date(), excluding: excluded)
         }
+    }
+
+    // MARK: - Active Temp Path Tracking
+
+    /// Records a temp-file path so the stale-file sweep ignores it while the
+    /// download is being processed.
+    ///
+    /// Must be called on `@MainActor` — called from `BackgroundDownloadManager+URLSessionDelegate.swift`
+    /// inside the `Task { @MainActor }` block that handles completion.
+    ///
+    /// Stores the symlink-resolved path so it matches the paths returned by
+    /// `FileManager.contentsOfDirectory`, which resolves symlinks on macOS
+    /// (e.g. `/var/folders/…` → `/private/var/folders/…`).
+    @MainActor
+    internal func registerActiveTempPath(_ url: URL) {
+        activeTempPaths.insert(url.resolvingSymlinksInPath())
+    }
+
+    /// Removes a previously registered temp-file path.
+    ///
+    /// Must be called on `@MainActor` after the file has been moved to its final
+    /// destination or deleted on failure.
+    @MainActor
+    internal func unregisterActiveTempPath(_ url: URL) {
+        activeTempPaths.remove(url.resolvingSymlinksInPath())
     }
 
     // MARK: - Disk Space
@@ -912,23 +948,16 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// ### What the sweep preserves
     /// Any file missing even one of the four properties above. Notably:
     /// - Temp files written by other subsystems (wrong prefix or extension).
-    /// - Files newer than 24 hours — these may belong to an in-flight download
-    ///   handed off from the system's background transfer service. The age gate
-    ///   is our only protection here: `URLSession` does not expose the paths of
-    ///   in-flight downloads, so we cannot cross-check against a live task list.
+    /// - Files currently being processed by the delegate in this process
+    ///   (tracked in ``activeTempPaths`` — registered/unregistered around
+    ///   the temp→final move in `didFinishDownloadingTo`).
+    /// - Files newer than 24 hours — secondary guard for files handed off from
+    ///   the system's background transfer service before the delegate registers them.
     /// - Files whose attributes cannot be read (logged and skipped).
     ///
-    /// ### Known limitation
-    /// A user who suspends a download, closes the app, and reopens it more than
-    /// 24 hours later may see the partial temp file swept. `URLSession` itself
-    /// retains the resume information independently, so the user can still retry
-    /// — the sweep only reclaims the orphaned on-disk blob. If this proves
-    /// noisy in practice, the follow-up is to serialize the active-task temp
-    /// path at write time and exclude those paths from the sweep.
-    ///
     /// Runs on launch from ``reconnectBackgroundSession()``.
-    public static func cleanupStaleTempFiles() {
-        cleanupStaleTempFiles(now: Date())
+    public func cleanupStaleTempFiles() {
+        cleanupStaleTempFiles(now: Date(), excluding: activeTempPaths)
     }
 
     /// Time-injectable companion to ``cleanupStaleTempFiles()`` used by tests.
@@ -936,8 +965,16 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// Kept `internal` so the time-injection seam does not appear in the public
     /// API surface of the framework. Production callers should use the no-arg
     /// overload above.
+    ///
+    /// - Parameters:
+    ///   - now: The reference time for the age-threshold comparison.
+    ///   - excluded: Temp-file paths to skip regardless of age — typically the set
+    ///     of files currently being processed by the delegate in this process.
     @discardableResult
-    internal static func cleanupStaleTempFiles(now: Date) -> (removed: Int, bytesReclaimed: Int64) {
+    internal func cleanupStaleTempFiles(
+        now: Date,
+        excluding excluded: Set<URL> = []
+    ) -> (removed: Int, bytesReclaimed: Int64) {
         let tempDir = FileManager.default.temporaryDirectory
         let contents: [URL]
         do {
@@ -951,15 +988,21 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
             return (0, 0)
         }
 
-        let threshold = now.addingTimeInterval(-staleTempFileAge)
+        let threshold = now.addingTimeInterval(-Self.staleTempFileAge)
         var removed = 0
         var bytesReclaimed: Int64 = 0
         for fileURL in contents {
             // Filename signature check — only files we could have written.
             let name = fileURL.lastPathComponent
-            guard name.hasPrefix(tempFilePrefix), fileURL.pathExtension == tempFileExtension else {
+            guard name.hasPrefix(Self.tempFilePrefix), fileURL.pathExtension == Self.tempFileExtension else {
                 continue
             }
+            // Skip any path that is actively being processed by the delegate so the
+            // sweep never races with an in-flight move in the same process.
+            // Resolve symlinks before the set lookup — `contentsOfDirectory` resolves
+            // them (e.g. /var/folders → /private/var/folders on macOS) and the
+            // registered paths are stored resolved, so both sides must match.
+            guard !excluded.contains(fileURL.resolvingSymlinksInPath()) else { continue }
             let resourceKeys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
             let values: URLResourceValues
             do {

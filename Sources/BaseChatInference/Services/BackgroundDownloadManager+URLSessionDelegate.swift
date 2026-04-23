@@ -46,12 +46,13 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
         // since the system deletes the file at `location` immediately after.
         // The prefix + extension combination is the signature the launch-time
         // sweep uses to reclaim files leaked by a prior crash.
+        // Retry up to three times with brief backoff to survive transient disk-jitter.
         let tempURL: URL
         do {
             let tempDir = FileManager.default.temporaryDirectory
             let fileName = "\(BackgroundDownloadManager.tempFilePrefix)\(UUID().uuidString).\(BackgroundDownloadManager.tempFileExtension)"
             tempURL = tempDir.appendingPathComponent(fileName)
-            try FileManager.default.moveItem(at: location, to: tempURL)
+            try moveItemWithRetry(from: location, to: tempURL)
         } catch {
             Log.download.error("Failed to preserve downloaded file: \(error.localizedDescription)")
             return
@@ -60,13 +61,18 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
 
+            // Track this path so the stale-file sweep does not race with us.
+            self.registerActiveTempPath(tempURL)
+
             guard let context = self.taskContext(for: taskID, taskDescription: taskDescription) else {
                 Log.download.error("Completed download has no model ID mapping (task \(taskID))")
+                self.unregisterActiveTempPath(tempURL)
                 return
             }
 
             guard let state = self.activeDownloads[context.modelID] else {
                 Log.download.error("No DownloadState for completed download: \(context.modelID)")
+                self.unregisterActiveTempPath(tempURL)
                 return
             }
 
@@ -86,6 +92,7 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
                     let resolvedModels = self.storageService.modelsDirectory.standardized
                     guard resolvedDestination.path.hasPrefix(resolvedModels.path + "/") else {
                         try? FileManager.default.removeItem(at: tempURL)
+                        self.unregisterActiveTempPath(tempURL)
                         throw HuggingFaceError.invalidDownloadedFile(reason: "Model filename escapes models directory: \(model.fileName)")
                     }
                     if FileManager.default.fileExists(atPath: destination.path) {
@@ -98,6 +105,7 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
                     self.activeDownloads[context.modelID]?.markCompleted(localURL: destination)
                     self.removePendingDownload(id: context.modelID)
                 }
+                self.unregisterActiveTempPath(tempURL)
                 self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
             } catch {
                 Log.download.error("Post-download processing failed for \(context.modelID): \(error.localizedDescription)")
@@ -111,6 +119,7 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
                     self.activeDownloads[context.modelID]?.markFailed(error: error.localizedDescription)
                     self.removePendingDownload(id: context.modelID)
                 }
+                self.unregisterActiveTempPath(tempURL)
                 self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
                 do {
                     try FileManager.default.removeItem(at: tempURL)
@@ -178,5 +187,37 @@ extension BackgroundDownloadManager: URLSessionDownloadDelegate {
             }
             self.removeTaskTracking(taskID: taskID, modelID: context.modelID)
         }
+    }
+}
+
+// MARK: - Disk-jitter retry helper
+
+private extension BackgroundDownloadManager {
+
+    /// Moves a file from `source` to `destination`, retrying on transient errors.
+    ///
+    /// On macOS, disk I/O jitter can cause a single `moveItem` to fail with an
+    /// `NSFileWriteUnknownError` or similar transient code even when the volume is
+    /// healthy.  Three attempts with a short exponential backoff are enough to ride
+    /// out brief bursts of I/O contention without delaying the happy path noticeably.
+    ///
+    /// - Parameters:
+    ///   - source: The URL to move from.
+    ///   - destination: The URL to move to.
+    ///   - maxAttempts: Number of attempts before surfacing the last error.
+    func moveItemWithRetry(from source: URL, to destination: URL, maxAttempts: Int = 3) throws {
+        var lastError: Error?
+        for attempt in 1...maxAttempts {
+            do {
+                try FileManager.default.moveItem(at: source, to: destination)
+                return
+            } catch {
+                lastError = error
+                if attempt < maxAttempts {
+                    Thread.sleep(forTimeInterval: 0.05 * Double(attempt))
+                }
+            }
+        }
+        throw lastError!
     }
 }
