@@ -280,6 +280,21 @@ The fuzzer now runs on three tiers — see [CI tiers](#ci-tiers).
 
 ---
 
+## Tool-Calling Harness (bck-tools)
+
+`bck-tools` validates end-to-end tool-calling correctness independently of the generation fuzzer.
+It uses `OllamaBackend` only and does **not** require `--traits Fuzz` (OllamaBackend is always compiled).
+
+```bash
+# Requires Ollama running at localhost:11434
+swift run bck-tools
+```
+
+Unlike `fuzz-chat`, `bck-tools` runs a deterministic scripted scenario rather than a stochastic fuzzer.
+Use it for regression testing after changes to tool-calling logic in `BaseChatTools`.
+
+---
+
 ## CI tiers
 
 The fuzzer runs on three tiers so each PR pays a small, bounded cost and larger

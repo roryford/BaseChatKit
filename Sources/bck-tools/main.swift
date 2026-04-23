@@ -1,3 +1,5 @@
+// Does not require the Fuzz trait — uses OllamaBackend only (always compiled).
+// For generation fuzzing with real backends, see scripts/fuzz.sh.
 import Foundation
 import BaseChatInference
 import BaseChatBackends
