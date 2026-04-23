@@ -126,7 +126,7 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  FUZZ SUMMARY"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-printf "  swift run --traits Fuzz,MLX,Llama fuzz-chat exit:   %d\n" "$SWIFT_EXIT"
+printf "  fuzz-chat exit:             %d\n" "$SWIFT_EXIT"
 if [[ $WITH_MLX -eq 1 ]]; then
     printf "  xcodebuild MLXFuzzTests:    %d\n" "$MLX_EXIT"
 fi
