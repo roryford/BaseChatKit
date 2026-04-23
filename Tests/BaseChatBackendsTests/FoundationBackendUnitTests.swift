@@ -288,59 +288,62 @@ final class FoundationBackendUnitTests: XCTestCase {
 
     // MARK: - Session reuse for multi-turn context preservation
 
-    /// Verifies that consecutive `generate()` calls with the same `systemPrompt`
-    /// reuse the **same** `LanguageModelSession` object.
+    /// Verifies that a dirty session forces a **new** `LanguageModelSession`
+    /// on the next `generate()` call — even when the system prompt is unchanged.
     ///
-    /// `LanguageModelSession.streamResponse(to:)` accumulates turns inside the session,
-    /// which is how FoundationBackend provides multi-turn context to the model.
-    /// If a new session were created on every call, all prior conversation history
-    /// would be lost.
+    /// ## Why a new session is required after mid-stream cancellation
     ///
-    /// The test drives this path without real inference by:
-    ///   1. Forcing the backend into the loaded state via `_forceLoaded()`.
-    ///   2. Calling `generate()` to trigger the lazy session-creation branch.
-    ///   3. Cancelling via `_cancelTaskOnly()` — which does NOT reset the session,
-    ///      unlike `stopGeneration()` — so the session survives into the next call.
-    ///   4. Draining the stream so `isGenerating` resets before the second call.
-    ///   5. Calling `generate()` again with the same systemPrompt.
-    ///   6. Asserting object identity (`===`) on the captured session references.
+    /// `LanguageModelSession` asserts (SIGTRAP) if `streamResponse()` is called while
+    /// the previous `ResponseStream`'s iterator was dropped before returning `nil`
+    /// (i.e. the stream was abandoned mid-flight).  Cancelling the generation Task
+    /// causes the iterator to be dropped early, leaving the session in a "dirty" state.
+    /// `FoundationBackend` tracks this via `_sessionIsClean` and forces a fresh
+    /// `LanguageModelSession` on the next call, preventing the SIGTRAP.
     ///
-    /// Sabotage check: change the `needsNewSession` condition in `FoundationBackend.generate`
-    /// so it always creates a new session (e.g. `let needsNewSession = true`). The
-    /// `XCTAssert(session1 === session2)` assertion will fail because a new object is
-    /// allocated on every call. Remove the sabotage before committing.
-    func test_generate_reusesSameSession_whenSystemPromptUnchanged() async throws {
-        // These tests exercise internal session-management state. They do not run real
-        // inference, but they do instantiate LanguageModelSession — a macOS 26 type.
-        // The setUpWithError guard already enforces the OS floor, so no additional skip
-        // is needed here. We do still skip when Apple Intelligence is NOT available,
-        // because LanguageModelSession() may raise an error at creation time on devices
-        // where the model is absent.
-        //
-        // Note: on CI (no Apple Intelligence) this test is SKIPPED — the session-reuse
-        // logic is verified on a real device where LanguageModelSession can be created.
+    /// ## Why `_markSessionDirty()` rather than `_cancelTaskOnly()`
+    ///
+    /// On fast hardware the generation Task may complete on a background thread between
+    /// `generate()` returning and `_cancelTaskOnly()` being called.  If that happens
+    /// the Task sets `_sessionIsClean = true` (natural completion) — racing with any
+    /// flag write in `_cancelTaskOnly()`.  Using `_markSessionDirty()` sidesteps that
+    /// race: it directly drives the `_sessionIsClean = false` state that a
+    /// mid-stream cancellation would produce, without relying on Task scheduling order.
+    ///
+    /// Sabotage check: remove the `|| !_sessionIsClean` clause from the
+    /// `needsNewSession` condition in `FoundationBackend.generate`.  The
+    /// `XCTAssert(session1 !== session2)` assertion will fail because the dirty
+    /// session is reused, reproducing the original SIGTRAP.  Remove the sabotage
+    /// before committing.
+    ///
+    /// - Note: on CI (no Apple Intelligence) this test is SKIPPED — `LanguageModelSession`
+    ///   cannot be created without Apple Intelligence.
+    func test_generate_dirtySession_forcesNewSession() async throws {
         try XCTSkipUnless(
             FoundationBackend.isAvailable,
-            "LanguageModelSession cannot be created without Apple Intelligence — skipping session-reuse test"
+            "LanguageModelSession cannot be created without Apple Intelligence — skipping dirty-session test"
         )
 
         backend._forceLoaded()
 
-        // First call — creates the session lazily.
         let systemPrompt = "You are a helpful assistant."
         let stream1 = try backend.generate(prompt: "Hello", systemPrompt: systemPrompt, config: GenerationConfig())
 
-        // Capture the session before cancellation resets it (stopGeneration would nil it).
         let session1 = backend._session
         XCTAssertNotNil(session1, "First generate() must create a session")
-        XCTAssertEqual(backend._currentSystemPrompt, systemPrompt, "currentSystemPrompt must be set")
+        XCTAssertEqual(backend._currentSystemPrompt, systemPrompt)
 
-        // Cancel the task without resetting the session, then drain so isGenerating → false.
+        // Stop the active generation, then drain the stream so isGenerating → false.
         backend._cancelTaskOnly()
         for try await _ in stream1.events {}
         XCTAssertFalse(backend.isGenerating, "isGenerating must be false after stream drains")
 
-        // Second call — same systemPrompt → must reuse the same session object.
+        // Directly mark the session dirty — simulates the state left by a Task that was
+        // cancelled before its ResponseStream iterator returned nil.  This avoids the
+        // Task-scheduling race where a fast response completes before the cancel lands.
+        backend._markSessionDirty()
+
+        // Second call with the SAME systemPrompt — must allocate a NEW session because
+        // the session is dirty and calling streamResponse() on it would SIGTRAP.
         let stream2 = try backend.generate(prompt: "How are you?", systemPrompt: systemPrompt, config: GenerationConfig())
         let session2 = backend._session
         XCTAssertNotNil(session2, "Second generate() must have a session")
@@ -348,10 +351,60 @@ final class FoundationBackendUnitTests: XCTestCase {
         backend._cancelTaskOnly()
         for try await _ in stream2.events {}
 
+        // After marking dirty the session must have been replaced, not reused.
+        XCTAssert(
+            session1 !== session2,
+            "Dirty session must NOT be reused — a fresh LanguageModelSession is required "
+            + "to prevent SIGTRAP on the next streamResponse() call"
+        )
+    }
+
+    /// Verifies that consecutive `generate()` calls with the same `systemPrompt`
+    /// reuse the **same** `LanguageModelSession` object after a **clean** completion.
+    ///
+    /// `LanguageModelSession.streamResponse(to:)` accumulates turns inside the session,
+    /// which is how FoundationBackend provides multi-turn context to the model.
+    /// If a new session were created on every call, all prior conversation history
+    /// would be lost.
+    ///
+    /// Requires live Apple Intelligence because we must let the generation complete
+    /// naturally so the `ResponseStream` iterator returns `nil` and the session is
+    /// marked clean before the next call.
+    ///
+    /// Sabotage check: change the `needsNewSession` condition in `FoundationBackend.generate`
+    /// so it always creates a new session (e.g. `let needsNewSession = true`). The
+    /// `XCTAssert(session1 === session2)` assertion will fail because a new object is
+    /// allocated on every call. Remove the sabotage before committing.
+    func test_generate_reusesSameSession_afterCleanCompletion() async throws {
+        try XCTSkipUnless(
+            FoundationBackend.isAvailable,
+            "LanguageModelSession cannot be created without Apple Intelligence — skipping session-reuse test"
+        )
+
+        let url = URL(fileURLWithPath: "/dev/null")
+        try await backend.loadModel(from: url, plan: .testStub(effectiveContextSize: 4096))
+        XCTAssertTrue(backend.isModelLoaded, "Precondition: loadModel must succeed")
+
+        let systemPrompt = "Reply with exactly the word OK and nothing else."
+
+        // First call — let generation complete naturally (short prompt → quick response).
+        let stream1 = try backend.generate(prompt: "Say OK", systemPrompt: systemPrompt, config: GenerationConfig())
+        for try await _ in stream1.events {}  // drain to natural completion
+        let session1 = backend._session
+        XCTAssertNotNil(session1, "First generate() must create a session")
+
+        XCTAssertFalse(backend.isGenerating, "isGenerating must be false after natural completion")
+
+        // Second call — same systemPrompt, previous stream completed cleanly → reuse session.
+        let stream2 = try backend.generate(prompt: "What did you just say?", systemPrompt: systemPrompt, config: GenerationConfig())
+        for try await _ in stream2.events {}
+        let session2 = backend._session
+        XCTAssertNotNil(session2, "Second generate() must have a session")
+
         // The key invariant: same session object identity means conversation history was preserved.
         XCTAssert(
             session1 === session2,
-            "Session must be REUSED when systemPrompt is unchanged — object identity must match"
+            "Session must be REUSED after a clean completion when systemPrompt is unchanged"
         )
     }
 
@@ -363,36 +416,54 @@ final class FoundationBackendUnitTests: XCTestCase {
     /// a new session (accepting that prior conversation history is discarded in exchange
     /// for the correct persona).
     ///
+    /// The first generation must complete **cleanly** (not via `_cancelTaskOnly()`)
+    /// so the session is marked clean before the second call.  That way the session
+    /// recreation is caused solely by the prompt change and not by the dirty-session
+    /// guard, keeping the sabotage check precise.
+    ///
     /// Sabotage check: remove the `systemPrompt != currentSystemPrompt` clause from the
     /// `needsNewSession` condition in `FoundationBackend.generate`. The assertion
-    /// `XCTAssert(session1 !== session2)` will fail because the old session is reused
-    /// even though the prompt changed. Remove the sabotage before committing.
+    /// `XCTAssert(session1 !== session2)` will fail because the old clean session is
+    /// reused even though the prompt changed. Remove the sabotage before committing.
     func test_generate_createsNewSession_whenSystemPromptChanges() async throws {
         try XCTSkipUnless(
             FoundationBackend.isAvailable,
             "LanguageModelSession cannot be created without Apple Intelligence — skipping session-recreation test"
         )
 
-        backend._forceLoaded()
+        let url = URL(fileURLWithPath: "/dev/null")
+        try await backend.loadModel(from: url, plan: .testStub(effectiveContextSize: 4096))
+        XCTAssertTrue(backend.isModelLoaded, "Precondition: loadModel must succeed")
 
-        // First call with prompt "A".
-        let stream1 = try backend.generate(prompt: "Hello", systemPrompt: "Persona A", config: GenerationConfig())
+        // First call with prompt "A" — let generation complete naturally so the session
+        // is marked clean.  This ensures the second call's new session is triggered by
+        // the prompt change, not by the dirty-session guard.
+        let stream1 = try backend.generate(
+            prompt: "Say OK",
+            systemPrompt: "Reply with exactly the word OK and nothing else.",
+            config: GenerationConfig()
+        )
+        for try await _ in stream1.events {}  // drain to natural completion
         let session1 = backend._session
         XCTAssertNotNil(session1, "First generate() must create a session")
-        XCTAssertEqual(backend._currentSystemPrompt, "Persona A")
+        XCTAssertEqual(backend._currentSystemPrompt, "Reply with exactly the word OK and nothing else.")
 
-        backend._cancelTaskOnly()
-        for try await _ in stream1.events {}
-        XCTAssertFalse(backend.isGenerating, "isGenerating must be false after stream drains")
+        XCTAssertFalse(backend.isGenerating, "isGenerating must be false after natural completion")
 
-        // Second call with a DIFFERENT prompt "B" — must allocate a new session.
-        let stream2 = try backend.generate(prompt: "Hello", systemPrompt: "Persona B", config: GenerationConfig())
+        // Second call with a DIFFERENT system prompt — must allocate a new session.
+        let stream2 = try backend.generate(
+            prompt: "Say OK",
+            systemPrompt: "You are a pirate. Reply with exactly the word OK and nothing else.",
+            config: GenerationConfig()
+        )
+        for try await _ in stream2.events {}
         let session2 = backend._session
         XCTAssertNotNil(session2, "Second generate() must create a session")
-        XCTAssertEqual(backend._currentSystemPrompt, "Persona B", "currentSystemPrompt must update to new prompt")
-
-        backend._cancelTaskOnly()
-        for try await _ in stream2.events {}
+        XCTAssertEqual(
+            backend._currentSystemPrompt,
+            "You are a pirate. Reply with exactly the word OK and nothing else.",
+            "currentSystemPrompt must update to new prompt"
+        )
 
         // The key invariant: a different system prompt must produce a different session object.
         XCTAssert(
