@@ -1,8 +1,10 @@
 import Foundation
 import BaseChatFuzz
-import BaseChatBackends
 import BaseChatInference
 import BaseChatTestSupport
+#if Fuzz
+import BaseChatBackends
+#endif
 
 @main
 @MainActor
@@ -105,30 +107,34 @@ struct FuzzChatCLI {
         let factory: any FuzzBackendFactory
         switch backend {
         case .ollama:
+            #if Fuzz
             do {
                 factory = try Self.makeOllamaFactory(modelHint: modelHint)
             } catch {
                 fail(String(describing: error))
             }
+            #else
+            fail("Ollama backend requires the Fuzz build trait. Run via: scripts/fuzz.sh")
+            #endif
         case .mock:
             factory = MockFuzzFactory()
         case .chaos:
             factory = ChaosFuzzFactory()
         case .llama:
-            #if Llama
+            #if Llama && Fuzz
             factory = LlamaFuzzFactory()
             #else
-            fail("Llama backend requires the Llama build trait. Build with --traits Llama.")
+            fail("Llama backend requires the Fuzz and Llama build traits. Run via: scripts/fuzz.sh")
             #endif
         case .foundation:
-            #if canImport(FoundationModels)
+            #if canImport(FoundationModels) && Fuzz
             if #available(macOS 26, iOS 26, *) {
                 factory = FoundationFuzzFactory()
             } else {
                 fail("Foundation backend requires macOS 26 or iOS 26.")
             }
             #else
-            fail("Foundation backend requires macOS 26+ with FoundationModels.")
+            fail("Foundation backend requires macOS 26+ with FoundationModels and the Fuzz build trait. Run via: scripts/fuzz.sh")
             #endif
         case .mlx, .all:
             fail("\(backend.rawValue) backend not yet wired in CLI. Use scripts/fuzz.sh --with-mlx for MLX.")
@@ -196,6 +202,7 @@ struct FuzzChatCLI {
         await factory.teardown()
     }
 
+    #if Fuzz
     /// Builds the Ollama-backed factory for the runner.
     ///
     /// - When `modelHint` is `nil` or `"all"`: enumerates every installed Ollama
@@ -231,6 +238,7 @@ struct FuzzChatCLI {
         let children: [any FuzzBackendFactory] = sorted.map { OllamaFuzzFactory(modelHint: $0) }
         return RotatingFuzzFactory(children: children)
     }
+    #endif
 
     /// Drives the Replayer and maps its `Outcome` to an exit code + summary line.
     /// Exit codes match the issue brief:
@@ -362,7 +370,7 @@ struct FuzzChatCLI {
         let lines = [
             "fuzz-chat — chat anomaly fuzzer",
             "",
-            "Usage: swift run fuzz-chat [options]",
+            "Usage: swift run --traits Fuzz,MLX,Llama fuzz-chat [options]",
             "",
             "Options:",
             "  --backend ollama|mock|chaos|llama|foundation|mlx|all   default: ollama",

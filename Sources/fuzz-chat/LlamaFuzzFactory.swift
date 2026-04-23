@@ -1,4 +1,4 @@
-#if Llama
+#if Llama && Fuzz
 import Foundation
 import BaseChatFuzz
 import BaseChatBackends

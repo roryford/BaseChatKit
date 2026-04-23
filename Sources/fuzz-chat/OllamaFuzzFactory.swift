@@ -1,3 +1,4 @@
+#if Fuzz
 import Foundation
 import BaseChatFuzz
 import BaseChatBackends
@@ -46,3 +47,4 @@ public struct OllamaFuzzFactory: FuzzBackendFactory {
         )
     }
 }
+#endif
