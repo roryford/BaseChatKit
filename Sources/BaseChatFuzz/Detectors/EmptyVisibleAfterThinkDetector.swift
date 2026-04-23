@@ -6,10 +6,11 @@ import Foundation
 /// `EmptyOutputAfterWorkDetector`: the model *did* produce raw tokens and
 /// *did* produce thinking, but the visible rendering is empty.
 ///
-/// Today's `rendered` field mirrors the user-visible string. #499 may
-/// deprecate it in parallel; once that lands, swap the check to
-/// `r.raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty` —
-/// functionally equivalent while the `rendered` field still exists.
+/// Today's `rendered` field holds only the user-visible portion of the stream
+/// (no `<think>` blocks). It is doc-comment-deprecated in favour of a future
+/// "real UI-transform rendering" path; until that path ships, `rendered` is
+/// the only field that tracks the visible-only output, so this detector
+/// continues to read it rather than `raw` (which includes thinking tokens).
 ///
 /// Ships at `.flaky` severity. Promotion to `.confirmed` requires the
 /// calibration corpus + FP/TP gating planned in W2.C phase 2.
