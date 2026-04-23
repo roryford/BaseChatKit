@@ -74,11 +74,16 @@ public final class MockURLProtocol: URLProtocol {
     /// Prefer this over ``reset()`` in test teardown — it cleans up only the
     /// current test's stub without clearing stubs registered by other suites
     /// that may be running concurrently.
+    ///
+    /// Also removes any captured requests for this URL so that
+    /// `capturedRequests` does not accumulate stale entries across tests.
     public static func unstub(url: URL) {
         lock.lock()
         defer { lock.unlock() }
-        stubs.removeValue(forKey: url.absoluteString)
-        stubSequences.removeValue(forKey: url.absoluteString)
+        let key = url.absoluteString
+        stubs.removeValue(forKey: key)
+        stubSequences.removeValue(forKey: key)
+        _capturedRequests.removeAll { $0.url?.absoluteString == key }
     }
 
     /// Removes all registered stubs and captured requests.
@@ -117,11 +122,12 @@ public final class MockURLProtocol: URLProtocol {
             }
         }
 
-        // If only one stub is registered, use it as a catch-all (common in tests).
-        if stubs.count == 1 {
-            return stubs.values.first
-        }
-
+        // No stub matched. Return nil so startLoading responds with a proper
+        // URLError rather than crashing or returning the wrong suite's response.
+        // The single-stub catch-all was removed because it caused cross-suite
+        // contamination when two serialized suites ran concurrently: Suite A's
+        // lone stub would intercept Suite B's requests and deliver the wrong
+        // response, leading to hangs or assertion failures.
         return nil
     }
 

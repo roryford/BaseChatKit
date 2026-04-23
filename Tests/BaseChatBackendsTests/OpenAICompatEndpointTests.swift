@@ -25,9 +25,9 @@ private let sseDone = Data("data: [DONE]\n\n".utf8)
 /// Creates an OpenAIBackend configured for a unique test URL.
 ///
 /// Each call uses a UUID-based hostname, so stubs from different tests
-/// never collide. We do NOT call `MockURLProtocol.reset()` here because
-/// that clears ALL global stubs and would corrupt concurrent test suites
-/// (e.g. CloudBackendSSETests) that also use MockURLProtocol.
+/// never collide. Tests must call `MockURLProtocol.unstub(url:)` in a
+/// `defer` block rather than `MockURLProtocol.reset()`, which would clear
+/// stubs registered by other suites running concurrently.
 private func makeOllamaBackend() -> (OpenAIBackend, URL) {
     let session = makeMockSession()
     let backend = OpenAIBackend(urlSession: session)
@@ -85,6 +85,7 @@ struct OpenAICompatEndpointTests {
 
     @Test func ollama_streaming_standardChunks() async throws {
         let (backend, url) = makeOllamaBackend()
+        defer { MockURLProtocol.unstub(url: url) }
 
         // Ollama's streaming format mirrors OpenAI's but includes an "ollama"
         // system_fingerprint and may omit some fields OpenAI includes.
@@ -130,6 +131,7 @@ struct OpenAICompatEndpointTests {
 
     @Test func ollama_streaming_withUsage() async throws {
         let (backend, url) = makeOllamaBackend()
+        defer { MockURLProtocol.unstub(url: url) }
 
         // Ollama supports stream_options.include_usage (added in 0.4.0).
         // Usage arrives in the final chunk, same as OpenAI.
@@ -165,6 +167,7 @@ struct OpenAICompatEndpointTests {
     /// this gracefully (lastUsage stays nil).
     @Test func ollama_streaming_withoutUsageSupport() async throws {
         let (backend, url) = makeOllamaBackend()
+        defer { MockURLProtocol.unstub(url: url) }
 
         let chunks: [Data] = [
             sseData("""
@@ -205,6 +208,7 @@ struct OpenAICompatEndpointTests {
     /// using OpenAI-compatible error format.
     @Test func ollama_error_modelNotFound() async throws {
         let (backend, url) = makeOllamaBackend()
+        defer { MockURLProtocol.unstub(url: url) }
 
         let body = Data("""
         {"error":{"message":"model 'nonexistent' not found, try pulling it first","type":"not_found","code":"model_not_found"}}
@@ -242,6 +246,7 @@ struct OpenAICompatEndpointTests {
     /// without authentication headers.
     @Test func ollama_noAuth_omitsAuthHeader() async throws {
         let (backend, url) = makeOllamaBackend()
+        defer { MockURLProtocol.unstub(url: url) }
 
         let chunks: [Data] = [
             sseData("""
@@ -275,6 +280,7 @@ struct OpenAICompatEndpointTests {
     /// OpenAI-compatible endpoint. Ollama accepts this format.
     @Test func requestFormat_containsExpectedFields() async throws {
         let (backend, url) = makeCompatBackend(modelName: "test-model")
+        defer { MockURLProtocol.unstub(url: url) }
 
         let chunks: [Data] = [
             sseData("""
@@ -319,6 +325,7 @@ struct OpenAICompatEndpointTests {
     /// version 0.4.0+. Older Ollama versions ignore it without erroring.
     @Test func requestFormat_containsStreamOptions() async throws {
         let (backend, url) = makeCompatBackend(modelName: "test-model")
+        defer { MockURLProtocol.unstub(url: url) }
 
         let chunks: [Data] = [
             sseData("""
@@ -352,6 +359,7 @@ struct OpenAICompatEndpointTests {
     /// which is essential for multi-turn conversations with Ollama.
     @Test func requestFormat_includesConversationHistory() async throws {
         let (backend, url) = makeCompatBackend(modelName: "llama3")
+        defer { MockURLProtocol.unstub(url: url) }
 
         let chunks: [Data] = [
             sseData("""
