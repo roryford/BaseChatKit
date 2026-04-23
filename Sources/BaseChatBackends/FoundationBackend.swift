@@ -98,6 +98,17 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
     /// Tracks the system prompt used to create the current session, so we only
     /// recreate when the prompt actually changes.
     private var currentSystemPrompt: String?
+    /// True when the session has no in-flight `ResponseStream`.
+    ///
+    /// `LanguageModelSession` asserts (SIGTRAP) if `streamResponse()` is called
+    /// again before the previous `ResponseStream` has been fully consumed — i.e.
+    /// its `AsyncIterator.next()` returned `nil`.  When a generation Task is
+    /// cancelled mid-stream the iterator is dropped early, leaving the session in
+    /// a "dirty" state.  This flag tracks that: it is cleared to `false` just
+    /// before the streaming loop starts and restored to `true` only when the loop
+    /// exits naturally (not via cancellation).  `generate()` treats a dirty session
+    /// the same as a `nil` session and creates a fresh `LanguageModelSession`.
+    private var _sessionIsClean = true
 
     private func withStateLock<T>(_ body: () throws -> T) rethrows -> T {
         stateLock.lock()
@@ -127,15 +138,32 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         withStateLock { _isModelLoaded = true }
     }
 
-    /// Cancels the active generation task without resetting `session` or
-    /// `currentSystemPrompt`.  Unlike `stopGeneration()`, this preserves session state
-    /// so tests can verify that a second `generate()` call reuses the same session.
+    /// Cancels the active generation task without calling `stopGeneration()`.
+    ///
+    /// Unlike `stopGeneration()`, this does NOT nil `session` or `currentSystemPrompt`
+    /// synchronously.  `_sessionIsClean` is left for the Task body to manage: the
+    /// cancelled Task will observe `Task.isCancelled` and leave `_sessionIsClean = false`
+    /// when its streaming loop exits early.
+    ///
+    /// Use this in tests that need to stop a generation without going through the full
+    /// `stopGeneration()` path.
     func _cancelTaskOnly() {
         let task = withStateLock { () -> Task<Void, Never>? in
             defer { generationTask = nil }
             return generationTask
         }
         task?.cancel()
+    }
+
+    /// Directly marks the session as dirty, simulating the state that results from a
+    /// cancelled generation Task dropping its `ResponseStream` iterator mid-stream.
+    ///
+    /// Use this in unit tests that need to drive the `generate()` "dirty session →
+    /// new LanguageModelSession" code path without racing against real Task scheduling.
+    /// Prefer this over `_cancelTaskOnly()` when the test goal is to verify that the
+    /// next `generate()` call creates a fresh session.
+    func _markSessionDirty() {
+        withStateLock { _sessionIsClean = false }
     }
 #endif
 
@@ -195,6 +223,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
             currentSystemPrompt = nil
             _isModelLoaded = false
             _isGenerating = false
+            _sessionIsClean = true
         }
         Self.logger.info("Foundation backend unloaded")
     }
@@ -216,8 +245,14 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
             _isGenerating = true
 
             // Reuse the existing session to preserve conversation history.
-            // Only recreate if the system prompt changed or no session exists.
-            let needsNewSession = session == nil || systemPrompt != currentSystemPrompt
+            // Recreate if: no session exists, the system prompt changed, or the
+            // previous generation was cancelled before its ResponseStream was fully
+            // consumed.  In the last case the session is "dirty" — LanguageModelSession
+            // asserts (SIGTRAP) if streamResponse() is called on a session whose
+            // previous ResponseStream iterator was dropped before returning nil.
+            let needsNewSession = session == nil
+                || systemPrompt != currentSystemPrompt
+                || !_sessionIsClean
             if needsNewSession {
                 if let systemPrompt, !systemPrompt.isEmpty {
                     session = LanguageModelSession(instructions: systemPrompt)
@@ -225,6 +260,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                     session = LanguageModelSession()
                 }
                 currentSystemPrompt = systemPrompt
+                _sessionIsClean = true  // fresh session always starts clean
             }
 
             return session!
@@ -258,12 +294,27 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                     options: options
                 )
 
+                // Mark the session as dirty before iterating.  If the Task is
+                // cancelled or the loop breaks early (e.g. output token limit) before
+                // the ResponseStream is fully consumed, the session will be considered
+                // dirty and generate() will create a fresh LanguageModelSession on the
+                // next call.  This prevents a SIGTRAP: LanguageModelSession asserts when
+                // streamResponse() is called again while the previous ResponseStream
+                // iterator was dropped before returning nil.
+                backend.withStateLock { backend._sessionIsClean = false }
+
                 let outputLimit = config.maxOutputTokens
                 var outputTokenCount = 0
                 var previousCount = 0
                 var isFirstToken = true
+                // Tracks whether the loop ran to natural completion (iterator returned
+                // nil) rather than exiting via break or CancellationError.
+                var streamExhausted = true
                 for try await partial in responseStream {
-                    if Task.isCancelled { break }
+                    if Task.isCancelled {
+                        streamExhausted = false
+                        break
+                    }
 
                     let currentText = partial.content
                     if currentText.count > previousCount {
@@ -281,10 +332,20 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                             outputTokenCount += max(1, newContent.count / 3)
                             if outputTokenCount >= limit {
                                 Self.logger.info("Output token limit (\(limit)) reached")
+                                streamExhausted = false
                                 break
                             }
                         }
                     }
+                }
+
+                // Only mark the session clean when the ResponseStream was fully
+                // consumed (iterator returned nil).  Any early exit — task
+                // cancellation or output-token-limit break — leaves the iterator
+                // dropped mid-stream, which would cause LanguageModelSession to
+                // SIGTRAP on the next streamResponse() call.
+                if streamExhausted {
+                    backend.withStateLock { backend._sessionIsClean = true }
                 }
                 await MainActor.run { generationStream.setPhase(.done) }
             } catch {
@@ -317,6 +378,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         withStateLock {
             session = nil
             currentSystemPrompt = nil
+            _sessionIsClean = true
         }
         Self.logger.info("Foundation conversation reset")
     }
@@ -335,6 +397,7 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         withStateLock {
             session = nil
             currentSystemPrompt = nil
+            _sessionIsClean = true
         }
     }
 
