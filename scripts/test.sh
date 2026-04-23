@@ -34,6 +34,22 @@ set -euo pipefail
 OUTPUT_FILE="${TMPDIR:-/tmp}/test_output.txt"
 PACKAGE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+# ── Arguments ────────────────────────────────────────────────────────────────
+MIN_PASSED=0
+SWIFT_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --min-passed)
+            MIN_PASSED="${2:?'--min-passed requires an integer argument'}"
+            shift 2
+            ;;
+        *)
+            SWIFT_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
 # ── Run ──────────────────────────────────────────────────────────────────────
 echo "Running swift test in: $PACKAGE_DIR"
 echo "Output captured to: $OUTPUT_FILE"
@@ -43,7 +59,7 @@ echo ""
 # We merge both so signal-crash lines (stderr) land alongside test lines (stdout).
 cd "$PACKAGE_DIR"
 set +e
-swift test "$@" 2>&1 | tee "$OUTPUT_FILE"
+swift test "${SWIFT_ARGS[@]}" 2>&1 | tee "$OUTPUT_FILE"
 SWIFT_EXIT=${PIPESTATUS[0]}
 set -e
 
@@ -163,6 +179,9 @@ elif [[ $SWIFT_EXIT -ne 0 ]]; then
     FINAL_EXIT=$SWIFT_EXIT
 elif [[ $total_passed -eq 0 && $total_skipped -gt 0 && $total_failed -eq 0 && $total_crashed_count -eq 0 ]]; then
     echo "  RESULT: TRIPWIRE — 0 tests passed, $total_skipped skipped (entire suite silently skipped)"
+    FINAL_EXIT=3
+elif [[ $MIN_PASSED -gt 0 && $total_passed -lt $MIN_PASSED ]]; then
+    echo "  RESULT: TRIPWIRE — only $total_passed test(s) passed, expected at least $MIN_PASSED"
     FINAL_EXIT=3
 else
     echo "  RESULT: PASSED"
