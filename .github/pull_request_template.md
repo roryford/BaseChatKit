@@ -8,9 +8,28 @@
 
 ## Release Note
 
-<!-- For feat: and fix: PRs, write the changelog entry here in prose style.
-     Format: **Bold title** — Problem, what changed, why it matters.
-     This is copied into CHANGELOG.md at release time.
+<!-- For feat: and fix: PRs, draft the release-note fragment here in the
+     Prisma-style format used by BaseChatKit since v0.11.2. This gets copied
+     into CHANGELOG.md at release time, so write it like a reader sees it.
+
+     For a HEADLINE feature (new subsystem, cross-cutting change, API
+     consumers need to know about), use this shape:
+
+         #### Short verb-led headline
+
+         2–3 sentences: the problem, what shipped, how it fits together.
+
+         ```swift
+         // 4–8 lines showing the new API in use
+         ```
+
+         One more sentence of caveats, opt-in/out semantics, or "see [#N]".
+
+     For a SMALL feature or fix, one bullet is enough — match the style
+     of the Features/Fixes sections in CHANGELOG.md:
+
+         - **scope:** what changed — why it matters ([#N])
+
      For chore/test/docs PRs, write "N/A". -->
 
 ## Testing
