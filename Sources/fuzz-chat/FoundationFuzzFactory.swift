@@ -1,4 +1,4 @@
-#if canImport(FoundationModels)
+#if canImport(FoundationModels) && Fuzz
 import Foundation
 import BaseChatFuzz
 import BaseChatBackends

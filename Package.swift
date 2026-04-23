@@ -22,6 +22,11 @@ let package = Package(
         .default(enabledTraits: ["MLX", "Llama"]),
         .trait(name: "MLX", description: "Enable the MLX inference backend (requires Apple Silicon)"),
         .trait(name: "Llama", description: "Enable the llama.cpp (GGUF) inference backend"),
+        // Fuzz is intentionally NOT a default trait. Enabling it adds BaseChatBackends
+        // (and transitively LlamaSwift) to fuzz-chat, which conflicts with the MLX
+        // integration test targets in the auto-generated Xcode scheme. Run the fuzzer via
+        // scripts/fuzz.sh, which passes --traits Fuzz,MLX,Llama explicitly.
+        .trait(name: "Fuzz", description: "Enable real inference backends in fuzz-chat (Ollama, Llama, Foundation). Required by scripts/fuzz.sh; not needed for swift test or xcodebuild test."),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.31.3"),
@@ -166,13 +171,22 @@ let package = Package(
             resources: [.process("Resources")]
         ),
         // CLI driver. Wires Ollama, Llama, Foundation; MLX runs via xcodebuild fuzz path.
+        // BaseChatBackends is conditional on the Fuzz trait to avoid a llama.framework
+        // copy conflict with BaseChatMLXIntegrationTests in the auto-generated Xcode scheme.
+        // Use scripts/fuzz.sh (which passes --traits Fuzz,MLX,Llama) to run the fuzzer.
         .executableTarget(
             name: "fuzz-chat",
-            dependencies: ["BaseChatFuzz", "BaseChatBackends", "BaseChatInference", "BaseChatTestSupport"],
+            dependencies: [
+                "BaseChatFuzz",
+                "BaseChatInference",
+                "BaseChatTestSupport",
+                .target(name: "BaseChatBackends", condition: .when(traits: ["Fuzz"])),
+            ],
             path: "Sources/fuzz-chat",
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+                .define("Fuzz", .when(traits: ["Fuzz"])),
             ]
         ),
         .testTarget(
@@ -199,7 +213,11 @@ let package = Package(
             dependencies: [
                 "BaseChatInference",
             ],
-            path: "Sources/BaseChatTools"
+            path: "Sources/BaseChatTools",
+            exclude: ["Scenarios/built-in/README.md", "README.md"],
+            resources: [
+                .copy("Scenarios/built-in"),
+            ]
         ),
         .executableTarget(
             name: "bck-tools",
