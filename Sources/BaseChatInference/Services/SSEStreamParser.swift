@@ -123,9 +123,49 @@ public enum SSEStreamError: Error, Equatable {
 ///
 /// Each cloud backend provides its own implementation to extract tokens,
 /// usage, stream-end signals, and errors from the provider's JSON format.
+///
+/// ## Event-level routing
+///
+/// ``extractEvents(from:)`` is the primary entry point: it maps one SSE
+/// payload to zero or more ``GenerationEvent`` values. This lets a single
+/// chunk surface ``GenerationEvent/token(_:)``, ``GenerationEvent/thinkingToken(_:)``,
+/// or ``GenerationEvent/thinkingComplete`` as the provider's wire format
+/// requires, without forcing the base class to reinterpret a raw string.
+///
+/// The default implementation wraps the legacy ``extractToken(from:)``
+/// result into `[.token(...)]`, so existing conformers keep compiling
+/// unchanged. New conformers should implement ``extractEvents(from:)``
+/// directly and leave ``extractToken(from:)`` as a no-op.
 public protocol SSEPayloadHandler: Sendable {
     /// Extracts a text token from a JSON payload, or `nil` if not a token event.
+    ///
+    /// - Important: Prefer ``extractEvents(from:)`` for new conformers. This
+    ///   method is preserved for backwards compatibility and will be removed
+    ///   once the remaining cloud backends (`ClaudeBackend`, `OpenAIBackend`)
+    ///   migrate to event-level routing.
+    // TODO: remove once #604 (Claude thinking_delta) and #605 (OpenAI
+    // reasoning_content) migrate to `extractEvents(from:)`.
     func extractToken(from payload: String) -> String?
+
+    /// Maps a single SSE JSON payload to zero or more generation events.
+    ///
+    /// Returning multiple events from one payload lets a handler distinguish
+    /// thinking/reasoning deltas from regular text deltas natively. For
+    /// lifecycle-style `.thinkingComplete` events that cannot be derived
+    /// from a single chunk (e.g. OpenAI's `reasoning_content` → `content`
+    /// transition), the `SSECloudBackend` base loop injects the event on
+    /// the first non-thinking-token event that follows one or more
+    /// thinking-token events, so handlers can stay stateless.
+    ///
+    /// Handlers that already know they are at a reasoning-block boundary
+    /// (e.g. an inline-tag parser using `ThinkingParser`) may emit
+    /// ``GenerationEvent/thinkingComplete`` themselves; the base loop's
+    /// flag tracking is idempotent and will not duplicate the event.
+    ///
+    /// The default implementation wraps ``extractToken(from:)`` so existing
+    /// handlers continue to work. Override for any handler that needs to
+    /// classify thinking vs. text deltas.
+    func extractEvents(from payload: String) -> [GenerationEvent]
 
     /// Extracts token usage from a JSON payload, or `nil` if not a usage event.
     func extractUsage(from payload: String) -> (promptTokens: Int?, completionTokens: Int?)?
@@ -135,6 +175,19 @@ public protocol SSEPayloadHandler: Sendable {
 
     /// Extracts an error from a JSON payload, or `nil` if not an error event.
     func extractStreamError(from payload: String) -> Error?
+}
+
+extension SSEPayloadHandler {
+    /// Default implementation that wraps ``extractToken(from:)`` into a
+    /// single-element `[.token(...)]` array, preserving the old protocol's
+    /// behaviour for handlers that have not yet migrated to event-level
+    /// routing.
+    public func extractEvents(from payload: String) -> [GenerationEvent] {
+        if let token = extractToken(from: payload) {
+            return [.token(token)]
+        }
+        return []
+    }
 }
 
 package struct SSEStreamParser {
@@ -273,11 +326,32 @@ package struct SSEStreamParser {
             let task = Task {
                 do {
                     let sseStream = parse(bytes: bytes, limits: limits)
+                    var wasThinking = false
                     for try await payload in sseStream {
                         if Task.isCancelled { break }
 
-                        if let token = handler.extractToken(from: payload) {
-                            continuation.yield(.token(token))
+                        for event in handler.extractEvents(from: payload) {
+                            // Lifecycle: inject a single `.thinkingComplete`
+                            // when the stream transitions from a thinking-
+                            // token run back to a plain token. Handlers that
+                            // emit `.thinkingComplete` themselves clear the
+                            // flag before reaching here, so no duplicate.
+                            switch event {
+                            case .thinkingToken:
+                                wasThinking = true
+                                continuation.yield(event)
+                            case .thinkingComplete:
+                                wasThinking = false
+                                continuation.yield(event)
+                            case .token:
+                                if wasThinking {
+                                    continuation.yield(.thinkingComplete)
+                                    wasThinking = false
+                                }
+                                continuation.yield(event)
+                            default:
+                                continuation.yield(event)
+                            }
                         }
 
                         if let usage = handler.extractUsage(from: payload),

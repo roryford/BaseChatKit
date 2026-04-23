@@ -178,8 +178,26 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     /// The default implementation delegates to ``payloadHandler``.
     /// Subclasses may override for additional processing, but providing a
     /// custom ``SSEPayloadHandler`` at init is the preferred approach.
+    ///
+    /// - Important: Prefer ``extractEvents(from:)`` — this hook is retained
+    ///   so existing subclasses continue to compile during the #604 / #605
+    ///   migration and will be removed once they finish.
+    // TODO: remove once ClaudeBackend / OpenAIBackend migrate to
+    // `extractEvents(from:)` and no subclass overrides this hook.
     open func extractToken(from payload: String) -> String? {
         payloadHandler.extractToken(from: payload)
+    }
+
+    /// Maps an SSE JSON payload to zero or more generation events.
+    ///
+    /// The default implementation forwards to ``payloadHandler``'s
+    /// ``SSEPayloadHandler/extractEvents(from:)``. The base
+    /// ``parseResponseStream(bytes:continuation:)`` loop iterates the
+    /// returned events and injects ``GenerationEvent/thinkingComplete``
+    /// on the first non-thinking-token event after one or more
+    /// thinking-token events, so handlers stay stateless.
+    open func extractEvents(from payload: String) -> [GenerationEvent] {
+        payloadHandler.extractEvents(from: payload)
     }
 
     /// Extracts token usage from an SSE JSON payload.
@@ -423,11 +441,36 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
     ) async throws {
         let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
+        // Tracks whether the last emitted content event was a
+        // `.thinkingToken`. When the next payload produces a `.token` (plain
+        // text), we inject a single `.thinkingComplete` so downstream
+        // consumers see the reasoning block close exactly once, even for
+        // field-based wire formats (Claude `thinking_delta`, OpenAI
+        // `reasoning_content`) where the boundary is implicit.
+        var wasThinking = false
         for try await payload in tokenStream {
             if Task.isCancelled { break }
 
-            if let token = extractToken(from: payload) {
-                continuation.yield(.token(token))
+            for event in extractEvents(from: payload) {
+                switch event {
+                case .thinkingToken:
+                    wasThinking = true
+                    continuation.yield(event)
+                case .thinkingComplete:
+                    // Handler emitted the boundary itself (e.g. an inline-
+                    // tag backend using `ThinkingParser`). Clear the flag
+                    // so we don't double-emit on the next `.token`.
+                    wasThinking = false
+                    continuation.yield(event)
+                case .token:
+                    if wasThinking {
+                        continuation.yield(.thinkingComplete)
+                        wasThinking = false
+                    }
+                    continuation.yield(event)
+                default:
+                    continuation.yield(event)
+                }
             }
 
             if let usage = extractUsage(from: payload) {
