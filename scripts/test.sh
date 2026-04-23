@@ -89,7 +89,8 @@ xctest_crashed_count=0
 if [[ -n "$xctest_suites_started" ]]; then
     while IFS= read -r suite; do
         [[ -z "$suite" ]] && continue
-        if ! grep -qE "^Test Suite '${suite}' (passed|failed) at" "$OUTPUT_FILE" 2>/dev/null; then
+        suite_pat=$(printf '%s' "$suite" | sed 's/[][(){}.*+?^$|\\]/\\&/g')
+        if ! grep -qE "^Test Suite '${suite_pat}' (passed|failed) at" "$OUTPUT_FILE" 2>/dev/null; then
             xctest_crashed_suites="${xctest_crashed_suites}  - ${suite} (XCTest)"$'\n'
             xctest_crashed_count=$((xctest_crashed_count + 1))
         fi
@@ -114,7 +115,8 @@ st_crashed_count=0
 if [[ -n "$st_suites_started" ]]; then
     while IFS= read -r suite; do
         [[ -z "$suite" ]] && continue
-        if ! grep -qE "^[✔✘] Suite \"${suite}\" (passed|failed) after" "$OUTPUT_FILE" 2>/dev/null; then
+        suite_pat=$(printf '%s' "$suite" | sed 's/[][(){}.*+?^$|\\]/\\&/g')
+        if ! grep -qE "^[✔✘] Suite \"${suite_pat}\" (passed|failed) after" "$OUTPUT_FILE" 2>/dev/null; then
             st_crashed_suites="${st_crashed_suites}  - ${suite} (Swift Testing)"$'\n'
             st_crashed_count=$((st_crashed_count + 1))
         fi
