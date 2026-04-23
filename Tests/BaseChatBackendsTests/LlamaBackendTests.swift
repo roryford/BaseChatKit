@@ -796,5 +796,74 @@ final class LlamaBackendTests: XCTestCase {
                        "stopGeneration() mid-decode must cause isGenerating to fall false within 2s — "
                        + "a regression here means the cancel check was moved out of the decode loop")
     }
+
+    // MARK: - maxThinkingTokens == 0 disables thinking entirely (#597)
+
+    /// Closes #597 (Llama half) — exercises the `LlamaGenerationDriver` path that
+    /// short-circuits `ThinkingParser` when `config.maxThinkingTokens == 0`.
+    ///
+    /// With `thinkingMarkers = .qwen3` set on the config *and* `maxThinkingTokens = 0`,
+    /// the driver must:
+    ///   1. Emit zero `.thinkingToken` events — no reasoning tokens leak into the stream.
+    ///   2. Emit zero `.thinkingComplete` events — the parser never opens a thinking block.
+    ///   3. Produce visible `.token` events — disabling thinking must not starve output.
+    ///
+    /// Any `<think>` / `</think>` literal the model emits surfaces as `.token`
+    /// text rather than being routed through the parser.
+    ///
+    /// Hardware-gated (requires Apple Silicon + a real GGUF). When the available
+    /// GGUF happens to be a non-reasoning model, the stream produces zero thinking
+    /// events trivially — which is still a valid pass: the contract is "no thinking
+    /// events AND visible output appears", and both hold. The test remains useful
+    /// because it re-asserts on every push that the gating code path still
+    /// compiles and the `config.maxThinkingTokens == 0` branch actually routes
+    /// content to `.token` rather than `.thinkingToken`.
+    ///
+    /// Sabotage check: remove `!thinkingDisabled &&` from the `useParser` /
+    /// `sniffEnabled` initialisers in `LlamaGenerationDriver`. On a reasoning
+    /// GGUF the stream emits `<think>` content as `.thinkingToken`, failing the
+    /// zero-count assertion.
+    func test_fixture_maxThinkingTokens_zero_disablesThinkingEntirely_regression597() async throws {
+        guard let modelURL = HardwareRequirements.findGGUFModel() else {
+            throw XCTSkip("No GGUF on disk. Place a `.gguf` in ~/Documents/Models/ to run this fixture.")
+        }
+
+        let backend = LlamaBackend()
+        addTeardownBlock { await backend.unloadAndWait() }
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
+
+        // thinkingMarkers = .qwen3 would normally activate the parser.
+        // maxThinkingTokens = 0 must override that and keep the parser off.
+        var config = GenerationConfig(temperature: 0.1, maxOutputTokens: 64)
+        config.thinkingMarkers = .qwen3
+        config.maxThinkingTokens = 0
+
+        let stream = try backend.generate(
+            prompt: "Reply with just the word 'ok'.",
+            systemPrompt: nil,
+            config: config
+        )
+
+        var thinkingTokenCount = 0
+        var thinkingCompleteCount = 0
+        var visibleTokenCount = 0
+        for try await event in stream.events {
+            switch event {
+            case .thinkingToken: thinkingTokenCount += 1
+            case .thinkingComplete: thinkingCompleteCount += 1
+            case .token: visibleTokenCount += 1
+            default: break
+            }
+        }
+
+        XCTAssertEqual(thinkingTokenCount, 0,
+            "maxThinkingTokens=0 must suppress every .thinkingToken event (#597) — "
+            + "driver must short-circuit ThinkingParser even when thinkingMarkers is set")
+        XCTAssertEqual(thinkingCompleteCount, 0,
+            "maxThinkingTokens=0 must suppress .thinkingComplete — no thinking phase entered")
+        XCTAssertGreaterThan(visibleTokenCount, 0,
+            "Visible output must still appear when thinking is disabled — the generation loop "
+            + "must not starve .token events")
+    }
 }
 #endif

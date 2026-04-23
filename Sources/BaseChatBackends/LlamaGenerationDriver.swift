@@ -199,7 +199,14 @@ struct LlamaGenerationDriver {
         //
         // `useParser` starts true for mode 1 and flips true for mode 2 if sniffing
         // detects a marker. Once true it never reverts.
-        var useParser = markers != nil
+        //
+        // Special case: `config.maxThinkingTokens == 0` disables thinking entirely
+        // (issue #597). Even when `markers` is non-nil, the parser stays off and
+        // sniffing is skipped, so every decoded token flows straight to `.token`.
+        // The model may still emit raw `<think>` / `</think>` substrings, but the
+        // driver routes them as visible text rather than `.thinkingToken` events.
+        let thinkingDisabled = config.maxThinkingTokens == 0
+        var useParser = !thinkingDisabled && markers != nil
         var thinkingParser = ThinkingParser(markers: markers ?? .qwen3)
         var thinkingTokenCount = 0
         // Flag set when maxThinkingTokens is reached so we can break the outer loop cleanly.
@@ -211,7 +218,7 @@ struct LlamaGenerationDriver {
         // across the boundary so a partial `<thin` followed by `k>` still matches.
         let sniffBudgetBytes = 64
         let sniffOpenTag = ThinkingMarkers.qwen3.open  // "<think>"
-        let sniffEnabled = markers == nil
+        let sniffEnabled = !thinkingDisabled && markers == nil
         var sniffBuffer = ""
         var sniffDone = !sniffEnabled   // true when sniffing has concluded (match or giveup)
 
