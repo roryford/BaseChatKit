@@ -48,14 +48,32 @@ final class OllamaE2ETests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// Default visible-token budget for the helper.
+    ///
+    /// Raised from 64 to 256 to accommodate thinking models (qwen3.x,
+    /// DeepSeek-R1 distillations, QwQ, Mistral Magistral) that route output
+    /// through a `<think>` block before any visible content. OllamaBackend
+    /// already reserves a 2048-token *thinking* budget on top of
+    /// `maxOutputTokens` for detected thinking models when
+    /// `maxThinkingTokens == nil`, so the helper only needs to give the
+    /// visible portion enough room to surface at least a few tokens. 64 was
+    /// small enough that even fast non-thinking models sometimes returned an
+    /// empty string under `num_predict` rounding, and thinking models always
+    /// did.
+    ///
+    /// See issue #602.
+    private static let defaultVisibleTokenBudget = 256
+
     private func generate(
         prompt: String,
         systemPrompt: String? = nil,
-        maxTokens: Int = 64
+        maxTokens: Int = OllamaE2ETests.defaultVisibleTokenBudget,
+        maxThinkingTokens: Int? = nil
     ) async throws -> String {
         let config = GenerationConfig(
             temperature: 0.3,
-            maxOutputTokens: maxTokens
+            maxOutputTokens: maxTokens,
+            maxThinkingTokens: maxThinkingTokens
         )
         let stream = try backend.generate(
             prompt: prompt,
@@ -65,21 +83,97 @@ final class OllamaE2ETests: XCTestCase {
         return try await collectTokens(stream)
     }
 
+    /// Collects both visible and thinking event evidence from a generation
+    /// stream. Used by ``test_realInference_generatesNonEmptyResponse`` to
+    /// pass whenever the model produces *any* output — visible tokens for
+    /// plain models, or a well-formed thinking trace for reasoning models
+    /// whose visible portion may still be empty for trivial prompts.
+    private struct GenerationEvidence {
+        var visibleText: String = ""
+        var thinkingTokenCount: Int = 0
+        var sawThinkingComplete: Bool = false
+
+        var isEmpty: Bool {
+            visibleText.isEmpty && thinkingTokenCount == 0 && !sawThinkingComplete
+        }
+    }
+
+    private func collectEvidence(
+        prompt: String,
+        systemPrompt: String? = nil,
+        maxTokens: Int = OllamaE2ETests.defaultVisibleTokenBudget,
+        maxThinkingTokens: Int? = nil
+    ) async throws -> GenerationEvidence {
+        let config = GenerationConfig(
+            temperature: 0.3,
+            maxOutputTokens: maxTokens,
+            maxThinkingTokens: maxThinkingTokens
+        )
+        let stream = try backend.generate(
+            prompt: prompt,
+            systemPrompt: systemPrompt,
+            config: config
+        )
+        var evidence = GenerationEvidence()
+        for try await event in stream.events {
+            switch event {
+            case .token(let text):
+                evidence.visibleText += text
+            case .thinkingToken:
+                evidence.thinkingTokenCount += 1
+            case .thinkingComplete:
+                evidence.sawThinkingComplete = true
+            default:
+                continue
+            }
+        }
+        return evidence
+    }
+
     // MARK: - Real Inference Tests
 
+    /// A non-empty response must arrive as either visible `.token` content or,
+    /// on reasoning models whose visible portion may be trivially short for
+    /// this prompt, as thinking-event evidence (`.thinkingToken` +
+    /// `.thinkingComplete`). An empty visible stream *with* no thinking events
+    /// still fails — this is not a silent-pass.
     func test_realInference_generatesNonEmptyResponse() async throws {
-        let response = try await generate(prompt: "Reply with exactly one word.")
+        let evidence = try await collectEvidence(prompt: "Reply with exactly one word.")
 
-        XCTAssertFalse(response.isEmpty, "Ollama should generate a non-empty response (model: \(modelName!))")
+        if backend.isThinkingModel {
+            XCTAssertFalse(
+                evidence.isEmpty,
+                "Thinking model '\(modelName!)' produced neither visible tokens nor thinking events"
+            )
+            XCTAssertTrue(
+                !evidence.visibleText.isEmpty || (evidence.thinkingTokenCount > 0 && evidence.sawThinkingComplete),
+                "Thinking model '\(modelName!)' must emit either visible text or a complete thinking trace (visible=\(evidence.visibleText.count) chars, thinkingTokens=\(evidence.thinkingTokenCount), thinkingComplete=\(evidence.sawThinkingComplete))"
+            )
+        } else {
+            XCTAssertFalse(
+                evidence.visibleText.isEmpty,
+                "Ollama should generate a non-empty response (model: \(modelName!))"
+            )
+        }
     }
 
     func test_realInference_withSystemPrompt() async throws {
-        let response = try await generate(
+        let evidence = try await collectEvidence(
             prompt: "What are you?",
             systemPrompt: "You are a helpful pirate. Always respond in pirate speak."
         )
 
-        XCTAssertFalse(response.isEmpty, "Should generate a response with system prompt")
+        if backend.isThinkingModel {
+            XCTAssertFalse(
+                evidence.isEmpty,
+                "Thinking model '\(modelName!)' produced no output with system prompt"
+            )
+        } else {
+            XCTAssertFalse(
+                evidence.visibleText.isEmpty,
+                "Should generate a response with system prompt (model: \(modelName!))"
+            )
+        }
     }
 
     func test_realInference_multiTurn() async throws {
@@ -214,11 +308,14 @@ final class OllamaE2ETests: XCTestCase {
     /// Test A — Thinking models must emit `.thinkingToken` events and fire
     /// exactly one `.thinkingComplete` before the first visible `.token`.
     func testThinkingModel_emitsThinkingEventsBeforeVisibleOutput() async throws {
-        // 256 tokens is enough for a compact reasoning trace plus at least one
-        // visible token on the train-meeting prompt — the assertions only need
-        // `firstTokenAfterThinkingComplete == true` and non-empty visible text,
-        // so we just need reasoning AND the first post-thinking token to fit.
-        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 256)
+        // qwen3.5:4b can spend well over 1k tokens reasoning through the
+        // train-meeting prompt before emitting any visible content. When
+        // `maxThinkingTokens == nil` OllamaBackend reserves 2048 extra on the
+        // wire for detected thinking models, so on-wire `num_predict` is
+        // `maxOutputTokens + 2048`. 2048 visible gives heavy thinkers room
+        // to finish reasoning *and* surface at least one post-thinking token,
+        // which is what the final assertion requires.
+        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 2048)
         let stream = try backend.generate(
             prompt: Self.reasoningPrompt,
             systemPrompt: nil,
@@ -347,12 +444,14 @@ final class OllamaE2ETests: XCTestCase {
         // arrives, but the server still generates the full reasoning trace —
         // `num_predict` on the wire is `maxOutputTokens + maxThinkingTokens`,
         // so the budget has to cover server-side reasoning PLUS a non-empty
-        // visible answer. 1536 gives gemma4:e4b room to finish reasoning and
-        // emit visible text for this prompt while still saving wall-clock vs
-        // leaving `maxOutputTokens` at the 2048 default.
+        // visible answer. qwen3.5:4b in particular emits 1000+ reasoning
+        // tokens on the train-meeting prompt even when the client is dropping
+        // `thinkingToken` events. 4096 visible + 5 thinking gives heavy
+        // thinkers enough runway to finish reasoning server-side AND produce
+        // a visible answer.
         let config = GenerationConfig(
             temperature: 0.3,
-            maxOutputTokens: 1536,
+            maxOutputTokens: 4096,
             maxThinkingTokens: 5
         )
         let stream = try backend.generate(
