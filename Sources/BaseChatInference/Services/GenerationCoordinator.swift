@@ -516,7 +516,13 @@ final class GenerationCoordinator {
     /// continuation untouched *except* for `.toolCall(_:)` events, which
     /// are intercepted when a registry is present:
     ///
-    /// 1. The call is dispatched via `toolRegistry.dispatch(_:)`.
+    /// 1. The finalized ``ToolCall`` is passed to ``toolApprovalGate``. On
+    ///    ``ToolApprovalDecision/approved`` the call is dispatched via
+    ///    `toolRegistry.dispatch(_:)`; on ``ToolApprovalDecision/denied(reason:)``
+    ///    a synthetic ``ToolResult`` with
+    ///    ``ToolResult/ErrorKind/permissionDenied`` is produced in place of
+    ///    a real dispatch, and the loop continues to the next turn so the
+    ///    model can acknowledge the refusal.
     /// 2. A `.toolResult(_:)` event is emitted so UIs can render the
     ///    outcome alongside the call.
     /// 3. The `(call, result)` pair is appended to the tool-aware history
