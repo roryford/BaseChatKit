@@ -98,3 +98,6 @@ jobs:
 
       - name: Test — Inference (Swift Testing)
         run: scripts/test.sh --filter BaseChatInferenceSwiftTestingTests --disable-default-traits --skip-update
+
+      - name: Test — TestSupport
+        run: scripts/test.sh --filter BaseChatTestSupportTests --disable-default-traits --skip-update

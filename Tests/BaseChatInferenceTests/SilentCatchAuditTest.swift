@@ -128,6 +128,10 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatUI/Views/Chat/TypingIndicatorView.swift:try? await Task.sleep(for: .milliseconds(400))",
 
         // BaseChatTestSupport — test-only helpers, not production paths.
+        // withTimeout deadline task: Task.sleep cancellation is intentionally swallowed so
+        // the deadline fires immediately when the parent task is cancelled, rather than
+        // propagating CancellationError and racing with the operation task's resume path.
+        "BaseChatTestSupport/TestHelpers.swift:try? await Task.sleep(for: timeout)",
         "BaseChatTestSupport/TestHelpers.swift:try? FileManager.default.removeItem(at: url)",
         "BaseChatTestSupport/SlowMockBackend.swift:try? await Task.sleep(for: delay)",
         "BaseChatTestSupport/PerceivedLatencyBackend.swift:try? await Task.sleep(for: ttft)",
