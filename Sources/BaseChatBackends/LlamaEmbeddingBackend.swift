@@ -270,18 +270,22 @@ public final class LlamaEmbeddingBackend: EmbeddingBackend, @unchecked Sendable 
     }
 
     deinit {
-        // Synchronously block on the actor-confined unload before releasing
-        // the process-level llama backend. The actor's serial executor
-        // guarantees there is no concurrent C call when this runs, so it is
-        // safe to free the model/context here. We use a semaphore rather than
-        // `await` because `deinit` cannot be async.
-        let sem = DispatchSemaphore(value: 0)
+        // Fire-and-forget the actor unload; do NOT block the thread running
+        // deinit. Blocking here (e.g. with a semaphore) is unsafe: if deinit
+        // runs on the main actor (typical when the backend is owned by an
+        // @MainActor InferenceService), blocking freezes the UI for the
+        // duration of the C cleanup, and any main-actor hop inside unload
+        // would deadlock outright.
+        //
+        // Keep the process-level refcount alive until the detached unload
+        // finishes, then release — mirrors LlamaBackend's pattern so the
+        // llama_backend_free call can't race with an in-flight unload.
+        LlamaBackendProcessLifecycle.retain()
         let storage = storage
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             await storage.unload()
-            sem.signal()
+            LlamaBackendProcessLifecycle.release()
         }
-        sem.wait()
         LlamaBackendProcessLifecycle.release()
     }
 
