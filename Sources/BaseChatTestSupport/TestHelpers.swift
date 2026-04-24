@@ -110,20 +110,9 @@ public enum TimeoutError: Error, CustomStringConvertible, Equatable {
     }
 }
 
-/// Runs `operation` with a bounded deadline. If it exceeds `timeout`,
-/// ``TimeoutError/timedOut(_:)`` is thrown regardless of whether the operation
-/// cooperates with cancellation.
-///
-/// Used to convert sabotage-check hangs into deterministic failures per the
-/// repo's test conventions (see CLAUDE.md — "no artificial sleep/fixed
-/// timeouts — use XCTestExpectation / XCTWaiter with tight deadlines", and
-/// the sabotage-verify rule which requires bounded, visible failures).
-///
-/// Unlike a `TaskGroup` race, this implementation uses unstructured concurrency
-/// so the deadline fires even when `operation` is blocked inside a
-/// `withCheckedContinuation` that never resumes (e.g. `UIToolApprovalGate.awaitDecision`
-/// waiting on user input). `OSAllocatedUnfairLock` guards the single-resume
-/// contract. Bookkeeping overhead is O(1).
+/// Runs `operation` with a bounded deadline. Throws ``TimeoutError/timedOut(_:)`` if
+/// `timeout` elapses, even when `operation` is blocked inside a `withCheckedContinuation`
+/// that does not check cancellation (e.g. a gate awaiting user input).
 ///
 /// - Parameters:
 ///   - timeout: Maximum duration the operation may run before failing.
