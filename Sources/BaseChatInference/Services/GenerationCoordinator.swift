@@ -376,6 +376,7 @@ final class GenerationCoordinator {
         maxOutputTokens: Int? = 2048,
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
+        grammar: String? = nil,
         tools: [ToolDefinition] = [],
         toolChoice: ToolChoice = .auto,
         maxToolIterations: Int = 10,
@@ -409,6 +410,7 @@ final class GenerationCoordinator {
             maxToolIterations: maxToolIterations
         )
         config.maxThinkingTokens = maxThinkingTokens
+        config.grammar = grammar
 
         let request = QueuedRequest(
             token: token,
