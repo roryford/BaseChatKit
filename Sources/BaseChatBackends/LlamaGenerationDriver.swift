@@ -128,25 +128,24 @@ struct LlamaGenerationDriver {
         llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
         llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
 
-        // Grammar-constrained sampling: GBNF grammar string from config.
-        // Added BEFORE dist so the grammar sampler prunes logits first —
-        // dist then picks from only grammar-valid continuations. The chain
-        // applies samplers in insertion order, so position matters here.
-        //
-        // `llama_sampler_init_grammar` returns nil on parse failure (invalid
-        // GBNF), in which case we fall through to unconstrained dist sampling
-        // rather than crashing. The caller is expected to validate grammar
-        // strings before passing them via GenerationConfig.grammar.
-        //
-        // Teardown: the grammar sampler is owned by `sampler` and freed by
-        // the `defer { llama_sampler_free(sampler) }` above — no extra cleanup.
+        // Grammar-constrained sampling: GBNF grammar from config, inserted before dist
+        // so it prunes the logit distribution before final token selection. Parse failure
+        // (invalid GBNF) is surfaced as an error — silent fallback to unconstrained sampling
+        // would produce output that violates the caller's grammar contract.
         if let grammarString = config.grammar {
+            var grammarSamplerCreated = false
             grammarString.withCString { grammarCStr in
                 "root".withCString { rootCStr in
                     if let gs = llama_sampler_init_grammar(vocab, grammarCStr, rootCStr) {
                         llama_sampler_chain_add(sampler, gs)
+                        grammarSamplerCreated = true
                     }
                 }
+            }
+            if !grammarSamplerCreated {
+                await MainActor.run { generationStream.setPhase(.failed("Failed to parse GBNF grammar")) }
+                continuation.finish(throwing: InferenceError.inferenceFailure("Failed to parse GBNF grammar string"))
+                return
             }
         }
 
