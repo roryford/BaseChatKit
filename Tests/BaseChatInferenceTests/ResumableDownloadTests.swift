@@ -10,17 +10,22 @@ final class ResumableDownloadTests: XCTestCase {
 
     private var manager: BackgroundDownloadManager!
     private var tempDirectory: URL!
+    // Separate subdir for persistence so the blocker test can plant a file at this
+    // path without destroying tempDirectory itself (which tearDown removes).
+    private var persistenceDir: URL!
 
     override func setUp() async throws {
         try await super.setUp()
 
         tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ResumableDownloadTests-\(UUID().uuidString)")
+        persistenceDir = tempDirectory.appendingPathComponent("persistence")
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
 
         manager = BackgroundDownloadManager(
             storageService: ModelStorageService(baseDirectory: tempDirectory),
-            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)"
+            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)",
+            persistenceDirectory: persistenceDir
         )
     }
 
@@ -28,17 +33,8 @@ final class ResumableDownloadTests: XCTestCase {
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
-        // Clean up the Caches persistence directory to prevent test bleed.
-        // The directory is shared with the real app process but is safe to remove
-        // between test runs because it only holds transient resume/pending data.
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let persistenceDir = caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
-            isDirectory: true
-        )
-        try? FileManager.default.removeItem(at: persistenceDir)
         tempDirectory = nil
+        persistenceDir = nil
         manager = nil
         try await super.tearDown()
     }
@@ -66,12 +62,6 @@ final class ResumableDownloadTests: XCTestCase {
         // Write a pending-downloads JSON file into the manager's persistence directory.
         // We replicate the internal format so the test remains honest about what the
         // real code reads back.
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let persistenceDir = caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
-            isDirectory: true
-        )
         try FileManager.default.createDirectory(at: persistenceDir, withIntermediateDirectories: true)
         let metadataURL = persistenceDir.appendingPathComponent("pending-downloads.json")
 
@@ -98,18 +88,11 @@ final class ResumableDownloadTests: XCTestCase {
 
         manager.persistResumeData(fakeResumeData, for: model.id)
 
-        // Verify the file exists in the caches persistence directory.
+        // Verify the file exists in the injected persistence directory.
         let safeID = model.id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? model.id
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let persistenceDir = caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
-        )
         let fileURL = persistenceDir.appendingPathComponent("resume-\(safeID).bin")
         let stored = try? Data(contentsOf: fileURL)
-        XCTAssertEqual(stored, fakeResumeData, "Resume data should be persisted as a file under the caches directory")
-
-        // Clean up.
-        try? FileManager.default.removeItem(at: fileURL)
+        XCTAssertEqual(stored, fakeResumeData, "Resume data should be persisted as a file under the persistence directory")
     }
 
     func test_consumeResumeData_returnsAndDeletesFile() {
@@ -123,10 +106,6 @@ final class ResumableDownloadTests: XCTestCase {
 
         // After consumption the file must be gone so the next retry starts fresh.
         let safeID = model.id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? model.id
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let persistenceDir = caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
-        )
         let fileURL = persistenceDir.appendingPathComponent("resume-\(safeID).bin")
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "consumeResumeData should delete the file")
     }
@@ -323,10 +302,6 @@ final class ResumableDownloadTests: XCTestCase {
         // We verify by checking that retryDownload can find the model metadata.
         // The manager's retryDownload method reads from the file; if the file is
         // present with the right entry, it will find the metadata.
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let persistenceDir = caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
-        )
         let metadataURL = persistenceDir.appendingPathComponent("pending-downloads.json")
         let data = try XCTUnwrap(
             try? Data(contentsOf: metadataURL),
@@ -338,8 +313,6 @@ final class ResumableDownloadTests: XCTestCase {
             "Pending metadata must survive a single-file failure so retryDownload can use it"
         )
 
-        // Clean up the seeded metadata file.
-        try? FileManager.default.removeItem(at: metadataURL)
         _ = manager.consumeResumeData(for: model.id)
     }
 
@@ -384,12 +357,6 @@ final class ResumableDownloadTests: XCTestCase {
         UserDefaults.standard.set(legacy, forKey: pendingKey)
 
         // Ensure the destination file does NOT already exist so the migration branch runs.
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let persistenceDir = caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
-            isDirectory: true
-        )
         let metadataURL = persistenceDir.appendingPathComponent("pending-downloads.json")
         try? FileManager.default.removeItem(at: metadataURL)
 
@@ -429,14 +396,9 @@ final class ResumableDownloadTests: XCTestCase {
 
         // Block the write by placing a regular FILE where the persistence DIRECTORY should be,
         // so ensurePersistenceDirectory() and createDirectory() both fail.
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let persistencePath = caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads"
-        )
         // Remove any existing directory first, then plant a file as a blocker.
-        try? FileManager.default.removeItem(at: persistencePath)
-        try Data("blocker".utf8).write(to: persistencePath)
+        try? FileManager.default.removeItem(at: persistenceDir)
+        try Data("blocker".utf8).write(to: persistenceDir)
 
         manager.migrateFromUserDefaults()
 
@@ -450,8 +412,8 @@ final class ResumableDownloadTests: XCTestCase {
         // the success branch and instead leave it outside, the key would be cleared unconditionally
         // even on failure — causing this assertion to fail.
 
-        // Clean up: remove the blocker file so tearDown can recreate a proper directory.
-        try? FileManager.default.removeItem(at: persistencePath)
+        // Clean up: remove the blocker file so tearDown can clean up tempDirectory.
+        try? FileManager.default.removeItem(at: persistenceDir)
         UserDefaults.standard.removeObject(forKey: pendingKey)
     }
 
@@ -459,12 +421,6 @@ final class ResumableDownloadTests: XCTestCase {
 
     /// An orphaned `.bin` file (no matching pending download) must be deleted.
     func test_deleteOrphanedResumeDataFiles_deletesOrphan() throws {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let persistenceDir = caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
-            isDirectory: true
-        )
         try FileManager.default.createDirectory(at: persistenceDir, withIntermediateDirectories: true)
 
         // Write an orphaned resume-data file for an ID that has no pending download entry.

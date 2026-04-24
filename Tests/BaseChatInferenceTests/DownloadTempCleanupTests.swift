@@ -7,38 +7,41 @@
 /// orphaned by a prior process that crashed or was force-killed between
 /// `URLSession`'s handoff and the move into the models directory.
 ///
-/// The sweep scans the process temp directory — which is shared with every
-/// other test — so tests must (a) only create files with a test-specific UUID
-/// suffix and (b) remove everything they create in `tearDown` to avoid bleed.
+/// Each test gets a unique `tempScanDir` injected into its manager so that
+/// parallel suites cannot accidentally sweep each other's files.
 @MainActor
 final class DownloadTempCleanupTests: XCTestCase {
 
-    /// Files we created during a test run — removed in tearDown regardless of outcome.
-    private var createdURLs: [URL] = []
+    /// Isolated directory the manager scans — unique per test run.
+    private var tempScanDir: URL!
 
-    /// Fresh manager per test — session identifier is unique to prevent OS-level collisions.
+    /// Fresh manager per test — session identifier and scan directory are both unique.
     private var manager: BackgroundDownloadManager!
 
     override func setUp() async throws {
         try await super.setUp()
+        tempScanDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DownloadTempCleanupTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempScanDir, withIntermediateDirectories: true)
         manager = BackgroundDownloadManager(
-            sessionIdentifier: "com.basechatkit.test.cleanup.\(UUID().uuidString)"
+            sessionIdentifier: "com.basechatkit.test.cleanup.\(UUID().uuidString)",
+            tempScanDirectory: tempScanDir
         )
     }
 
     override func tearDown() async throws {
-        for url in createdURLs {
-            try? FileManager.default.removeItem(at: url)
+        if let tempScanDir {
+            try? FileManager.default.removeItem(at: tempScanDir)
         }
-        createdURLs.removeAll()
+        tempScanDir = nil
         manager = nil
         try await super.tearDown()
     }
 
     // MARK: - Helpers
 
-    /// Creates a file in the process temp directory with the manager's naming
-    /// signature and backdates its modification time.
+    /// Creates a file in `tempScanDir` with the manager's naming signature and
+    /// backdates its modification time.
     ///
     /// - Parameter age: Seconds in the past to stamp on the file's mtime.
     /// - Returns: The URL of the created file.
@@ -48,30 +51,28 @@ final class DownloadTempCleanupTests: XCTestCase {
         contents: Data = Data("temp".utf8)
     ) throws -> URL {
         let name = "\(BackgroundDownloadManager.tempFilePrefix)\(UUID().uuidString).\(BackgroundDownloadManager.tempFileExtension)"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        let url = tempScanDir.appendingPathComponent(name)
         try contents.write(to: url)
         let backdatedDate = Date().addingTimeInterval(-age)
         try FileManager.default.setAttributes(
             [.modificationDate: backdatedDate],
             ofItemAtPath: url.path
         )
-        createdURLs.append(url)
         return url
     }
 
-    /// Creates a file in the temp directory that does NOT match the manager's
-    /// naming signature, to verify the sweep leaves unrelated files alone.
+    /// Creates a file in `tempScanDir` that does NOT match the manager's naming
+    /// signature, to verify the sweep leaves unrelated files alone.
     @discardableResult
     private func makeUnrelatedTempFile(age: TimeInterval) throws -> URL {
         let name = "unrelated-\(UUID().uuidString).tmp"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        let url = tempScanDir.appendingPathComponent(name)
         try Data("unrelated".utf8).write(to: url)
         let backdatedDate = Date().addingTimeInterval(-age)
         try FileManager.default.setAttributes(
             [.modificationDate: backdatedDate],
             ofItemAtPath: url.path
         )
-        createdURLs.append(url)
         return url
     }
 

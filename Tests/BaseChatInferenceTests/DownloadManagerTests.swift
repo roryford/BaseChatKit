@@ -400,13 +400,16 @@ final class DownloadManagerTests: XCTestCase {
             return
         }
 
-        // Request exactly: freeSpace - buffer - 1 byte (should just barely pass).
+        // Request freeSpace - buffer - 100 MB. A 1-byte margin is too tight when
+        // parallel tests are writing files and shrinking available space between
+        // the time we read freeSpace here and checkDiskSpace reads it inside.
         let buffer: UInt64 = 500_000_000
-        guard freeSpace > buffer + 1 else {
+        let margin: UInt64 = 100_000_000
+        guard freeSpace > buffer + margin else {
             // System has less than the buffer; skip this test gracefully.
             return
         }
-        let requestSize = freeSpace - buffer - 1
+        let requestSize = freeSpace - buffer - margin
 
         do {
             try await manager.checkDiskSpace(requiredBytes: requestSize)

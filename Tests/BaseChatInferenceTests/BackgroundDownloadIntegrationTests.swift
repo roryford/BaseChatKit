@@ -22,15 +22,10 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
     // ensures each test gets a fresh, isolated session with no shared OS state.
     private var testSessionIdentifier: String!
 
-    // Per-test persistence directory derived from the manager's caches layout.
-    private var persistenceDir: URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
-            isDirectory: true
-        )
-    }
+    // Per-test persistence directory — a subdir of tempDirectory, unique per test run.
+    // Passed to every BackgroundDownloadManager created in this suite so that parallel
+    // runs never share pending-downloads.json or resume-data files.
+    private var persistenceDir: URL!
 
     private var pendingMetadataURL: URL {
         persistenceDir.appendingPathComponent("pending-downloads.json")
@@ -39,11 +34,17 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         testSessionIdentifier = "com.basechatkit.test.download.\(UUID().uuidString)"
-        manager = BackgroundDownloadManager(sessionIdentifier: testSessionIdentifier)
 
         tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("BackgroundDownloadIntegrationTests-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        persistenceDir = tempDirectory.appendingPathComponent("persistence")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        manager = BackgroundDownloadManager(
+            sessionIdentifier: testSessionIdentifier,
+            persistenceDirectory: persistenceDir,
+            tempScanDirectory: tempDirectory
+        )
     }
 
     override func tearDown() async throws {
@@ -51,10 +52,7 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
         tempDirectory = nil
-
-        // Remove the pending metadata file so tests don't bleed state.
-        try? FileManager.default.removeItem(at: pendingMetadataURL)
-
+        persistenceDir = nil
         manager = nil
         testSessionIdentifier = nil
         try await super.tearDown()
@@ -383,7 +381,9 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         // A fresh manager starts with no active downloads.
         // Use a unique session identifier to avoid OS-level URLSession collisions with setUp's manager.
         let freshManager = BackgroundDownloadManager(
-            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)"
+            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)",
+            persistenceDirectory: persistenceDir,
+            tempScanDirectory: tempDirectory
         )
         XCTAssertNil(freshManager.activeDownloads[model.id], "No active downloads before reconnect")
 
@@ -400,7 +400,9 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         // Use a unique session identifier to avoid OS-level URLSession collisions with setUp's manager.
         let manager = BackgroundDownloadManager(
             storageService: ModelStorageService(baseDirectory: tempDirectory),
-            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)"
+            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)",
+            persistenceDirectory: persistenceDir,
+            tempScanDirectory: tempDirectory
         )
         let model = makeModel(
             repoID: "mlx-community/Test-4bit",

@@ -75,7 +75,8 @@ final class OllamaThinkingE2ETests: XCTestCase {
         let task = Task<Bool, Error> { @MainActor in
             let config = GenerationConfig(
                 temperature: 0.3,
-                maxOutputTokens: 64
+                maxOutputTokens: 64,
+                maxThinkingTokens: 16
             )
             let stream = try backendRef.generate(
                 prompt: Self.reasoningPrompt,

@@ -154,22 +154,22 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
 
     // MARK: - File-based Persistence
 
-    /// Directory in Caches where we store the pending-downloads JSON and per-download
-    /// resume-data files. Using Caches lets the OS reclaim space under extreme pressure,
-    /// which is acceptable — a missing resume-data file causes a fresh download, not a
-    /// crash or data corruption.
+    /// Directory where the pending-downloads JSON and per-download resume-data files live.
     ///
-    /// Stored as a lazy property so the path is computed once and reused, avoiding
-    /// repeated filesystem lookups on every call.
+    /// Defaults to `Caches/<bundleID>.downloads` so the OS can reclaim space under
+    /// pressure — a missing resume file causes a fresh download, not a crash.
+    /// Tests inject a per-test temporary directory to prevent parallel suites from
+    /// sharing the same JSON file.
     @ObservationIgnored
-    private lazy var persistenceDirectory: URL = {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return caches.appendingPathComponent(
-            "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
-            isDirectory: true
-        )
-    }()
+    private let persistenceDirectory: URL
+
+    /// Directory scanned by ``cleanupStaleTempFiles()`` for orphaned temp files.
+    ///
+    /// Defaults to `FileManager.default.temporaryDirectory`. Tests inject a unique
+    /// subdirectory so parallel cleanup calls from different manager instances cannot
+    /// race on each other's files.
+    @ObservationIgnored
+    private let tempScanDirectory: URL
 
     /// URL of the single JSON file that stores all pending-download metadata.
     private var pendingMetadataFileURL: URL {
@@ -205,10 +205,20 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     ///     deliver callbacks to a deallocated delegate, resulting in a double-free crash.
     public init(
         storageService: ModelStorageService = ModelStorageService(),
-        sessionIdentifier: String? = nil
+        sessionIdentifier: String? = nil,
+        persistenceDirectory: URL? = nil,
+        tempScanDirectory: URL? = nil
     ) {
         self.storageService = storageService
         self._sessionIdentifier = sessionIdentifier ?? Self.sessionIdentifier
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        self.persistenceDirectory = persistenceDirectory
+            ?? caches.appendingPathComponent(
+                "\(BaseChatConfiguration.shared.bundleIdentifier).downloads",
+                isDirectory: true
+            )
+        self.tempScanDirectory = tempScanDirectory ?? FileManager.default.temporaryDirectory
         super.init()
     }
 
@@ -975,7 +985,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
         now: Date,
         excluding excluded: Set<URL> = []
     ) -> (removed: Int, bytesReclaimed: Int64) {
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = tempScanDirectory
         let contents: [URL]
         do {
             contents = try FileManager.default.contentsOfDirectory(
