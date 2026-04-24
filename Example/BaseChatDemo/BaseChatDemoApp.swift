@@ -22,6 +22,11 @@ struct BaseChatDemoApp: App {
     // frame for several seconds when done on the main thread.
     @State private var modelContainer: ModelContainer?
 
+    /// Single-slot buffer for inbound payloads that land during the
+    /// cold-launch window where the SwiftData container is still being
+    /// built. ``DemoContentView`` drains it once persistence is wired.
+    @State private var pendingPayloadBuffer = PendingPayloadBuffer()
+
     init() {
         let testing = CommandLine.arguments.contains("--uitesting")
         self.isUITesting = testing
@@ -169,8 +174,13 @@ struct BaseChatDemoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if let container = modelContainer {
-                DemoContentView(inferenceService: inferenceService, skipAutoModelLoad: isUITesting)
+            Group {
+                if let container = modelContainer {
+                    DemoContentView(
+                        inferenceService: inferenceService,
+                        skipAutoModelLoad: isUITesting,
+                        pendingPayloadBuffer: pendingPayloadBuffer
+                    )
                     .environment(chatViewModel)
                     .environment(modelManagementViewModel)
                     .environment(sessionManager)
@@ -178,20 +188,92 @@ struct BaseChatDemoApp: App {
                     .frame(minWidth: 600, minHeight: 400)
                     #endif
                     .modelContainer(container)
-            } else {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .task {
-                        let testing = isUITesting
-                        modelContainer = await Task.detached(priority: .userInitiated) {
-                            let config = ModelConfiguration("BaseChatDemo", isStoredInMemoryOnly: testing)
-                            return try! ModelContainerFactory.makeContainer(configurations: [config])
-                        }.value
-                    }
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .task {
+                            let testing = isUITesting
+
+                            // Seed the pending buffer BEFORE the container
+                            // finishes so `DemoContentView.onAppear` sees a
+                            // non-empty buffer when it drains. Without this
+                            // order, the `modelContainer = ...` assignment
+                            // flips the view hierarchy to `DemoContentView`
+                            // and its onAppear drains an empty buffer.
+                            if testing, let seeded = Self.uiTestingSeededPayload() {
+                                await pendingPayloadBuffer.store(seeded)
+                            }
+
+                            modelContainer = await Task.detached(priority: .userInitiated) {
+                                let config = ModelConfiguration("BaseChatDemo", isStoredInMemoryOnly: testing)
+                                return try! ModelContainerFactory.makeContainer(configurations: [config])
+                            }.value
+                        }
+                }
+            }
+            .onOpenURL { url in
+                handleOpenURL(url)
             }
         }
         #if os(macOS)
         .defaultSize(width: 900, height: 700)
         #endif
+    }
+
+    // MARK: - Inbound payload handoff
+
+    /// Entry point for the `basechatdemo://ingest` URL scheme.
+    ///
+    /// Reads the JSON envelope the App Intent wrote to the App Group
+    /// `UserDefaults`, decodes it back into an ``InboundPayload``, and
+    /// either ingests immediately (if persistence is already wired) or
+    /// buffers for ``DemoContentView`` to drain post-mount.
+    private func handleOpenURL(_ url: URL) {
+        guard url.scheme == "basechatdemo", url.host == "ingest" else { return }
+        guard let defaults = UserDefaults(suiteName: DemoAppGroup.identifier),
+              let data = defaults.data(forKey: DemoAppGroup.inboundKey),
+              let envelope = try? JSONDecoder().decode(InboundPayloadEnvelope.self, from: data) else {
+            return
+        }
+        // Clear so we don't replay the same payload on the next launch.
+        defaults.removeObject(forKey: DemoAppGroup.inboundKey)
+
+        let payload = InboundPayload(
+            prompt: envelope.prompt,
+            source: decodeSource(envelope.source)
+        )
+
+        // If persistence is wired, ingest directly — otherwise hand off
+        // to the buffer and let `DemoContentView` pick it up once mount
+        // completes.
+        if modelContainer != nil {
+            Task { @MainActor in
+                await chatViewModel.ingest(payload)
+            }
+        } else {
+            Task {
+                await pendingPayloadBuffer.store(payload)
+            }
+        }
+    }
+
+    private func decodeSource(_ raw: String) -> InboundPayload.Source {
+        switch raw {
+        case "deepLink": return .deepLink
+        case "shareExtension": return .shareExtension
+        default: return .appIntent
+        }
+    }
+
+    /// Returns a payload constructed from UI-testing launch arguments, if
+    /// any. Used by ``AppIntentUITests`` to exercise the cold-launch
+    /// handoff without invoking real AppIntents infrastructure.
+    private static func uiTestingSeededPayload() -> InboundPayload? {
+        let args = CommandLine.arguments
+        guard let flagIndex = args.firstIndex(of: "--uitesting-ingest-prompt"),
+              flagIndex + 1 < args.count else {
+            return nil
+        }
+        return InboundPayload(prompt: args[flagIndex + 1], source: .appIntent)
     }
 }

@@ -24,6 +24,10 @@
 		BF1005000000000000000000 /* SettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11006000000000000000000 /* SettingsUITests.swift */; };
 		BF1006000000000000000000 /* CloudAPIUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11007000000000000000000 /* CloudAPIUITests.swift */; };
 		BF1007000000000000000000 /* ToolApprovalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11008000000000000000000 /* ToolApprovalUITests.swift */; };
+		BF0011000000000000000000 /* PendingPayloadBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10008000000000000000000 /* PendingPayloadBuffer.swift */; };
+		BF0012000000000000000000 /* AskBaseChatDemoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10009000000000000000000 /* AskBaseChatDemoIntent.swift */; };
+		BF0013000000000000000000 /* BaseChatDemoShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10010000000000000000000 /* BaseChatDemoShortcuts.swift */; };
+		BF1008000000000000000000 /* AppIntentUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11009000000000000000000 /* AppIntentUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -52,6 +56,11 @@
 		F11006000000000000000000 /* SettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsUITests.swift; sourceTree = "<group>"; };
 		F11007000000000000000000 /* CloudAPIUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAPIUITests.swift; sourceTree = "<group>"; };
 		F11008000000000000000000 /* ToolApprovalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalUITests.swift; sourceTree = "<group>"; };
+		F10008000000000000000000 /* PendingPayloadBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Concurrency/PendingPayloadBuffer.swift; sourceTree = "<group>"; };
+		F10009000000000000000000 /* AskBaseChatDemoIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents/AskBaseChatDemoIntent.swift; sourceTree = "<group>"; };
+		F10010000000000000000000 /* BaseChatDemoShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents/BaseChatDemoShortcuts.swift; sourceTree = "<group>"; };
+		F10011000000000000000000 /* BaseChatDemo.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BaseChatDemo.entitlements; sourceTree = "<group>"; };
+		F11009000000000000000000 /* AppIntentUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +104,10 @@
 				F10005000000000000000000 /* ChatEmptyStateView.swift */,
 				F10006000000000000000000 /* ToolApprovalSheet.swift */,
 				F10007000000000000000000 /* ToolPolicyView.swift */,
+				F10008000000000000000000 /* PendingPayloadBuffer.swift */,
+				F10009000000000000000000 /* AskBaseChatDemoIntent.swift */,
+				F10010000000000000000000 /* BaseChatDemoShortcuts.swift */,
+				F10011000000000000000000 /* BaseChatDemo.entitlements */,
 			);
 			path = BaseChatDemo;
 			sourceTree = "<group>";
@@ -125,6 +138,7 @@
 				F11006000000000000000000 /* SettingsUITests.swift */,
 				F11007000000000000000000 /* CloudAPIUITests.swift */,
 				F11008000000000000000000 /* ToolApprovalUITests.swift */,
+				F11009000000000000000000 /* AppIntentUITests.swift */,
 			);
 			path = BaseChatDemoUITests;
 			sourceTree = "<group>";
@@ -214,6 +228,9 @@
 				BF0008000000000000000000 /* ChatEmptyStateView.swift in Sources */,
 				BF0009000000000000000000 /* ToolApprovalSheet.swift in Sources */,
 				BF0010000000000000000000 /* ToolPolicyView.swift in Sources */,
+				BF0011000000000000000000 /* PendingPayloadBuffer.swift in Sources */,
+				BF0012000000000000000000 /* AskBaseChatDemoIntent.swift in Sources */,
+				BF0013000000000000000000 /* BaseChatDemoShortcuts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -228,6 +245,7 @@
 				BF1005000000000000000000 /* SettingsUITests.swift in Sources */,
 				BF1006000000000000000000 /* CloudAPIUITests.swift in Sources */,
 				BF1007000000000000000000 /* ToolApprovalUITests.swift in Sources */,
+				BF1008000000000000000000 /* AppIntentUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -363,6 +381,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = BaseChatDemo/BaseChatDemo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
@@ -396,6 +415,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = BaseChatDemo/BaseChatDemo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
