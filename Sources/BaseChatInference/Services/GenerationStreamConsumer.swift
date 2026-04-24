@@ -36,6 +36,9 @@ public struct GenerationStreamConsumer: Sendable {
 
         case .toolLoopLimitReached(let iterations):
             return .toolLoopLimitReached(iterations: iterations)
+
+        case .kvCacheReuse:
+            return .ignore
         }
     }
 
@@ -66,5 +69,7 @@ public struct GenerationStreamConsumer: Sendable {
         /// The orchestrator stopped the tool-dispatch loop because the
         /// ``GenerationConfig/maxToolIterations`` budget was exhausted.
         case toolLoopLimitReached(iterations: Int)
+        /// The backend reused a KV-cache prefix from the previous turn; no UI action needed.
+        case ignore
     }
 }

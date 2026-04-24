@@ -40,6 +40,7 @@ private func categorise(_ event: GenerationEvent) -> EventCategory? {
     case .toolCall: return nil
     case .toolResult: return nil
     case .toolLoopLimitReached: return nil
+    case .kvCacheReuse: return nil
     }
 }
 

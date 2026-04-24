@@ -91,6 +91,8 @@ public final class ScenarioRunner {
                     // dispatch below, so it never receives GenerationCoordinator's
                     // orchestrator events on this path. Stay exhaustive for growth.
                     continue
+                case .kvCacheReuse:
+                    continue
                 }
             }
 

@@ -43,6 +43,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     public var capabilities: BackendCapabilities {
         let ctxSize = withStateLock { _effectiveContextSize }
+        // MLX: KV cache reuse deferred — MLX manages its own context lifecycle via
+        // MLXModelContainer and does not expose a KV-trim API.
         return BackendCapabilities(
             supportedParameters: [.temperature, .topP, .repeatPenalty],
             maxContextTokens: ctxSize,
@@ -56,7 +58,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             memoryStrategy: .mappable,
             maxOutputTokens: 4096,
             supportsStreaming: true,
-            isRemote: false
+            isRemote: false,
+            supportsKVCachePersistence: true
         )
     }
 
@@ -85,6 +88,18 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     /// Owns the serialized model-load path and the C-level parameter/progress-callback bridging.
     private let modelLoader = LlamaModelLoader()
+
+    // MARK: - KV Cache State
+
+    /// Captures the full prompt token sequence of the most recently completed
+    /// decode so the next turn can skip re-decoding a shared prefix.
+    private struct SessionKVState {
+        /// Full token array of the last successfully completed prompt decode.
+        var tokens: [llama_token]
+    }
+
+    /// Guarded by `stateLock`. Non-nil after a successful prompt decode; nil after reset.
+    private var sessionKVState: SessionKVState?
 
     // MARK: - Memory Pressure
 
@@ -246,6 +261,26 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             )
         }
 
+        // Compute how many leading tokens match the previous turn's KV state so
+        // the driver can skip re-decoding that prefix. We read sessionKVState
+        // here (before the isGenerating flip) because stopGeneration() never
+        // clears it — only unloadModel() and resetConversation() do — so there
+        // is no race between this read and those two paths under stateLock.
+        let previousTokens = withStateLock { sessionKVState?.tokens ?? [] }
+        let commonPrefixLen = zip(tokens, previousTokens).prefix(while: { $0.0 == $0.1 }).count
+        // Must leave at least one token for the sampler (the last prompt token),
+        // so cap reuse at tokens.count - 1.
+        let reuseLen = min(commonPrefixLen, tokens.count - 1)
+
+        // Trim the KV cache tail beyond the reuse prefix before flipping
+        // isGenerating. The context pointer is safe to snapshot here: the outer
+        // guard already verified context != nil, and unloadModel() can only nil
+        // it after acquiring stateLock — which we hold during the flip below.
+        if reuseLen > 0, let ctx = withStateLock({ context }),
+           let mem = llama_get_memory(ctx) {
+            llama_memory_seq_rm(mem, 0, Int32(reuseLen), -1)
+        }
+
         // Reset the cancellation flag and flip isGenerating atomically under the
         // same lock that stopGeneration() holds when it touches generationTask.
         // Keeping both writes inside a single critical section means a concurrent
@@ -255,6 +290,12 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         withStateLock {
             cancelled.store(false, ordering: .sequentiallyConsistent)
             isGenerating = true
+            // Optimistically record the current prompt tokens as the new KV state.
+            // If generation is cancelled mid-stream, this is still safe: the prefix
+            // up to `reuseLen` is intact in the C KV cache, and any tokens decoded
+            // beyond that are the start of the new turn's output — not prompt tokens.
+            // resetConversation() / unloadModel() will wipe this if needed.
+            sessionKVState = SessionKVState(tokens: tokens)
         }
         Self.logger.debug("Llama generate started")
 
@@ -301,10 +342,11 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             }
 
             let driver = LlamaGenerationDriver()
-            await driver.run(
+            let kvCoherent = await driver.run(
                 context: context,
                 vocab: vocab,
                 tokens: tokens,
+                reuseLen: reuseLen,
                 maxTokens: maxTokens,
                 config: config,
                 markers: config.thinkingMarkers,
@@ -314,6 +356,12 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 generationStream: generationStream,
                 continuation: continuation
             )
+            // A decode failure leaves the C KV cache in an undefined state.
+            // Clear sessionKVState so the next turn does not attempt prefix reuse
+            // against positions that were never coherently decoded.
+            if !kvCoherent {
+                self.withStateLock { self.sessionKVState = nil }
+            }
         }
 
         // Assignment and unlock complete the critical section opened above.
@@ -349,6 +397,25 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         taskToCancel?.cancel()
     }
 
+    /// Invalidates the KV cache prefix so the next turn starts with a clean
+    /// context rather than attempting to reuse state from a prior conversation.
+    ///
+    /// Call this when the conversation history is cleared or a new session
+    /// begins. `stopGeneration()` intentionally does NOT call this — a
+    /// cancelled turn preserves the prefix so the model can continue from
+    /// where it left off on the next `generate()`.
+    public func resetConversation() {
+        let capturedContext = withStateLock { () -> OpaquePointer? in
+            sessionKVState = nil
+            return context
+        }
+        // Also flush the actual KV cache in the C context so any leftover
+        // positional state is gone before the next turn decodes from position 0.
+        if let ctx = capturedContext, let mem = llama_get_memory(ctx) {
+            llama_memory_clear(mem, false)
+        }
+    }
+
     public func unloadModel() {
         // Signal the decode loop to stop before acquiring stateLock. The atomic
         // write is visible to the background task immediately, so the loop can
@@ -372,6 +439,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         vocab = nil
         isModelLoaded = false
         isGenerating = false
+        sessionKVState = nil
         stateLock.unlock()
 
         capturedTask?.cancel()

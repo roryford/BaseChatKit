@@ -40,4 +40,9 @@ public enum GenerationEvent: Sendable, Equatable {
     /// consumers (chat UIs, transcripts) use this to append the tool result to
     /// the assistant turn before the next generation round begins.
     case toolResult(ToolResult)
+
+    /// Emitted at the start of a turn when the backend reused a KV-cache prefix
+    /// from the previous turn. `promptTokensReused` is the number of prompt tokens
+    /// whose KV state was preserved, saving their re-decode cost.
+    case kvCacheReuse(promptTokensReused: Int)
 }
