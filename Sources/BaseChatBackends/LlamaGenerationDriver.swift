@@ -59,6 +59,11 @@ struct LlamaGenerationDriver {
     ///     cancellation (combines `Task.isCancelled` and the backend's `Atomic<Bool>`).
     ///   - generationStream: Stream whose phase is updated on the main actor.
     ///   - continuation: Raw stream continuation for yielding events.
+    /// Returns `true` when the KV cache is in a coherent state after the call
+    /// (success or clean cancellation), `false` when a C decode error occurred
+    /// and the KV state should be treated as undefined. Callers must clear their
+    /// `sessionKVState` when this returns `false`.
+    @discardableResult
     func run(
         context: OpaquePointer,
         vocab: OpaquePointer,
@@ -70,7 +75,7 @@ struct LlamaGenerationDriver {
         isCancelled: () -> Bool,
         generationStream: GenerationStream,
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
-    ) async {
+    ) async -> Bool {
         Self.logger.debug("LlamaGenerationDriver run started")
 
         // MARK: Batch size
@@ -104,7 +109,7 @@ struct LlamaGenerationDriver {
         guard let sampler = llama_sampler_chain_init(sparams) else {
             await MainActor.run { generationStream.setPhase(.failed("Failed to create sampler")) }
             continuation.finish(throwing: InferenceError.inferenceFailure("Failed to create sampler"))
-            return
+            return false
         }
         defer { llama_sampler_free(sampler) }
 
@@ -167,7 +172,7 @@ struct LlamaGenerationDriver {
             Self.logger.error("Llama prompt decode failed")
             await MainActor.run { generationStream.setPhase(.failed("Failed to decode prompt")) }
             continuation.finish(throwing: InferenceError.inferenceFailure("Failed to decode prompt"))
-            return
+            return false
         }
 
         // Honour cancellation that fired mid-prompt before entering the
@@ -175,7 +180,7 @@ struct LlamaGenerationDriver {
         if isCancelled() {
             await MainActor.run { generationStream.setPhase(.done) }
             continuation.finish()
-            return
+            return true
         }
 
         // MARK: Token generation loop
@@ -358,7 +363,7 @@ struct LlamaGenerationDriver {
             if llama_decode(context, genBatch) != 0 {
                 await MainActor.run { generationStream.setPhase(.failed("Decode failed during generation")) }
                 continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
-                return
+                return false
             }
         }
 
@@ -381,6 +386,7 @@ struct LlamaGenerationDriver {
         await MainActor.run { generationStream.setPhase(.done) }
         Self.logger.debug("LlamaGenerationDriver run finished")
         continuation.finish()
+        return true
     }
 
     // MARK: - Phrase Detection

@@ -43,6 +43,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
 
     public var capabilities: BackendCapabilities {
         let ctxSize = withStateLock { _effectiveContextSize }
+        // MLX: KV cache reuse deferred — MLX manages its own context lifecycle via
+        // MLXModelContainer and does not expose a KV-trim API.
         return BackendCapabilities(
             supportedParameters: [.temperature, .topP, .repeatPenalty],
             maxContextTokens: ctxSize,
@@ -58,8 +60,6 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             supportsStreaming: true,
             isRemote: false,
             supportsKVCachePersistence: true
-            // MLX: KV cache reuse deferred — MLX manages its own context lifecycle via
-            // MLXModelContainer and does not expose a KV-trim API.
         )
     }
 
@@ -342,7 +342,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             }
 
             let driver = LlamaGenerationDriver()
-            await driver.run(
+            let kvCoherent = await driver.run(
                 context: context,
                 vocab: vocab,
                 tokens: tokens,
@@ -356,6 +356,12 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 generationStream: generationStream,
                 continuation: continuation
             )
+            // A decode failure leaves the C KV cache in an undefined state.
+            // Clear sessionKVState so the next turn does not attempt prefix reuse
+            // against positions that were never coherently decoded.
+            if !kvCoherent {
+                self.withStateLock { self.sessionKVState = nil }
+            }
         }
 
         // Assignment and unlock complete the critical section opened above.
