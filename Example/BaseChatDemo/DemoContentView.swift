@@ -25,6 +25,11 @@ struct DemoContentView: View {
     /// so that UI tests start from a deterministic empty state.
     var skipAutoModelLoad: Bool = false
 
+    /// Buffer holding any ``InboundPayload`` that arrived during the
+    /// cold-launch window, before persistence was wired. Drained once
+    /// the `onAppear` configuration completes.
+    var pendingPayloadBuffer: PendingPayloadBuffer?
+
     var body: some View {
         // Read the gate's pending queue so SwiftUI observes changes and the
         // `.sheet(item:)` binding below re-evaluates when a new approval
@@ -138,6 +143,18 @@ struct DemoContentView: View {
                     )
                 }
             }
+
+            // Drain any payload that arrived during the cold-launch window
+            // where persistence was not yet wired. Runs after the
+            // `viewModel.configure(persistence:)` call above so the ingest
+            // path can safely create sessions.
+            if let pendingPayloadBuffer {
+                Task { @MainActor in
+                    if let payload = await pendingPayloadBuffer.drain() {
+                        await viewModel.ingest(payload)
+                    }
+                }
+            }
         }
         .onChange(of: viewModel.selectedModel) {
             viewModel.dispatchSelectedLoad()
@@ -154,7 +171,29 @@ struct DemoContentView: View {
                     columnVisibility = .detailOnly
                     preferredCompactColumn = .detail
                 }
-                viewModel.switchToSession(session)
+                // Guard against the back-channel loop with `onChange(of:
+                // viewModel.activeSession)` below: when `ingest(_:)` creates
+                // a session and switches `viewModel` to it, the sibling
+                // handler mirrors the change into `sessionManager`, which
+                // would re-enter `switchToSession` here and (because
+                // `isGenerating` is already `true`) call `stopGeneration()`
+                // mid-stream, wiping the ingested reply. Only re-activate
+                // if the view model is currently on a different session.
+                if viewModel.activeSession?.id != session.id {
+                    viewModel.switchToSession(session)
+                }
+            }
+        }
+        .onChange(of: viewModel.activeSession) { _, newSession in
+            // Keep `SessionManagerViewModel.activeSession` in sync when
+            // `ChatViewModel.ingest(_:)` creates + switches to a new
+            // session of its own. Without this, the sidebar binding
+            // stays on whatever session was previously active and the
+            // user sees the wrong detail pane.
+            guard let newSession else { return }
+            if sessionManager.activeSession?.id != newSession.id {
+                sessionManager.loadSessions()
+                sessionManager.activeSession = newSession
             }
         }
         .onChange(of: managementViewModel.completedDownloadCount) { _, _ in
