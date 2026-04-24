@@ -21,6 +21,9 @@ public enum InferenceError: LocalizedError {
     /// string read from the model (`model_type` in MLX config.json, `general.architecture`
     /// in a GGUF header, etc.) so UI can display it.
     case unsupportedModelArchitecture(String)
+    /// Thrown by backends when `config.grammar != nil` but the backend does not support
+    /// grammar-constrained sampling. `isRetryable` is `false`.
+    case unsupportedGrammar(reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -42,6 +45,8 @@ public enum InferenceError: LocalizedError {
             return "Prompt (\(promptTokens) tokens) plus requested output (\(maxOutputTokens) tokens) exceeds context window (\(contextSize) tokens)."
         case .unsupportedModelArchitecture(let arch):
             return "Unsupported model architecture: \(arch). This backend only supports chat/instruct language models."
+        case .unsupportedGrammar(let reason):
+            return "Grammar-constrained sampling not supported: \(reason)"
         }
     }
 
@@ -56,7 +61,7 @@ public enum InferenceError: LocalizedError {
             return true
         case .modelNotFound, .modelLoadFailed, .inferenceFailure,
              .memoryInsufficient, .generationError, .contextExhausted,
-             .unsupportedModelArchitecture:
+             .unsupportedModelArchitecture, .unsupportedGrammar:
             return false
         }
     }
