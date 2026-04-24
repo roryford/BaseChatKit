@@ -49,10 +49,9 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
     /// Thinking markers for this template, or nil if the template does not emit reasoning blocks.
     public var thinkingMarkers: ThinkingMarkers? {
         switch self {
-        case .chatML: return .qwen3  // Qwen3, DeepSeek-R1 use ChatML format with <think> tags
-        // .gemma4 markers deferred — <|end_of_turn> as close marker needs verification
-        // against real Gemma 4 thinking weights before enabling.
-        default:      return nil
+        case .chatML:  return .qwen3   // Qwen3, DeepSeek-R1 use ChatML format with <think> tags
+        case .gemma4:  return .gemma4  // Gemma 4 thinking fine-tunes wrap CoT in <|turn>think\n
+        default:       return nil
         }
     }
 

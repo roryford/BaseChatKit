@@ -32,14 +32,17 @@ final class PromptTemplateThinkingMarkersTests: XCTestCase {
             "Llama 3 template does not emit reasoning blocks; thinkingMarkers must be nil")
     }
 
-    func test_gemma4_returnsNil() {
-        // Gemma 4 markers are deferred pending verification of real thinking weights.
-        // This test documents the *intentional* nil until that work lands.
-        XCTAssertNil(PromptTemplate.gemma4.thinkingMarkers,
-            "Gemma 4 thinking markers are deferred; thinkingMarkers must be nil until verified")
+    func test_gemma4_returnsGemma4Markers() {
+        let markers = PromptTemplate.gemma4.thinkingMarkers
+        XCTAssertNotNil(markers,
+            "Gemma 4 template must expose ThinkingMarkers for thinking fine-tunes")
+        XCTAssertEqual(markers?.open, "<|turn>think\n",
+            "Gemma 4 thinking open marker must be '<|turn>think\\n'")
+        XCTAssertEqual(markers?.close, "<|end_of_turn>",
+            "Gemma 4 thinking close marker must be '<|end_of_turn>'")
 
-        // Sabotage check: prematurely enabling gemma4 markers would cause this
-        // assertion to fail, alerting the team that the deferral comment was removed.
+        // Sabotage check: returning nil would disable thinking parsing for Gemma 4
+        // thinking-enabled models and this XCTAssertNotNil would fail.
     }
 
     // MARK: - ThinkingMarkers.qwen3 holdback
