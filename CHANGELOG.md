@@ -1,5 +1,108 @@
 # Changelog
 
+## [0.11.3](https://github.com/roryford/BaseChatKit/compare/v0.11.2...v0.11.3) (2026-04-24)
+
+### Highlights
+
+#### Local-inference capability stack — grammar, KV cache, embeddings
+
+BaseChatKit 0.11.3 lands three primitives that together let callers program against local inference with the richness remote backends have long offered: GBNF grammar-constrained sampling, KV-cache-aware prompt reuse, and a concrete embedding backend. All three are capability-flagged on `BackendCapabilities` so a single caller can cover cloud and local paths; all three default to `false`/`nil` so existing serialized `BackendCapabilities` payloads decode without migration.
+
+```swift
+// Grammar-constrained generation on LlamaBackend
+var config = GenerationConfig()
+config.grammar = #"root ::= "yes" | "no""#
+_ = try await service.enqueue(messages: messages, grammar: config.grammar)
+
+// Local embeddings — actor-confined, unit-normalized, cosine-ready
+let embedder = LlamaEmbeddingBackend()
+try await embedder.loadModel(from: gguf)
+let vectors = try await embedder.embed(["hello", "world"])
+```
+
+`LlamaBackend` now computes the longest common prompt prefix across turns and trims only the diverging KV tail via `llama_memory_seq_rm`, improving Turn 2+ TTFT on long static system prompts by 5× or more. `LlamaEmbeddingBackend` wraps the BERT / Nomic / Jina / T5-encoder GGUF family with pooling-aware extraction and L2 normalization; on Apple Silicon with `nomic-embed-text-v1.5` Q8_0 it sustains ~4–5 ms per embed. See [#663], [#664], [#667], [#668], [#686], [#687].
+
+#### Tool calling, end-to-end — with an approval gate
+
+Tool calling ships every piece a host app needs in one release: a `ToolApprovalGate` protocol for per-call human approval, a `@ToolSchema` macro that derives `JSONSchemaValue` parameters from Swift structs at compile time, and a public `ToolInvocationView` + `UIToolApprovalGate` so pending → running → completed states render from a single SwiftUI view. The demo app ships the flagship empty-state moment — curated prompt button → thinking → sandboxed tool call → approval sheet → result in one tap.
+
+```swift
+@ToolSchema
+struct WeatherArguments: Decodable, Sendable {
+    /// City name (e.g. "San Francisco")
+    let city: String
+}
+
+let gate = UIToolApprovalGate(policy: .askOncePerSession)
+let service = InferenceService(toolRegistry: registry, toolApprovalGate: gate)
+let chatVM = ChatViewModel(inferenceService: service, toolApprovalGate: gate)
+```
+
+The macro is a conservative subset — primitives, arrays, `Optional`, nested `@ToolSchema` types, String-raw-type enums, literal defaults — and emits compile-time diagnostics for unsupported shapes. Closes [#437]. See [#632], [#652], [#657], [#662], [#675].
+
+### Features
+
+- **embeddings:** `LlamaEmbeddingBackend` — concrete `EmbeddingBackend` for GGUF embedders ([#687])
+- **inference:** add `BackendCapabilities.supportsThinking` flag ([#674])
+- **inference:** add `ThinkingMarkers` presets and `forModel(named:)` lookup ([#672])
+- **inference:** add `ToolApprovalGate` protocol for per-call tool approval ([#657])
+- **inference:** expose `grammar:` parameter on `InferenceService.enqueue` / `GenerationCoordinator.enqueue` ([#686])
+- **inference:** local-capability contract types for grammar, KV cache, and embeddings ([#663], [#664])
+- **intents:** `AskBaseChatDemo` AppIntent via `InboundPayload` handoff ([#666])
+- **llama:** GBNF grammar-constrained sampling in `LlamaBackend` ([#663], [#667])
+- **llama:** KV cache persistence across turns — 5× TTFT improvement on long system prompts ([#663], [#668])
+- **macros:** `@ToolSchema` macro — synthesize `ToolDefinition.parameters` from Swift structs ([#675])
+- **tools:** add `SampleRepoSearchTool` and wire reference tools in demo ([#652])
+- **ui:** `ToolInvocationView` + `UIToolApprovalGate` with demo empty-state moment — closes [#437] ([#662])
+
+### Fixes
+
+- **backends:** parse SSE `id:` fields and inject `Last-Event-ID` header on reconnect — prevents duplicate token replay across dropped streams ([#608], [#658])
+- **backends:** prevent SIGTRAP when `FoundationModels` session is reused after task cancel ([#661])
+- **ci:** add `--min-passed` flag to `scripts/test.sh` to catch silent suite skips ([#633], [#654])
+- **ci:** escape regex metacharacters in suite-name crash detection — follow-up to [#633] ([af452ef])
+- **ci:** revert `swift-tools-version` to 6.1 for CI toolchain compatibility ([#670])
+- **downloads:** retry disk-jitter moves and exclude active temps from sweep — closes flaky downloads ([#599], [#601], [#656])
+- **inference:** Package.resolved drift guard + FoundationBackend memory accumulation — cleans long-running memory growth ([#600], [#644], [#655])
+- **swift:** Swift 6.3 warnings, Fuzz-trait docs, MLXFuzzTests gating ([#645], [#646], [#647], [#659])
+- **test-support:** `withTimeout` hangs on non-cancellation-aware operations; wire `BaseChatTestSupportTests` to CI ([#685])
+- **tests:** prevent `MockURLProtocol` crash on unregistered URLs in concurrent suites ([#660])
+
+[#437]: https://github.com/roryford/BaseChatKit/issues/437
+[#599]: https://github.com/roryford/BaseChatKit/issues/599
+[#600]: https://github.com/roryford/BaseChatKit/issues/600
+[#601]: https://github.com/roryford/BaseChatKit/issues/601
+[#608]: https://github.com/roryford/BaseChatKit/issues/608
+[#632]: https://github.com/roryford/BaseChatKit/issues/632
+[#633]: https://github.com/roryford/BaseChatKit/issues/633
+[#644]: https://github.com/roryford/BaseChatKit/issues/644
+[#645]: https://github.com/roryford/BaseChatKit/issues/645
+[#646]: https://github.com/roryford/BaseChatKit/issues/646
+[#647]: https://github.com/roryford/BaseChatKit/issues/647
+[#652]: https://github.com/roryford/BaseChatKit/issues/652
+[#654]: https://github.com/roryford/BaseChatKit/issues/654
+[#655]: https://github.com/roryford/BaseChatKit/issues/655
+[#656]: https://github.com/roryford/BaseChatKit/issues/656
+[#657]: https://github.com/roryford/BaseChatKit/issues/657
+[#658]: https://github.com/roryford/BaseChatKit/issues/658
+[#659]: https://github.com/roryford/BaseChatKit/issues/659
+[#660]: https://github.com/roryford/BaseChatKit/issues/660
+[#661]: https://github.com/roryford/BaseChatKit/issues/661
+[#662]: https://github.com/roryford/BaseChatKit/issues/662
+[#663]: https://github.com/roryford/BaseChatKit/issues/663
+[#664]: https://github.com/roryford/BaseChatKit/issues/664
+[#666]: https://github.com/roryford/BaseChatKit/issues/666
+[#667]: https://github.com/roryford/BaseChatKit/issues/667
+[#668]: https://github.com/roryford/BaseChatKit/issues/668
+[#670]: https://github.com/roryford/BaseChatKit/issues/670
+[#672]: https://github.com/roryford/BaseChatKit/issues/672
+[#674]: https://github.com/roryford/BaseChatKit/issues/674
+[#675]: https://github.com/roryford/BaseChatKit/issues/675
+[#685]: https://github.com/roryford/BaseChatKit/issues/685
+[#686]: https://github.com/roryford/BaseChatKit/issues/686
+[#687]: https://github.com/roryford/BaseChatKit/issues/687
+[af452ef]: https://github.com/roryford/BaseChatKit/commit/af452ef58fe2448cf2b9f20edeea0f600a373724
+
 ## [0.11.2](https://github.com/roryford/BaseChatKit/compare/v0.11.1...v0.11.2) (2026-04-23)
 
 ### Highlights
