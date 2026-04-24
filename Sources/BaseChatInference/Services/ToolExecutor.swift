@@ -23,6 +23,53 @@ import Foundation
 /// ``TypedToolExecutor`` to wrap a strongly-typed Swift handler — the adapter
 /// handles JSON encode/decode on both sides so the handler signature stays
 /// free of `JSONSchemaValue`.
+///
+/// ## Atomicity
+///
+/// `execute(arguments:)` is **atomic** from the orchestrator's point of view:
+/// the registry observes exactly one outcome per call — either a fully-formed
+/// ``ToolResult`` returned from the function, or a thrown error. There is no
+/// partial-emission channel. Executors that perform streaming or multi-step
+/// work (streaming file reads, subprocess pipes, streamed HTTP responses,
+/// multi-RPC transactions) MUST buffer that work internally and only return a
+/// single complete ``ToolResult`` once the work has succeeded.
+///
+/// When an executor throws mid-work, ``ToolRegistry/dispatch(_:)`` records a
+/// ``ToolResult`` with ``ToolResult/ErrorKind/permanent`` and
+/// `String(describing: error)` as the content. Any in-flight state the
+/// executor had accumulated — bytes read, chunks processed, rows fetched — is
+/// discarded and never flows into the transcript. The model sees the error
+/// description, not the partial output.
+///
+/// The throw path is classified as ``ToolResult/ErrorKind/permanent``
+/// (not ``ToolResult/ErrorKind/transient``) by design: an uncategorised
+/// thrown `Error` is the "I don't know what went wrong" escape hatch, and
+/// labelling it retry-safe would push agents into loops on permanent
+/// failures (logic bugs, schema mismatches, auth denials) that no amount of
+/// retrying will fix. Executors that *know* a failure is retriable must
+/// return an explicit ``ToolResult/init(callId:content:errorKind:)`` with
+/// ``ToolResult/ErrorKind/transient`` instead of throwing — same rule for
+/// ``ToolResult/ErrorKind/timeout``, ``ToolResult/ErrorKind/rateLimited``,
+/// ``ToolResult/ErrorKind/cancelled``, and the other specific kinds.
+/// Throwing is the last-resort catch-all, not a retry signal.
+///
+/// Practical consequences:
+///
+/// - If your tool streams and you want to preserve what you got before
+///   failing, aggregate into a local buffer and only throw after you have
+///   decided to abandon that buffer. If the partial result is useful, return
+///   a successful ``ToolResult`` whose ``ToolResult/content`` contains the
+///   buffered prefix plus a description of why collection stopped, rather
+///   than throwing.
+/// - If the failure is transient (disk I/O hiccup, dropped connection,
+///   rate-limit response), return
+///   `ToolResult(callId: "", content: "...", errorKind: .transient)` rather
+///   than throwing — this tells the orchestrator the call is safe to retry.
+/// - Do not rely on side-effects (written files, DB rows, API calls) to
+///   communicate partial progress to later turns — the orchestrator only
+///   sees the returned ``ToolResult``.
+/// - A future extension may add an explicit partial-content channel; until
+///   then, this atomic request/response shape is the contract.
 public protocol ToolExecutor: Sendable {
 
     /// The JSON-Schema contract exposed to the model and the ``ToolRegistry``
@@ -35,7 +82,15 @@ public protocol ToolExecutor: Sendable {
     /// The returned ``ToolResult/callId`` may be empty — ``ToolRegistry``
     /// stamps the correct id from the incoming ``ToolCall`` before returning
     /// the result to the caller. Thrown errors are caught by the registry and
-    /// turned into ``ToolResult/ErrorKind/permanent`` results.
+    /// turned into ``ToolResult/ErrorKind/permanent`` results; to signal a
+    /// retriable failure, return a ``ToolResult`` with an explicit
+    /// ``ToolResult/ErrorKind/transient`` (or another specific kind) instead
+    /// of throwing.
+    ///
+    /// This call is **atomic** — see the protocol-level ``ToolExecutor``
+    /// documentation. Partial work accumulated before a throw is discarded
+    /// by the orchestrator; aggregate internally and only throw once you
+    /// have decided to abandon the buffer.
     func execute(arguments: JSONSchemaValue) async throws -> ToolResult
 }
 
@@ -66,6 +121,17 @@ public protocol ToolExecutor: Sendable {
 /// the raw ``ToolCall/arguments`` string is classified as
 /// ``ToolResult/ErrorKind/invalidArguments`` at the registry boundary before
 /// this adapter sees it.
+///
+/// ## Atomicity
+///
+/// The adapter is inherently atomic: the handler's `Result` is JSON-encoded
+/// exactly once **after** the handler returns normally. If the handler throws,
+/// nothing is encoded and no ``ToolResult`` is produced — the error bubbles to
+/// ``ToolRegistry/dispatch(_:)`` which records a
+/// ``ToolResult/ErrorKind/permanent`` result with the error description and
+/// discards any work the handler had performed. See the ``ToolExecutor``
+/// protocol's Atomicity section for the full contract; handlers that perform
+/// streaming or multi-step work should buffer internally before returning.
 public struct TypedToolExecutor<Arguments: Decodable & Sendable, Result: Encodable & Sendable>: ToolExecutor {
 
     public let definition: ToolDefinition
