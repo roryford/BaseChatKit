@@ -1,0 +1,90 @@
+import XCTest
+import BaseChatTestSupport
+
+/// Tests for the ``withTimeout`` helper in `BaseChatTestSupport`.
+///
+/// The helper exists so sabotage-verify tests that would otherwise hang on a
+/// regression (e.g. a missing latch causing `await gate.approve(...)` to
+/// suspend forever) instead fail deterministically within a bounded deadline.
+/// These tests pin that contract: hangs throw `TimeoutError`, fast operations
+/// return their value, and the helper's own bookkeeping stays cheap.
+final class WithTimeoutTests: XCTestCase {
+
+    // MARK: - Hang path
+
+    func test_withTimeout_throwsOnHang() async {
+        // A millisecond-scale timeout keeps the suite fast while still
+        // comfortably clear of scheduling noise on CI hardware.
+        let timeout: Duration = .milliseconds(50)
+
+        do {
+            _ = try await withTimeout(timeout) {
+                // Simulate a hang: a very long sleep we expect the helper
+                // to cancel when the deadline elapses.
+                try await Task.sleep(for: .seconds(60))
+                return 42
+            }
+            XCTFail("Expected TimeoutError.timedOut but operation returned a value")
+        } catch let error as TimeoutError {
+            XCTAssertEqual(error, .timedOut(timeout))
+        } catch {
+            XCTFail("Expected TimeoutError, got \(type(of: error)): \(error)")
+        }
+    }
+
+    // MARK: - Happy path
+
+    func test_withTimeout_returnsValueUnderBudget() async throws {
+        // Give the operation a generous budget — we're pinning the fast-path
+        // contract, not measuring wall-clock overhead.
+        let value = try await withTimeout(.seconds(5)) {
+            // Tiny async hop so the operation actually suspends; otherwise we'd
+            // be asserting on a synchronous return that doesn't exercise the
+            // race machinery.
+            try await Task.sleep(for: .milliseconds(1))
+            return "ok"
+        }
+        XCTAssertEqual(value, "ok")
+    }
+
+    // MARK: - Overhead budget
+
+    func test_withTimeout_overheadStaysUnderBudget() async throws {
+        // The helper's own bookkeeping must add ≤ 50 ms on top of the
+        // operation's real duration (see PR body — this is the documented
+        // budget). We measure wall-clock around a ~10 ms operation and assert
+        // total runtime stays within op + 50 ms.
+        let opDuration: Duration = .milliseconds(10)
+        let start = ContinuousClock.now
+
+        _ = try await withTimeout(.seconds(1)) {
+            try await Task.sleep(for: opDuration)
+            return ()
+        }
+
+        let elapsed = ContinuousClock.now - start
+        let budget: Duration = opDuration + .milliseconds(50)
+        XCTAssertLessThan(
+            elapsed,
+            budget,
+            "withTimeout overhead exceeded 50 ms budget (elapsed=\(elapsed), op=\(opDuration))"
+        )
+    }
+
+    // MARK: - Error rethrow
+
+    func test_withTimeout_rethrowsOperationError() async {
+        struct Boom: Error, Equatable {}
+
+        do {
+            _ = try await withTimeout(.seconds(5)) {
+                throw Boom()
+            }
+            XCTFail("Expected Boom to propagate")
+        } catch let error as Boom {
+            XCTAssertEqual(error, Boom())
+        } catch {
+            XCTFail("Expected Boom, got \(type(of: error)): \(error)")
+        }
+    }
+}

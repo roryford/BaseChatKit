@@ -1,5 +1,6 @@
 import XCTest
 import BaseChatInference
+import BaseChatTestSupport
 @testable import BaseChatUI
 
 /// Behavioural tests for ``UIToolApprovalGate``. These exercise the policy
@@ -51,7 +52,7 @@ final class UIToolApprovalGateTests: XCTestCase {
 
     // MARK: - Policy: askOncePerSession
 
-    func test_askOncePerSession_secondCallSkipsPrompt() async {
+    func test_askOncePerSession_secondCallSkipsPrompt() async throws {
         let gate = UIToolApprovalGate(policy: .askOncePerSession)
 
         let first = startApprove(gate, call(id: "c1"))
@@ -61,11 +62,14 @@ final class UIToolApprovalGateTests: XCTestCase {
         XCTAssertEqual(firstDecision, .approved)
 
         // Second call must skip the queue entirely thanks to the latch.
-        // We await the result directly: with the latch set, approve() returns
-        // on the same scheduling turn without enqueueing. If the latch
-        // regresses the test hangs — which the CI watchdog surfaces as a
-        // failure rather than a passing run.
-        let secondResult = await gate.approve(call(id: "c2"))
+        // `withTimeout` turns a latch regression into a deterministic 1 s
+        // failure rather than a hang: if `hasApprovedThisSession` is not set,
+        // approve() would enqueue and await a resolver that never comes —
+        // the bounded deadline surfaces that as `TimeoutError` instead.
+        let secondCall = call(id: "c2")
+        let secondResult = try await withTimeout(.seconds(1)) { @MainActor in
+            await gate.approve(secondCall)
+        }
         XCTAssertEqual(secondResult, .approved)
         XCTAssertTrue(gate.pending.isEmpty)
     }

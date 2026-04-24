@@ -106,6 +106,14 @@ let package = Package(
             name: "BaseChatCoreTests",
             dependencies: ["BaseChatCore", "BaseChatInference", "BaseChatTestSupport"]
         ),
+        // Tests for the shared test-helper module itself (e.g. `withTimeout`).
+        // Kept as a dedicated target so hang-sabotage helpers don't accrete
+        // inside product-suite test targets and so they can be exercised
+        // with `swift test --filter BaseChatTestSupportTests`.
+        .testTarget(
+            name: "BaseChatTestSupportTests",
+            dependencies: ["BaseChatTestSupport"]
+        ),
         .testTarget(
             name: "BaseChatInferenceTests",
             dependencies: ["BaseChatInference", "BaseChatTestSupport"]

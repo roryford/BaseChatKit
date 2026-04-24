@@ -93,3 +93,61 @@ public func collectTokens(_ stream: GenerationStream) async throws -> String {
     }
     return tokens.joined()
 }
+
+// MARK: - Bounded async timeout
+
+/// Error thrown by ``withTimeout(_:file:line:_:)`` when the wrapped operation
+/// exceeds its deadline.
+public enum TimeoutError: Error, CustomStringConvertible, Equatable {
+    case timedOut(Duration)
+
+    public var description: String {
+        switch self {
+        case .timedOut(let duration):
+            return "Operation timed out after \(duration)"
+        }
+    }
+}
+
+/// Runs `operation` with a bounded deadline. If it exceeds `timeout` the
+/// operation's task is cancelled and ``TimeoutError/timedOut(_:)`` is thrown.
+///
+/// Used to convert sabotage-check hangs into deterministic failures per the
+/// repo's test conventions (see CLAUDE.md — "no artificial sleep/fixed
+/// timeouts — use XCTestExpectation / XCTWaiter with tight deadlines", and
+/// the sabotage-verify rule which requires bounded, visible failures).
+///
+/// Implementation is a `TaskGroup` race between the user operation and a
+/// `Task.sleep(for:)` deadline — whichever finishes first wins and the
+/// sibling is cancelled. Bookkeeping overhead is O(1).
+///
+/// - Parameters:
+///   - timeout: Maximum duration the operation may run before failing.
+///   - operation: The async operation to run.
+/// - Returns: The operation's result when it completes within `timeout`.
+/// - Throws: ``TimeoutError/timedOut(_:)`` if the deadline elapses first;
+///   otherwise rethrows any error from `operation`.
+@discardableResult
+public func withTimeout<T: Sendable>(
+    _ timeout: Duration,
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ operation: @Sendable @escaping () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await operation()
+        }
+        group.addTask {
+            try await Task.sleep(for: timeout)
+            throw TimeoutError.timedOut(timeout)
+        }
+        // First completion wins; cancel the sibling before returning.
+        defer { group.cancelAll() }
+        guard let result = try await group.next() else {
+            // Unreachable — we added two child tasks above.
+            throw TimeoutError.timedOut(timeout)
+        }
+        return result
+    }
+}
