@@ -160,8 +160,9 @@ final class ConcurrencyTests: XCTestCase {
     func test_sendWhileGenerating_secondSendProceeds() async throws {
         createAndActivateSession()
 
-        // Use a slow backend with many tokens so generation takes a while.
-        slowBackend.tokensToYield = (0..<20).map { "tok\($0) " }
+        // 5 tokens is enough to keep the stream in-flight while the second send
+        // races — the test asserts concurrency behavior, not token count.
+        slowBackend.tokensToYield = (0..<5).map { "tok\($0) " }
         slowBackend.delayPerToken = .milliseconds(50)
 
         // Start first generation.
@@ -279,7 +280,8 @@ final class ConcurrencyTests: XCTestCase {
     func test_regenerateWhileGenerating_isGuarded() async throws {
         createAndActivateSession()
 
-        slowBackend.tokensToYield = (0..<20).map { "tok\($0) " }
+        // 5 tokens is enough to hold the stream open while the regenerate races.
+        slowBackend.tokensToYield = (0..<5).map { "tok\($0) " }
         slowBackend.delayPerToken = .milliseconds(50)
 
         // Send initial message to start generation.

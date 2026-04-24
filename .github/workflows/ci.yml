@@ -94,7 +94,7 @@ jobs:
         run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatBackendsTests --disable-default-traits --skip-update
 
       - name: Test — Inference (XCTest)
-        run: scripts/test.sh --filter BaseChatInferenceTests --disable-default-traits --skip-update
+        run: scripts/test.sh --filter BaseChatInferenceTests --disable-default-traits --skip-update --parallel
 
       - name: Test — Inference (Swift Testing)
         run: scripts/test.sh --filter BaseChatInferenceSwiftTestingTests --disable-default-traits --skip-update
