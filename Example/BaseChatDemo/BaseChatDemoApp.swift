@@ -261,7 +261,12 @@ struct BaseChatDemoApp: App {
         switch raw {
         case "deepLink": return .deepLink
         case "shareExtension": return .shareExtension
-        default: return .appIntent
+        case "appIntent": return .appIntent
+        default:
+            Log.ui.warning(
+                "Unknown inbound-payload source '\(raw, privacy: .public)' — defaulting to .appIntent"
+            )
+            return .appIntent
         }
     }
 
