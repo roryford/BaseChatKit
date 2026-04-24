@@ -301,11 +301,18 @@ final class GenerationCoordinator {
                                 msg.completionTokens = completion
                             }
 
-                        case .dispatchToolCall:
-                            // Tool execution is a host-app concern; ChatViewModel does not
-                            // implement a tool dispatch loop. Apps that need tool calling
-                            // should drive generation directly via InferenceService.
-                            break
+                        case .dispatchToolCall(let call):
+                            // Tool execution itself is a host-app concern; ChatViewModel does
+                            // not implement a tool dispatch loop. But the UI needs the call
+                            // persisted in contentParts so ``MessagePartsView`` can pair the
+                            // later ``.toolResult`` with the originating call (and render a
+                            // named "completed" disclosure instead of an opaque callId).
+                            // ``InferenceService.GenerationCoordinator`` dispatches through
+                            // its ``ToolRegistry`` and emits the result downstream; that
+                            // event lands on the ``appendToolResult`` branch below.
+                            self.onMutateMessage(messageID) { msg in
+                                msg.contentParts.append(.toolCall(call))
+                            }
 
                         case .appendThinkingText(let text):
                             let isFirstThinkingFragment = thinkingAccumulator.isEmpty

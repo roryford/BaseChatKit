@@ -4,6 +4,7 @@ import BaseChatCore
 import BaseChatInference
 import BaseChatUI
 import BaseChatBackends
+import BaseChatTools
 
 @main
 struct BaseChatDemoApp: App {
@@ -43,11 +44,45 @@ struct BaseChatDemoApp: App {
         let toolRegistry = ToolRegistry()
         DemoTools.register(on: toolRegistry)
 
-        let inferenceService = InferenceService(toolRegistry: toolRegistry)
-        DefaultBackends.register(with: inferenceService)
-        self.inferenceService = inferenceService
+        let approvalGate = UIToolApprovalGate(policy: .askOncePerSession)
 
-        let vm = ChatViewModel(inferenceService: inferenceService)
+        let configuredService: InferenceService
+        #if DEBUG
+        if testing {
+            // Under --uitesting, swap in a ScriptedBackend so the approval UI
+            // can be exercised without live inference. Keeps this gated on
+            // the uitesting launch arg so production launches are unaffected.
+            let scripted = ScriptedBackend(turns: [
+                .toolCall(name: "sample_repo_search", arguments: #"{"query":"readme"}"#),
+                .tokens(["Here's ", "a ", "summary ", "of ", "your ", "workspace."])
+            ])
+            configuredService = InferenceService(
+                backend: scripted,
+                name: "ScriptedUITest",
+                modelName: "scripted-ui",
+                toolRegistry: toolRegistry,
+                toolApprovalGate: approvalGate
+            )
+        } else {
+            configuredService = InferenceService(
+                toolRegistry: toolRegistry,
+                toolApprovalGate: approvalGate
+            )
+            DefaultBackends.register(with: configuredService)
+        }
+        #else
+        configuredService = InferenceService(
+            toolRegistry: toolRegistry,
+            toolApprovalGate: approvalGate
+        )
+        DefaultBackends.register(with: configuredService)
+        #endif
+        self.inferenceService = configuredService
+
+        let vm = ChatViewModel(
+            inferenceService: configuredService,
+            toolApprovalGate: approvalGate
+        )
         vm.foundationModelProvider = {
             if #available(iOS 26, macOS 26, *) {
                 return FoundationBackend.isAvailable

@@ -25,8 +25,27 @@ public struct ChatView: View {
     @State private var showClearConfirmation: Bool = false
     @State private var showAPIConfiguration: Bool = false
 
+    /// Optional replacement for the built-in "Send a message to start chatting."
+    /// placeholder shown when the session has no messages. Hosts pass a custom
+    /// view here to surface a flagship prompt button, first-run hints, etc.
+    private let customEmptyPlaceholder: AnyView?
+
     public init(showModelManagement: Binding<Bool>) {
         self._showModelManagement = showModelManagement
+        self.customEmptyPlaceholder = nil
+    }
+
+    /// Creates a ``ChatView`` with a host-supplied empty-state view rendered
+    /// when the active session has no messages.
+    ///
+    /// Use this overload to surface a curated prompt button, a first-run
+    /// tour, or any other call-to-action in place of the default placeholder.
+    public init<EmptyContent: View>(
+        showModelManagement: Binding<Bool>,
+        @ViewBuilder emptyState: () -> EmptyContent
+    ) {
+        self._showModelManagement = showModelManagement
+        self.customEmptyPlaceholder = AnyView(emptyState())
     }
 
     // MARK: - Body
@@ -367,12 +386,19 @@ public struct ChatView: View {
         .frame(maxHeight: .infinity)
     }
 
+    @ViewBuilder
     private var emptyPlaceholder: some View {
-        Text("Send a message to start chatting.")
-            .foregroundStyle(.tertiary)
-            .font(.body)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 40)
+        if let customEmptyPlaceholder {
+            customEmptyPlaceholder
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+        } else {
+            Text("Send a message to start chatting.")
+                .foregroundStyle(.tertiary)
+                .font(.body)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+        }
     }
 
     // MARK: - Toolbar Items

@@ -34,6 +34,24 @@ public final class ChatViewModel {
     let modelStorage: ModelStorageService
     let memoryPressure: MemoryPressureHandler
 
+    /// The UI-layer ``ToolApprovalGate`` that drives the per-call approval
+    /// sheet. When `nil`, the underlying ``InferenceService`` uses its
+    /// default ``AutoApproveGate`` — every tool call dispatches silently.
+    ///
+    /// To wire an approval sheet, pass the same instance to both
+    /// ``InferenceService/init(toolRegistry:toolApprovalGate:)`` and this
+    /// view model's initializer. ``switchToSession(_:)`` forwards session
+    /// resets so per-session approvals do not leak across chats.
+    public let toolApprovalGate: UIToolApprovalGate?
+
+    /// Convenience accessor for the gate's policy. Get returns
+    /// ``UIToolApprovalGate/Policy/autoApprove`` when no gate was installed
+    /// (the effective behaviour without a gate); set is a no-op in that case.
+    public var toolApprovalPolicy: UIToolApprovalGate.Policy {
+        get { toolApprovalGate?.policy ?? .autoApprove }
+        set { toolApprovalGate?.policy = newValue }
+    }
+
     /// Test-only seam: overrides the system-memory source used by `ModelLoadPlan`
     /// when deciding whether a local model load should proceed. Production code
     /// leaves this at `.current`; tests assign a deterministic environment.
@@ -511,13 +529,15 @@ public final class ChatViewModel {
     public convenience init(
         inferenceService: InferenceService = InferenceService(),
         deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
-        modelStorage: ModelStorageService = ModelStorageService()
+        modelStorage: ModelStorageService = ModelStorageService(),
+        toolApprovalGate: UIToolApprovalGate? = nil
     ) {
         self.init(
             inferenceService: inferenceService,
             deviceCapability: deviceCapability,
             modelStorage: modelStorage,
-            memoryPressure: MemoryPressureHandler()
+            memoryPressure: MemoryPressureHandler(),
+            toolApprovalGate: toolApprovalGate
         )
     }
 
@@ -525,12 +545,14 @@ public final class ChatViewModel {
         inferenceService: InferenceService = InferenceService(),
         deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
         modelStorage: ModelStorageService = ModelStorageService(),
-        memoryPressure: MemoryPressureHandler
+        memoryPressure: MemoryPressureHandler,
+        toolApprovalGate: UIToolApprovalGate? = nil
     ) {
         self.inferenceService = inferenceService
         self.deviceCapability = deviceCapability
         self.modelStorage = modelStorage
         self.memoryPressure = memoryPressure
+        self.toolApprovalGate = toolApprovalGate
         self.sessionController = SessionController(selectedPromptTemplate: inferenceService.selectedPromptTemplate)
 
         let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"

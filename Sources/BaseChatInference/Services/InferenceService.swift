@@ -330,6 +330,25 @@ public final class InferenceService {
         self.generation = GenerationCoordinator()
         generation.provider = self
     }
+
+    /// Debug-only init that pre-loads a backend alongside a ``ToolRegistry``
+    /// and ``ToolApprovalGate``. Used by ``--uitesting`` launches in the
+    /// example app so the approval sheet can be exercised deterministically
+    /// against a ``ScriptedBackend``.
+    public init(
+        backend: any InferenceBackend,
+        name: String = "Mock",
+        modelName: String? = nil,
+        toolRegistry: ToolRegistry,
+        toolApprovalGate: any ToolApprovalGate = AutoApproveGate()
+    ) {
+        self.lifecycle = ModelLifecycleCoordinator(backend: backend, name: name, modelName: modelName)
+        self.generation = GenerationCoordinator(
+            toolRegistry: toolRegistry,
+            toolApprovalGate: toolApprovalGate
+        )
+        generation.provider = self
+    }
     #endif
 
     /// Ensures the generation coordinator has a reference to this service.

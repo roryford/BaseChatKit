@@ -14,12 +14,16 @@
 		BF0005000000000000000000 /* BaseChatBackends in Frameworks */ = {isa = PBXBuildFile; productRef = F30003000000000000000000 /* BaseChatBackends */; };
 		BF0006000000000000000000 /* BaseChatTools in Frameworks */ = {isa = PBXBuildFile; productRef = F30004000000000000000000 /* BaseChatTools */; };
 		BF0007000000000000000000 /* DemoTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10004000000000000000000 /* DemoTools.swift */; };
+		BF0008000000000000000000 /* ChatEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10005000000000000000000 /* ChatEmptyStateView.swift */; };
+		BF0009000000000000000000 /* ToolApprovalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10006000000000000000000 /* ToolApprovalSheet.swift */; };
+		BF0010000000000000000000 /* ToolPolicyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10007000000000000000000 /* ToolPolicyView.swift */; };
 		BF1001000000000000000000 /* ModelManagementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11001000000000000000000 /* ModelManagementUITests.swift */; };
 		BF1002000000000000000000 /* UITestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11003000000000000000000 /* UITestHelpers.swift */; };
 		BF1003000000000000000000 /* ChatFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11004000000000000000000 /* ChatFlowUITests.swift */; };
 		BF1004000000000000000000 /* SessionManagementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11005000000000000000000 /* SessionManagementUITests.swift */; };
 		BF1005000000000000000000 /* SettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11006000000000000000000 /* SettingsUITests.swift */; };
 		BF1006000000000000000000 /* CloudAPIUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11007000000000000000000 /* CloudAPIUITests.swift */; };
+		BF1007000000000000000000 /* ToolApprovalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11008000000000000000000 /* ToolApprovalUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +40,9 @@
 		F10001000000000000000000 /* BaseChatDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BaseChatDemoApp.swift; sourceTree = "<group>"; };
 		F10002000000000000000000 /* DemoContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoContentView.swift; sourceTree = "<group>"; };
 		F10004000000000000000000 /* DemoTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoTools.swift; sourceTree = "<group>"; };
+		F10005000000000000000000 /* ChatEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatEmptyStateView.swift; sourceTree = "<group>"; };
+		F10006000000000000000000 /* ToolApprovalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalSheet.swift; sourceTree = "<group>"; };
+		F10007000000000000000000 /* ToolPolicyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/ToolPolicyView.swift; sourceTree = "<group>"; };
 		F10003000000000000000000 /* BaseChatDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BaseChatDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F11001000000000000000000 /* ModelManagementUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelManagementUITests.swift; sourceTree = "<group>"; };
 		F11002000000000000000000 /* BaseChatDemoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BaseChatDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -44,6 +51,7 @@
 		F11005000000000000000000 /* SessionManagementUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagementUITests.swift; sourceTree = "<group>"; };
 		F11006000000000000000000 /* SettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsUITests.swift; sourceTree = "<group>"; };
 		F11007000000000000000000 /* CloudAPIUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAPIUITests.swift; sourceTree = "<group>"; };
+		F11008000000000000000000 /* ToolApprovalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -84,6 +92,9 @@
 				F10001000000000000000000 /* BaseChatDemoApp.swift */,
 				F10002000000000000000000 /* DemoContentView.swift */,
 				F10004000000000000000000 /* DemoTools.swift */,
+				F10005000000000000000000 /* ChatEmptyStateView.swift */,
+				F10006000000000000000000 /* ToolApprovalSheet.swift */,
+				F10007000000000000000000 /* ToolPolicyView.swift */,
 			);
 			path = BaseChatDemo;
 			sourceTree = "<group>";
@@ -113,6 +124,7 @@
 				F11005000000000000000000 /* SessionManagementUITests.swift */,
 				F11006000000000000000000 /* SettingsUITests.swift */,
 				F11007000000000000000000 /* CloudAPIUITests.swift */,
+				F11008000000000000000000 /* ToolApprovalUITests.swift */,
 			);
 			path = BaseChatDemoUITests;
 			sourceTree = "<group>";
@@ -199,6 +211,9 @@
 				BF0001000000000000000000 /* BaseChatDemoApp.swift in Sources */,
 				BF0002000000000000000000 /* DemoContentView.swift in Sources */,
 				BF0007000000000000000000 /* DemoTools.swift in Sources */,
+				BF0008000000000000000000 /* ChatEmptyStateView.swift in Sources */,
+				BF0009000000000000000000 /* ToolApprovalSheet.swift in Sources */,
+				BF0010000000000000000000 /* ToolPolicyView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -212,6 +227,7 @@
 				BF1004000000000000000000 /* SessionManagementUITests.swift in Sources */,
 				BF1005000000000000000000 /* SettingsUITests.swift in Sources */,
 				BF1006000000000000000000 /* CloudAPIUITests.swift in Sources */,
+				BF1007000000000000000000 /* ToolApprovalUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
