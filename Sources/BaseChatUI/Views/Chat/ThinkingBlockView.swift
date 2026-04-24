@@ -21,7 +21,13 @@ struct ThinkingBlockView: View {
             Label("Thinking…", systemImage: "brain")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Reasoning in progress")
         } else {
+            // `.accessibilitySortPriority` is intentionally omitted — SwiftUI
+            // renders parts in document order, so ThinkingBlockView (placed before
+            // the text parts in MessagePartsView's ForEach) is already visited
+            // first by VoiceOver. The disclosure group itself handles expand/collapse
+            // navigation; the inner Text is not reachable until expanded.
             DisclosureGroup(isExpanded: $isExpanded) {
                 Text(text)
                     .font(.caption)
@@ -33,6 +39,8 @@ struct ThinkingBlockView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .accessibilityLabel("Reasoning")
+            .accessibilityHint(isExpanded ? "Double-tap to collapse." : "Double-tap to expand.")
         }
     }
 }
