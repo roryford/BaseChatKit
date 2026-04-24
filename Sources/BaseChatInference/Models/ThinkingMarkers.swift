@@ -39,9 +39,10 @@ public struct ThinkingMarkers: Sendable, Equatable {
     /// - `qwen` / `deepseek` / `qwq` → `.qwen3`
     /// - `mistral` / `sky-t1` → `.mistralReasoning`
     ///
-    /// Generic `phi` matches fall through to `.phi4` only when no more-specific
-    /// family (e.g. `reflection-llama`) is present in the name. Unknown models
-    /// return `nil` so callers can opt out of thinking-tag filtering cleanly.
+    /// Only `phi4` / `phi-4` map to `.phi4` — generic `phi` or other Phi
+    /// generations (e.g. `phi3`) are not thinking-model variants and return
+    /// `nil`. Unknown models likewise return `nil` so callers can opt out of
+    /// thinking-tag filtering cleanly.
     public static func forModel(named name: String) -> ThinkingMarkers? {
         let lowered = name.lowercased()
 
