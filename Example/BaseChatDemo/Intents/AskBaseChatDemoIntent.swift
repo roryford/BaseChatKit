@@ -53,6 +53,11 @@ public struct AskBaseChatDemoIntent: AppIntent {
         // `InboundPayload` is not `Codable` — attachments carry
         // `MessagePart` values that already have their own
         // persistence-oriented codable story we don't need here.
+        //
+        // TODO(#440, #441): Share / Action Extensions need attachments.
+        // When those land, extend `InboundPayloadEnvelope` with an
+        // `attachments: [MessagePart]` field (or an envelope-specific
+        // codable shape) so images and files ride alongside the prompt.
         let envelope = InboundPayloadEnvelope(prompt: prompt, source: "appIntent")
         if let defaults = UserDefaults(suiteName: DemoAppGroup.identifier) {
             if let encoded = try? JSONEncoder().encode(envelope) {
@@ -63,6 +68,21 @@ public struct AskBaseChatDemoIntent: AppIntent {
         // Open via the custom URL scheme. The app's `.onOpenURL` handler
         // is responsible for actually draining the App Group defaults —
         // this intent only signals that a payload is waiting.
+        //
+        // NOTE: The `basechatdemo` scheme is **not** registered in the
+        // demo's auto-generated Info.plist. In production the
+        // `open(URL)` call below silently fails and the app never
+        // receives `.onOpenURL`. The intent still opens the app via
+        // `openAppWhenRun = true`, but without the URL delivery the
+        // payload sits unread in App Group defaults.
+        //
+        // UI-test runs bypass this gap by seeding the pending buffer
+        // with `--uitesting-ingest-prompt` launch args (see
+        // `BaseChatDemoApp.uiTestingSeededPayload()`). Hosts wanting
+        // real AppIntent delivery must add `CFBundleURLTypes` to the
+        // app's Info.plist (requires dropping `GENERATE_INFOPLIST_FILE`
+        // or overriding via build settings that support structured
+        // plist values).
         let url = URL(string: "basechatdemo://ingest")!
         #if canImport(UIKit)
         await UIApplication.shared.open(url, options: [:])

@@ -72,6 +72,15 @@ final class AppIntentUITests: XCTestCase {
         ).firstMatch
         let promptStaticText = app.staticTexts["search for ideas"]
 
+        // `Thread.sleep` in a polling loop violates CLAUDE.md's "no
+        // artificial sleep" rule for XCTestCase async flows. The
+        // exception here is deliberate: XCUITest lacks `XCTWaiter`
+        // semantics for "any of three signals" without creating three
+        // separate expectations that each race `.exists` state
+        // mutations on the simulator. The `.exists` property has no
+        // KVO story under XCUITest, so a poll loop is the supported
+        // pattern. 20s is an upper bound, not an expected wait — the
+        // signal lands in <2s on a warm simulator.
         let deadline = Date().addingTimeInterval(20)
         var found = false
         while Date() < deadline {
