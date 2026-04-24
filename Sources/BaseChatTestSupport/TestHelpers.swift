@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SwiftData
 import BaseChatCore
 import BaseChatInference
@@ -109,17 +110,20 @@ public enum TimeoutError: Error, CustomStringConvertible, Equatable {
     }
 }
 
-/// Runs `operation` with a bounded deadline. If it exceeds `timeout` the
-/// operation's task is cancelled and ``TimeoutError/timedOut(_:)`` is thrown.
+/// Runs `operation` with a bounded deadline. If it exceeds `timeout`,
+/// ``TimeoutError/timedOut(_:)`` is thrown regardless of whether the operation
+/// cooperates with cancellation.
 ///
 /// Used to convert sabotage-check hangs into deterministic failures per the
 /// repo's test conventions (see CLAUDE.md — "no artificial sleep/fixed
 /// timeouts — use XCTestExpectation / XCTWaiter with tight deadlines", and
 /// the sabotage-verify rule which requires bounded, visible failures).
 ///
-/// Implementation is a `TaskGroup` race between the user operation and a
-/// `Task.sleep(for:)` deadline — whichever finishes first wins and the
-/// sibling is cancelled. Bookkeeping overhead is O(1).
+/// Unlike a `TaskGroup` race, this implementation uses unstructured concurrency
+/// so the deadline fires even when `operation` is blocked inside a
+/// `withCheckedContinuation` that never resumes (e.g. `UIToolApprovalGate.awaitDecision`
+/// waiting on user input). `OSAllocatedUnfairLock` guards the single-resume
+/// contract. Bookkeeping overhead is O(1).
 ///
 /// - Parameters:
 ///   - timeout: Maximum duration the operation may run before failing.
@@ -134,20 +138,29 @@ public func withTimeout<T: Sendable>(
     line: UInt = #line,
     _ operation: @Sendable @escaping () async throws -> T
 ) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask {
-            try await operation()
+    try await withCheckedThrowingContinuation { cont in
+        let resumed = OSAllocatedUnfairLock(initialState: false)
+        func tryResume(_ body: @Sendable () -> Void) {
+            let shouldResume = resumed.withLock { r -> Bool in
+                guard !r else { return false }
+                r = true
+                return true
+            }
+            if shouldResume { body() }
         }
-        group.addTask {
-            try await Task.sleep(for: timeout)
-            throw TimeoutError.timedOut(timeout)
+
+        Task {
+            do {
+                let value = try await operation()
+                tryResume { cont.resume(returning: value) }
+            } catch {
+                tryResume { cont.resume(throwing: error) }
+            }
         }
-        // First completion wins; cancel the sibling before returning.
-        defer { group.cancelAll() }
-        guard let result = try await group.next() else {
-            // Unreachable — we added two child tasks above.
-            throw TimeoutError.timedOut(timeout)
+
+        Task {
+            try? await Task.sleep(for: timeout)
+            tryResume { cont.resume(throwing: TimeoutError.timedOut(timeout)) }
         }
-        return result
     }
 }

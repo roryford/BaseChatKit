@@ -71,6 +71,28 @@ final class WithTimeoutTests: XCTestCase {
         )
     }
 
+    // MARK: - Non-cancellation-aware hang
+
+    func test_withTimeout_throwsOnNonCancellationAwareHang() async {
+        // withCheckedContinuation never resumes unless the caller explicitly does
+        // so — it does not unblock on Task cancellation. This simulates operations
+        // like UIToolApprovalGate.awaitDecision that wait on external state.
+        let timeout: Duration = .seconds(1)
+
+        do {
+            _ = try await withTimeout(timeout) {
+                try await withCheckedThrowingContinuation { (_: CheckedContinuation<Int, Error>) in
+                    // Intentionally never resume — models a gate awaiting user input.
+                }
+            }
+            XCTFail("Expected TimeoutError.timedOut but operation returned a value")
+        } catch let error as TimeoutError {
+            XCTAssertEqual(error, .timedOut(timeout))
+        } catch {
+            XCTFail("Expected TimeoutError, got \(type(of: error)): \(error)")
+        }
+    }
+
     // MARK: - Error rethrow
 
     func test_withTimeout_rethrowsOperationError() async {
