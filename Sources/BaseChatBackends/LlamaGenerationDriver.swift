@@ -127,6 +127,28 @@ struct LlamaGenerationDriver {
         }
         llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
         llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
+
+        // Grammar-constrained sampling: GBNF grammar from config, inserted before dist
+        // so it prunes the logit distribution before final token selection. Parse failure
+        // (invalid GBNF) is surfaced as an error — silent fallback to unconstrained sampling
+        // would produce output that violates the caller's grammar contract.
+        if let grammarString = config.grammar {
+            var grammarSamplerCreated = false
+            grammarString.withCString { grammarCStr in
+                "root".withCString { rootCStr in
+                    if let gs = llama_sampler_init_grammar(vocab, grammarCStr, rootCStr) {
+                        llama_sampler_chain_add(sampler, gs)
+                        grammarSamplerCreated = true
+                    }
+                }
+            }
+            if !grammarSamplerCreated {
+                await MainActor.run { generationStream.setPhase(.failed("Failed to parse GBNF grammar")) }
+                continuation.finish(throwing: InferenceError.inferenceFailure("Failed to parse GBNF grammar string"))
+                return
+            }
+        }
+
         llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 0...UInt32.max)))
 
         // MARK: Chunked prompt decode

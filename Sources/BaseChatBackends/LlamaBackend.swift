@@ -59,7 +59,8 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             maxOutputTokens: 4096,
             supportsStreaming: true,
             isRemote: false,
-            supportsKVCachePersistence: true
+            supportsKVCachePersistence: true,
+            supportsGrammarConstrainedSampling: true
         )
     }
 
