@@ -27,6 +27,16 @@ actor PendingPayloadBuffer {
         pending = payload
     }
 
+    /// Returns the buffered payload without consuming it, or `nil` if
+    /// the buffer is empty.
+    ///
+    /// Use this to check whether a payload is pending before taking an
+    /// action that would conflict with the drain path (e.g. creating an
+    /// empty session that `ingest(_:)` would duplicate).
+    func peek() -> InboundPayload? {
+        pending
+    }
+
     /// Removes and returns the buffered payload, or `nil` if the buffer
     /// is empty.
     func drain() -> InboundPayload? {

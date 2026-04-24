@@ -112,22 +112,6 @@ struct DemoContentView: View {
 
             sessionManager.loadSessions()
 
-            if sessionManager.sessions.isEmpty {
-                do {
-                    try sessionManager.createSession()
-                } catch {
-                    viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
-                }
-            }
-
-            // On first launch, createSession() above activates the new session.
-            // On subsequent launches, sessions already exist but none is active yet —
-            // restore the most recent one so the chat detail is ready immediately
-            // without waiting for the user to tap a row in the sidebar.
-            if sessionManager.activeSession == nil, let first = sessionManager.sessions.first {
-                sessionManager.activeSession = first
-            }
-
             // Wire AI auto-rename: fires after the first user message in a session.
             // We defer the rename call until generation finishes so the rename
             // inference request does not compete with the active streaming reply.
@@ -144,15 +128,37 @@ struct DemoContentView: View {
                 }
             }
 
-            // Drain any payload that arrived during the cold-launch window
-            // where persistence was not yet wired. Runs after the
-            // `viewModel.configure(persistence:)` call above so the ingest
-            // path can safely create sessions.
-            if let pendingPayloadBuffer {
-                Task { @MainActor in
-                    if let payload = await pendingPayloadBuffer.drain() {
-                        await viewModel.ingest(payload)
+            // Seed an empty session and/or drain any buffered payload.
+            //
+            // On cold-launch with a pending payload, `ingest(_:)` will create
+            // its own session — seeding an empty one here would leave an orphan
+            // in the sidebar (#677). We peek at the buffer before deciding
+            // whether to create the placeholder session.
+            Task { @MainActor in
+                let hasPendingPayload = await pendingPayloadBuffer?.peek() != nil
+
+                if !hasPendingPayload && sessionManager.sessions.isEmpty {
+                    do {
+                        try sessionManager.createSession()
+                    } catch {
+                        viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
                     }
+                }
+
+                // On first launch, createSession() above activates the new session.
+                // On subsequent launches, sessions already exist but none is active
+                // yet — restore the most recent one so the chat detail is ready
+                // immediately without waiting for the user to tap a row in the sidebar.
+                if sessionManager.activeSession == nil, let first = sessionManager.sessions.first {
+                    sessionManager.activeSession = first
+                }
+
+                // Drain any payload that arrived during the cold-launch window
+                // where persistence was not yet wired. Runs after the
+                // `viewModel.configure(persistence:)` call above so the ingest
+                // path can safely create sessions.
+                if let pendingPayloadBuffer, let payload = await pendingPayloadBuffer.drain() {
+                    await viewModel.ingest(payload)
                 }
             }
         }
