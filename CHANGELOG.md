@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.4](https://github.com/roryford/BaseChatKit/compare/v0.11.3...v0.11.4) (2026-04-25)
+
+### Highlights
+
+#### Thinking model polish — Gemma 4 markers and VoiceOver support
+
+Two gaps in the thinking-token pipeline closed. `PromptTemplate.gemma4.thinkingMarkers` previously returned `nil`, so Gemma 4 thinking streams passed through raw without stripping the `<|turn>think` / `<|end_of_turn>` block or emitting `.thinkingToken` events. It now returns a fully wired `ThinkingMarkers` preset handled correctly at chunk boundaries and on stream finalize. On the UI side, `MessageBubbleView` gains an accessibility label indicating when a message includes reasoning, and `ThinkingBlockView` exposes a proper label/hint pair so VoiceOver users can navigate to and expand reasoning blocks without the raw thinking content being read inline. See [#691], [#689].
+
+### Features
+
+- **inference:** add Gemma 4 thinking markers to PromptTemplate ([#691])
+- **ui:** add VoiceOver labels and hints for thinking parts in MessageBubbleView and ThinkingBlockView ([#689])
+
+### Bug Fixes
+
+- **example:** prevent orphan empty session on AppIntent cold-launch — `DemoContentView` now checks `PendingPayloadBuffer` before seeding a blank session, so the intent's session is the only one created ([#692])
+
+### Performance Improvements
+
+- **ci:** run BaseChatInferenceTests with `--parallel` (~10 s saved per run), shorten SlowBackend concurrency test delays (~6.7 s saved), split OllamaThinkingE2ETests into its own file for targeted reruns ([#688])
+
 ## [0.11.3](https://github.com/roryford/BaseChatKit/compare/v0.11.2...v0.11.3) (2026-04-24)
 
 ### Highlights
