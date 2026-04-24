@@ -2,14 +2,6 @@ import XCTest
 @testable import BaseChatInference
 import BaseChatTestSupport
 
-/// Verifies that `InferenceService.enqueue(..., grammar:)` forwards the GBNF
-/// string all the way to `InferenceBackend.generate(request:)` via
-/// `GenerationConfig.grammar`.
-///
-/// Issue #683 — closes the gap left by #664 (config field) and #667 (Llama
-/// sampler wiring): until this PR, no caller could set `grammar` because the
-/// public enqueue surface omitted the parameter and the coordinator never
-/// assigned it onto its inline `GenerationConfig`.
 @MainActor
 final class EnqueueGrammarPropagationTests: XCTestCase {
 
@@ -25,7 +17,6 @@ final class EnqueueGrammarPropagationTests: XCTestCase {
             grammar: grammar
         )
 
-        // Drain the stream so generate() runs and populates lastConfig.
         for try await _ in stream.events {}
 
         XCTAssertEqual(
