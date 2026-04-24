@@ -171,7 +171,17 @@ struct DemoContentView: View {
                     columnVisibility = .detailOnly
                     preferredCompactColumn = .detail
                 }
-                viewModel.switchToSession(session)
+                // Guard against the back-channel loop with `onChange(of:
+                // viewModel.activeSession)` below: when `ingest(_:)` creates
+                // a session and switches `viewModel` to it, the sibling
+                // handler mirrors the change into `sessionManager`, which
+                // would re-enter `switchToSession` here and (because
+                // `isGenerating` is already `true`) call `stopGeneration()`
+                // mid-stream, wiping the ingested reply. Only re-activate
+                // if the view model is currently on a different session.
+                if viewModel.activeSession?.id != session.id {
+                    viewModel.switchToSession(session)
+                }
             }
         }
         .onChange(of: viewModel.activeSession) { _, newSession in
