@@ -267,11 +267,12 @@ final class ToolRegistryTests: XCTestCase {
         let call = ToolCall(id: "call-atomic", toolName: "partial", arguments: "{}")
         let result = await registry.dispatch(call)
 
-        // Registry classifies thrown executor errors as .permanent today.
-        // If the registry's classification ever changes (e.g. to .transient
-        // per #630's original draft), update this assertion in lockstep —
-        // the contract the test is locking in is "thrown-error kind + error
-        // description + no partial state", not the specific enum case.
+        // Thrown executor errors classify as .permanent by design: an
+        // uncategorised throw is the catch-all escape hatch, and marking it
+        // retry-safe would loop agents on real permanent failures (logic
+        // bugs, schema mismatches, auth denials). Executors that know their
+        // failure is retriable must return a ToolResult with .transient
+        // explicitly — see the ToolExecutor atomicity DocC note.
         XCTAssertEqual(result.errorKind, .permanent)
         XCTAssertEqual(result.callId, "call-atomic")
         XCTAssertTrue(

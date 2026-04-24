@@ -41,6 +41,18 @@ import Foundation
 /// discarded and never flows into the transcript. The model sees the error
 /// description, not the partial output.
 ///
+/// The throw path is classified as ``ToolResult/ErrorKind/permanent``
+/// (not ``ToolResult/ErrorKind/transient``) by design: an uncategorised
+/// thrown `Error` is the "I don't know what went wrong" escape hatch, and
+/// labelling it retry-safe would push agents into loops on permanent
+/// failures (logic bugs, schema mismatches, auth denials) that no amount of
+/// retrying will fix. Executors that *know* a failure is retriable must
+/// return an explicit ``ToolResult/init(callId:content:errorKind:)`` with
+/// ``ToolResult/ErrorKind/transient`` instead of throwing — same rule for
+/// ``ToolResult/ErrorKind/timeout``, ``ToolResult/ErrorKind/rateLimited``,
+/// ``ToolResult/ErrorKind/cancelled``, and the other specific kinds.
+/// Throwing is the last-resort catch-all, not a retry signal.
+///
 /// Practical consequences:
 ///
 /// - If your tool streams and you want to preserve what you got before
@@ -49,6 +61,10 @@ import Foundation
 ///   a successful ``ToolResult`` whose ``ToolResult/content`` contains the
 ///   buffered prefix plus a description of why collection stopped, rather
 ///   than throwing.
+/// - If the failure is transient (disk I/O hiccup, dropped connection,
+///   rate-limit response), return
+///   `ToolResult(callId: "", content: "...", errorKind: .transient)` rather
+///   than throwing — this tells the orchestrator the call is safe to retry.
 /// - Do not rely on side-effects (written files, DB rows, API calls) to
 ///   communicate partial progress to later turns — the orchestrator only
 ///   sees the returned ``ToolResult``.
@@ -66,7 +82,10 @@ public protocol ToolExecutor: Sendable {
     /// The returned ``ToolResult/callId`` may be empty — ``ToolRegistry``
     /// stamps the correct id from the incoming ``ToolCall`` before returning
     /// the result to the caller. Thrown errors are caught by the registry and
-    /// turned into ``ToolResult/ErrorKind/permanent`` results.
+    /// turned into ``ToolResult/ErrorKind/permanent`` results; to signal a
+    /// retriable failure, return a ``ToolResult`` with an explicit
+    /// ``ToolResult/ErrorKind/transient`` (or another specific kind) instead
+    /// of throwing.
     ///
     /// This call is **atomic** — see the protocol-level ``ToolExecutor``
     /// documentation. Partial work accumulated before a throw is discarded
