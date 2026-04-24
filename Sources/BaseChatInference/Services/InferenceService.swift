@@ -325,21 +325,22 @@ public final class InferenceService {
     }
 
     #if DEBUG
-    public init(backend: any InferenceBackend, name: String = "Mock", modelName: String? = nil) {
-        self.lifecycle = ModelLifecycleCoordinator(backend: backend, name: name, modelName: modelName)
-        self.generation = GenerationCoordinator()
-        generation.provider = self
-    }
-
-    /// Debug-only init that pre-loads a backend alongside a ``ToolRegistry``
-    /// and ``ToolApprovalGate``. Used by ``--uitesting`` launches in the
-    /// example app so the approval sheet can be exercised deterministically
-    /// against a ``ScriptedBackend``.
+    /// Debug-only init that pre-loads a backend, optionally alongside a
+    /// ``ToolRegistry`` and ``ToolApprovalGate``. Used by tests to drive a
+    /// mock backend, and by ``--uitesting`` launches in the example app so
+    /// the approval sheet can be exercised deterministically against a
+    /// ``ScriptedBackend``.
+    ///
+    /// When `toolRegistry` is `nil` (the default) the generation coordinator
+    /// is constructed without tool-calling wired in — matching the behaviour
+    /// every existing test suite relies on. Pass a non-nil registry to
+    /// enable tool dispatch; `toolApprovalGate` then gates each call and
+    /// defaults to ``AutoApproveGate`` so legacy callers see no change.
     public init(
         backend: any InferenceBackend,
         name: String = "Mock",
         modelName: String? = nil,
-        toolRegistry: ToolRegistry,
+        toolRegistry: ToolRegistry? = nil,
         toolApprovalGate: any ToolApprovalGate = AutoApproveGate()
     ) {
         self.lifecycle = ModelLifecycleCoordinator(backend: backend, name: name, modelName: modelName)
