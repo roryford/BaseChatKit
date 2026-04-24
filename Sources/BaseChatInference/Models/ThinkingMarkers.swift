@@ -25,6 +25,15 @@ public struct ThinkingMarkers: Sendable, Equatable {
     /// `<reflection>` / `</reflection>` blocks distinct from its `<thinking>` pass.
     public static let reflection = ThinkingMarkers(open: "<reflection>", close: "</reflection>")
 
+    /// Gemma 4 thinking fine-tunes, which wrap chain-of-thought in a dedicated
+    /// `<|turn>think\n` turn that closes with the standard `<|end_of_turn>` delimiter.
+    ///
+    /// The close marker collides with normal turn separators, but `ThinkingParser` is
+    /// only active when thinking mode is enabled — and a thinking block always appears
+    /// at the start of the model turn before any visible content — so the parser
+    /// correctly transitions to visible-text mode after the first `<|end_of_turn>`.
+    public static let gemma4 = ThinkingMarkers(open: "<|turn>think\n", close: "<|end_of_turn>")
+
     /// Extensibility hook for custom model formats.
     public static func custom(open: String, close: String) -> ThinkingMarkers {
         ThinkingMarkers(open: open, close: close)

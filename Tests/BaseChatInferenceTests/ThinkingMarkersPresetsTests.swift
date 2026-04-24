@@ -177,4 +177,94 @@ final class ThinkingMarkersPresetsTests: XCTestCase {
         XCTAssertNil(ThinkingMarkers.forModel(named: "gemma-2-27b"))
         XCTAssertNil(ThinkingMarkers.forModel(named: ""))
     }
+
+    // MARK: - Gemma 4 preset tags
+
+    func test_gemma4_tagsAreCorrect() {
+        XCTAssertEqual(ThinkingMarkers.gemma4.open, "<|turn>think\n")
+        XCTAssertEqual(ThinkingMarkers.gemma4.close, "<|end_of_turn>")
+    }
+
+    func test_gemma4_holdbackEqualsCloseTagLength() {
+        // max("<|turn>think\n".count=13, "<|end_of_turn>".count=14) = 14
+        XCTAssertEqual(ThinkingMarkers.gemma4.holdback, 14)
+
+        // Sabotage check: using the open-tag length (13) instead of the close-tag
+        // length (14) would return 13 and this assertion would fail.
+    }
+
+    // MARK: - ThinkingParser end-to-end with .gemma4
+
+    func test_gemma4_parsesSingleBlock() {
+        let r = runParser(.gemma4, open: "<|turn>think\n", close: "<|end_of_turn>")
+        XCTAssertEqual(r.thinking, "reason",
+            "Content between Gemma 4 thinking markers must be emitted as .thinkingToken")
+        XCTAssertEqual(r.visible, "answer",
+            "Content after <|end_of_turn> must be emitted as .token")
+        XCTAssertEqual(r.completions, 1,
+            "Exactly one .thinkingComplete must fire on the 1→0 depth transition")
+
+        // Sabotage check: using .qwen3 markers instead would search for "<think>" /
+        // "</think>", miss the Gemma 4 open tag, and emit everything as visible text
+        // — r.visible would equal "<|turn>think\nreason<|end_of_turn>answer" and the
+        // thinkingToken assertion would fail.
+    }
+
+    func test_gemma4_splitOpenTagAcrossChunks() {
+        var parser = ThinkingParser(markers: .gemma4)
+        // Split "<|turn>think\n" across two chunks at a plausible boundary.
+        let e1 = parser.process("<|turn>")
+        let e2 = parser.process("think\nreason<|end_of_turn>answer")
+        let all = e1 + e2 + parser.finalize()
+
+        XCTAssertEqual(collectThinking(all), "reason",
+            "Split Gemma 4 open tag must reassemble across chunk boundary")
+        XCTAssertEqual(collectVisible(all), "answer",
+            "Visible content after close marker must be emitted correctly")
+        XCTAssertEqual(countCompletions(all), 1)
+
+        // Sabotage check: if the holdback did not cover the full open tag,
+        // "<|turn>" would be flushed as a visible token and the parser would
+        // never enter thinking mode — collectThinking would be empty.
+    }
+
+    func test_gemma4_splitCloseTagAcrossChunks() {
+        var parser = ThinkingParser(markers: .gemma4)
+        // Split "<|end_of_turn>" in the middle while in thinking mode.
+        let e1 = parser.process("<|turn>think\nreason<|end_of")
+        let e2 = parser.process("_turn>answer")
+        let all = e1 + e2 + parser.finalize()
+
+        XCTAssertEqual(collectThinking(all), "reason",
+            "Split Gemma 4 close tag must reassemble across chunk boundary")
+        XCTAssertEqual(collectVisible(all), "answer")
+        XCTAssertEqual(countCompletions(all), 1)
+    }
+
+    func test_gemma4_finalizeUnclosedBlock() {
+        var parser = ThinkingParser(markers: .gemma4)
+        let events = parser.process("<|turn>think\npartial thought")
+        let finalEvents = parser.finalize()
+        let all = events + finalEvents
+
+        XCTAssertTrue(collectThinking(all).contains("partial thought"),
+            "Unclosed Gemma 4 thinking block must be flushed as .thinkingToken by finalize()")
+        XCTAssertEqual(countCompletions(all), 0,
+            "An unclosed block must NOT emit .thinkingComplete")
+
+        // Sabotage check: if finalize() returned [] for a non-empty thinking buffer,
+        // the partial chain-of-thought would be silently dropped.
+    }
+
+    func test_gemma4_thinkingThenVisibleText() {
+        // Realistic Gemma 4 stream: thinking block followed by the model's answer.
+        var parser = ThinkingParser(markers: .gemma4)
+        let input = "<|turn>think\nI should add 2 and 2.<|end_of_turn>The answer is 4."
+        let events = parser.process(input)
+        let all = events + parser.finalize()
+
+        XCTAssertEqual(collectThinking(all), "I should add 2 and 2.")
+        XCTAssertEqual(collectVisible(all), "The answer is 4.")
+        XCTAssertEqual(countCompletions(all), 1)
+    }
 }
