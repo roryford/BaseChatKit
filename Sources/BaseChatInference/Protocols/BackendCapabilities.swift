@@ -89,6 +89,16 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
     /// and the caller can rely on grammar-valid output. Backends reporting `false` (default) MUST
     /// throw `InferenceError.unsupportedGrammar(reason:)` when `config.grammar != nil`.
     public let supportsGrammarConstrainedSampling: Bool
+
+    /// If true, the backend can emit ``GenerationEvent/thinkingToken(_:)`` and
+    /// ``GenerationEvent/thinkingComplete`` events for reasoning content. Consumers use this
+    /// static capability flag to gate thinking-related UI (reasoning disclosure group,
+    /// thinking budget slider) rather than inferring it from the active `PromptTemplate`.
+    ///
+    /// Defaults to `false` for source compatibility. Orthogonal to
+    /// `GenerationConfig.thinkingMarkers`, which is a per-request runtime hint.
+    public let supportsThinking: Bool
+
     /// Parameters the UI should present controls for.
     public var visibleParameters: [GenerationParameter] {
         GenerationParameter.allCases.filter { supportedParameters.contains($0) }
@@ -109,7 +119,8 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         supportsStreaming: Bool = true,
         isRemote: Bool = false,
         supportsKVCachePersistence: Bool = false,
-        supportsGrammarConstrainedSampling: Bool = false
+        supportsGrammarConstrainedSampling: Bool = false,
+        supportsThinking: Bool = false
     ) {
         self.supportedParameters = supportedParameters
         self.maxContextTokens = maxContextTokens
@@ -126,6 +137,7 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         self.isRemote = isRemote
         self.supportsKVCachePersistence = supportsKVCachePersistence
         self.supportsGrammarConstrainedSampling = supportsGrammarConstrainedSampling
+        self.supportsThinking = supportsThinking
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -144,6 +156,7 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         case isRemote
         case supportsKVCachePersistence
         case supportsGrammarConstrainedSampling
+        case supportsThinking
     }
 
     public init(from decoder: Decoder) throws {
@@ -163,6 +176,7 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         isRemote = try c.decode(Bool.self, forKey: .isRemote)
         supportsKVCachePersistence = (try c.decodeIfPresent(Bool.self, forKey: .supportsKVCachePersistence)) ?? false
         supportsGrammarConstrainedSampling = (try c.decodeIfPresent(Bool.self, forKey: .supportsGrammarConstrainedSampling)) ?? false
+        supportsThinking = (try c.decodeIfPresent(Bool.self, forKey: .supportsThinking)) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -182,5 +196,6 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         try c.encode(isRemote, forKey: .isRemote)
         try c.encode(supportsKVCachePersistence, forKey: .supportsKVCachePersistence)
         try c.encode(supportsGrammarConstrainedSampling, forKey: .supportsGrammarConstrainedSampling)
+        try c.encode(supportsThinking, forKey: .supportsThinking)
     }
 }

@@ -53,6 +53,22 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                       "OllamaBackend supports format=json")
     }
 
+    // MARK: - supportsThinking
+
+    /// Cloud backends remain at the default `false` until their
+    /// thinking-event wiring is formalised through #604 / #605 / #598.
+    /// Even though `OpenAIBackend` and `ClaudeBackend` already plumb reasoning
+    /// deltas, the capability flag is the static, model-agnostic contract
+    /// callers rely on to gate reasoning UI — see issue #480.
+    func test_cloudBackends_doNotAdvertiseThinking() {
+        XCTAssertFalse(ClaudeBackend().capabilities.supportsThinking,
+                       "ClaudeBackend.supportsThinking stays false until #604 formalises the declaration")
+        XCTAssertFalse(OpenAIBackend().capabilities.supportsThinking,
+                       "OpenAIBackend.supportsThinking stays false until #605 formalises the declaration")
+        XCTAssertFalse(OllamaBackend().capabilities.supportsThinking,
+                       "OllamaBackend.supportsThinking stays false until #598 formalises the declaration")
+    }
+
     // MARK: - Local backends
 
 #if Llama
@@ -82,6 +98,18 @@ final class BackendCapabilitiesContractTests: XCTestCase {
         XCTAssertFalse(LlamaBackend().capabilities.supportsNativeJSONMode,
                        "LlamaBackend does not expose a native JSON mode")
     }
+
+    /// `LlamaGenerationDriver` already filters thinking markers and emits
+    /// `.thinkingToken` / `.thinkingComplete`, so the capability flag must
+    /// advertise it for consumers gating reasoning UI (#480).
+    func test_llamaBackend_supportsThinking() throws {
+        try XCTSkipUnless(HardwareRequirements.isPhysicalDevice,
+                          "LlamaBackend requires Metal (unavailable in simulator)")
+        try XCTSkipUnless(HardwareRequirements.isAppleSilicon,
+                          "LlamaBackend requires Apple Silicon")
+        XCTAssertTrue(LlamaBackend().capabilities.supportsThinking,
+                      "LlamaBackend emits thinking events via LlamaGenerationDriver — supportsThinking must be true")
+    }
 #endif
 
 #if MLX
@@ -92,6 +120,16 @@ final class BackendCapabilitiesContractTests: XCTestCase {
                        "MLXBackend runs on-device — isRemote must be false")
         XCTAssertFalse(MLXBackend().capabilities.supportsNativeJSONMode,
                        "MLXBackend does not expose a native JSON mode")
+    }
+
+    /// MLXBackend routes generation through `ThinkingParser` when
+    /// `config.thinkingMarkers` is set, emitting `.thinkingToken` /
+    /// `.thinkingComplete` events. Capability flag must reflect that (#480).
+    func test_mlxBackend_supportsThinking() throws {
+        try XCTSkipUnless(HardwareRequirements.isAppleSilicon,
+                          "MLXBackend requires Apple Silicon")
+        XCTAssertTrue(MLXBackend().capabilities.supportsThinking,
+                      "MLXBackend emits thinking events via ThinkingParser — supportsThinking must be true")
     }
 #endif
 
@@ -112,6 +150,14 @@ final class BackendCapabilitiesContractTests: XCTestCase {
     func test_foundationBackend_doesNotSupportNativeJSONMode() {
         XCTAssertFalse(FoundationBackend().capabilities.supportsNativeJSONMode,
                        "FoundationBackend does not expose a native JSON mode in this version")
+    }
+
+    /// FoundationBackend does not expose reasoning events today; it stays at
+    /// the default `false` until Foundation Models gain a thinking surface.
+    @available(iOS 26, macOS 26, *)
+    func test_foundationBackend_doesNotAdvertiseThinking() {
+        XCTAssertFalse(FoundationBackend().capabilities.supportsThinking,
+                       "FoundationBackend does not emit thinking events — supportsThinking must be false")
     }
 #endif
 }

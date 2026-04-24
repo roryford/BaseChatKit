@@ -65,7 +65,8 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         memoryStrategy: .resident,
         maxOutputTokens: 4096,
         supportsStreaming: true,
-        isRemote: false
+        isRemote: false,
+        supportsThinking: true
     )
 
     // MARK: - Private
