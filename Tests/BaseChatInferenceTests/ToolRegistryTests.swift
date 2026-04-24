@@ -214,6 +214,90 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertTrue(result.content.contains("boom-message"), "Content should include the error description. Got: \(result.content)")
     }
 
+    // MARK: - dispatch: atomicity contract (#630)
+
+    /// Executor that performs visible "partial work" into a caller-owned
+    /// buffer before throwing. Locks in the ``ToolExecutor`` atomicity
+    /// contract: no partial state reaches the ``ToolResult``; only the thrown
+    /// error description is surfaced to the orchestrator.
+    private final class PartialWorkExecutor: ToolExecutor, @unchecked Sendable {
+        struct MidFlightError: Error, CustomStringConvertible {
+            var description: String { "disk io failed after 2 chunks" }
+        }
+
+        let definition: ToolDefinition
+        /// Shared buffer the executor "emits into" during work. Tests read
+        /// this to confirm the executor did accumulate state before throwing
+        /// — and that the registry dropped it.
+        let partialBuffer: PartialBuffer
+
+        init(name: String, buffer: PartialBuffer) {
+            self.definition = ToolDefinition(name: name, description: "partial", parameters: .object([:]))
+            self.partialBuffer = buffer
+        }
+
+        func execute(arguments: JSONSchemaValue) async throws -> ToolResult {
+            // Simulate streaming work by appending chunks to the buffer and
+            // then failing — exactly the shape the contract forbids exposing
+            // to the orchestrator.
+            await partialBuffer.append("chunk-1")
+            await partialBuffer.append("chunk-2")
+            throw MidFlightError()
+        }
+    }
+
+    /// Async-safe accumulator used by ``PartialWorkExecutor``. An actor is
+    /// the simplest way to make the "caller-owned buffer" pattern concurrent
+    /// without reaching for locks.
+    private actor PartialBuffer {
+        private(set) var chunks: [String] = []
+        func append(_ chunk: String) { chunks.append(chunk) }
+        func snapshot() -> [String] { chunks }
+    }
+
+    func test_executorAtomicity_partialWorkDiscarded_onThrow() async {
+        // Given an executor that accumulates state into a side-channel buffer
+        // and then throws mid-work, the orchestrator must see only the
+        // thrown-error ToolResult — no partial content leaks into the
+        // transcript via ``ToolResult/content``.
+        let registry = ToolRegistry()
+        let buffer = PartialBuffer()
+        registry.register(PartialWorkExecutor(name: "partial", buffer: buffer))
+
+        let call = ToolCall(id: "call-atomic", toolName: "partial", arguments: "{}")
+        let result = await registry.dispatch(call)
+
+        // Registry classifies thrown executor errors as .permanent today.
+        // If the registry's classification ever changes (e.g. to .transient
+        // per #630's original draft), update this assertion in lockstep —
+        // the contract the test is locking in is "thrown-error kind + error
+        // description + no partial state", not the specific enum case.
+        XCTAssertEqual(result.errorKind, .permanent)
+        XCTAssertEqual(result.callId, "call-atomic")
+        XCTAssertTrue(
+            result.content.contains("disk io failed after 2 chunks"),
+            "Error description must surface in ToolResult.content. Got: \(result.content)"
+        )
+
+        // The executor definitely accumulated partial state — confirm the
+        // side-channel buffer saw both chunks. This proves the test is
+        // actually exercising the "work happened before the throw" path and
+        // not silently skipping it.
+        let seen = await buffer.snapshot()
+        XCTAssertEqual(seen, ["chunk-1", "chunk-2"])
+
+        // None of the partial state must have leaked into the ToolResult
+        // that the orchestrator records in the transcript.
+        XCTAssertFalse(
+            result.content.contains("chunk-1"),
+            "Partial chunk leaked into ToolResult.content: \(result.content)"
+        )
+        XCTAssertFalse(
+            result.content.contains("chunk-2"),
+            "Partial chunk leaked into ToolResult.content: \(result.content)"
+        )
+    }
+
     // MARK: - dispatch: happy path
 
     func test_typedExecutor_happyPath_roundTrip() async throws {
