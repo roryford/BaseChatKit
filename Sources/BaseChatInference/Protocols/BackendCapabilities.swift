@@ -89,7 +89,6 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
     /// and the caller can rely on grammar-valid output. Backends reporting `false` (default) MUST
     /// throw `InferenceError.unsupportedGrammar(reason:)` when `config.grammar != nil`.
     public let supportsGrammarConstrainedSampling: Bool
-
     /// Parameters the UI should present controls for.
     public var visibleParameters: [GenerationParameter] {
         GenerationParameter.allCases.filter { supportedParameters.contains($0) }

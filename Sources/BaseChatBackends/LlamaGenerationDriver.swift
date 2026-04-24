@@ -47,6 +47,9 @@ struct LlamaGenerationDriver {
     ///   - context: Live `llama_context *` snapshot captured under `stateLock`.
     ///   - vocab: Live `llama_vocab *` snapshot captured under `stateLock`.
     ///   - tokens: Tokenized prompt (including BOS) — computed before the Task.
+    ///   - reuseLen: Number of leading prompt tokens whose KV state was preserved
+    ///     from the previous turn by the caller. When > 0, the driver skips
+    ///     re-decoding those tokens and emits `.kvCacheReuse(promptTokensReused:)`.
     ///   - maxTokens: Maximum number of new tokens to generate.
     ///   - config: Sampling parameters (temperature, topP, repeatPenalty).
     ///   - markers: Thinking markers for the active template, or nil to disable ThinkingParser.
@@ -60,6 +63,7 @@ struct LlamaGenerationDriver {
         context: OpaquePointer,
         vocab: OpaquePointer,
         tokens: [llama_token],
+        reuseLen: Int,
         maxTokens: Int,
         config: GenerationConfig,
         markers: ThinkingMarkers?,
@@ -79,13 +83,18 @@ struct LlamaGenerationDriver {
         // llama.cpp's default (2048 at the time of writing).
         let batchSize = max(1, Int(llama_n_batch(context)))
 
-        // MARK: KV cache clear
+        // MARK: KV cache clear / reuse
 
-        // Clear KV cache at the start so state from any prior run (including
-        // one terminated by stopGeneration) can't collide with this run's
-        // positions.
-        if let memory = llama_get_memory(context) {
+        // When reuseLen > 0 the caller (LlamaBackend.generate) has already trimmed
+        // the KV tail beyond the shared prefix via llama_memory_seq_rm — so the
+        // reused tokens are already decoded at their correct positions and we must
+        // NOT clear them. Only do a full clear when there is nothing to reuse.
+        if reuseLen == 0, let memory = llama_get_memory(context) {
             llama_memory_clear(memory, false)
+        }
+
+        if reuseLen > 0 {
+            continuation.yield(.kvCacheReuse(promptTokensReused: reuseLen))
         }
 
         // MARK: Sampler chain setup
@@ -122,8 +131,11 @@ struct LlamaGenerationDriver {
         // prompt and decode each chunk separately. Only the last token of
         // the final chunk has `logits = 1` — that's the one we sample from
         // to kick off generation.
+        //
+        // Start at `reuseLen` to skip the prefix whose KV state was preserved
+        // by the caller. When reuseLen == 0 this is equivalent to starting at 0.
         var promptDecodeFailed = false
-        var promptPos = 0
+        var promptPos = reuseLen
         while promptPos < tokens.count {
             if isCancelled() { break }
 

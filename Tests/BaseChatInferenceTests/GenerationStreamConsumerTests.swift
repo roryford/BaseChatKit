@@ -55,4 +55,22 @@ final class GenerationStreamConsumerTests: XCTestCase {
         // Sabotage check: disabling RepetitionDetector.looksLikeLooping causes this to fail
         XCTAssertTrue(consumer.shouldStopForLoop(content: repeating))
     }
+
+    // MARK: - KV Cache Reuse
+
+    func test_kvCacheReuse_returnsIgnore() {
+        var consumer = GenerationStreamConsumer()
+        let action = consumer.handle(.kvCacheReuse(promptTokensReused: 42))
+        // Sabotage check: mapping .kvCacheReuse to .appendText("") would fail this assertion
+        XCTAssertEqual(action, .ignore,
+            ".kvCacheReuse is an internal performance event; no UI action is needed")
+    }
+
+    func test_kvCacheReuse_doesNotAffectSubsequentTokenHandling() {
+        var consumer = GenerationStreamConsumer()
+        _ = consumer.handle(.kvCacheReuse(promptTokensReused: 10))
+        let tokenAction = consumer.handle(.token("hello"))
+        XCTAssertEqual(tokenAction, .appendText("hello"),
+            "Processing .kvCacheReuse must not corrupt subsequent .token handling")
+    }
 }

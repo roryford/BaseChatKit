@@ -181,6 +181,8 @@ final class OllamaToolCallLiveReplayTests: XCTestCase {
                     // events. Exhaustive stub so the switch stays honest as
                     // GenerationEvent grows.
                     break
+                case .kvCacheReuse:
+                    break
                 }
             }
 

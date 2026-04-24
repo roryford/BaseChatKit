@@ -361,6 +361,9 @@ final class GenerationCoordinator {
                             // an error so the user isn't left staring at an
                             // empty bubble.
                             self.onSetErrorMessage("Tool-call loop stopped after \(iterations) iterations.")
+
+                        case .ignore:
+                            break
                         }
                     }
                 } catch {
