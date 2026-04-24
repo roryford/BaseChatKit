@@ -25,9 +25,14 @@ final class ChatA11yContractTests: XCTestCase {
     /// to VoiceOver users. Kept in the test file (not imported from source) so
     /// a drive-by change to the source helper is caught by a failing assertion
     /// rather than quietly updating the "expected" side of the test.
+    ///
+    /// When `hasThinking` is `true`, `. Includes reasoning.` is appended so that
+    /// VoiceOver announces the presence of a reasoning block without reading its
+    /// contents inline.
     private func expectedMessageBubbleLabel(
         role: MessageRole,
-        content: String
+        content: String,
+        hasThinking: Bool = false
     ) -> String {
         let roleName: String
         switch role {
@@ -35,7 +40,8 @@ final class ChatA11yContractTests: XCTestCase {
         case .assistant: roleName = "Assistant"
         case .system: roleName = "System"
         }
-        return "\(roleName) said: \(content)"
+        let base = "\(roleName) said: \(content)"
+        return hasThinking ? "\(base). Includes reasoning." : base
     }
 
     private let sessionID = UUID()
@@ -125,6 +131,66 @@ final class ChatA11yContractTests: XCTestCase {
         XCTAssertEqual(
             MessageBubbleView.accessibilityLabel(for: system),
             expectedMessageBubbleLabel(role: .system, content: "Be concise")
+        )
+    }
+
+    func test_messageBubble_withThinkingParts_appendsIncludesReasoning() {
+        // A message whose contentParts include a .thinking block must announce
+        // reasoning presence so VoiceOver users know they can expand it.
+        let msg = ChatMessageRecord(
+            role: .assistant,
+            contentParts: [
+                .thinking("Let me reason about this."),
+                .text("The answer is 42.")
+            ],
+            sessionID: sessionID
+        )
+
+        let label = MessageBubbleView.accessibilityLabel(for: msg)
+
+        XCTAssertEqual(
+            label,
+            expectedMessageBubbleLabel(role: .assistant, content: "The answer is 42.", hasThinking: true),
+            "Label must append '. Includes reasoning.' when thinking parts are present"
+        )
+        XCTAssertTrue(
+            label.hasSuffix(". Includes reasoning."),
+            "Label must end with '. Includes reasoning.' suffix"
+        )
+    }
+
+    func test_messageBubble_withoutThinkingParts_doesNotAppendIncludesReasoning() {
+        // A plain text message must NOT have the reasoning suffix.
+        let msg = ChatMessageRecord(role: .assistant, content: "Just text.", sessionID: sessionID)
+
+        let label = MessageBubbleView.accessibilityLabel(for: msg)
+
+        XCTAssertFalse(
+            label.contains("Includes reasoning"),
+            "Label must not mention reasoning when no thinking parts are present"
+        )
+        XCTAssertEqual(
+            label,
+            expectedMessageBubbleLabel(role: .assistant, content: "Just text.", hasThinking: false)
+        )
+    }
+
+    // MARK: - Sabotage check for thinking-present label
+
+    func test_sabotage_thinkingPresentLabelDiffersFromPlainLabel() {
+        // Confirms that the thinking suffix actually changes the label — guards
+        // against a regression where the suffix is silently dropped.
+        let withThinking = ChatMessageRecord(
+            role: .assistant,
+            contentParts: [.thinking("some reasoning"), .text("answer")],
+            sessionID: sessionID
+        )
+        let withoutThinking = ChatMessageRecord(role: .assistant, content: "answer", sessionID: sessionID)
+
+        XCTAssertNotEqual(
+            MessageBubbleView.accessibilityLabel(for: withThinking),
+            MessageBubbleView.accessibilityLabel(for: withoutThinking),
+            "A message with thinking parts must produce a different label than one without"
         )
     }
 
