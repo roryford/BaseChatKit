@@ -145,7 +145,10 @@ struct LlamaGenerationDriver {
             if !grammarSamplerCreated {
                 await MainActor.run { generationStream.setPhase(.failed("Failed to parse GBNF grammar")) }
                 continuation.finish(throwing: InferenceError.inferenceFailure("Failed to parse GBNF grammar string"))
-                return
+                // run() returns Bool; the merge of #667 (grammar) and #668 (Bool return) left a bare
+                // return here. KV cache state is untouched at this point — no decode has run yet —
+                // so the cache is still coherent and the caller can keep `sessionKVState`.
+                return true
             }
         }
 
