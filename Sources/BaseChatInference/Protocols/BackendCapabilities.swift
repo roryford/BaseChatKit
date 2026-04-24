@@ -80,6 +80,16 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
     /// All remote backends must also reflect this in their `memoryStrategy`.
     public let isRemote: Bool
 
+    /// If true, the backend reuses KV cache state across consecutive `generate()` calls in the
+    /// same model-loaded session — defined as calls between `loadModel()`, `resetConversation()`,
+    /// and `unloadModel()`. Transparent to callers; enables Track D.
+    public let supportsKVCachePersistence: Bool
+
+    /// If true, the backend honors `GenerationConfig.grammar` via sampler-level GBNF constraint
+    /// and the caller can rely on grammar-valid output. Backends reporting `false` (default) MUST
+    /// throw `InferenceError.unsupportedGrammar(reason:)` when `config.grammar != nil`.
+    public let supportsGrammarConstrainedSampling: Bool
+
     /// Parameters the UI should present controls for.
     public var visibleParameters: [GenerationParameter] {
         GenerationParameter.allCases.filter { supportedParameters.contains($0) }
@@ -98,7 +108,9 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         memoryStrategy: MemoryStrategy = .resident,
         maxOutputTokens: Int = 4096,
         supportsStreaming: Bool = true,
-        isRemote: Bool = false
+        isRemote: Bool = false,
+        supportsKVCachePersistence: Bool = false,
+        supportsGrammarConstrainedSampling: Bool = false
     ) {
         self.supportedParameters = supportedParameters
         self.maxContextTokens = maxContextTokens
@@ -113,6 +125,8 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         self.maxOutputTokens = maxOutputTokens
         self.supportsStreaming = supportsStreaming
         self.isRemote = isRemote
+        self.supportsKVCachePersistence = supportsKVCachePersistence
+        self.supportsGrammarConstrainedSampling = supportsGrammarConstrainedSampling
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -129,6 +143,8 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         case supportsTokenCounting
         case memoryStrategy
         case isRemote
+        case supportsKVCachePersistence
+        case supportsGrammarConstrainedSampling
     }
 
     public init(from decoder: Decoder) throws {
@@ -146,6 +162,8 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         supportsTokenCounting = try c.decode(Bool.self, forKey: .supportsTokenCounting)
         memoryStrategy = try c.decode(MemoryStrategy.self, forKey: .memoryStrategy)
         isRemote = try c.decode(Bool.self, forKey: .isRemote)
+        supportsKVCachePersistence = (try c.decodeIfPresent(Bool.self, forKey: .supportsKVCachePersistence)) ?? false
+        supportsGrammarConstrainedSampling = (try c.decodeIfPresent(Bool.self, forKey: .supportsGrammarConstrainedSampling)) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -163,5 +181,7 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         try c.encode(supportsTokenCounting, forKey: .supportsTokenCounting)
         try c.encode(memoryStrategy, forKey: .memoryStrategy)
         try c.encode(isRemote, forKey: .isRemote)
+        try c.encode(supportsKVCachePersistence, forKey: .supportsKVCachePersistence)
+        try c.encode(supportsGrammarConstrainedSampling, forKey: .supportsGrammarConstrainedSampling)
     }
 }

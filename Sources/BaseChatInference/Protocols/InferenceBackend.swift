@@ -59,6 +59,15 @@ public struct GenerationConfig: Sendable, Codable {
     /// have not implemented JSON-mode wiring yet, silently ignore this flag.
     public var jsonMode: Bool
 
+    /// Raw GBNF grammar string to constrain sampling.
+    ///
+    /// Honored by backends reporting `BackendCapabilities.supportsGrammarConstrainedSampling == true`.
+    /// Backends that see a non-nil grammar but do not support grammar sampling MUST throw
+    /// `InferenceError.unsupportedGrammar(reason:)` rather than silently ignore — silent fallback
+    /// would turn a guaranteed-valid expectation into an unchecked one.
+    /// Defaults to `nil` (no grammar constraint).
+    public var grammar: String?
+
     /// Thinking markers for this request's model/template, or nil if the model does not emit
     /// reasoning blocks. Set by the caller when the selected `PromptTemplate` has
     /// `thinkingMarkers != nil`. Backends use this to activate `ThinkingParser`; backends that
@@ -80,7 +89,7 @@ public struct GenerationConfig: Sendable, Codable {
         didSet { if maxToolIterations < 1 { maxToolIterations = 1 } }
     }
 
-    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:) instead.")
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:grammar:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -94,7 +103,8 @@ public struct GenerationConfig: Sendable, Codable {
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil,
-        maxToolIterations: Int = 10
+        maxToolIterations: Int = 10,
+        grammar: String? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -109,6 +119,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.jsonMode = jsonMode
         self.thinkingMarkers = thinkingMarkers
         self.maxToolIterations = max(1, maxToolIterations)
+        self.grammar = grammar
     }
 
     public init(
@@ -123,7 +134,8 @@ public struct GenerationConfig: Sendable, Codable {
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil,
-        maxToolIterations: Int = 10
+        maxToolIterations: Int = 10,
+        grammar: String? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -138,13 +150,14 @@ public struct GenerationConfig: Sendable, Codable {
         self.jsonMode = jsonMode
         self.thinkingMarkers = thinkingMarkers
         self.maxToolIterations = max(1, maxToolIterations)
+        self.grammar = grammar
     }
 
     // MARK: Codable
 
     private enum CodingKeys: String, CodingKey {
         case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
-        case tools, toolChoice, maxThinkingTokens, jsonMode, maxToolIterations
+        case tools, toolChoice, maxThinkingTokens, jsonMode, maxToolIterations, grammar
     }
 
     public init(from decoder: Decoder) throws {
@@ -168,6 +181,7 @@ public struct GenerationConfig: Sendable, Codable {
         maxToolIterations = max(1, decodedIterations)
         // thinkingMarkers is a per-request runtime hint; it is not persisted.
         thinkingMarkers = nil
+        grammar = try c.decodeIfPresent(String.self, forKey: .grammar)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -184,6 +198,7 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encodeIfPresent(maxThinkingTokens, forKey: .maxThinkingTokens)
         try c.encode(jsonMode, forKey: .jsonMode)
         try c.encode(maxToolIterations, forKey: .maxToolIterations)
+        try c.encodeIfPresent(grammar, forKey: .grammar)
     }
 }
 
@@ -236,6 +251,13 @@ public protocol InferenceBackend: AnyObject, Sendable {
 
     /// Generates a response from a prompt, streaming events as they are produced.
     /// Errors during generation are thrown into the stream.
+    ///
+    /// **KV cache reuse semantics.** KV state MAY be reused across consecutive `generate()` calls
+    /// in the same model-loaded session — defined as calls between `loadModel()`,
+    /// `resetConversation()`, and `unloadModel()`. Callers do not pass a session ID; sessionhood
+    /// is implicit in "no intervening reset." Backends reporting
+    /// `BackendCapabilities.supportsKVCachePersistence: true` MUST honor this semantic; backends
+    /// reporting `false` (default) MUST clear KV per call (current behavior).
     func generate(
         prompt: String,
         systemPrompt: String?,
