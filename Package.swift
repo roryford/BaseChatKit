@@ -1,6 +1,7 @@
 // swift-tools-version: 6.1
 
 import PackageDescription
+import CompilerPluginSupport
 
 let package = Package(
     name: "BaseChatKit",
@@ -47,12 +48,35 @@ let package = Package(
         // Test-only: SwiftUI view-tree inspection for accessibility contract tests.
         // Must never appear in any production target.
         .package(url: "https://github.com/nalexn/ViewInspector", from: "0.10.3"),
+        // swift-syntax for the @ToolSchema macro plugin. Pinned to 600.0.x to
+        // match the version mlx-swift-lm pulls in transitively — a wider range
+        // would produce a duplicate-dependency resolution conflict. 600.x ships
+        // ABI-compatible macro APIs for Swift 5.10 / 6.0 and builds fine on
+        // Swift 6.1+. Do not bump beyond what the installed toolchain supports.
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"601.0.0"),
     ],
     targets: [
-        // Inference: models, protocols, services — no SwiftData, no heavy ML deps
+        // Macro compiler plugin: implements @ToolSchema. Runs at build time in
+        // the compiler's plugin host, not in app binaries. Only target that
+        // pulls swift-syntax into the graph.
+        .macro(
+            name: "BaseChatMacrosPlugin",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+                .product(name: "SwiftDiagnostics", package: "swift-syntax"),
+            ],
+            path: "Sources/BaseChatMacrosPlugin"
+        ),
+        // Inference: models, protocols, services — no SwiftData, no heavy ML deps.
+        // Hosts the @ToolSchema attribute declaration so callers get the macro
+        // for free wherever JSONSchemaValue is in scope.
         .target(
             name: "BaseChatInference",
             dependencies: [
+                "BaseChatMacrosPlugin",
                 .product(name: "HuggingFace", package: "swift-huggingface"),
             ],
             path: "Sources/BaseChatInference"
@@ -108,7 +132,12 @@ let package = Package(
         ),
         .testTarget(
             name: "BaseChatInferenceTests",
-            dependencies: ["BaseChatInference", "BaseChatTestSupport"]
+            dependencies: [
+                "BaseChatInference",
+                "BaseChatTestSupport",
+                "BaseChatMacrosPlugin",
+                .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
+            ]
         ),
         // Swift Testing suites split from BaseChatInferenceTests to prevent a
         // libmalloc double-free SIGABRT that occurs when XCTest and Swift Testing
