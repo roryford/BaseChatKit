@@ -199,6 +199,89 @@ final class ToolSchemaMacroTests: XCTestCase {
         )
     }
 
+    // MARK: Negative default
+
+    func testNegativeIntegerDefault() {
+        // Negative numeric literals parse as PrefixOperatorExpr("-", IntegerLiteral).
+        // The macro explicitly handles this shape — guard against a regression where
+        // literalSchemaValue silently drops the negation and emits a positive number.
+        assertMacroExpansion(
+            """
+            @ToolSchema
+            struct K {
+                let offset: Int = -5
+                let ratio: Double = -1.25
+            }
+            """,
+            expandedSource: """
+            struct K {
+                let offset: Int = -5
+                let ratio: Double = -1.25
+
+                public static var jsonSchema: BaseChatInference.JSONSchemaValue {
+                    BaseChatInference.JSONSchemaValue.object(["type": BaseChatInference.JSONSchemaValue.string("object"), "properties": BaseChatInference.JSONSchemaValue.object(["offset": BaseChatInference.JSONSchemaValue.object(["type": BaseChatInference.JSONSchemaValue.string("integer"), "default": BaseChatInference.JSONSchemaValue.number(-5)]), "ratio": BaseChatInference.JSONSchemaValue.object(["type": BaseChatInference.JSONSchemaValue.string("number"), "default": BaseChatInference.JSONSchemaValue.number(-1.25)])])])
+                }
+            }
+            """,
+            macros: testMacros
+        )
+    }
+
+    // MARK: Enum diagnostic (non-String raw type)
+
+    func testEnumWithoutStringRawTypeEmitsDiagnostic() {
+        assertMacroExpansion(
+            """
+            @ToolSchema
+            enum Priority: Int {
+                case low = 0
+                case high = 1
+            }
+            """,
+            expandedSource: """
+            enum Priority: Int {
+                case low = 0
+                case high = 1
+            }
+            """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: "@ToolSchema on an enum requires a String raw type (e.g. `enum Foo: String { ... }`).",
+                    line: 1,
+                    column: 1
+                )
+            ],
+            macros: testMacros
+        )
+    }
+
+    // MARK: Multi-line doc comment
+
+    func testMultiLineDocCommentJoinedWithSpaces() {
+        assertMacroExpansion(
+            #"""
+            @ToolSchema
+            struct L {
+                /// First line of description.
+                /// Second line elaborates.
+                let topic: String
+            }
+            """#,
+            expandedSource: #"""
+            struct L {
+                /// First line of description.
+                /// Second line elaborates.
+                let topic: String
+
+                public static var jsonSchema: BaseChatInference.JSONSchemaValue {
+                    BaseChatInference.JSONSchemaValue.object(["type": BaseChatInference.JSONSchemaValue.string("object"), "properties": BaseChatInference.JSONSchemaValue.object(["topic": BaseChatInference.JSONSchemaValue.object(["type": BaseChatInference.JSONSchemaValue.string("string"), "description": BaseChatInference.JSONSchemaValue.string("First line of description. Second line elaborates.")])]), "required": BaseChatInference.JSONSchemaValue.array([BaseChatInference.JSONSchemaValue.string("topic")])])
+                }
+            }
+            """#,
+            macros: testMacros
+        )
+    }
+
     // MARK: Doc comments
 
     func testDocCommentBecomesDescription() {
