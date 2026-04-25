@@ -73,6 +73,16 @@ final class GenerationCoordinator {
     /// reader. Tests must reset it in `tearDown` to avoid cross-test leakage.
     nonisolated(unsafe) static var jsonModeUnsupportedWarningHook: (@Sendable (String, String) -> Void)?
 
+    /// Test-only hook invoked alongside `Log.inference.warning` when a request
+    /// passes `tools` to a backend whose capabilities report
+    /// `supportsToolCalling == false`. Receives `(backendTypeName, message)`.
+    ///
+    /// Mirrors `jsonModeUnsupportedWarningHook`. The motivation is the same:
+    /// tools are silently dropped on incapable backends, and without a signal
+    /// the model spins on "I cannot access tools" while the host wonders why
+    /// its registry is never invoked. Tests must reset this in `tearDown`.
+    nonisolated(unsafe) static var toolsUnsupportedWarningHook: (@Sendable (String, String) -> Void)?
+
     // MARK: - Queue Types (Private)
 
     private struct QueuedRequest {
@@ -399,11 +409,24 @@ final class GenerationCoordinator {
         priority: GenerationPriority = .normal,
         sessionID: UUID? = nil
     ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
-        guard provider?.currentBackend != nil, provider?.isBackendLoaded == true else {
+        guard let backend = provider?.currentBackend, provider?.isBackendLoaded == true else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
         guard requestQueue.count < maxQueueDepth else {
             throw InferenceError.inferenceFailure("Generation queue is full")
+        }
+
+        // Capability gate for tool calling. Mirrors the jsonMode warning at the
+        // top of `generate(messages:)`: tools passed to a backend that reports
+        // `supportsToolCalling == false` are silently dropped on the wire,
+        // and the model loops on "I cannot access tools" while the host's
+        // registry never sees the call. Warn once at enqueue time so the
+        // signal is loud and the failure mode is diagnosable.
+        if !tools.isEmpty && !backend.capabilities.supportsToolCalling {
+            let backendType = String(describing: type(of: backend))
+            let message = "GenerationCoordinator: \(tools.count) tool(s) passed to enqueue() but \(backendType) reports capabilities.supportsToolCalling == false; tools will be ignored on the wire and tool calls will never be dispatched. Check `backend.capabilities.supportsToolCalling` before passing tools, or load a tool-capable backend."
+            Log.inference.warning("\(message, privacy: .public)")
+            Self.toolsUnsupportedWarningHook?(backendType, message)
         }
 
         let token = GenerationRequestToken(rawValue: nextGenerationToken.rawValue + 1)
