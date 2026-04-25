@@ -124,6 +124,9 @@ public enum DefaultBackends {
             case .openAI, .lmStudio, .custom: return OpenAIBackend()
             #endif
             #if Ollama
+            // FIXME(#714): expected deprecation warning until Phase 2D moves
+            // `Ollama` out of default traits — this internal registration is
+            // the supported migration path consumers are pointed at.
             case .ollama:                     return OllamaBackend()
             #endif
             default: return nil

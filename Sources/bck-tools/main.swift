@@ -207,6 +207,9 @@ func makeBackend(cli: CLI, scenario: Scenario, model: String) async throws -> an
         return MockFactory.make(for: scenario)
     case .ollama:
         #if Ollama
+        // FIXME(#714): expected deprecation warning until Phase 2D moves
+        // `Ollama` out of default traits. bck-tools is internal infrastructure
+        // that intentionally exercises the trait-gated init directly.
         let backend = OllamaBackend()
         backend.configure(baseURL: cli.ollamaBaseURL, modelName: model)
         try await backend.loadModel(from: cli.ollamaBaseURL, plan: .cloud())
