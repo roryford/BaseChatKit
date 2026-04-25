@@ -554,6 +554,95 @@ final class GenerationCoordinatorTests: XCTestCase {
         )
     }
 
+    // MARK: - Thermal pause (#745)
+
+    /// When the per-token loop sees `.critical` thermal state mid-stream, the
+    /// coordinator must pause via the injected sleep hook, re-check the
+    /// provider after each sleep, and resume cleanly when the state drops
+    /// below `.critical`. Exactly one `.diagnosticThrottle` event must be
+    /// emitted per pause cycle (not one per re-check tick).
+    ///
+    /// The test injects a deterministic provider that returns `.critical` for
+    /// the first two reads then `.nominal`, plus a sleep hook that records
+    /// each call instead of actually sleeping. This keeps the test in
+    /// real-time without any fixed delays.
+    ///
+    /// Sabotage check: deleting the `await pauseWhileThermalCritical(...)`
+    /// call inside the per-event loop drops the throttle-event count to 0
+    /// and the sleep-call count to 0; both assertions fail.
+    func test_perTokenLoop_criticalThermal_pausesAndEmitsSingleThrottleEvent() async throws {
+        // Provider script: `.critical, .critical, .nominal, .nominal, ...`
+        // Returning the same final state forever lets the second token's
+        // entry check flow through without another pause.
+        let thermalReads = ThermalReadCounter()
+        let states: [ProcessInfo.ThermalState] = [.critical, .critical, .nominal]
+
+        let sleepCalls = SleepCallCounter()
+
+        let coord = GenerationCoordinator(
+            thermalStateProvider: { @Sendable in
+                let idx = thermalReads.next()
+                return idx < states.count ? states[idx] : .nominal
+            },
+            thermalSleep: { @Sendable _ in
+                sleepCalls.bump()
+                // Yield to keep the cooperative-cancellation contract; do
+                // not actually sleep — the test must complete in well
+                // under the production 2-second cadence.
+                await Task.yield()
+            }
+        )
+        coord.provider = provider
+
+        provider.backend.tokensToYield = ["a", "b"]
+
+        let (_, stream) = try coord.enqueue(
+            messages: [("user", "hi")], priority: .normal
+        )
+
+        var tokens: [String] = []
+        var throttleEvents: [String] = []
+        for try await event in stream.events {
+            switch event {
+            case .token(let t):
+                tokens.append(t)
+            case .diagnosticThrottle(let reason):
+                throttleEvents.append(reason)
+            default:
+                break
+            }
+        }
+
+        XCTAssertEqual(tokens, ["a", "b"], "generation must complete after pause")
+        XCTAssertEqual(
+            throttleEvents.count, 1,
+            "exactly one .diagnosticThrottle event must be emitted per pause cycle, not per re-check"
+        )
+        XCTAssertTrue(
+            throttleEvents.first?.contains("critical") ?? false,
+            "throttle reason must reference the thermal state"
+        )
+        XCTAssertGreaterThanOrEqual(
+            sleepCalls.count, 1,
+            "loop must have slept at least once while waiting for thermal state to drop"
+        )
+        // First two reads were `.critical`, so the loop polls until the
+        // third read sees `.nominal`. That means at least two sleeps fired
+        // before resume — proves the loop didn't bail on the first re-check.
+        XCTAssertEqual(
+            sleepCalls.count, 2,
+            "loop must keep sleeping while state stays .critical and exit on the read that returns .nominal"
+        )
+        // Provider was read at least four times: once on entry to the
+        // pause for the first event (.critical), twice inside the
+        // re-check loop (.critical, .nominal), and at minimum once more
+        // for the second event's entry guard (.nominal → no pause).
+        XCTAssertGreaterThanOrEqual(
+            thermalReads.count, 4,
+            "provider must be polled on entry plus once per re-check tick"
+        )
+    }
+
     // MARK: - Exact preflight (TokenCountingBackend)
 
     /// When the backend fits within the context window on the first count,
@@ -822,6 +911,52 @@ private final class WarningCapture: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return entries
+    }
+}
+
+// MARK: - Thermal-pause test counters (#745)
+
+/// Records each invocation of the injected `thermalStateProvider` and
+/// returns a strictly increasing index, so the test script can drive the
+/// pause loop through `.critical → .critical → .nominal` without a stateful
+/// closure capture. Lock-protected because the provider is `@Sendable` and
+/// may be invoked off the test's MainActor isolation.
+private final class ThermalReadCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var index = 0
+
+    func next() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        let i = index
+        index += 1
+        return i
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return index
+    }
+}
+
+/// Counts calls to the injected `thermalSleep` hook so the test can
+/// assert how many re-check ticks the pause loop performed without
+/// burning real wall-clock time on `Task.sleep`.
+private final class SleepCallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _count = 0
+
+    func bump() {
+        lock.lock()
+        defer { lock.unlock() }
+        _count += 1
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _count
     }
 }
 

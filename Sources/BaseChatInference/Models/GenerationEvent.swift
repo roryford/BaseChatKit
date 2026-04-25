@@ -45,4 +45,13 @@ public enum GenerationEvent: Sendable, Equatable {
     /// from the previous turn. `promptTokensReused` is the number of prompt tokens
     /// whose KV state was preserved, saving their re-decode cost.
     case kvCacheReuse(promptTokensReused: Int)
+
+    /// Emitted by the orchestrator when generation has been paused for a
+    /// runtime-side condition (e.g. `ProcessInfo.thermalState == .critical`).
+    ///
+    /// Fired exactly once per pause cycle — on entry into the wait loop, not
+    /// on every re-check tick. UI surfaces can use this to show a "device
+    /// throttling — paused" hint while the loop blocks between tokens.
+    /// `reason` is a short, human-readable string the UI may display verbatim.
+    case diagnosticThrottle(reason: String)
 }

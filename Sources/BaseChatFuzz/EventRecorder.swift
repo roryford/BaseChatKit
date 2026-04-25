@@ -81,6 +81,8 @@ public struct EventRecorder: Sendable {
                     events.append(.init(t: t, kind: "toolLoopLimitReached", v: "\(iterations)"))
                 case .kvCacheReuse(let tokens):
                     events.append(.init(t: t, kind: "kvCacheReuse", v: "\(tokens)"))
+                case .diagnosticThrottle(let reason):
+                    events.append(.init(t: t, kind: "diagnosticThrottle", v: reason))
                 }
                 memoryTick()
             }

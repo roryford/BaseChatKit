@@ -93,6 +93,10 @@ public final class ScenarioRunner {
                     continue
                 case .kvCacheReuse:
                     continue
+                case .diagnosticThrottle:
+                    // Advisory pause signal from the orchestrator; scenarios
+                    // are deterministic replays so we just keep accumulating.
+                    continue
                 }
             }
 
