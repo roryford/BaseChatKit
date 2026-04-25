@@ -503,6 +503,17 @@ final class GenerationCoordinator {
                 if let continuation = self.continuations.removeValue(forKey: next.token) {
                     if let thrownError {
                         continuation.finish(throwing: thrownError)
+                    } else if Task.isCancelled {
+                        // Cancellation contract: when the surrounding task
+                        // was cancelled (by `stopGeneration()`/`cancel(_:)`),
+                        // finish the stream by throwing `CancellationError`
+                        // so consumers' `for try await` loops surface the
+                        // cancellation. Tool-dispatch may have already
+                        // yielded a `.toolResult(.cancelled)` event into
+                        // this same continuation; that event is preserved
+                        // because the throwing-finish only fires after the
+                        // earlier yields land in the stream buffer.
+                        continuation.finish(throwing: CancellationError())
                     } else {
                         continuation.finish()
                     }
@@ -726,6 +737,17 @@ final class GenerationCoordinator {
                         // pure-read scenarios don't flash an approval sheet.
                         // Side-effecting tools opt in via
                         // ``ToolExecutor/requiresApproval``.
+                        //
+                        // Cancellation contract (issue #622): the registry
+                        // dispatch runs under structured concurrency on the
+                        // orchestrator's `activeTask`, so a `Task.cancel()`
+                        // from `stopGeneration()` flows straight into the
+                        // executor. Cancellation-aware executors observe
+                        // `Task.isCancelled` / throw `CancellationError`;
+                        // ``ToolRegistry/dispatch(_:)`` classifies that as
+                        // ``ToolResult/ErrorKind/cancelled``, which the
+                        // post-dispatch guard below uses to exit the loop
+                        // without running another backend turn.
                         result = await toolRegistry!.dispatch(call)
                     } else {
                         // User-approval gate: invoked on the finalized ToolCall,
@@ -758,6 +780,17 @@ final class GenerationCoordinator {
                     // consumers thread `.toolResult` into the current
                     // assistant bubble before the next turn begins.
                     self.continuations[request.token]?.yield(.toolResult(result))
+
+                    // Cancellation contract (issue #622): when the user hits
+                    // stop while a tool is in flight the dispatch path returns
+                    // a ``ToolResult/ErrorKind/cancelled`` synthesized by
+                    // ``ToolRegistry/dispatch(_:)``. The transcript-side yield
+                    // above records it; here we stop the loop cleanly so no
+                    // further backend turn runs against the now-cancelled
+                    // task.
+                    if result.errorKind == .cancelled {
+                        return
+                    }
 
                     // Overflow after this dispatch — synthesise a terminal
                     // marker and exit before running another turn.
@@ -849,9 +882,19 @@ final class GenerationCoordinator {
         provider?.currentBackend?.stopGeneration()
         activeTask?.cancel()
         activeTask = nil
+        // Don't call `finishAndDiscard` on the active request here: doing
+        // so would close the continuation immediately, racing past any
+        // in-flight tool dispatch that's about to emit a
+        // `.toolResult(.cancelled)` event into the transcript (issue #622).
+        // The cancelled task's `defer` block in ``drainQueue`` finishes
+        // the continuation cleanly once the task unwinds — that's the path
+        // we want for the active request. Clearing `activeRequest` here
+        // ensures a fresh enqueue right after stop is not queued behind
+        // the dying task; the late-defer's
+        // `if self.activeRequest?.token == next.token` guard skips the
+        // redundant reset because the slot has already been cleared.
         if let active = activeRequest {
             active.stream.setPhase(.failed("Cancelled"))
-            finishAndDiscard(active.token, error: CancellationError())
         }
         activeRequest = nil
         isGenerating = false
