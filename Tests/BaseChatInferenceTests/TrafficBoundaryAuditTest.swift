@@ -555,6 +555,13 @@ final class TrafficBoundaryAuditTest: XCTestCase {
     /// compiler conditional (`os(macOS)`, `canImport(Metal)`, etc.) or a
     /// non-trait-shaped identifier (lowercase-only, contains digits at
     /// start, etc.).
+    ///
+    /// **Known limitation:** parenthesised groupings such as
+    /// `#if (Ollama || Bogus)` are dropped wholesale because the contains-`(`
+    /// filter classifies them as function-form. No source under `Sources/`
+    /// currently uses parenthesised `#if` groups for trait identifiers, so
+    /// this is a safe simplification today; revisit if a contributor adopts
+    /// that style and the audit regresses to a silent false negative.
     static func extractTraitLikeIdentifiers(from condition: String) -> [String] {
         // Tokens are anything separated by `&&`, `||`, or whitespace.
         // We keep parentheses so `os(iOS)` stays intact for the filter.
