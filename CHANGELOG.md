@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.11.5](https://github.com/roryford/BaseChatKit/compare/v0.11.4...v0.11.5) (2026-04-25)
+
+### Highlights
+
+#### Tool-call reliability — heal, cancel, and MLX parity
+
+Three interlocking pieces land together to make tool calling robust end-to-end. `TranscriptHealer` scans the loaded transcript on every session reload and synthesises a `.cancelled` `ToolResult` for any orphaned `ToolCall` — the tool call that was in-flight when the user killed the app and never received a response. Without the heal pass, the next cloud turn would send the transcript with an unanswered `tool_calls` entry, which Claude and OpenAI reject. The cooperative cancellation contract in `ToolRegistry.dispatch` closes the symmetric gap: when the user taps Stop while a tool is executing, the registry synthesises a `.cancelled` result rather than force-closing the stream, so the session stays self-consistent for replay. On the local side, `MLXBackend` now emits `tool_calls` via the same `GenerationEvent.toolCall` path as cloud backends, bringing tool-calling to on-device Gemma 4 and other instruction-tuned MLX models. See [#629], [#622], [#725].
+
+#### Thinking tokens — live display and multi-turn Claude
+
+`ThinkingBlockView` previously only rendered completed reasoning blocks. It now updates token-by-token as the stream arrives, using the same `AsyncStream`-backed pipeline as the main text display — no extra state, no flicker. On the cloud side, `ClaudeBackend` now preserves `thinking` blocks in the assistant turn when constructing multi-turn request history. The Anthropic API requires thinking blocks to be echoed back verbatim; without this, every Turn 2+ request to a thinking-enabled Claude model would fail with a 400. See [#767], [#776], [#604].
+
+#### Sampling config parity with mlx-swift-lm
+
+`GenerationConfig` gains three optional fields — `minP: Float?`, `repetitionPenalty: Float?`, and `seed: UInt64?` — matching the full parameter surface of `mlx-swift-lm`'s `GenerateParameters`. `MLXBackend` seeds `MLXRandom` before each generation call so consecutive runs with the same seed produce identical output. `LlamaGenerationDriver` plumbs `minP` into `llama_sampler_init_min_p` and the seed into `llama_sampler_init_dist`; the `UInt64 → UInt32` truncation is documented. `FoundationBackend` and cloud backends ignore the new fields silently. All three are `nil` by default so no existing callers are affected. See [#773], [#750].
+
+### Features
+
+- **inference:** heal orphan tool calls on session reload — synthesises `.cancelled` stubs for in-flight tool calls that never received a response ([#774])
+- **inference:** cooperative cancellation contract for in-flight tool execution — `ToolRegistry.dispatch` synthesises a `.cancelled` result on stop rather than force-closing the stream ([#775])
+- **mlx:** tool calling support — `MLXBackend` emits `GenerationEvent.toolCall` events on-device ([#725])
+- **inference:** `minP`, `repetitionPenalty`, `seed` on `GenerationConfig` for mlx-swift-lm parity ([#773])
+- **cloud:** preserve thinking blocks across multi-turn Claude requests — echoes assistant `thinking` blocks verbatim in request history ([#776])
+- **ui:** live streaming display for thinking tokens — `ThinkingBlockView` updates token-by-token as the stream arrives ([#767])
+- **inference:** pause generation when `ProcessInfo.thermalState` reaches `.critical`, resume on `.serious` or below — surfaces as `GenerationEvent.diagnosticThrottle(reason:)` ([#764])
+- **inference:** probe HF `config.json` for vision/audio capability before loading — populates `BackendCapabilities.supportsVision` / `supportsAudio` without requiring a full model load ([#762])
+- **inference:** `ChatSessionIntent` App Intents seam for Siri and Spotlight integration ([#770])
+- **ui:** `ChatViewModel.ingestPendingPayload` API for extension-driven sessions ([#763])
+- **mlx:** route MoE Gemma 4 through `MLXVLM` factory — enables `mlx-community/gemma-4-*` model variants ([#769])
+- **mlx:** support namespaced MLX model layouts and Gemma 4 architecture ([#742])
+- **demo:** Demo Scenarios picker with three-layer test pattern ([#710])
+- **test:** Package.swift hygiene and `#if` trait sanity audit rules (Phase 2B of [#714]) ([#740])
+
+### Fixes
+
+- **inference:** reject GGUF files without magic-bytes header in discovery — prevents silent load failures from truncated downloads ([#723])
+- **ci:** eliminate post-merge main-branch CI flakes ([#761])
+- **test:** correct `#if Ollama || CloudSaaS` gates that referenced CloudSaaS-only types — fixes `xcodebuild test` with default traits ([#777])
+- **test:** handle `diagnosticThrottle` in trait-gated `switch` statements ([#772])
+- **test:** stabilise test suite — grammar SIGABRT, KV cache cross-test leak, concurrency race, snapshot trait gap ([#760])
+- **test:** stabilise macOS XCUITest suite ([#716])
+- **test:** inject `UserDefaults` into `BackgroundDownloadManager` to remove `--parallel` flake ([#734])
+- **test:** allowlist MLX tool-calling `try?` probes in `SilentCatchAuditTest` ([#743])
+
+### Performance Improvements
+
+- **mlx:** yield briefly every N tokens to prevent WindowServer GPU command-queue starvation — configurable via `GenerationConfig.yieldEveryNTokens`, defaults to 8 ([#766])
+- **ci:** consolidate test runs and tighten path filters — reduces runner minutes per push ([#756])
+- **ci:** skip `Package.resolved` verify step when dependencies unchanged ([#751])
+
 ## [0.11.4](https://github.com/roryford/BaseChatKit/compare/v0.11.3...v0.11.4) (2026-04-25)
 
 ### Highlights
