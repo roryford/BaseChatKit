@@ -297,6 +297,27 @@ public final class ChatViewModel {
     /// Maximum characters to buffer before forcing a UI flush during streaming.
     public var streamingBatchCharacterLimit: Int = 128
 
+    /// Minimum interval between batched UI updates for streaming reasoning text.
+    ///
+    /// Decoupled from ``streamingUpdateInterval`` so apps can tune the visible-
+    /// token cadence (which drives the primary message body) independently
+    /// from reasoning preview cadence (which drives the small inline label
+    /// inside the thinking disclosure group). Defaults match the visible-token
+    /// batcher.
+    public var thinkingStreamingUpdateInterval: Duration = .milliseconds(33)
+    /// Maximum characters to buffer before forcing a UI flush for streaming reasoning text.
+    public var thinkingStreamingBatchCharacterLimit: Int = 128
+
+    /// Message IDs whose reasoning block is still being streamed.
+    ///
+    /// Populated when the first ``GenerationStreamConsumer/Action/appendThinkingText``
+    /// fragment lands and cleared on ``GenerationStreamConsumer/Action/finalizeThinking``
+    /// (or stream termination). Views read this to decide whether to render
+    /// a partial-preview affordance versus the finalized disclosure group.
+    /// Internal so views in the same module can read it without widening
+    /// the public surface.
+    var messageIDsWithStreamingThinking: Set<UUID> = []
+
     /// Whether to automatically stop generation when repetitive looping is detected.
     /// Defaults to `true`. Disable for apps that handle loop detection themselves.
     public var loopDetectionEnabled: Bool = true
@@ -606,6 +627,16 @@ public final class ChatViewModel {
         genCoordinator.loopDetectionEnabled = { [weak self] in self?.loopDetectionEnabled ?? true }
         genCoordinator.streamingUpdateInterval = { [weak self] in self?.streamingUpdateInterval ?? .milliseconds(33) }
         genCoordinator.streamingBatchCharacterLimit = { [weak self] in self?.streamingBatchCharacterLimit ?? 128 }
+        genCoordinator.thinkingStreamingUpdateInterval = { [weak self] in self?.thinkingStreamingUpdateInterval ?? .milliseconds(33) }
+        genCoordinator.thinkingStreamingBatchCharacterLimit = { [weak self] in self?.thinkingStreamingBatchCharacterLimit ?? 128 }
+        genCoordinator.onMarkThinkingStreaming = { [weak self] id, isStreaming in
+            guard let self else { return }
+            if isStreaming {
+                self.messageIDsWithStreamingThinking.insert(id)
+            } else {
+                self.messageIDsWithStreamingThinking.remove(id)
+            }
+        }
         genCoordinator.activeBackendName = { [weak self] in self?.activeBackendName }
         genCoordinator.activeSession = { [weak self] in self?.activeSession }
         genCoordinator.postGenerationTasks = { [weak self] in self?.postGenerationTasks ?? [] }

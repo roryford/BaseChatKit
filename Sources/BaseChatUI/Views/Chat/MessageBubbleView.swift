@@ -80,7 +80,12 @@ public struct MessageBubbleView: View {
             if !message.hasVisibleContent && !hasThinkingParts && isStreaming {
                 streamingPlaceholder
             } else {
-                MessagePartsView(parts: message.contentParts, role: .assistant, isStreaming: isStreaming)
+                MessagePartsView(
+                    parts: message.contentParts,
+                    role: .assistant,
+                    isStreaming: isStreaming,
+                    messageID: message.id
+                )
             }
 
             if isStreaming && message.hasVisibleContent {
@@ -198,6 +203,7 @@ public struct MessageBubbleView: View {
         message: ChatMessageRecord(role: .user, content: "Hello, tell me a story about a dragon.", sessionID: UUID()),
         isStreaming: false
     )
+    .environment(ChatViewModel())
 }
 
 #Preview("Assistant Message") {
@@ -205,6 +211,7 @@ public struct MessageBubbleView: View {
         message: ChatMessageRecord(role: .assistant, content: "Once upon a time, in a land far away, there lived a magnificent dragon named Ember.", sessionID: UUID()),
         isStreaming: false
     )
+    .environment(ChatViewModel())
 }
 
 #Preview("Assistant Streaming") {
@@ -212,6 +219,7 @@ public struct MessageBubbleView: View {
         message: ChatMessageRecord(role: .assistant, content: "Once upon a time...", sessionID: UUID()),
         isStreaming: true
     )
+    .environment(ChatViewModel())
 }
 
 #Preview("System Message") {
