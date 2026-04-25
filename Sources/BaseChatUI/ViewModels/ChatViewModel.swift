@@ -34,6 +34,11 @@ public final class ChatViewModel {
     let modelStorage: ModelStorageService
     let memoryPressure: MemoryPressureHandler
 
+    /// `UserDefaults` instance backing the first-run flag. Defaults to `.standard`
+    /// in production. Tests inject a unique-per-instance suite so `swift test --parallel`
+    /// runs cannot race on the shared `hasCompletedFirstLaunch` key.
+    let userDefaults: UserDefaults
+
     /// The UI-layer ``ToolApprovalGate`` that drives the per-call approval
     /// sheet. When `nil`, the underlying ``InferenceService`` uses its
     /// default ``AutoApproveGate`` — every tool call dispatches silently.
@@ -530,14 +535,16 @@ public final class ChatViewModel {
         inferenceService: InferenceService = InferenceService(),
         deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
         modelStorage: ModelStorageService = ModelStorageService(),
-        toolApprovalGate: UIToolApprovalGate? = nil
+        toolApprovalGate: UIToolApprovalGate? = nil,
+        userDefaults: UserDefaults = .standard
     ) {
         self.init(
             inferenceService: inferenceService,
             deviceCapability: deviceCapability,
             modelStorage: modelStorage,
             memoryPressure: MemoryPressureHandler(),
-            toolApprovalGate: toolApprovalGate
+            toolApprovalGate: toolApprovalGate,
+            userDefaults: userDefaults
         )
     }
 
@@ -546,17 +553,19 @@ public final class ChatViewModel {
         deviceCapability: DeviceCapabilityService = DeviceCapabilityService(),
         modelStorage: ModelStorageService = ModelStorageService(),
         memoryPressure: MemoryPressureHandler,
-        toolApprovalGate: UIToolApprovalGate? = nil
+        toolApprovalGate: UIToolApprovalGate? = nil,
+        userDefaults: UserDefaults = .standard
     ) {
         self.inferenceService = inferenceService
         self.deviceCapability = deviceCapability
         self.modelStorage = modelStorage
         self.memoryPressure = memoryPressure
         self.toolApprovalGate = toolApprovalGate
+        self.userDefaults = userDefaults
         self.sessionController = SessionController(selectedPromptTemplate: inferenceService.selectedPromptTemplate)
 
         let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
-        self.isFirstRun = !UserDefaults.standard.bool(forKey: firstRunKey)
+        self.isFirstRun = !userDefaults.bool(forKey: firstRunKey)
 
         let coordinator = ModelLoadCoordinator(inferenceService: inferenceService)
         self.loadCoordinator = coordinator

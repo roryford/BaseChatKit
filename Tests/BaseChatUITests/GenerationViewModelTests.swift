@@ -17,6 +17,11 @@ final class ChatViewModelTests: XCTestCase {
     /// leaks into the user's real `<Documents>/Models` path (see #379).
     private nonisolated(unsafe) var scratchModelsDirectory: URL!
 
+    /// Per-instance UserDefaults suite — prevents parallel test runs from racing
+    /// on the global `hasCompletedFirstLaunch` key in `UserDefaults.standard`.
+    private nonisolated(unsafe) var suiteName: String!
+    private nonisolated(unsafe) var testDefaults: UserDefaults!
+
     /// Convenience to build a view model with controllable device memory.
     /// Uses a default InferenceService (no backend loaded).
     private func makeViewModel(ramGB: UInt64 = 16) -> ChatViewModel {
@@ -24,7 +29,8 @@ final class ChatViewModelTests: XCTestCase {
             inferenceService: InferenceService(),
             deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
             modelStorage: ModelStorageService(baseDirectory: scratchModelsDirectory),
-            memoryPressure: MemoryPressureHandler()
+            memoryPressure: MemoryPressureHandler(),
+            userDefaults: testDefaults
         )
     }
 
@@ -39,7 +45,8 @@ final class ChatViewModelTests: XCTestCase {
             inferenceService: service,
             deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
             modelStorage: ModelStorageService(baseDirectory: scratchModelsDirectory),
-            memoryPressure: MemoryPressureHandler()
+            memoryPressure: MemoryPressureHandler(),
+            userDefaults: testDefaults
         )
         // Set an active session so sendMessage/regenerate/edit don't bail out.
         vm.activeSession = ChatSessionRecord(title: "Test Session")
@@ -79,6 +86,8 @@ final class ChatViewModelTests: XCTestCase {
     override func setUp() {
         super.setUp()
         scratchModelsDirectory = makeIsolatedModelsDirectory()
+        suiteName = "com.basechatkit.test.chatvm.\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: suiteName)!
     }
 
     override func tearDown() async throws {
@@ -91,6 +100,11 @@ final class ChatViewModelTests: XCTestCase {
             try? FileManager.default.removeItem(at: dir)
         }
         scratchModelsDirectory = nil
+        if let suiteName {
+            testDefaults?.removePersistentDomain(forName: suiteName)
+        }
+        testDefaults = nil
+        suiteName = nil
     }
 
     // MARK: - test_init_defaultState
@@ -252,8 +266,8 @@ final class ChatViewModelTests: XCTestCase {
     // MARK: - test_autoSelectFirstRunModel_selectsFoundation
 
     func test_autoSelectFirstRunModel_selectsFoundation() {
-        // Clear the flag so autoSelectFirstRunModel treats this as first launch.
-        UserDefaults.standard.removeObject(forKey: "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch")
+        let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
+        // Per-instance suite starts empty — no need to clear; the flag is unset by construction.
 
         let vm = makeViewModel()
 
@@ -276,19 +290,17 @@ final class ChatViewModelTests: XCTestCase {
         } else {
             // Foundation not available on this OS -- autoSelect won't find it.
             // Verify it didn't crash and the flag was set.
-            XCTAssertTrue(UserDefaults.standard.bool(forKey: "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"),
+            XCTAssertTrue(testDefaults.bool(forKey: firstRunKey),
                          "Flag should be set even if no foundation model available")
         }
-
-        // Clean up.
-        UserDefaults.standard.removeObject(forKey: "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch")
     }
 
     // MARK: - test_autoSelectFirstRunModel_doesNotRepeat
 
     func test_autoSelectFirstRunModel_doesNotRepeat() {
+        let firstRunKey = "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch"
         // Set the flag as if first launch already happened.
-        UserDefaults.standard.set(true, forKey: "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch")
+        testDefaults.set(true, forKey: firstRunKey)
 
         let vm = makeViewModel()
         vm.refreshModels()
@@ -296,9 +308,6 @@ final class ChatViewModelTests: XCTestCase {
 
         // Should NOT auto-select because the flag is already set.
         XCTAssertNil(vm.selectedModel, "Should not auto-select on subsequent launches")
-
-        // Clean up.
-        UserDefaults.standard.removeObject(forKey: "\(BaseChatConfiguration.shared.bundleIdentifier).hasCompletedFirstLaunch")
     }
 
     // MARK: - test_handleMemoryPressure_nominal_doesNotSetError
