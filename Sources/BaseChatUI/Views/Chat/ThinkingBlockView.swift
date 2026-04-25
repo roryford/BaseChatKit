@@ -58,8 +58,14 @@ struct ThinkingBlockView: View {
                     }
                 }
             }
+            // Intentionally omit `.accessibilityValue(text)` here — `text`
+            // updates every ~33ms while reasoning streams, which floods
+            // VoiceOver with re-announcements of a value the user has not
+            // asked to hear yet. Expanding the disclosure group exposes the
+            // accumulated text via the inner `Text` for assistive reading;
+            // the static "Reasoning in progress" label is enough for the
+            // collapsed state.
             .accessibilityLabel("Reasoning in progress")
-            .accessibilityValue(text)
         } else {
             DisclosureGroup(isExpanded: $isExpanded) {
                 Text(text)
