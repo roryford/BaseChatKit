@@ -82,6 +82,14 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
     public init?(ggufURL url: URL) {
         guard url.pathExtension.lowercased() == "gguf" else { return nil }
 
+        // Reject files that don't carry the GGUF magic header — covers:
+        //   - leaked test-fixture stubs (e.g. 15-byte ASCII placeholders, see
+        //     `scripts/clean-leaked-test-artifacts.sh`)
+        //   - downloads truncated before the first 4 bytes were written
+        //   - companion files some HF repos ship with a .gguf extension but no
+        //     header (rare, but cheap to filter)
+        guard GGUFMetadataReader.isValidGGUF(at: url) else { return nil }
+
         let fileManager = FileManager.default
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? UInt64 else {

@@ -18,12 +18,25 @@ final class ModelInfoTests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: - Helpers
+
+    /// Writes a minimal fixture with a real GGUF magic-bytes header padded to the requested size.
+    /// The first 4 bytes are `[0x47, 0x47, 0x55, 0x46]` so the file passes
+    /// `GGUFMetadataReader.isValidGGUF(at:)` without needing a full GGUF structure.
+    @discardableResult
+    private func writeGGUFFixture(at url: URL, totalSize: Int = 1024) throws -> URL {
+        precondition(totalSize >= 4, "GGUF fixture must be at least 4 bytes for the magic header")
+        var data = Data([0x47, 0x47, 0x55, 0x46])
+        data.append(Data(repeating: 0, count: totalSize - 4))
+        try data.write(to: url)
+        return url
+    }
+
     // MARK: - GGUF Initializer
 
     func test_ggufInit_validFile_createsModelInfo() throws {
         let fileURL = tempDirectory.appendingPathComponent("test-model.Q4_K_M.gguf")
-        let data = Data(repeating: 0, count: 1024)
-        try data.write(to: fileURL)
+        try writeGGUFFixture(at: fileURL, totalSize: 1024)
 
         let model = ModelInfo(ggufURL: fileURL)
 
@@ -32,6 +45,26 @@ final class ModelInfoTests: XCTestCase {
         XCTAssertEqual(model?.modelType, .gguf)
         XCTAssertEqual(model?.fileSize, 1024)
         XCTAssertEqual(model?.url, fileURL)
+    }
+
+    func test_ggufInit_rejectsFileWithoutMagicBytes() throws {
+        // 15-byte ASCII placeholder — mirrors the leaked test-fixture shape documented in
+        // `scripts/clean-leaked-test-artifacts.sh`. Before the fix these surfaced as fake
+        // ~1 KB entries in the model picker.
+        let fileURL = tempDirectory.appendingPathComponent("stub-\(UUID().uuidString).gguf")
+        try "not-a-real-gguf".data(using: .utf8)!.write(to: fileURL)
+
+        XCTAssertNil(
+            ModelInfo(ggufURL: fileURL),
+            "ModelInfo(ggufURL:) must reject files without GGUF magic"
+        )
+    }
+
+    func test_ggufInit_acceptsFileWithMagicBytes() throws {
+        let fileURL = tempDirectory.appendingPathComponent("real-\(UUID().uuidString).gguf")
+        try Data([0x47, 0x47, 0x55, 0x46] + Array(repeating: UInt8(0), count: 16)).write(to: fileURL)
+
+        XCTAssertNotNil(ModelInfo(ggufURL: fileURL))
     }
 
     func test_ggufInit_nonGgufExtension_returnsNil() throws {
@@ -204,7 +237,7 @@ final class ModelInfoTests: XCTestCase {
 
     func test_ggufInit_sameFile_producesStableID() throws {
         let fileURL = tempDirectory.appendingPathComponent("stable-id-test.gguf")
-        try Data(repeating: 0, count: 64).write(to: fileURL)
+        try writeGGUFFixture(at: fileURL, totalSize: 64)
 
         let first = try XCTUnwrap(ModelInfo(ggufURL: fileURL))
         let second = try XCTUnwrap(ModelInfo(ggufURL: fileURL))
@@ -227,8 +260,8 @@ final class ModelInfoTests: XCTestCase {
     func test_differentFiles_produceDifferentIDs() throws {
         let fileA = tempDirectory.appendingPathComponent("model-a.gguf")
         let fileB = tempDirectory.appendingPathComponent("model-b.gguf")
-        try Data(repeating: 0, count: 64).write(to: fileA)
-        try Data(repeating: 0, count: 64).write(to: fileB)
+        try writeGGUFFixture(at: fileA, totalSize: 64)
+        try writeGGUFFixture(at: fileB, totalSize: 64)
 
         let a = try XCTUnwrap(ModelInfo(ggufURL: fileA))
         let b = try XCTUnwrap(ModelInfo(ggufURL: fileB))
@@ -238,7 +271,7 @@ final class ModelInfoTests: XCTestCase {
 
     func test_stableID_isVersion5UUID() throws {
         let fileURL = tempDirectory.appendingPathComponent("v5-check.gguf")
-        try Data(repeating: 0, count: 64).write(to: fileURL)
+        try writeGGUFFixture(at: fileURL, totalSize: 64)
 
         let model = try XCTUnwrap(ModelInfo(ggufURL: fileURL))
         let uuidString = model.id.uuidString
@@ -253,8 +286,7 @@ final class ModelInfoTests: XCTestCase {
 
     func test_displayName_stripsGgufExtension() throws {
         let fileURL = tempDirectory.appendingPathComponent("model-name.Q4_K_M.gguf")
-        let data = Data(repeating: 0, count: 64)
-        try data.write(to: fileURL)
+        try writeGGUFFixture(at: fileURL, totalSize: 64)
 
         let model = ModelInfo(ggufURL: fileURL)
 

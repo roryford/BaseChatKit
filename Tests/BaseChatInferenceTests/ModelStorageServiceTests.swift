@@ -41,11 +41,17 @@ final class ModelStorageServiceTests: XCTestCase {
 
     /// Creates a temporary GGUF file inside the models directory with a UUID-based name.
     /// Returns the file URL. The file is tracked for tearDown cleanup.
+    ///
+    /// The first 4 bytes are the GGUF magic header (`0x47 0x47 0x55 0x46`) so the file
+    /// passes `ModelInfo(ggufURL:)`'s magic-bytes gate. The rest is filler padding out
+    /// to `size`.
     @discardableResult
     private func createGgufFile(named prefix: String = "test", size: Int = 1024) throws -> URL {
+        precondition(size >= 4, "GGUF fixture must be at least 4 bytes for the magic header")
         let fileName = "\(prefix)-\(UUID().uuidString).gguf"
         let url = service.modelsDirectory.appendingPathComponent(fileName)
-        let data = Data(repeating: 0xAA, count: size)
+        var data = Data([0x47, 0x47, 0x55, 0x46])
+        data.append(Data(repeating: 0xAA, count: size - 4))
         try data.write(to: url)
         createdURLs.append(url)
         return url
