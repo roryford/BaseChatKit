@@ -294,7 +294,10 @@ final class ModelManagementViewModelTests: XCTestCase {
 
         let fileName = "imported-\(UUID().uuidString).gguf"
         let sourceURL = tempDir.appendingPathComponent(fileName)
-        try Data(repeating: 0xAB, count: 4096).write(to: sourceURL)
+        // Prepend GGUF magic header so import passes ModelInfo(ggufURL:)'s magic-bytes gate.
+        var fixture = Data([0x47, 0x47, 0x55, 0x46])
+        fixture.append(Data(repeating: 0xAB, count: 4096 - 4))
+        try fixture.write(to: sourceURL)
 
         let imported = try vm.importModel(from: sourceURL)
         let importedURL = URL(fileURLWithPath: vm.modelsDirectoryPath).appendingPathComponent(fileName)

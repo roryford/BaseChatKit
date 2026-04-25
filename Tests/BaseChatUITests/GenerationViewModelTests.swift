@@ -54,11 +54,16 @@ final class ChatViewModelTests: XCTestCase {
     }
 
     /// Creates a fake .gguf file in the scratch models directory and returns its URL.
+    ///
+    /// The first 4 bytes are the GGUF magic header (`0x47 0x47 0x55 0x46`) so the
+    /// fixture passes `ModelInfo(ggufURL:)`'s magic-bytes gate during discovery.
     @discardableResult
     private func createFakeGGUF(named fileName: String, sizeBytes: Int = 1024) throws -> URL {
+        precondition(sizeBytes >= 4, "GGUF fixture must be at least 4 bytes for the magic header")
         try FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
         let fileURL = modelsDirectory.appendingPathComponent(fileName)
-        let data = Data(repeating: 0, count: sizeBytes)
+        var data = Data([0x47, 0x47, 0x55, 0x46])
+        data.append(Data(repeating: 0, count: sizeBytes - 4))
         try data.write(to: fileURL)
         return fileURL
     }
