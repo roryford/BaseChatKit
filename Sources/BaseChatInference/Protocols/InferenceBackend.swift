@@ -17,6 +17,34 @@ public struct GenerationConfig: Sendable, Codable {
     public var topK: Int32?
     public var typicalP: Float?
 
+    /// Min-p sampling threshold relative to the highest-probability token.
+    ///
+    /// An alternative to top-p that filters tokens by probability ratio rather than
+    /// cumulative mass. `nil` (the default) lets each backend apply its own value.
+    /// Mirrors `GenerateParameters.minP` in `mlx-swift-lm`. Honoured by ``MLXBackend``
+    /// and ``LlamaBackend``; backends that do not expose a min-p sampler ignore it.
+    public var minP: Float?
+
+    /// Repetition penalty applied to recently-generated tokens (1.0 = no penalty).
+    ///
+    /// Distinct from ``repeatPenalty`` only in shape — kept as a separate optional so
+    /// callers can leave it `nil` and inherit the backend's default behaviour. When
+    /// non-`nil` this value takes precedence over ``repeatPenalty`` for backends that
+    /// support an explicit knob (MLX, llama.cpp). Backends that do not expose a
+    /// repetition penalty (e.g. ``FoundationBackend``) ignore it.
+    public var repetitionPenalty: Float?
+
+    /// Deterministic sampling seed.
+    ///
+    /// When set, backends that expose a sampler seed (``MLXBackend``,
+    /// ``LlamaBackend``) initialise their RNG from this value so two runs with the
+    /// same prompt and config produce the same token stream. Backends that do not
+    /// expose a seed (``FoundationBackend``, cloud backends without a `seed` API
+    /// parameter) silently ignore it — a missing seed is never an error.
+    /// Stored as `UInt64` for parity with mlx-swift-lm; backends with smaller seed
+    /// types (e.g. llama.cpp's `uint32_t`) truncate.
+    public var seed: UInt64?
+
     /// Maximum number of tokens the model should generate in a single response.
     ///
     /// Cloud backends send this as their `max_tokens` API parameter.
@@ -108,7 +136,7 @@ public struct GenerationConfig: Sendable, Codable {
     /// - Only honoured by `MLXBackend`; other backends ignore this field.
     public var yieldEveryNTokens: Int = 8
 
-    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:grammar:yieldEveryNTokens:) instead.")
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:minP:repetitionPenalty:seed:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:grammar:yieldEveryNTokens:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -116,6 +144,9 @@ public struct GenerationConfig: Sendable, Codable {
         maxTokens: Int32,
         topK: Int32? = nil,
         typicalP: Float? = nil,
+        minP: Float? = nil,
+        repetitionPenalty: Float? = nil,
+        seed: UInt64? = nil,
         maxOutputTokens: Int? = 2048,
         tools: [ToolDefinition] = [],
         toolChoice: ToolChoice = .auto,
@@ -132,6 +163,9 @@ public struct GenerationConfig: Sendable, Codable {
         self._legacyMaxTokens = maxTokens
         self.topK = topK
         self.typicalP = typicalP
+        self.minP = minP
+        self.repetitionPenalty = repetitionPenalty
+        self.seed = seed
         self.maxOutputTokens = maxOutputTokens
         self.tools = tools
         self.toolChoice = toolChoice
@@ -149,6 +183,9 @@ public struct GenerationConfig: Sendable, Codable {
         repeatPenalty: Float = 1.1,
         topK: Int32? = nil,
         typicalP: Float? = nil,
+        minP: Float? = nil,
+        repetitionPenalty: Float? = nil,
+        seed: UInt64? = nil,
         maxOutputTokens: Int? = 2048,
         tools: [ToolDefinition] = [],
         toolChoice: ToolChoice = .auto,
@@ -164,6 +201,9 @@ public struct GenerationConfig: Sendable, Codable {
         self.repeatPenalty = repeatPenalty
         self.topK = topK
         self.typicalP = typicalP
+        self.minP = minP
+        self.repetitionPenalty = repetitionPenalty
+        self.seed = seed
         self.maxOutputTokens = maxOutputTokens
         self.tools = tools
         self.toolChoice = toolChoice
@@ -181,6 +221,7 @@ public struct GenerationConfig: Sendable, Codable {
         case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
         case tools, toolChoice, maxThinkingTokens, jsonMode, maxToolIterations, grammar
         case yieldEveryNTokens
+        case minP, repetitionPenalty, seed
     }
 
     public init(from decoder: Decoder) throws {
@@ -208,6 +249,11 @@ public struct GenerationConfig: Sendable, Codable {
         grammar = try c.decodeIfPresent(String.self, forKey: .grammar)
         // yieldEveryNTokens landed after the original shape; default to 8 when absent.
         yieldEveryNTokens = (try c.decodeIfPresent(Int.self, forKey: .yieldEveryNTokens)) ?? 8
+        // minP / repetitionPenalty / seed landed after the original shape; absent
+        // from older payloads, default to nil so the backend's own defaults apply.
+        minP = try c.decodeIfPresent(Float.self, forKey: .minP)
+        repetitionPenalty = try c.decodeIfPresent(Float.self, forKey: .repetitionPenalty)
+        seed = try c.decodeIfPresent(UInt64.self, forKey: .seed)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -227,6 +273,9 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encode(maxToolIterations, forKey: .maxToolIterations)
         try c.encodeIfPresent(grammar, forKey: .grammar)
         try c.encode(yieldEveryNTokens, forKey: .yieldEveryNTokens)
+        try c.encodeIfPresent(minP, forKey: .minP)
+        try c.encodeIfPresent(repetitionPenalty, forKey: .repetitionPenalty)
+        try c.encodeIfPresent(seed, forKey: .seed)
     }
 }
 

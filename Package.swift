@@ -99,6 +99,7 @@ let package = Package(
             dependencies: [
                 "BaseChatInference",
                 .product(name: "MLX", package: "mlx-swift", condition: .when(traits: ["MLX"])),
+                .product(name: "MLXRandom", package: "mlx-swift", condition: .when(traits: ["MLX"])),
                 .product(name: "MLXLLM", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
                 // MLXVLM ships the MoE Gemma 4 decoder (Libraries/MLXVLM/Models/Gemma4.swift)

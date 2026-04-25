@@ -92,4 +92,89 @@ final class GenerationConfigTests: XCTestCase {
 
         XCTAssertEqual(backend.lastConfig?.maxOutputTokens, 1024)
     }
+
+    // MARK: - mlx-swift-lm parity knobs (#750)
+
+    func test_defaultInit_minP_isNil() {
+        let config = GenerationConfig()
+        XCTAssertNil(config.minP)
+    }
+
+    func test_defaultInit_repetitionPenalty_isNil() {
+        let config = GenerationConfig()
+        XCTAssertNil(config.repetitionPenalty)
+    }
+
+    func test_defaultInit_seed_isNil() {
+        let config = GenerationConfig()
+        XCTAssertNil(config.seed)
+    }
+
+    func test_customInit_propagatesParityKnobs() {
+        let config = GenerationConfig(
+            minP: 0.05,
+            repetitionPenalty: 1.2,
+            seed: 42
+        )
+
+        XCTAssertEqual(config.minP, 0.05)
+        XCTAssertEqual(config.repetitionPenalty, 1.2)
+        XCTAssertEqual(config.seed, 42)
+    }
+
+    func test_minP_isMutable() {
+        var config = GenerationConfig()
+        config.minP = 0.1
+        XCTAssertEqual(config.minP, 0.1)
+    }
+
+    func test_repetitionPenalty_isMutable() {
+        var config = GenerationConfig()
+        config.repetitionPenalty = 1.15
+        XCTAssertEqual(config.repetitionPenalty, 1.15)
+    }
+
+    func test_seed_isMutable() {
+        var config = GenerationConfig()
+        config.seed = 1337
+        XCTAssertEqual(config.seed, 1337)
+    }
+
+    // MARK: - Codable round-trip for parity knobs
+
+    func test_codableRoundtrip_preservesParityKnobs() throws {
+        var original = GenerationConfig(temperature: 0.5)
+        original.minP = 0.07
+        original.repetitionPenalty = 1.3
+        original.seed = 9_999_999_999  // exceeds UInt32 to assert UInt64 storage
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(GenerationConfig.self, from: data)
+
+        XCTAssertEqual(decoded.minP, 0.07)
+        XCTAssertEqual(decoded.repetitionPenalty, 1.3)
+        XCTAssertEqual(decoded.seed, 9_999_999_999)
+    }
+
+    func test_codableDecode_legacyPayload_omittingParityKnobs() throws {
+        // Older payloads that predate #750 do not carry minP/repetitionPenalty/seed.
+        // The decoder must default them to nil rather than throwing.
+        let legacyJSON = """
+        {
+            "temperature": 0.7,
+            "topP": 0.9,
+            "repeatPenalty": 1.1,
+            "tools": [],
+            "toolChoice": {"type": "auto"},
+            "jsonMode": false,
+            "maxToolIterations": 10
+        }
+        """
+        let data = try XCTUnwrap(legacyJSON.data(using: .utf8))
+        let decoded = try JSONDecoder().decode(GenerationConfig.self, from: data)
+
+        XCTAssertNil(decoded.minP)
+        XCTAssertNil(decoded.repetitionPenalty)
+        XCTAssertNil(decoded.seed)
+    }
 }
