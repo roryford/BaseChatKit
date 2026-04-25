@@ -89,7 +89,19 @@ public struct GenerationConfig: Sendable, Codable {
         didSet { if maxToolIterations < 1 { maxToolIterations = 1 } }
     }
 
-    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:grammar:) instead.")
+    /// Number of tokens between brief cooperative yields during MLX generation.
+    ///
+    /// Sustained MLX inference on Mac can starve WindowServer's GPU command
+    /// queue and cause hitches in other apps. To mitigate this, ``MLXBackend``
+    /// inserts a 50µs `Task.sleep` every `yieldEveryNTokens` tokens. The same
+    /// pattern is used in `SwiftLM/Server.swift`.
+    ///
+    /// - Defaults to `8` (one yield per ~8 tokens).
+    /// - `0` disables the yield entirely.
+    /// - Only honoured by `MLXBackend`; other backends ignore this field.
+    public var yieldEveryNTokens: Int = 8
+
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:grammar:yieldEveryNTokens:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -104,7 +116,8 @@ public struct GenerationConfig: Sendable, Codable {
         jsonMode: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil,
         maxToolIterations: Int = 10,
-        grammar: String? = nil
+        grammar: String? = nil,
+        yieldEveryNTokens: Int = 8
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -120,6 +133,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.thinkingMarkers = thinkingMarkers
         self.maxToolIterations = max(1, maxToolIterations)
         self.grammar = grammar
+        self.yieldEveryNTokens = yieldEveryNTokens
     }
 
     public init(
@@ -135,7 +149,8 @@ public struct GenerationConfig: Sendable, Codable {
         jsonMode: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil,
         maxToolIterations: Int = 10,
-        grammar: String? = nil
+        grammar: String? = nil,
+        yieldEveryNTokens: Int = 8
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -151,6 +166,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.thinkingMarkers = thinkingMarkers
         self.maxToolIterations = max(1, maxToolIterations)
         self.grammar = grammar
+        self.yieldEveryNTokens = yieldEveryNTokens
     }
 
     // MARK: Codable
@@ -158,6 +174,7 @@ public struct GenerationConfig: Sendable, Codable {
     private enum CodingKeys: String, CodingKey {
         case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
         case tools, toolChoice, maxThinkingTokens, jsonMode, maxToolIterations, grammar
+        case yieldEveryNTokens
     }
 
     public init(from decoder: Decoder) throws {
@@ -182,6 +199,8 @@ public struct GenerationConfig: Sendable, Codable {
         // thinkingMarkers is a per-request runtime hint; it is not persisted.
         thinkingMarkers = nil
         grammar = try c.decodeIfPresent(String.self, forKey: .grammar)
+        // yieldEveryNTokens landed after the original shape; default to 8 when absent.
+        yieldEveryNTokens = (try c.decodeIfPresent(Int.self, forKey: .yieldEveryNTokens)) ?? 8
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -199,6 +218,7 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encode(jsonMode, forKey: .jsonMode)
         try c.encode(maxToolIterations, forKey: .maxToolIterations)
         try c.encodeIfPresent(grammar, forKey: .grammar)
+        try c.encode(yieldEveryNTokens, forKey: .yieldEveryNTokens)
     }
 }
 
