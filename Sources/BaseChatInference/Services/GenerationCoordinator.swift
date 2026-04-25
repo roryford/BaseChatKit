@@ -30,6 +30,20 @@ final class GenerationCoordinator {
     /// non-isolated so it is safe under Swift 6 strict concurrency.
     private let thermalStateProvider: @Sendable () -> ProcessInfo.ThermalState
 
+    /// Sleep hook used by the per-token thermal-pause loop. Defaults to
+    /// `Task.sleep(for:)`. Tests override this to skip the real 2-second
+    /// re-check delay and to count how many times the loop slept.
+    ///
+    /// Throws `CancellationError` when the surrounding task is cancelled —
+    /// the caller propagates that to abort the wait loop alongside a
+    /// regular state transition.
+    private let thermalSleep: @Sendable (Duration) async throws -> Void
+
+    /// Re-check delay between thermal polls when generation is paused.
+    /// Pulled out so the test seam injects only the sleep behaviour, not
+    /// the cadence — keeps the production cadence in production code.
+    private static let thermalRecheckInterval: Duration = .seconds(2)
+
     /// Optional registry used to dispatch model-emitted ``ToolCall`` events.
     ///
     /// Stored here in wave 1 so the coordinator's init surface is stable for
@@ -92,10 +106,12 @@ final class GenerationCoordinator {
 
     nonisolated init(
         thermalStateProvider: @Sendable @escaping () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState },
+        thermalSleep: @Sendable @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         toolRegistry: ToolRegistry? = nil,
         toolApprovalGate: any ToolApprovalGate = AutoApproveGate()
     ) {
         self.thermalStateProvider = thermalStateProvider
+        self.thermalSleep = thermalSleep
         self.toolRegistry = toolRegistry
         self.toolApprovalGate = toolApprovalGate
     }
@@ -494,6 +510,52 @@ final class GenerationCoordinator {
         }
     }
 
+    // MARK: - Thermal pause
+
+    /// Cooperatively pauses the per-token loop while the device is in
+    /// `.critical` thermal state. Returns immediately when thermal state is
+    /// `.serious` or below, or when the surrounding task has been cancelled.
+    ///
+    /// Emits `GenerationEvent.diagnosticThrottle` exactly once per pause
+    /// cycle — on entry, before the first sleep — so UI surfaces can show
+    /// "device throttling — paused" without being spammed every re-check.
+    /// Generation resumes silently when thermal pressure drops; downstream
+    /// `.token` events resuming after the pause is the implicit "resumed"
+    /// signal.
+    private func pauseWhileThermalCritical(
+        token: GenerationRequestToken
+    ) async {
+        guard thermalStateProvider() == .critical else { return }
+
+        // Entry-only event: spamming the continuation on every re-check would
+        // bloat the stream and make UI debouncing harder. The event is fired
+        // once and the consumer keeps showing the throttle hint until the
+        // next regular event flows through.
+        self.continuations[token]?.yield(
+            .diagnosticThrottle(reason: "thermalState=.critical")
+        )
+        Log.inference.warning(
+            "GenerationCoordinator: pausing generation — ProcessInfo.thermalState == .critical"
+        )
+
+        while !Task.isCancelled {
+            do {
+                try await thermalSleep(Self.thermalRecheckInterval)
+            } catch {
+                // Sleep was cancelled — propagate by exiting the loop. The
+                // outer `for try await event in stream.events` will observe
+                // `Task.isCancelled` on its next iteration.
+                return
+            }
+            if thermalStateProvider() != .critical {
+                Log.inference.info(
+                    "GenerationCoordinator: thermal state dropped below .critical — resuming generation"
+                )
+                return
+            }
+        }
+    }
+
     // MARK: - Tool Dispatch Loop
 
     /// Upper bound on cumulative bytes of tool-result content that can be
@@ -592,6 +654,14 @@ final class GenerationCoordinator {
             var dispatchedInThisTurn: [(ToolCall, ToolResult)] = []
 
             for try await event in stream.events {
+                guard !Task.isCancelled else { return }
+
+                // Thermal gate (cooperative): if the device is in `.critical`
+                // thermal state, pause between tokens until pressure drops to
+                // `.serious` or below, or until the surrounding task is
+                // cancelled. This is a no-op on the hot path — one provider
+                // read per event when temperature is fine.
+                await pauseWhileThermalCritical(token: request.token)
                 guard !Task.isCancelled else { return }
 
                 if case .token = event, request.stream.phase != .streaming {

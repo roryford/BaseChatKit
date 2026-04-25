@@ -39,6 +39,13 @@ public struct GenerationStreamConsumer: Sendable {
 
         case .kvCacheReuse:
             return .ignore
+
+        case .diagnosticThrottle:
+            // Throttle hints are advisory metadata; the consumer has no
+            // text/usage state to mutate. UI surfaces that want to render
+            // a "paused — device throttling" badge observe the raw event
+            // upstream instead of going through the action mapping.
+            return .ignore
         }
     }
 

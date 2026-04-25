@@ -206,6 +206,7 @@ final class ToolCallContractTests: XCTestCase {
             case .thinkingToken, .thinkingComplete: break
             case .toolResult, .toolLoopLimitReached: break
             case .kvCacheReuse: break
+            case .diagnosticThrottle: break
             }
         }
 
@@ -275,6 +276,7 @@ final class ToolCallContractTests: XCTestCase {
             case .thinkingToken, .thinkingComplete: break
             case .toolResult, .toolLoopLimitReached: break
             case .kvCacheReuse: break
+            case .diagnosticThrottle: break
             }
         }
 
