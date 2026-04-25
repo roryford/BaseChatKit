@@ -16,6 +16,71 @@ public protocol ConversationHistoryReceiver: AnyObject {
     func setConversationHistory(_ messages: [(role: String, content: String)])
 }
 
+/// One turn in a structured conversation history — a role plus an ordered
+/// list of ``MessagePart`` values.
+///
+/// This is the inference-layer companion to ``ChatMessageRecord``: it strips
+/// persistence-only fields (timestamp, sessionID, token counts) and exposes
+/// just what the generation pipeline needs to format prompts and serialize
+/// provider-specific request bodies. Crucially, ``parts`` retains
+/// ``MessagePart/thinking(_:signature:)`` blocks with their provider
+/// signatures intact so multi-turn replay against APIs that require the
+/// signature verbatim (Anthropic extended thinking) works on the second
+/// turn and beyond.
+///
+/// Text-only backends collapse a ``StructuredMessage`` back to
+/// `(role, content)` at their boundary — see
+/// ``GenerationCoordinator`` for the flattening rule (text parts joined,
+/// thinking parts dropped from the prompt).
+public struct StructuredMessage: Sendable, Hashable {
+
+    /// `"user"`, `"assistant"`, `"system"`, or `"tool"`.
+    public let role: String
+
+    /// Ordered content parts for this turn. May contain text, thinking
+    /// blocks (with optional signatures), images, and tool calls / results.
+    public let parts: [MessagePart]
+
+    public init(role: String, parts: [MessagePart]) {
+        self.role = role
+        self.parts = parts
+    }
+
+    /// Convenience constructor for a plain text turn.
+    public init(role: String, content: String) {
+        self.role = role
+        self.parts = [.text(content)]
+    }
+
+    /// Plain-text projection used by text-only backends. Concatenates every
+    /// `.text` part in order and drops every other part type.
+    ///
+    /// Thinking blocks are intentionally excluded: they would either be
+    /// double-counted against the context window or leak provider-internal
+    /// reasoning into prompts that the wire format does not natively
+    /// support. Backends that want to replay thinking adopt
+    /// ``StructuredHistoryReceiver`` instead and read ``parts`` directly.
+    public var textContent: String {
+        parts.compactMap(\.textContent).joined()
+    }
+}
+
+/// Adopted by backends that can consume the full structured conversation
+/// history — including thinking blocks with their provider signatures and
+/// tool call / result parts.
+///
+/// ``GenerationCoordinator`` calls this in addition to (not instead of)
+/// ``ConversationHistoryReceiver`` so backends can pick whichever shape
+/// matches their wire format. The Anthropic backend reads the structured
+/// form so it can serialize prior `thinking` content blocks with their
+/// `signature` verbatim — required for multi-turn extended-thinking
+/// requests. OpenAI-compatible reasoning APIs (DeepSeek, etc.) drop
+/// thinking on replay and continue to read the flattened
+/// ``ConversationHistoryReceiver`` form.
+public protocol StructuredHistoryReceiver: AnyObject {
+    func setStructuredHistory(_ messages: [StructuredMessage])
+}
+
 /// One entry in a tool-aware conversation history.
 ///
 /// Extends the plain `(role, content)` shape that ``ConversationHistoryReceiver``

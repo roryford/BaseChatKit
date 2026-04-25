@@ -89,7 +89,11 @@ final class GenerationCoordinator {
         let token: GenerationRequestToken
         let priority: GenerationPriority
         let sessionID: UUID?
-        let messages: [(role: String, content: String)]
+        /// Structured conversation history. Carries thinking signatures and
+        /// tool parts intact so cloud backends with structured wire formats
+        /// (Anthropic) can replay them on multi-turn requests; text-only
+        /// backends collapse this to `(role, content)` at their boundary.
+        let messages: [StructuredMessage]
         let systemPrompt: String?
         let config: GenerationConfig
         let stream: GenerationStream
@@ -150,6 +154,35 @@ final class GenerationCoordinator {
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false
     ) throws -> GenerationStream {
+        try generate(
+            structuredMessages: messages.map { StructuredMessage(role: $0.role, content: $0.content) },
+            systemPrompt: systemPrompt,
+            temperature: temperature,
+            topP: topP,
+            repeatPenalty: repeatPenalty,
+            maxOutputTokens: maxOutputTokens,
+            maxThinkingTokens: maxThinkingTokens,
+            jsonMode: jsonMode
+        )
+    }
+
+    /// Structured-message variant of ``generate(messages:...)``.
+    ///
+    /// Threads ``StructuredMessage`` (carrying ``MessagePart`` content
+    /// including thinking signatures) through to the backend boundary.
+    /// Backends adopting ``StructuredHistoryReceiver`` see the structured
+    /// form; text-only backends keep receiving the flattened `(role,
+    /// content)` shape via ``ConversationHistoryReceiver``.
+    func generate(
+        structuredMessages messages: [StructuredMessage],
+        systemPrompt: String? = nil,
+        temperature: Float = 0.7,
+        topP: Float = 0.9,
+        repeatPenalty: Float = 1.1,
+        maxOutputTokens: Int? = 2048,
+        maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false
+    ) throws -> GenerationStream {
         guard let backend = provider?.currentBackend else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
@@ -176,56 +209,10 @@ final class GenerationCoordinator {
         )
         config.maxThinkingTokens = maxThinkingTokens
 
-        // Exact-count pre-flight: backends that conform to TokenCountingBackend
-        // expose the real tokenizer. Use it to verify the assembled prompt fits
-        // inside the context window before committing to the C-level decode.
-        // The heuristic guard inside LlamaBackend.generate() remains as a
-        // fast-path sanity check for obviously-too-large prompts, but this
-        // trim-and-retry loop is the definitive gate that prevents KV overflow.
-        if let counter = backend as? TokenCountingBackend,
-           backend.capabilities.requiresPromptTemplate {
-            let result = try exactPreflightAndTrim(
-                counter: counter,
-                backend: backend,
-                messages: messages,
-                systemPrompt: systemPrompt,
-                config: config
-            )
-            if let historyReceiver = backend as? ConversationHistoryReceiver {
-                // Pass the trimmed messages so the backend's own history buffer
-                // reflects what was actually sent in the prompt.
-                historyReceiver.setConversationHistory(result.trimmedMessages)
-            }
-            return try backend.generate(
-                prompt: result.prompt,
-                systemPrompt: nil,
-                config: config
-            )
-        }
-
-        // Non-TokenCountingBackend path: assemble prompt and forward.
-        // For backends that require a prompt template, messages are formatted
-        // into a single string. Otherwise the most recent user message is
-        // passed directly and the system prompt goes through a separate channel.
-        let assembledPrompt: String
-        let effectiveSystemPrompt: String?
-
-        if backend.capabilities.requiresPromptTemplate {
-            let template = provider?.selectedPromptTemplate ?? .chatML
-            assembledPrompt = template.format(messages: messages, systemPrompt: systemPrompt)
-            effectiveSystemPrompt = nil
-        } else {
-            assembledPrompt = messages.last(where: { $0.role == "user" })?.content ?? ""
-            effectiveSystemPrompt = systemPrompt
-        }
-
-        if let historyReceiver = backend as? ConversationHistoryReceiver {
-            historyReceiver.setConversationHistory(messages)
-        }
-
-        return try backend.generate(
-            prompt: assembledPrompt,
-            systemPrompt: effectiveSystemPrompt,
+        return try dispatchToBackend(
+            backend: backend,
+            messages: messages,
+            systemPrompt: systemPrompt,
             config: config
         )
     }
@@ -245,6 +232,19 @@ final class GenerationCoordinator {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> GenerationStream {
+        try generateWithConfig(
+            structuredMessages: messages.map { StructuredMessage(role: $0.role, content: $0.content) },
+            systemPrompt: systemPrompt,
+            config: config
+        )
+    }
+
+    /// Structured-message variant of ``generateWithConfig(messages:...)``.
+    func generateWithConfig(
+        structuredMessages messages: [StructuredMessage],
+        systemPrompt: String?,
+        config: GenerationConfig
+    ) throws -> GenerationStream {
         guard let backend = provider?.currentBackend else {
             throw InferenceError.inferenceFailure("No model loaded")
         }
@@ -256,6 +256,35 @@ final class GenerationCoordinator {
             Self.jsonModeUnsupportedWarningHook?(backendType, message)
         }
 
+        return try dispatchToBackend(
+            backend: backend,
+            messages: messages,
+            systemPrompt: systemPrompt,
+            config: config
+        )
+    }
+
+    // MARK: - Backend dispatch (Private)
+
+    /// Common dispatch path shared by ``generate(structuredMessages:...)``
+    /// and ``generateWithConfig(structuredMessages:...)``.
+    ///
+    /// Performs the optional exact-token pre-flight + trim loop, hands the
+    /// structured history to ``StructuredHistoryReceiver`` adopters,
+    /// flattens to `(role, content)` for ``ConversationHistoryReceiver``
+    /// adopters, and finally invokes ``InferenceBackend/generate(...)``.
+    private func dispatchToBackend(
+        backend: InferenceBackend,
+        messages: [StructuredMessage],
+        systemPrompt: String?,
+        config: GenerationConfig
+    ) throws -> GenerationStream {
+        // Exact-count pre-flight: backends that conform to TokenCountingBackend
+        // expose the real tokenizer. Use it to verify the assembled prompt fits
+        // inside the context window before committing to the C-level decode.
+        // The heuristic guard inside LlamaBackend.generate() remains as a
+        // fast-path sanity check for obviously-too-large prompts, but this
+        // trim-and-retry loop is the definitive gate that prevents KV overflow.
         if let counter = backend as? TokenCountingBackend,
            backend.capabilities.requiresPromptTemplate {
             let result = try exactPreflightAndTrim(
@@ -265,9 +294,7 @@ final class GenerationCoordinator {
                 systemPrompt: systemPrompt,
                 config: config
             )
-            if let historyReceiver = backend as? ConversationHistoryReceiver {
-                historyReceiver.setConversationHistory(result.trimmedMessages)
-            }
+            installHistory(on: backend, structuredMessages: result.trimmedMessages)
             return try backend.generate(
                 prompt: result.prompt,
                 systemPrompt: nil,
@@ -275,20 +302,24 @@ final class GenerationCoordinator {
             )
         }
 
+        // Non-TokenCountingBackend path: assemble prompt and forward.
+        // For backends that require a prompt template, messages are formatted
+        // into a single string. Otherwise the most recent user message is
+        // passed directly and the system prompt goes through a separate channel.
+        let flattened = flatten(messages)
         let assembledPrompt: String
         let effectiveSystemPrompt: String?
+
         if backend.capabilities.requiresPromptTemplate {
             let template = provider?.selectedPromptTemplate ?? .chatML
-            assembledPrompt = template.format(messages: messages, systemPrompt: systemPrompt)
+            assembledPrompt = template.format(messages: flattened, systemPrompt: systemPrompt)
             effectiveSystemPrompt = nil
         } else {
-            assembledPrompt = messages.last(where: { $0.role == "user" })?.content ?? ""
+            assembledPrompt = flattened.last(where: { $0.role == "user" })?.content ?? ""
             effectiveSystemPrompt = systemPrompt
         }
 
-        if let historyReceiver = backend as? ConversationHistoryReceiver {
-            historyReceiver.setConversationHistory(messages)
-        }
+        installHistory(on: backend, structuredMessages: messages)
 
         return try backend.generate(
             prompt: assembledPrompt,
@@ -297,11 +328,44 @@ final class GenerationCoordinator {
         )
     }
 
+    /// Flattens ``StructuredMessage`` to the legacy `(role, content)` shape
+    /// for backends and helpers that operate on plain strings (prompt
+    /// templates, ``ConversationHistoryReceiver``).
+    ///
+    /// Thinking parts are dropped because they would either bloat the prompt
+    /// with provider-internal reasoning or fail validation on the
+    /// non-Anthropic providers that don't accept replayed thinking.
+    /// ``StructuredHistoryReceiver`` adopters read the unflattened form
+    /// directly to preserve thinking signatures.
+    private static func flatten(_ messages: [StructuredMessage]) -> [(role: String, content: String)] {
+        messages.map { (role: $0.role, content: $0.textContent) }
+    }
+
+    /// Instance-level wrapper around the static flatten so call sites stay readable.
+    private func flatten(_ messages: [StructuredMessage]) -> [(role: String, content: String)] {
+        Self.flatten(messages)
+    }
+
+    /// Hands history to whichever receiver protocol the backend conforms to.
+    ///
+    /// A backend may conform to both — ``StructuredHistoryReceiver`` is set
+    /// first so a backend that needs structured access (Anthropic) gets the
+    /// authoritative shape, and the flattened ``ConversationHistoryReceiver``
+    /// fallback is set afterwards for backends that only inspect strings.
+    private func installHistory(on backend: InferenceBackend, structuredMessages: [StructuredMessage]) {
+        if let structuredReceiver = backend as? StructuredHistoryReceiver {
+            structuredReceiver.setStructuredHistory(structuredMessages)
+        }
+        if let historyReceiver = backend as? ConversationHistoryReceiver {
+            historyReceiver.setConversationHistory(flatten(structuredMessages))
+        }
+    }
+
     // MARK: - Exact Pre-flight (Private)
 
     private struct ExactPreflightResult {
         let prompt: String
-        let trimmedMessages: [(role: String, content: String)]
+        let trimmedMessages: [StructuredMessage]
     }
 
     /// Counts tokens on the assembled prompt and trims the oldest non-system
@@ -314,7 +378,7 @@ final class GenerationCoordinator {
     private func exactPreflightAndTrim(
         counter: TokenCountingBackend,
         backend: InferenceBackend,
-        messages: [(role: String, content: String)],
+        messages: [StructuredMessage],
         systemPrompt: String?,
         config: GenerationConfig,
         maxTrimAttempts: Int = 20
@@ -340,7 +404,7 @@ final class GenerationCoordinator {
         var attempt = 0
 
         while true {
-            let prompt = template.format(messages: workingMessages, systemPrompt: systemPrompt)
+            let prompt = template.format(messages: Self.flatten(workingMessages), systemPrompt: systemPrompt)
             let promptTokens = try counter.countTokens(prompt)
 
             if promptTokens + maxOutput <= contextSize {
@@ -395,6 +459,46 @@ final class GenerationCoordinator {
 
     func enqueue(
         messages: [(role: String, content: String)],
+        systemPrompt: String? = nil,
+        temperature: Float = 0.7,
+        topP: Float = 0.9,
+        repeatPenalty: Float = 1.1,
+        maxOutputTokens: Int? = 2048,
+        maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false,
+        grammar: String? = nil,
+        tools: [ToolDefinition] = [],
+        toolChoice: ToolChoice = .auto,
+        maxToolIterations: Int = 10,
+        priority: GenerationPriority = .normal,
+        sessionID: UUID? = nil
+    ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
+        try enqueue(
+            structuredMessages: messages.map { StructuredMessage(role: $0.role, content: $0.content) },
+            systemPrompt: systemPrompt,
+            temperature: temperature,
+            topP: topP,
+            repeatPenalty: repeatPenalty,
+            maxOutputTokens: maxOutputTokens,
+            maxThinkingTokens: maxThinkingTokens,
+            jsonMode: jsonMode,
+            grammar: grammar,
+            tools: tools,
+            toolChoice: toolChoice,
+            maxToolIterations: maxToolIterations,
+            priority: priority,
+            sessionID: sessionID
+        )
+    }
+
+    /// Structured-message variant of ``enqueue(messages:...)``.
+    ///
+    /// Threads ``StructuredMessage`` (with thinking signatures and tool
+    /// parts intact) through the queue to the backend boundary. This is the
+    /// entry point used by ChatViewModel so prior-turn thinking blocks can
+    /// be replayed verbatim against APIs that require them (Anthropic).
+    func enqueue(
+        structuredMessages messages: [StructuredMessage],
         systemPrompt: String? = nil,
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -670,7 +774,7 @@ final class GenerationCoordinator {
             }
 
             let stream = try self.generateWithConfig(
-                messages: currentMessages,
+                structuredMessages: currentMessages,
                 systemPrompt: request.systemPrompt,
                 config: request.config
             )
@@ -779,7 +883,7 @@ final class GenerationCoordinator {
             // Otherwise augment the tool-aware history with the tool-call +
             // tool-result pairs the model produced this turn, then loop.
             var nextHistory = toolAwareHistory ?? currentMessages.map {
-                ToolAwareHistoryEntry(role: $0.role, content: $0.content)
+                ToolAwareHistoryEntry(role: $0.role, content: $0.textContent)
             }
             nextHistory.append(
                 ToolAwareHistoryEntry(

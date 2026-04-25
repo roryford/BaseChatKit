@@ -63,7 +63,7 @@ struct MessagePartsView: View {
         case .image(let data, _):
             imageView(data)
 
-        case .thinking(let text):
+        case .thinking(let text, _):
             // While reasoning is in progress (`isThinkingStreaming`), the part's
             // text holds whatever has been flushed so far by the streaming
             // batcher and is rendered inline as a live preview. Once

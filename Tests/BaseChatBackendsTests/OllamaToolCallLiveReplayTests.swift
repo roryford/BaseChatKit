@@ -172,7 +172,7 @@ final class OllamaToolCallLiveReplayTests: XCTestCase {
                     projected.append(ExpectedEvent(event: "toolCall", text: nil, tool_name: call.toolName, arguments_contains: nil, prompt: nil, completion: nil))
                 case .usage(let p, let c):
                     projected.append(ExpectedEvent(event: "usage", text: nil, tool_name: nil, arguments_contains: nil, prompt: p, completion: c))
-                case .thinkingToken, .thinkingComplete:
+                case .thinkingToken, .thinkingComplete, .thinkingSignature:
                     // Not exercised by tool-call fixtures; ignore for
                     // forward-compat with future thinking-in-tool-call
                     // captures.

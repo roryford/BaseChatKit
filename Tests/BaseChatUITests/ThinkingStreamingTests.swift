@@ -55,7 +55,7 @@ final class ThinkingStreamingTests: XCTestCase {
             // intent.
             let parts = vm.messages.first(where: { $0.id == id })?.contentParts ?? []
             let thinkingText = parts.compactMap { part -> String? in
-                if case .thinking(let s) = part { return s }
+                if case .thinking(let s, _) = part { return s }
                 return nil
             }.first
             thinkingTextHistory.append(thinkingText)
@@ -96,7 +96,7 @@ final class ThinkingStreamingTests: XCTestCase {
         // Authoritative final text is the full concatenated reasoning.
         let assistant = vm.messages.first(where: { $0.role == .assistant })
         let finalThinking = assistant?.contentParts.compactMap { part -> String? in
-            if case .thinking(let s) = part { return s }
+            if case .thinking(let s, _) = part { return s }
             return nil
         }.first
         XCTAssertEqual(
@@ -138,7 +138,7 @@ final class ThinkingStreamingTests: XCTestCase {
         GenerationCoordinator.appendVisibleText(", world", into: &msg)
 
         XCTAssertEqual(msg.contentParts.count, 2)
-        guard case .thinking(let t) = msg.contentParts[0] else {
+        guard case .thinking(let t, _) = msg.contentParts[0] else {
             return XCTFail("Expected leading .thinking part to survive append")
         }
         XCTAssertEqual(t, "reasoning")
@@ -174,7 +174,7 @@ final class ThinkingStreamingTests: XCTestCase {
         GenerationCoordinator.writeThinkingPartialText("Let me think", into: &msg)
 
         XCTAssertEqual(msg.contentParts.count, 2, "No new parts should be appended on partial flushes")
-        guard case .thinking(let t) = msg.contentParts[0] else {
+        guard case .thinking(let t, _) = msg.contentParts[0] else {
             return XCTFail("Index 0 must remain a .thinking part")
         }
         XCTAssertEqual(t, "Let me think")

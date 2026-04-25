@@ -31,6 +31,9 @@ public struct GenerationStreamConsumer: Sendable {
         case .thinkingComplete:
             return .finalizeThinking
 
+        case .thinkingSignature(let signature):
+            return .recordThinkingSignature(signature)
+
         case .toolResult(let result):
             return .appendToolResult(result)
 
@@ -71,6 +74,12 @@ public struct GenerationStreamConsumer: Sendable {
         case appendThinkingText(String)
         /// Reasoning block complete — finalize and store the accumulated thinking content.
         case finalizeThinking
+        /// Provider attached an opaque signature to the in-flight thinking
+        /// block. Caller stashes it so the next ``finalizeThinking`` writes
+        /// a ``MessagePart/thinking(_:signature:)`` carrying the signature
+        /// verbatim, enabling multi-turn replay against APIs that require
+        /// it (Anthropic).
+        case recordThinkingSignature(String)
         /// Append a dispatched ``ToolResult`` to the current assistant message's parts.
         case appendToolResult(ToolResult)
         /// The orchestrator stopped the tool-dispatch loop because the

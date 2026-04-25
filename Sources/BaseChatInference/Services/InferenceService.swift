@@ -191,6 +191,35 @@ public final class InferenceService {
         )
     }
 
+    /// Structured-message variant of ``generate(messages:...)``.
+    ///
+    /// Carries ``MessagePart`` content (including thinking blocks with
+    /// signatures) through to the backend boundary so cloud APIs that
+    /// require structured replay (Anthropic extended thinking) can
+    /// reconstruct prior turns without losing provider-supplied metadata.
+    public func generate(
+        structuredMessages messages: [StructuredMessage],
+        systemPrompt: String? = nil,
+        temperature: Float = 0.7,
+        topP: Float = 0.9,
+        repeatPenalty: Float = 1.1,
+        maxOutputTokens: Int? = 2048,
+        maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false
+    ) throws -> GenerationStream {
+        ensureProviderWired()
+        return try generation.generate(
+            structuredMessages: messages,
+            systemPrompt: systemPrompt,
+            temperature: temperature,
+            topP: topP,
+            repeatPenalty: repeatPenalty,
+            maxOutputTokens: maxOutputTokens,
+            maxThinkingTokens: maxThinkingTokens,
+            jsonMode: jsonMode
+        )
+    }
+
     // MARK: - Generation Queue
 
     /// Enqueues a generation request and returns a token + stream pair.
@@ -216,6 +245,46 @@ public final class InferenceService {
         ensureProviderWired()
         return try generation.enqueue(
             messages: messages,
+            systemPrompt: systemPrompt,
+            temperature: temperature,
+            topP: topP,
+            repeatPenalty: repeatPenalty,
+            maxOutputTokens: maxOutputTokens,
+            maxThinkingTokens: maxThinkingTokens,
+            jsonMode: jsonMode,
+            grammar: grammar,
+            tools: tools,
+            toolChoice: toolChoice,
+            maxToolIterations: maxToolIterations,
+            priority: priority,
+            sessionID: sessionID
+        )
+    }
+
+    /// Structured-message variant of ``enqueue(messages:...)``.
+    ///
+    /// Threads ``StructuredMessage`` through the queue so cloud backends
+    /// with structured wire formats (Anthropic) can replay prior assistant
+    /// turns including their thinking blocks and signatures verbatim.
+    public func enqueue(
+        structuredMessages messages: [StructuredMessage],
+        systemPrompt: String? = nil,
+        temperature: Float = 0.7,
+        topP: Float = 0.9,
+        repeatPenalty: Float = 1.1,
+        maxOutputTokens: Int? = 2048,
+        maxThinkingTokens: Int? = nil,
+        jsonMode: Bool = false,
+        grammar: String? = nil,
+        tools: [ToolDefinition] = [],
+        toolChoice: ToolChoice = .auto,
+        maxToolIterations: Int = 10,
+        priority: GenerationPriority = .normal,
+        sessionID: UUID? = nil
+    ) throws -> (token: GenerationRequestToken, stream: GenerationStream) {
+        ensureProviderWired()
+        return try generation.enqueue(
+            structuredMessages: messages,
             systemPrompt: systemPrompt,
             temperature: temperature,
             topP: topP,

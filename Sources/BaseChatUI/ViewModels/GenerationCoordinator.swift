@@ -249,8 +249,12 @@ final class GenerationCoordinator {
                 responseBuffer: responseBuffer,
                 tokenizer: cachingTokenizer
             )
-            let history: [(role: String, content: String)] = trimmed.map {
-                (role: $0.role.rawValue, content: $0.content)
+            // Build structured history that carries thinking signatures
+            // through to backends with structured wire formats (Anthropic).
+            // Text-only backends collapse this back to (role, content) at
+            // their own boundary via ``StructuredMessage/textContent``.
+            let history: [StructuredMessage] = trimmed.map {
+                StructuredMessage(role: $0.role.rawValue, parts: $0.contentParts)
             }
 
             // Surface the registered tool definitions so the model can call
@@ -260,7 +264,7 @@ final class GenerationCoordinator {
             let registeredTools = inferenceService.toolRegistry?.definitions ?? []
 
             let (token, stream) = try inferenceService.enqueue(
-                messages: history,
+                structuredMessages: history,
                 systemPrompt: effectiveSystemPrompt,
                 temperature: temperature(),
                 topP: topP(),
@@ -297,6 +301,13 @@ final class GenerationCoordinator {
                 // a subsequent <think>…</think> block in the same response starts
                 // a fresh accumulator.
                 var thinkingDisplayed = ""
+                // Most recent provider-supplied signature for the in-flight
+                // reasoning block. Set by ``recordThinkingSignature`` actions
+                // (Anthropic emits via `signature_delta`); consumed by the
+                // next ``finalizeThinking`` so the persisted
+                // ``MessagePart/thinking`` carries the signature for
+                // multi-turn replay.
+                var pendingThinkingSignature: String?
 
                 do {
                     eventLoop: for try await event in stream.events {
@@ -348,16 +359,15 @@ final class GenerationCoordinator {
                             if isFirstThinkingFragment {
                                 // Insert a placeholder `.thinking("")` part immediately so the
                                 // UI can render the "Thinking…" label during the reasoning phase
-                                // rather than staying on the generic typing placeholder. Mark
-                                // the message's thinking as actively streaming so the disclosure
-                                // group renders an inline preview rather than the "Thinking…"
-                                // static label.
+                                // rather than staying on the generic typing placeholder. The
+                                // placeholder is the *most recent* thinking-shaped part —
+                                // partial flushes and the next finalize target it via
+                                // `lastIndex(where:)` so multiple thinking blocks within one
+                                // response stay separate. (#604: signatures are per-block.)
                                 self.onMarkThinkingStreaming(messageID, true)
                                 self.onMutateMessage(messageID) { msg in
-                                    if msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) == nil {
-                                        let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
-                                        msg.contentParts.insert(.thinking(""), at: insertAt)
-                                    }
+                                    let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? msg.contentParts.endIndex
+                                    msg.contentParts.insert(.thinking(""), at: insertAt)
                                 }
                             }
                             // Flush partial reasoning text into the thinking part on the
@@ -371,6 +381,15 @@ final class GenerationCoordinator {
                                 }
                             }
 
+                        case .recordThinkingSignature(let signature):
+                            // Stash the provider-supplied signature; the next
+                            // `.finalizeThinking` writes it onto the in-flight
+                            // thinking part. Anthropic emits this between
+                            // `content_block_start` and the first `thinking_delta`,
+                            // so the placeholder may not exist yet — that's fine,
+                            // we apply at finalize time regardless of order.
+                            pendingThinkingSignature = signature
+
                         case .finalizeThinking:
                             // Drain any buffered partial fragments first so we don't
                             // miss display content on tight streams that finish before
@@ -379,29 +398,32 @@ final class GenerationCoordinator {
                                 thinkingDisplayed += batch
                             }
                             let block = thinkingAccumulator
+                            let signature = pendingThinkingSignature
                             thinkingAccumulator = ""
                             thinkingDisplayed = ""
+                            pendingThinkingSignature = nil
                             self.onMarkThinkingStreaming(messageID, false)
                             guard !block.isEmpty else { break }
                             self.onMutateMessage(messageID) { msg in
-                                // Append to any existing thinking part so multiple <think>…</think>
-                                // blocks within one response are concatenated into a single part.
-                                if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
-                                    let existing = msg.contentParts[idx].thinkingContent ?? ""
-                                    // The partial-streaming branch may have already written
-                                    // `block` (or a prefix of it) into `existing`. Replace the
-                                    // contents wholesale with the authoritative final text
-                                    // rather than concatenating it onto an in-flight prefix.
-                                    if existing == block || existing.isEmpty {
-                                        msg.contentParts[idx] = .thinking(block)
-                                    } else if block.hasPrefix(existing) {
-                                        msg.contentParts[idx] = .thinking(block)
-                                    } else {
-                                        msg.contentParts[idx] = .thinking(existing + "\n\n" + block)
-                                    }
+                                // Each finalize creates a fresh part rather than
+                                // merging with prior thinking parts. This preserves
+                                // per-block signatures (Anthropic issues one per
+                                // `content_block_start{type:"thinking"}`) and keeps
+                                // multiple reasoning rounds within one response
+                                // visually distinct in MessagePartsView.
+                                //
+                                // The placeholder for the *current* block is the
+                                // last `.thinking` part in the array — partial
+                                // flushes have been writing into it. Convert that
+                                // placeholder to the final text + signature; if no
+                                // placeholder exists (e.g. signature arrived after
+                                // a synthetic finalize), insert one ahead of text.
+                                if let idx = msg.contentParts.lastIndex(where: { $0.thinkingContent != nil }),
+                                   msg.contentParts[idx].thinkingSignature == nil {
+                                    msg.contentParts[idx] = .thinking(block, signature: signature)
                                 } else {
-                                    let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
-                                    msg.contentParts.insert(.thinking(block), at: insertAt)
+                                    let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? msg.contentParts.endIndex
+                                    msg.contentParts.insert(.thinking(block, signature: signature), at: insertAt)
                                 }
                             }
 
@@ -441,23 +463,23 @@ final class GenerationCoordinator {
                 }
 
                 // Finalize an unclosed thinking block — a model may emit <think>…
-                // without a closing tag if generation is cut short.
+                // without a closing tag if generation is cut short. Targets
+                // the *last* in-flight thinking part so previously finalized
+                // blocks (including their signatures) survive untouched.
                 if !thinkingAccumulator.isEmpty {
                     _ = thinkingBatcher.flush(now: ContinuousClock.now)
                     let block = thinkingAccumulator
+                    let signature = pendingThinkingSignature
                     thinkingAccumulator = ""
                     thinkingDisplayed = ""
+                    pendingThinkingSignature = nil
                     self.onMutateMessage(messageID) { msg in
-                        if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
-                            let existing = msg.contentParts[idx].thinkingContent ?? ""
-                            if existing == block || existing.isEmpty || block.hasPrefix(existing) {
-                                msg.contentParts[idx] = .thinking(block)
-                            } else {
-                                msg.contentParts[idx] = .thinking(existing + "\n\n" + block)
-                            }
+                        if let idx = msg.contentParts.lastIndex(where: { $0.thinkingContent != nil }),
+                           msg.contentParts[idx].thinkingSignature == nil {
+                            msg.contentParts[idx] = .thinking(block, signature: signature)
                         } else {
-                            let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
-                            msg.contentParts.insert(.thinking(block), at: insertAt)
+                            let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? msg.contentParts.endIndex
+                            msg.contentParts.insert(.thinking(block, signature: signature), at: insertAt)
                         }
                     }
                 }
@@ -573,7 +595,10 @@ final class GenerationCoordinator {
     /// fragment) so each flush mutates the same part rather than appending new
     /// ones — keeping the message structure stable across rerenders.
     static func writeThinkingPartialText(_ partial: String, into msg: inout ChatMessageRecord) {
-        guard let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) else {
+        // Target the most recent thinking part — that's the in-flight
+        // placeholder for the current reasoning block. Earlier blocks were
+        // already finalized and must not be mutated.
+        guard let idx = msg.contentParts.lastIndex(where: { $0.thinkingContent != nil }) else {
             // The placeholder should always exist by the time partial flushes
             // run, but if it doesn't (e.g. tests that drive this helper
             // directly), insert one ahead of any visible text.
@@ -581,7 +606,11 @@ final class GenerationCoordinator {
             msg.contentParts.insert(.thinking(partial), at: insertAt)
             return
         }
-        msg.contentParts[idx] = .thinking(partial)
+        // Preserve any signature already attached to this part — partial
+        // flushes only update the text. Signatures arrive separately and
+        // are written by the finalize path.
+        let signature = msg.contentParts[idx].thinkingSignature
+        msg.contentParts[idx] = .thinking(partial, signature: signature)
     }
 
     /// Substitutes `{{key}}` tokens in `text` with values from `context`.

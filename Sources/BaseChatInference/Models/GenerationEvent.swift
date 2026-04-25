@@ -24,6 +24,20 @@ public enum GenerationEvent: Sendable, Equatable {
     /// Reasoning block complete (depth 1→0 transition). Finalize accumulated thinking content.
     case thinkingComplete
 
+    /// Provider-supplied opaque signature attached to the most recent
+    /// thinking block. Emitted by backends (Anthropic) whose APIs require
+    /// the signature verbatim on multi-turn replay.
+    ///
+    /// Fired between the block's `content_block_start` and the first
+    /// `content_block_delta`, before any ``thinkingToken`` events for the
+    /// same block. Consumers attach the signature to the in-flight
+    /// reasoning accumulator so it lands on the persisted
+    /// ``MessagePart/thinking(_:signature:)`` part once
+    /// ``thinkingComplete`` arrives. Backends without a signature concept
+    /// (MLX inline `<think>`, OpenAI `reasoning_content`, Llama) never
+    /// emit this event.
+    case thinkingSignature(String)
+
     /// The orchestrator terminated a tool-dispatch loop because the per-request
     /// iteration budget (``GenerationConfig/maxToolIterations``) was reached.
     ///
