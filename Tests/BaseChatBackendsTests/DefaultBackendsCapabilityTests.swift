@@ -31,7 +31,10 @@ final class DefaultBackendsCapabilityTests: XCTestCase {
     }
 
     func test_canLoad_provider_alwaysTrue() {
-        // Cloud providers are always available in BaseChatBackends.
+        // `DefaultBackends.canLoad(provider:)` reports static availability —
+        // it always returns `true` (provider data lives in BaseChatInference
+        // and is independent of trait gating). The actual factory may still
+        // return `nil` for a provider when its trait is disabled.
         for provider in APIProvider.allCases {
             XCTAssertTrue(DefaultBackends.canLoad(provider: provider),
                           "Expected \(provider) to always be supported")
@@ -44,8 +47,10 @@ final class DefaultBackendsCapabilityTests: XCTestCase {
         let service = InferenceService()
         DefaultBackends.register(with: service)
 
-        // All cloud providers must be declared after registration.
-        for provider in APIProvider.allCases {
+        // Cloud providers compiled into this build must be declared after
+        // registration. Providers gated out by `Ollama` / `CloudSaaS` traits
+        // intentionally stay un-declared.
+        for provider in APIProvider.availableInBuild {
             XCTAssertTrue(service.canLoad(provider: provider),
                           "Expected \(provider) to be declared after DefaultBackends.register")
         }
@@ -83,7 +88,7 @@ final class DefaultBackendsCapabilityTests: XCTestCase {
         DefaultBackends.register(with: service)
         let snapshot = service.registeredBackendSnapshot()
 
-        for provider in APIProvider.allCases {
+        for provider in APIProvider.availableInBuild {
             XCTAssertTrue(snapshot.cloudProviders.contains(provider),
                           "\(provider) missing from snapshot after registration")
         }
@@ -110,15 +115,22 @@ final class DefaultBackendsCapabilityTests: XCTestCase {
                        DefaultBackends.supportedModelTypes,
                        "FrameworkCapabilityService.enabledBackends should match static query after refresh")
 
-        XCTAssertTrue(capService.enabledBackends.supportsCloudInference,
-                      "Cloud inference should be supported after DefaultBackends registration")
+        // Cloud inference support tracks whichever providers the build's
+        // traits compiled in. Offline builds (neither `Ollama` nor
+        // `CloudSaaS`) declare none, so `supportsCloudInference` is false.
+        let expected = !APIProvider.availableInBuild.isEmpty
+        XCTAssertEqual(capService.enabledBackends.supportsCloudInference, expected,
+                       "Cloud inference support should match the trait-gated provider list")
     }
 
     // Sabotage check: without register(), cloud providers are absent.
     func test_withoutRegister_cloudProvidersNotDeclared_sabotageCheck() {
         let service = InferenceService()
         // Do NOT call register(with:).
-        XCTAssertFalse(service.canLoad(provider: .claude),
+        // Use whichever provider the current build can build, falling back to
+        // `.claude` purely so the assertion compiles in offline builds.
+        let probe = APIProvider.availableInBuild.first ?? .claude
+        XCTAssertFalse(service.canLoad(provider: probe),
                        "Without registration, no provider should be declared")
     }
 }

@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import XCTest
 @testable import BaseChatBackends
 import BaseChatInference
@@ -217,3 +218,4 @@ final class DNSRebindingGuardTests: XCTestCase {
         }
     }
 }
+#endif

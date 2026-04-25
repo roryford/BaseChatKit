@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import Foundation
 import os
 import BaseChatInference
@@ -610,3 +611,5 @@ private final class WeakBox<T: AnyObject>: @unchecked Sendable {
     weak var value: T?
     init(_ value: T?) { self.value = value }
 }
+#endif
+

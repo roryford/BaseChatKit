@@ -1,3 +1,4 @@
+#if CloudSaaS
 import XCTest
 import BaseChatCore
 import BaseChatInference
@@ -418,3 +419,4 @@ extension ClaudeBackendTests {
     }
 }
 
+#endif

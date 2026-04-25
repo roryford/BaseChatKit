@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import XCTest
 import BaseChatCore
 import BaseChatTestSupport
@@ -161,3 +162,4 @@ final class BackendCapabilitiesContractTests: XCTestCase {
     }
 #endif
 }
+#endif

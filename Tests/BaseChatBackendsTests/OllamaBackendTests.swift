@@ -1,3 +1,4 @@
+#if Ollama
 import Testing
 import XCTest
 import Foundation
@@ -1688,3 +1689,4 @@ private func extractBody(from request: URLRequest?) throws -> Data {
     Issue.record("Request has neither httpBody nor httpBodyStream")
     return Data()
 }
+#endif

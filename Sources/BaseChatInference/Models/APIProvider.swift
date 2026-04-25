@@ -37,4 +37,22 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         case .custom: return "model"
         }
     }
+
+    /// The providers actually available in this build.
+    ///
+    /// Iterates the cases compatible with the `Ollama` and `CloudSaaS` traits.
+    /// Use this when a UI or registration loop should only present providers
+    /// the build can actually instantiate. ``allCases`` stays unconditional —
+    /// it's data, not behaviour, and `ConversationRecords.selectedEndpointID`
+    /// must be able to decode any case regardless of build flavour.
+    public static var availableInBuild: [APIProvider] {
+        var result: [APIProvider] = []
+        #if CloudSaaS
+        result.append(contentsOf: [.claude, .openAI, .lmStudio, .custom])
+        #endif
+        #if Ollama
+        result.append(.ollama)
+        #endif
+        return result
+    }
 }

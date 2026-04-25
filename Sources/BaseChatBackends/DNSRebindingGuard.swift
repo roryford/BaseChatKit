@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import Darwin
 import Foundation
 import BaseChatInference
@@ -126,3 +127,5 @@ public enum DNSRebindingGuard {
         }.value
     }
 }
+
+#endif

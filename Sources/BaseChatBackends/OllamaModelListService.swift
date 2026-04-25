@@ -1,3 +1,4 @@
+#if Ollama
 import Foundation
 import os
 import BaseChatInference
@@ -110,3 +111,5 @@ public final class OllamaModelListService: Sendable {
             .sorted { $0.name < $1.name }
     }
 }
+
+#endif

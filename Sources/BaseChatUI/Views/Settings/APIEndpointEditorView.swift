@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import SwiftUI
 import BaseChatCore
 import BaseChatInference
@@ -32,7 +33,7 @@ public struct APIEndpointEditorView: View {
             Form {
                 Section("Provider") {
                     Picker("Provider", selection: $provider) {
-                        ForEach(APIProvider.allCases) { p in
+                        ForEach(APIProvider.availableInBuild) { p in
                             Text(p.rawValue).tag(p)
                         }
                     }
@@ -114,7 +115,7 @@ public struct APIEndpointEditorView: View {
                 if !isEditing {
                     baseURL = newProvider.defaultBaseURL
                     modelName = newProvider.defaultModelName
-                    if name.isEmpty || APIProvider.allCases.map(\.rawValue).contains(name) {
+                    if name.isEmpty || APIProvider.availableInBuild.map(\.rawValue).contains(name) {
                         name = newProvider.rawValue
                     }
                 }
@@ -224,3 +225,5 @@ public struct APIEndpointEditorView: View {
     APIEndpointEditorView(endpoint: nil)
         .modelContainer(for: APIEndpoint.self, inMemory: true)
 }
+#endif
+

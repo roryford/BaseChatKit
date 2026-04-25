@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import XCTest
 import BaseChatInference
 import BaseChatTestSupport
@@ -130,3 +131,4 @@ final class AllBackendsAcceptPlanTests: XCTestCase {
         #endif
     }
 }
+#endif

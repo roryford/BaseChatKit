@@ -1,3 +1,4 @@
+#if CloudSaaS
 import Testing
 import Foundation
 @testable import BaseChatBackends
@@ -298,3 +299,4 @@ struct CloudErrorSanitizerE2ETests {
         }
     }
 }
+#endif

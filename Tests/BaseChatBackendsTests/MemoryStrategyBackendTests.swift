@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import XCTest
 @testable import BaseChatBackends
 import BaseChatCore
@@ -34,3 +35,4 @@ final class MemoryStrategyBackendTests: XCTestCase {
     }
     #endif
 }
+#endif

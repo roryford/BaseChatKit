@@ -20,6 +20,11 @@ public enum CloudBackendError: LocalizedError {
     /// IP address at connect time, indicating a potential DNS rebinding attack.
     /// The associated value describes which address triggered the block.
     case blockedAddress(String)
+    /// The runtime kill-switch ``URLSessionProvider/networkDisabled`` was
+    /// `true` when a cloud backend tried to obtain a `URLSession`. Belt-and-
+    /// suspenders mitigation for regulated runtimes that need to lock the
+    /// network even in a `full`-trait build. Not retryable.
+    case networkDisabled
 
     public var errorDescription: String? {
         switch self {
@@ -52,6 +57,8 @@ public enum CloudBackendError: LocalizedError {
             return "No response received for \(duration.components.seconds)s."
         case .blockedAddress(let detail):
             return "Connection blocked: the endpoint resolved to a private or reserved address. \(detail)"
+        case .networkDisabled:
+            return "Network access is disabled by the runtime kill-switch (URLSessionProvider.networkDisabled)."
         }
     }
 
@@ -62,7 +69,7 @@ public enum CloudBackendError: LocalizedError {
         case .serverError(let statusCode, _):
             return statusCode >= 500
         case .invalidURL, .authenticationFailed, .parseError, .missingAPIKey,
-             .backendDeallocated, .blockedAddress:
+             .backendDeallocated, .blockedAddress, .networkDisabled:
             return false
         }
     }

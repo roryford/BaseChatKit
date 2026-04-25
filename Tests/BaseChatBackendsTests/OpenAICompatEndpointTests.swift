@@ -1,3 +1,4 @@
+#if CloudSaaS
 import Testing
 import Foundation
 @testable import BaseChatBackends
@@ -533,3 +534,4 @@ struct ProviderSSEPayloadTests {
 // 5. Authentication:
 //    - Ollama does not require API keys by default.
 //    - OpenAIBackend correctly omits the Authorization header when apiKey is nil.
+#endif

@@ -1,3 +1,4 @@
+#if Ollama
 import XCTest
 import Foundation
 @testable import BaseChatBackends
@@ -230,3 +231,4 @@ final class OllamaToolCallLiveReplayTests: XCTestCase {
         }
     }
 }
+#endif

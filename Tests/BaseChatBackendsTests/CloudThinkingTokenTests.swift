@@ -1,3 +1,4 @@
+#if CloudSaaS
 import Testing
 import Foundation
 @testable import BaseChatBackends
@@ -327,3 +328,4 @@ struct OpenAIReasoningTests {
         #expect(!sawThinkingComplete, ".thinkingComplete must not fire for plain Chat Completions streams")
     }
 }
+#endif
