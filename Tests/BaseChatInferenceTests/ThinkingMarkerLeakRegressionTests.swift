@@ -3,12 +3,11 @@ import XCTest
 
 /// Regression tests for the non-ChatML thinking-marker leak — DeepSeek-R1 GGUFs
 /// and similar reasoning models using the Llama3 prompt template still emit
-/// `<think>…</think>` blocks. `LlamaGenerationDriver` now runs a sniff window
-/// on top of `ThinkingParser`: when the active `PromptTemplate` reports
-/// `thinkingMarkers == nil`, the driver buffers the first 64 bytes of output
-/// and, if `<think>` appears, retroactively replays the buffer through a
-/// `ThinkingParser(.qwen3)`. This file pins the replay semantics — the same
-/// behaviour the driver relies on.
+/// `<think>…</think>` blocks. The driver originally ran a 64-byte sniff window
+/// at generate time; that has been replaced by load-time auto-detection
+/// (`LlamaModelLoader.readChatTemplateMetadata` + `ThinkingMarkers.fromChatTemplate`).
+/// These tests still pin the underlying `ThinkingParser` semantics that both
+/// the old sniff replay and the new explicit-markers path depend on.
 final class ThinkingMarkerLeakRegressionTests: XCTestCase {
 
     // MARK: - Helpers

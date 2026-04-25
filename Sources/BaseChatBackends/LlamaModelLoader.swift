@@ -29,6 +29,10 @@ final class LlamaModelLoader: @unchecked Sendable {
         let model: LlamaModelHandle
         let context: LlamaContextHandle
         let effectiveContextSize: Int32
+        /// Auto-detected thinking-marker pair sniffed from
+        /// `tokenizer.chat_template` GGUF metadata. `nil` when the metadata
+        /// is absent or no known marker pair appears in the template.
+        let autoDetectedThinkingMarkers: ThinkingMarkers?
         var vocab: OpaquePointer? { context.vocabPtr }
     }
 
@@ -177,10 +181,18 @@ final class LlamaModelLoader: @unchecked Sendable {
             vocab: llama_model_get_vocab(rawModel)
         )
 
+        // Sniff the GGUF's chat template for known thinking-marker pairs. A
+        // missing or empty template is fine — callers treat nil as "no
+        // auto-detected markers" and fall back to whatever the caller passes
+        // explicitly via `GenerationConfig.thinkingMarkers`.
+        let autoMarkers = Self.readChatTemplateMetadata(model: rawModel)
+            .flatMap { ThinkingMarkers.fromChatTemplate($0) }
+
         return LoadedResources(
             model: modelHandle,
             context: contextHandle,
-            effectiveContextSize: effectiveContextSize
+            effectiveContextSize: effectiveContextSize,
+            autoDetectedThinkingMarkers: autoMarkers
         )
     }
 
@@ -214,6 +226,33 @@ final class LlamaModelLoader: @unchecked Sendable {
     /// Returns true when `architecture` is on the non-LM denylist.
     static func isUnsupportedArchitecture(_ architecture: String) -> Bool {
         unsupportedArchitectures.contains(architecture.lowercased())
+    }
+
+    /// Reads `tokenizer.chat_template` from the loaded GGUF model's metadata.
+    ///
+    /// Returns `nil` when the key is absent or the metadata read fails.
+    /// Chat templates can be several KB of Jinja so we probe for the size
+    /// first, then allocate a correctly-sized buffer for the second call.
+    /// `llama_model_meta_val_str` returns the byte length the value would
+    /// require (excluding the null terminator) when the supplied buffer is
+    /// too small, or a negative value when the key is not present.
+    static func readChatTemplateMetadata(model: OpaquePointer) -> String? {
+        let key = "tokenizer.chat_template"
+        // Probe with a single-byte buffer to learn the required size. The
+        // function still returns the value's length even when the buffer
+        // can't fit it; a negative return means the key wasn't found.
+        var probe: [CChar] = [0]
+        let needed = probe.withUnsafeMutableBufferPointer { ptr in
+            llama_model_meta_val_str(model, key, ptr.baseAddress, ptr.count)
+        }
+        guard needed > 0 else { return nil }
+        // Allocate one extra byte for the null terminator.
+        var buffer = [CChar](repeating: 0, count: Int(needed) + 1)
+        let written = buffer.withUnsafeMutableBufferPointer { ptr in
+            llama_model_meta_val_str(model, key, ptr.baseAddress, ptr.count)
+        }
+        guard written > 0 else { return nil }
+        return String(cString: buffer)
     }
 
     /// Reads `general.architecture` from the loaded GGUF model's metadata.

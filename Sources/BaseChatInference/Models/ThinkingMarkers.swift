@@ -52,6 +52,18 @@ public struct ThinkingMarkers: Sendable, Equatable {
     /// generations (e.g. `phi3`) are not thinking-model variants and return
     /// `nil`. Unknown models likewise return `nil` so callers can opt out of
     /// thinking-tag filtering cleanly.
+    /// Returns the most-specific preset for a given Jinja chat-template string
+    /// by sniffing the open/close marker pairs the template references.
+    ///
+    /// Both halves of a pair (e.g. `<think>` and `</think>`) must appear for
+    /// that family to be returned. A template with neither pair returns `nil`,
+    /// letting backends opt out of thinking parsing on non-reasoning models.
+    /// See ``PromptTemplateDetector/detectThinkingMarkers(from:)`` for the full
+    /// precedence rules.
+    public static func fromChatTemplate(_ chatTemplate: String) -> ThinkingMarkers? {
+        PromptTemplateDetector.detectThinkingMarkers(from: chatTemplate)
+    }
+
     public static func forModel(named name: String) -> ThinkingMarkers? {
         let lowered = name.lowercased()
 

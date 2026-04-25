@@ -34,6 +34,22 @@ public final class MockMLXModelContainer: @unchecked Sendable {
     /// When set, `generate` throws this error instead of yielding tokens.
     public var generateError: Error?
 
+    /// Simulates a chat-template / tokenizer rejection at `apply_chat_template` time.
+    ///
+    /// When set, `generate(messages:parameters:)` throws this error before yielding
+    /// any token — modeling the failure mode where the loaded tokenizer either has
+    /// no chat template (`tokenizer_config.json` missing the `chat_template` field)
+    /// or the template rejects the supplied message set (e.g. missing
+    /// `<|assistant|>` marker, wrong role ordering). The error surfaces unwrapped
+    /// through `MLXBackend.generate`'s GenerationStream — see issue #551.
+    public var simulatedTokenizerApplyFailure: Error?
+
+    /// Optional stand-in for the tokenizer's `chat_template` field. The mock does
+    /// NOT itself apply a Jinja template — production MLXModelContainer does that
+    /// internally — but tests can set this to document which template shape they
+    /// are exercising and assert the backend hands compatible messages along.
+    public var simulatedChatTemplate: String?
+
     // MARK: - Observation
 
     /// Number of times `generate(messages:parameters:)` was called.
@@ -41,6 +57,11 @@ public final class MockMLXModelContainer: @unchecked Sendable {
 
     /// Last messages passed to `generate`.
     public private(set) var lastMessages: [[String: String]]?
+
+    /// Last `GenerateParameters` value passed to `generate`. Useful for asserting
+    /// that `MLXBackend` forwards `temperature` / `topP` / `topK` / `minP` /
+    /// `repetitionPenalty` from the caller's `GenerationConfig`.
+    public private(set) var lastParameters: GenerateParameters?
 
     public init() {}
 
@@ -52,6 +73,11 @@ public final class MockMLXModelContainer: @unchecked Sendable {
     ) async throws -> AsyncStream<Generation> {
         generateCallCount += 1
         lastMessages = messages
+        lastParameters = parameters
+        // Tokenizer-apply failures throw before any token is yielded — that is
+        // the failure mode `MLXBackend` sees when a template is missing or the
+        // message set is rejected by the chat template.
+        if let error = simulatedTokenizerApplyFailure { throw error }
         if let error = generateError { throw error }
 
         let tokens = tokensToYield

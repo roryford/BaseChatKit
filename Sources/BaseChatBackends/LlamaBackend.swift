@@ -103,6 +103,13 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
     /// Guarded by `stateLock`. Non-nil after a successful prompt decode; nil after reset.
     private var sessionKVState: SessionKVState?
 
+    /// Thinking-marker pair auto-detected from the GGUF's `tokenizer.chat_template`.
+    /// `nil` when the model is not loaded, the chat template is missing, or no
+    /// known marker pair was found in the template. `GenerationConfig.thinkingMarkers`
+    /// always overrides this — see the generate path below.
+    /// Guarded by `stateLock`.
+    private var _autoDetectedThinkingMarkers: ThinkingMarkers?
+
     // MARK: - Memory Pressure
 
     /// Monitors OS-level memory pressure so the decode loop can be aborted before
@@ -203,6 +210,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             self.vocab = loadedResources.vocab
             self.isModelLoaded = true
             self._effectiveContextSize = loadedResources.effectiveContextSize
+            self._autoDetectedThinkingMarkers = loadedResources.autoDetectedThinkingMarkers
             return true
         }
 
@@ -344,6 +352,10 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             }
 
             let driver = LlamaGenerationDriver()
+            // Manual override beats auto-detection. When neither is present,
+            // markers stays nil and the driver skips ThinkingParser entirely.
+            let autoDetected = self.withStateLock { self._autoDetectedThinkingMarkers }
+            let resolvedMarkers = config.thinkingMarkers ?? autoDetected
             let kvCoherent = await driver.run(
                 context: context,
                 vocab: vocab,
@@ -351,7 +363,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
                 reuseLen: reuseLen,
                 maxTokens: maxTokens,
                 config: config,
-                markers: config.thinkingMarkers,
+                markers: resolvedMarkers,
                 isCancelled: {
                     Task.isCancelled || self.cancelled.load(ordering: .sequentiallyConsistent)
                 },
@@ -442,6 +454,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
         isModelLoaded = false
         isGenerating = false
         sessionKVState = nil
+        _autoDetectedThinkingMarkers = nil
         stateLock.unlock()
 
         capturedTask?.cancel()

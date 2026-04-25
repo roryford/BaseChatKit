@@ -165,6 +165,59 @@ final class MLXModelE2ETests: XCTestCase {
         XCTAssertTrue(backend.capabilities.supportsSystemPrompt)
         XCTAssertTrue(backend.capabilities.supportsTokenCounting)
     }
+
+    // MARK: - Stripped tokenizer fixture (#551)
+
+    /// Loading a model snapshot with `tokenizer_config.json` removed must surface
+    /// a structured error rather than crashing or hanging. The mock-container path
+    /// in `MLXBackendGenerationTests` covers the *generation*-time failure mode
+    /// (chat template missing); this E2E exercises the *load*-time path with a
+    /// real on-disk model directory, confirming `MLXBackend.loadModel` wraps the
+    /// underlying tokenizer error in `InferenceError.modelLoadFailed`.
+    func test_loadModel_strippedTokenizerConfig_throwsModelLoadFailed() async throws {
+        // Start from a clean backend so this test owns the load attempt.
+        backend.unloadModel()
+
+        // Copy the resolved model dir to a temp location and delete tokenizer_config.json.
+        let fm = FileManager.default
+        let stagingRoot = fm.temporaryDirectory
+            .appendingPathComponent("MLXStrippedFixture-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: stagingRoot) }
+
+        let strippedURL = stagingRoot.appendingPathComponent(modelURL.lastPathComponent, isDirectory: true)
+        try fm.copyItem(at: modelURL, to: strippedURL)
+
+        let tokenizerConfig = strippedURL.appendingPathComponent("tokenizer_config.json")
+        guard fm.fileExists(atPath: tokenizerConfig.path) else {
+            throw XCTSkip("Source model has no tokenizer_config.json — cannot exercise the strip path")
+        }
+        try fm.removeItem(at: tokenizerConfig)
+
+        // Loading must throw modelLoadFailed (or a structurally-equivalent error).
+        var caught: Error?
+        do {
+            try await backend.loadModel(from: strippedURL, plan: .testStub(effectiveContextSize: 2048))
+        } catch {
+            caught = error
+        }
+
+        let unwrapped = try XCTUnwrap(caught,
+            "Loading a snapshot stripped of tokenizer_config.json must throw")
+
+        if case InferenceError.modelLoadFailed = unwrapped {
+            // Expected — MLXBackend.loadModel wraps the underlying tokenizer
+            // failure in modelLoadFailed before throwing.
+        } else {
+            XCTFail("Expected InferenceError.modelLoadFailed, got \(unwrapped)")
+        }
+
+        XCTAssertFalse(backend.isModelLoaded,
+            "isModelLoaded must remain false after a failed load")
+
+        // Sabotage check: skipping the `try fm.removeItem(at: tokenizerConfig)`
+        // call lets the load succeed and `caught` stays nil, failing the XCTUnwrap.
+    }
 }
 
 #endif

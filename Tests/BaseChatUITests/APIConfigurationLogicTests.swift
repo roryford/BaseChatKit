@@ -52,8 +52,9 @@ final class APIConfigurationLogicTests: XCTestCase {
 
     func test_provider_allCases_containsAllProviders() {
         let cases = APIProvider.allCases
-        XCTAssertEqual(cases.count, 5, "Should have 5 providers")
+        XCTAssertEqual(cases.count, 6, "Should have 6 providers")
         XCTAssertTrue(cases.contains(.openAI))
+        XCTAssertTrue(cases.contains(.openAIResponses))
         XCTAssertTrue(cases.contains(.claude))
         XCTAssertTrue(cases.contains(.ollama))
         XCTAssertTrue(cases.contains(.lmStudio))
@@ -215,8 +216,8 @@ final class APIConfigurationLogicTests: XCTestCase {
         let requireKey = APIProvider.allCases.filter(\.requiresAPIKey)
         let noKey = APIProvider.allCases.filter { !$0.requiresAPIKey }
 
-        XCTAssertEqual(Set(requireKey), [.openAI, .claude, .custom],
-                       "Only OpenAI, Claude, and Custom should require API keys")
+        XCTAssertEqual(Set(requireKey), [.openAI, .openAIResponses, .claude, .custom],
+                       "Only OpenAI (Chat & Responses), Claude, and Custom should require API keys")
         XCTAssertEqual(Set(noKey), [.ollama, .lmStudio],
                        "Ollama and LM Studio should not require API keys")
     }

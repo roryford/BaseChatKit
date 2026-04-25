@@ -67,6 +67,7 @@ public enum DefaultBackends {
         #if CloudSaaS
         case .claude:                     return "ClaudeBackend"
         case .openAI, .lmStudio, .custom: return "OpenAIBackend"
+        case .openAIResponses:            return "OpenAIResponsesBackend"
         #endif
         #if Ollama
         case .ollama:                     return "OllamaBackend"
@@ -122,6 +123,7 @@ public enum DefaultBackends {
             #if CloudSaaS
             case .claude:                     return ClaudeBackend()
             case .openAI, .lmStudio, .custom: return OpenAIBackend()
+            case .openAIResponses:            return OpenAIResponsesBackend()
             #endif
             #if Ollama
             // FIXME(#714): expected deprecation warning until the next major

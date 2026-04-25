@@ -100,6 +100,12 @@ BaseChatBackends/OllamaBackend.swift:guard let json = try? JSONSerialization.jso
 BaseChatBackends/OpenAIBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
 BaseChatBackends/SSECloudBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
 
+# parseDelta / parseUsage / parseErrorMessage: SSE payload probes for the
+# OpenAI Responses-API named-event stream. Malformed JSON on a probe is a
+# non-event — the parser ignores the payload, same pattern as the Chat
+# Completions handlers above.
+BaseChatBackends/OpenAIResponsesBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+
 # MLXBackend.validateArchitecture: best-effort read of the MLX model's
 # `config.json`. A missing/unreadable/malformed config is not fatal here
 # — we deliberately fall through so mlx-swift-lm's own load path produces

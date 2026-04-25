@@ -54,7 +54,10 @@ struct LlamaGenerationDriver {
     ///   - config: Sampling parameters (temperature, topP, repeatPenalty).
     ///   - markers: Thinking markers for the active template, or nil to disable ThinkingParser.
     ///     When non-nil, `.thinkingToken` / `.thinkingComplete` events are emitted for reasoning
-    ///     content and `config.maxThinkingTokens` is enforced.
+    ///     content and `config.maxThinkingTokens` is enforced. When nil, every decoded chunk
+    ///     surfaces as a plain `.token` event — there is no longer a sniff-mode fallback that
+    ///     retroactively engages the parser on raw `<think>` substrings; auto-detection at
+    ///     load time replaced it.
     ///   - isCancelled: Closure that returns `true` when the caller has requested
     ///     cancellation (combines `Task.isCancelled` and the backend's `Atomic<Bool>`).
     ///   - generationStream: Stream whose phase is updated on the main actor.
@@ -255,46 +258,35 @@ struct LlamaGenerationDriver {
         var invalidUTF8: [CChar] = []
         var isFirstToken = true
 
-        // Thinking-marker handling has three modes:
+        // Thinking-marker handling has two modes:
         //
-        // 1. Eager — `markers != nil` (template advertises thinking). Every decoded
-        //    token flows through `ThinkingParser` from the first byte.
+        // 1. Eager — `markers != nil` (caller passed explicit markers, or the
+        //    backend auto-detected them from the GGUF chat template). Every
+        //    decoded token flows through `ThinkingParser` from the first byte.
         //
-        // 2. Sniff — `markers == nil` (template does NOT advertise thinking). A small
-        //    byte window is accumulated and scanned for `<think>`. If the marker
-        //    appears inside the budget, the captured prefix is replayed through a
-        //    fresh `ThinkingParser(.qwen3)` and the driver switches to eager mode for
-        //    the remainder of the stream. This catches DeepSeek-R1 GGUFs that use a
-        //    non-ChatML prompt template but still emit `<think>…</think>` content.
-        //
-        // 3. Passthrough — sniff budget exhausted without a marker. Every subsequent
-        //    token yields `.token` with no tag scanning, matching non-reasoning
-        //    models' fast path.
-        //
-        // `useParser` starts true for mode 1 and flips true for mode 2 if sniffing
-        // detects a marker. Once true it never reverts.
+        // 2. Disabled — `markers == nil`. The model does not advertise reasoning
+        //    blocks, so every token yields `.token` with no tag scanning. Raw
+        //    `<think>` substrings (if the model emits them anyway) surface as
+        //    visible text rather than `.thinkingToken` events. This matches
+        //    non-reasoning models' fast path. Removed in this change: an
+        //    earlier "sniff" mode that probed the first 64 bytes for `<think>`
+        //    and retroactively engaged the parser. Auto-detection at load time
+        //    (LlamaModelLoader.readChatTemplateMetadata) replaced it.
         //
         // Special case: `config.maxThinkingTokens == 0` disables thinking entirely
         // (issue #597). Even when `markers` is non-nil, the parser stays off and
-        // sniffing is skipped, so every decoded token flows straight to `.token`.
-        // The model may still emit raw `<think>` / `</think>` substrings, but the
-        // driver routes them as visible text rather than `.thinkingToken` events.
+        // every decoded token flows straight to `.token`. The model may still
+        // emit raw `<think>` / `</think>` substrings, but the driver routes
+        // them as visible text rather than `.thinkingToken` events.
         let thinkingDisabled = config.maxThinkingTokens == 0
-        var useParser = !thinkingDisabled && markers != nil
+        let useParser = !thinkingDisabled && markers != nil
+        // `ThinkingParser`'s initialiser requires a non-nil marker pair. When
+        // `useParser` is false the parser is never invoked, so the placeholder
+        // value is never observed.
         var thinkingParser = ThinkingParser(markers: markers ?? .qwen3)
         var thinkingTokenCount = 0
         // Flag set when maxThinkingTokens is reached so we can break the outer loop cleanly.
         var thinkingLimitReached = false
-
-        // Lazy-sniff state. Only consulted when `markers == nil` at entry.
-        // Buffer grows until either `<think>` is found or `sniffBudgetBytes` bytes
-        // have been seen without a match. The open-tag suffix needs to be kept
-        // across the boundary so a partial `<thin` followed by `k>` still matches.
-        let sniffBudgetBytes = 64
-        let sniffOpenTag = ThinkingMarkers.qwen3.open  // "<think>"
-        let sniffEnabled = !thinkingDisabled && markers == nil
-        var sniffBuffer = ""
-        var sniffDone = !sniffEnabled   // true when sniffing has concluded (match or giveup)
 
         // Repetition-window state: track the last decoded token string and how
         // many times it has appeared consecutively. Exceeding `maxRepeatWindow`
@@ -354,33 +346,11 @@ struct LlamaGenerationDriver {
                     }
                 }
 
-                // Build the list of events this token emits. Three paths, matching the
-                // three thinking-marker modes documented at the top of the loop:
-                var events: [GenerationEvent] = []
-                if useParser {
-                    events = thinkingParser.process(text)
-                } else if !sniffDone {
-                    sniffBuffer += text
-                    if sniffBuffer.contains(sniffOpenTag) {
-                        // Hit — replay the full sniff buffer through the parser so its
-                        // pre-<think> prefix yields `.token` events and the opening tag
-                        // opens a thinking block with the post-tag remainder streaming
-                        // as `.thinkingToken`.
-                        useParser = true
-                        sniffDone = true
-                        events = thinkingParser.process(sniffBuffer)
-                        sniffBuffer = ""
-                    } else if sniffBuffer.count >= sniffBudgetBytes {
-                        // Budget exhausted without a marker — flush as visible text and
-                        // stop sniffing for the remainder of the stream.
-                        events = [.token(sniffBuffer)]
-                        sniffBuffer = ""
-                        sniffDone = true
-                    }
-                    // else: still sniffing, emit nothing this iteration
-                } else {
-                    events = [.token(text)]
-                }
+                // Build the list of events this token emits. Two paths, matching the
+                // two thinking-marker modes documented at the top of the loop:
+                let events: [GenerationEvent] = useParser
+                    ? thinkingParser.process(text)
+                    : [.token(text)]
 
                 for event in events {
                     if isFirstToken {
@@ -422,13 +392,6 @@ struct LlamaGenerationDriver {
                 continuation.finish(throwing: InferenceError.inferenceFailure("Decode failed during generation"))
                 return false
             }
-        }
-
-        // Flush any unflushed sniffer bytes as visible text — the stream ended
-        // before the sniff budget was reached or a `<think>` was found.
-        if !sniffBuffer.isEmpty {
-            continuation.yield(.token(sniffBuffer))
-            sniffBuffer = ""
         }
 
         // Flush any bytes held back by the tag-boundary buffer. Only matters when

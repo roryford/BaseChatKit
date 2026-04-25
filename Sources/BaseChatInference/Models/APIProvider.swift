@@ -1,6 +1,14 @@
 /// The cloud API provider type.
 public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     case openAI = "OpenAI"
+    /// OpenAI Responses API (`POST /v1/responses`).
+    ///
+    /// Distinguished from ``openAI`` (Chat Completions) because the wire
+    /// formats are incompatible: Responses uses named SSE events and surfaces
+    /// reasoning summaries as first-class deltas. Selecting this provider
+    /// routes through ``OpenAIResponsesBackend`` and emits
+    /// ``GenerationEvent/thinkingToken(_:)`` for the reasoning stream.
+    case openAIResponses = "OpenAI Responses"
     case claude = "Claude"
     case ollama = "Ollama"
     case lmStudio = "LM Studio"
@@ -11,7 +19,7 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Default base URL for this provider.
     public var defaultBaseURL: String {
         switch self {
-        case .openAI: return "https://api.openai.com"
+        case .openAI, .openAIResponses: return "https://api.openai.com"
         case .claude: return "https://api.anthropic.com"
         case .ollama: return "http://localhost:11434"
         case .lmStudio: return "http://localhost:1234"
@@ -22,7 +30,7 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Whether this provider requires an API key.
     public var requiresAPIKey: Bool {
         switch self {
-        case .openAI, .claude, .custom: return true
+        case .openAI, .openAIResponses, .claude, .custom: return true
         case .ollama, .lmStudio: return false
         }
     }
@@ -31,6 +39,7 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     public var defaultModelName: String {
         switch self {
         case .openAI: return "gpt-4o-mini"
+        case .openAIResponses: return "gpt-5"
         case .claude: return "claude-sonnet-4-6"
         case .ollama: return "llama3.2"
         case .lmStudio: return "local-model"
@@ -48,7 +57,7 @@ public enum APIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     public static var availableInBuild: [APIProvider] {
         var result: [APIProvider] = []
         #if CloudSaaS
-        result.append(contentsOf: [.claude, .openAI, .lmStudio, .custom])
+        result.append(contentsOf: [.claude, .openAI, .openAIResponses, .lmStudio, .custom])
         #endif
         #if Ollama
         result.append(.ollama)
