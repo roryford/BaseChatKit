@@ -259,7 +259,7 @@ final class ModelLifecycleCoordinator {
         }
 
         switch endpoint.provider {
-        case .claude, .openAI, .custom:
+        case .claude, .openAI, .openAIResponses, .custom:
             guard let keychainConfigurable = newBackend as? CloudBackendKeychainConfigurable else {
                 throw InferenceError.inferenceFailure(
                     "Cloud backend \(type(of: newBackend)) must conform to CloudBackendKeychainConfigurable "
