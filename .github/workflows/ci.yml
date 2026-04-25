@@ -9,7 +9,8 @@ on:
       - "Package.swift"
       - "Package.resolved"
       - ".github/workflows/ci.yml"
-      - "scripts/**"
+      - "scripts/test.sh"
+      - "scripts/example-ui-tests.sh"
   pull_request:
     branches: [main]
     paths:
@@ -18,7 +19,8 @@ on:
       - "Package.swift"
       - "Package.resolved"
       - ".github/workflows/ci.yml"
-      - "scripts/**"
+      - "scripts/test.sh"
+      - "scripts/example-ui-tests.sh"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -69,6 +71,7 @@ jobs:
             .build/repositories
           key: ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-spm-${{ hashFiles('Package.resolved') }}
           restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-fuzz-spm-${{ hashFiles('Package.resolved') }}
             ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-spm-
             ${{ runner.os }}-${{ runner.arch }}-spm-
 
@@ -102,20 +105,23 @@ jobs:
       # already up to date (the Verify step re-confirms this when deps changed).
       # Without this flag, every `swift build`/`swift test` invocation re-contacts
       # every git remote (~10-15s).
-      - name: Build
-        run: swift build --build-tests --disable-default-traits --skip-update
+      #
+      # The XCTest batch below compiles the test bundle on first invocation,
+      # so a separate `swift build --build-tests` step would be duplicate work.
 
-      # Core + UI + Backends share a process. Inference is split across two
-      # invocations because mixing its XCTest + Swift Testing suites in one
-      # process triggers a libmalloc SIGABRT (see BaseChatInferenceSwiftTestingTests).
-      - name: Test — Core + UI + Backends
-        run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatBackendsTests --disable-default-traits --skip-update
+      # All XCTest-only suites run in one process. Swift Testing must stay
+      # isolated — mixing XCTest + Swift Testing in one swift test process
+      # triggers a libmalloc double-free SIGABRT (see SwiftTestingAuditTest, #681).
+      #
+      # Do NOT add --parallel here. swift test --parallel launches each XCTest
+      # in a separate process, but UserDefaults.standard is keyed by bundle ID
+      # and persists to the same on-disk plist across processes — so tests that
+      # touch UserDefaults race across worker processes (see #756, the
+      # ChatViewModelTests.test_autoSelectFirstRunModel_* pair). Serial XCTest
+      # execution avoids that and `--parallel` would still need a UI-test-only
+      # carve-out, which negates most of the speedup anyway.
+      - name: Test — XCTest suites (Core + UI + Backends + Inference + TestSupport)
+        run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatBackendsTests --filter BaseChatInferenceTests --filter BaseChatTestSupportTests --disable-default-traits --skip-update
 
-      - name: Test — Inference (XCTest)
-        run: scripts/test.sh --filter BaseChatInferenceTests --disable-default-traits --skip-update --parallel
-
-      - name: Test — Inference (Swift Testing)
+      - name: Test — Inference (Swift Testing, isolated process)
         run: scripts/test.sh --filter BaseChatInferenceSwiftTestingTests --disable-default-traits --skip-update
-
-      - name: Test — TestSupport
-        run: scripts/test.sh --filter BaseChatTestSupportTests --disable-default-traits --skip-update
