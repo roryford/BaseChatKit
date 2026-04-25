@@ -432,26 +432,23 @@ final class GenerationCoordinatorTests: XCTestCase {
     /// responsive, and the C-level inference keeps running until the next
     /// natural boundary.
     ///
-    /// This test pins the contract at coordinator level: with a 60-second
-    /// per-token delay, stop-and-wait must complete within a 2-second
-    /// wall-clock budget. The deadline is generous enough to ride out CI
+    /// This test pins the *contract* (prompt return), not the mechanism:
+    /// with a 60-second per-token delay, stop-and-wait must complete within
+    /// a 2-second wall-clock budget — generous enough to ride out CI
     /// scheduling jitter on a busy macOS runner without being so loose that
-    /// a real regression sneaks through.
-    ///
-    /// This test pins the *contract* (prompt return), not the mechanism.
-    /// SlowMockBackend has three cancellation paths — `task.cancel()` from
-    /// `cancelGeneration`, the in-loop `Task.isCancelled` guards, and
-    /// `continuation.onTermination` — and any one of them is sufficient to
-    /// honour the contract. A future change that breaks all three would
-    /// trip this test; breaking one is caught by the dedicated tests for
-    /// each path elsewhere in this file.
+    /// a real regression sneaks through. SlowMockBackend has three
+    /// cancellation paths — `task.cancel()` from `cancelGeneration`, the
+    /// in-loop `Task.isCancelled` guards, and `continuation.onTermination`
+    /// — and any one of them is sufficient to honour the contract. A future
+    /// change that breaks all three would trip this test; breaking one is
+    /// caught by the dedicated tests for each path elsewhere in this file.
     func test_stopGenerationAndWait_returnsPromptly_evenWithLongTokenDelay() async throws {
         let backend = SlowMockBackend(tokenCount: 1, delayMilliseconds: 60_000)
         let slowProvider = SlowFakeProvider(backend: backend)
         let coord = GenerationCoordinator()
         coord.provider = slowProvider
 
-        let (_, _) = try coord.enqueue(messages: [("user", "long")], priority: .normal)
+        _ = try coord.enqueue(messages: [("user", "long")], priority: .normal)
 
         // Yield once so the orchestrator's drainQueue() spawns its Task and
         // the producer enters its first 60s sleep before we ask to stop.

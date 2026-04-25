@@ -424,7 +424,8 @@ final class GenerationCoordinator {
         // signal is loud and the failure mode is diagnosable.
         if !tools.isEmpty && !backend.capabilities.supportsToolCalling {
             let backendType = String(describing: type(of: backend))
-            let message = "GenerationCoordinator: \(tools.count) tool(s) passed to enqueue() but \(backendType) reports capabilities.supportsToolCalling == false; tools will be ignored on the wire and tool calls will never be dispatched. Check `backend.capabilities.supportsToolCalling` before passing tools, or load a tool-capable backend."
+            let toolWord = tools.count == 1 ? "tool" : "tools"
+            let message = "GenerationCoordinator: \(tools.count) \(toolWord) passed to enqueue() but \(backendType) reports capabilities.supportsToolCalling == false; tools will be ignored on the wire and tool calls will never be dispatched. Check `backend.capabilities.supportsToolCalling` before passing tools, or load a tool-capable backend."
             Log.inference.warning("\(message, privacy: .public)")
             Self.toolsUnsupportedWarningHook?(backendType, message)
         }
