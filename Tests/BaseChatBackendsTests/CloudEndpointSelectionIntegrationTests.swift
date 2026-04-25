@@ -1,4 +1,4 @@
-#if Ollama || CloudSaaS
+#if CloudSaaS
 import XCTest
 import SwiftData
 @testable import BaseChatBackends

@@ -1,4 +1,3 @@
-#if Ollama || CloudSaaS
 import XCTest
 @testable import BaseChatBackends
 import BaseChatCore
@@ -7,6 +6,7 @@ final class MemoryStrategyBackendTests: XCTestCase {
 
     // MARK: - Cloud Backends (no hardware needed)
 
+    #if CloudSaaS
     func test_openAIBackend_declaresExternalStrategy() {
         let backend = OpenAIBackend()
         XCTAssertEqual(backend.capabilities.memoryStrategy, .external)
@@ -16,6 +16,7 @@ final class MemoryStrategyBackendTests: XCTestCase {
         let backend = ClaudeBackend()
         XCTAssertEqual(backend.capabilities.memoryStrategy, .external)
     }
+    #endif
 
     // MARK: - Local Backends (hardware gated)
 
@@ -35,4 +36,3 @@ final class MemoryStrategyBackendTests: XCTestCase {
     }
     #endif
 }
-#endif
