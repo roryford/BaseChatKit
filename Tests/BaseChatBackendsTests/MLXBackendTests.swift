@@ -152,6 +152,48 @@ final class MLXBackendTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
         XCTAssertNoThrow(try MLXBackend.validateArchitecture(at: dir))
     }
+
+    // MARK: - VLM Factory Routing (issue #752, no hardware gate)
+
+    func test_requiresVLMFactory_whenTextConfigEnablesMoE_returnsTrue() throws {
+        // mlx-community/gemma-4-26b-a4b-it-4bit ships
+        //   { "text_config": { "enable_moe_block": true, … } }
+        // and only loads correctly via VLMModelFactory in mlx-swift-lm 3.31.3.
+        // Sabotage check: flipping `requiresVLMFactory` to always return false
+        // makes this assertion fail (verified locally before commit).
+        let url = try writeTempConfig([
+            "text_config": ["enable_moe_block": true]
+        ])
+        XCTAssertTrue(MLXBackend.requiresVLMFactory(at: url))
+    }
+
+    func test_requiresVLMFactory_whenTextConfigOmitsMoE_returnsFalse() throws {
+        // Dense Gemma 4 variants (e.g. gemma-4-e4b-it-4bit) ship
+        //   { "text_config": { "enable_moe_block": false, … } }
+        // and must stay on LLMModelFactory to avoid loading vision-tower
+        // weights into resident memory.
+        let url = try writeTempConfig([
+            "text_config": ["enable_moe_block": false]
+        ])
+        XCTAssertFalse(MLXBackend.requiresVLMFactory(at: url))
+    }
+
+    func test_requiresVLMFactory_whenConfigHasNoTextConfig_returnsFalse() throws {
+        // Regular LLMs (qwen3, llama, mistral, …) have a flat config.json with
+        // no `text_config` block. They route through LLMModelFactory.
+        let url = try writeTempConfig(["model_type": "qwen3"])
+        XCTAssertFalse(MLXBackend.requiresVLMFactory(at: url))
+    }
+
+    func test_requiresVLMFactory_whenConfigMissing_returnsFalse() throws {
+        // Conservative fallback matches `validateArchitecture` — let the MLX
+        // load path produce the real diagnostic for missing config.json.
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mlx-vlm-empty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertFalse(MLXBackend.requiresVLMFactory(at: dir))
+    }
 }
 
 // MARK: - Backend Contract

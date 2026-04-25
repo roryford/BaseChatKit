@@ -3,6 +3,7 @@ import Foundation
 import MLX
 import MLXLLM
 import MLXLMCommon
+import MLXVLM
 import MLXHuggingFace
 import Tokenizers
 import os
@@ -173,6 +174,30 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         throw InferenceError.unsupportedModelArchitecture(reported)
     }
 
+    // MARK: - Factory Routing
+
+    /// Returns `true` when the model at `url` declares an MoE config that
+    /// `LLMModelFactory.Gemma4Model` can't handle today. Currently triggers on
+    /// `text_config.enable_moe_block == true` (Gemma 4 26B). Extend here if/when
+    /// other VLM-only LM architectures appear.
+    ///
+    /// Falls back to `false` (LLM factory) when config.json is missing/unreadable —
+    /// matches the same conservative default used by `validateArchitecture`. Dense
+    /// Gemma 4 models intentionally stay on the LLM factory so we don't pay the
+    /// memory cost of resident vision-tower weights.
+    static func requiresVLMFactory(at url: URL) -> Bool {
+        let configURL = url.appendingPathComponent("config.json")
+        guard let data = try? Data(contentsOf: configURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        if let textConfig = json["text_config"] as? [String: Any],
+           textConfig["enable_moe_block"] as? Bool == true {
+            return true
+        }
+        return false
+    }
+
     // MARK: - Model Lifecycle
 
     public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
@@ -202,13 +227,33 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
         do {
             // Load from a local directory containing config.json + .safetensors.
-            // loadModelContainer(from:using:) is a free function from MLXLMCommon.
-            // #huggingFaceTokenizerLoader() (from MLXHuggingFace) adapts swift-transformers'
-            // AutoTokenizer to the TokenizerLoader protocol required by the new API.
-            let container: ModelContainer = try await loadModelContainer(
-                from: url,
-                using: #huggingFaceTokenizerLoader()
-            )
+            // We dispatch directly to either `LLMModelFactory.shared` or
+            // `VLMModelFactory.shared` rather than calling the registry-iterating
+            // free function `loadModelContainer(from:using:)`. Reason: the MoE
+            // Gemma 4 decoder lives only on the VLM side in mlx-swift-lm 3.31.3
+            // (`Libraries/MLXVLM/Models/Gemma4.swift`), so the registry walk
+            // would otherwise hand the 26B `gemma4` model to the dense
+            // `Gemma4Text.swift` LLM path and fail with "Unhandled keys
+            // [experts, router, …]". See issue #752. Dense Gemma 4 variants
+            // stay on the LLM factory — `requiresVLMFactory` only flags
+            // configs that explicitly declare `text_config.enable_moe_block`.
+            //
+            // `#huggingFaceTokenizerLoader()` (from MLXHuggingFace) adapts
+            // swift-transformers' `AutoTokenizer` to the `TokenizerLoader`
+            // protocol both factories accept.
+            let container: ModelContainer
+            if Self.requiresVLMFactory(at: url) {
+                Self.logger.info("MLX routing via VLMModelFactory (MoE / VLM-only architecture)")
+                container = try await VLMModelFactory.shared.loadContainer(
+                    from: url,
+                    using: #huggingFaceTokenizerLoader()
+                )
+            } else {
+                container = try await LLMModelFactory.shared.loadContainer(
+                    from: url,
+                    using: #huggingFaceTokenizerLoader()
+                )
+            }
             let detectedDialect = MLXToolDialect.detect(at: url)
             withStateLock {
                 _modelContainer = container
