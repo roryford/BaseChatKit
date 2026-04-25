@@ -489,6 +489,56 @@ final class MLXBackendGenerationTests: XCTestCase {
         // failing the count == 3 assertion.
     }
 
+    /// Cancellation during the cooperative yield must not crash, must not leak
+    /// `CancellationError` to the consumer (the production sleep is `try?`'d),
+    /// and the next loop iteration's `Task.isCancelled` check must terminate
+    /// the stream cleanly.
+    ///
+    /// The hook substitutes for `Task.sleep`, so to model "cancellation while
+    /// the task is sleeping" we cancel the surrounding generation Task from
+    /// inside the hook itself — this exercises the same control-flow shape as
+    /// a real cancel arriving during the 50µs sleep.
+    func test_yieldEveryNTokens_cancellationDuringYield_terminatesCleanly() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = Array(repeating: "x", count: 32)
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+
+        // Cancel mid-generation from inside the yield hook. By the time the
+        // first yield fires (at chunk 4) we cancel via stopGeneration(), which
+        // cancels the underlying generation Task. The next iteration of the
+        // mlxStream `for await` should observe `Task.isCancelled` and break.
+        MLXBackend._yieldHookForTesting = { [weak backend] in
+            backend?.stopGeneration()
+        }
+        defer { MLXBackend._yieldHookForTesting = nil }
+
+        var config = GenerationConfig()
+        config.yieldEveryNTokens = 4
+        config.maxOutputTokens = 100
+
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: config
+        )
+
+        // Drain the stream — must complete without throwing, even though the
+        // surrounding task was cancelled mid-yield. The `try?` on the sleep
+        // (allowlisted in SilentCatchAuditTest) intentionally swallows any
+        // CancellationError so the for-await observes cancellation at the top
+        // of the next iteration.
+        let tokens = try await collectTokens(from: stream)
+
+        // Expect at most ~yieldEvery tokens to have been emitted before the
+        // cancel propagated. Strictly: no more than one full cadence past the
+        // cancel point. The point of the assertion is simply that we exited
+        // cleanly and didn't drain all 32 tokens.
+        XCTAssertLessThan(tokens.count, 32,
+            "Cancellation during yield must terminate the stream early")
+    }
+
     func test_sendableLMInput_wrapsAndUnwraps() throws {
         // This test verifies `SendableLMInput` at the type level: the wrapper must
         // satisfy Swift's `Sendable` requirement so the compiler allows cross-actor
