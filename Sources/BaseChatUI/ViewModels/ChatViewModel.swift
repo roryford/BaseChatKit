@@ -399,6 +399,17 @@ public final class ChatViewModel {
     /// Default is `nil` (no-op — the hint banner is displayed by `ChatView`).
     public var onUpgradeHintTriggered: (@MainActor () -> Void)?
 
+    // MARK: - App Intents Bridge
+
+    /// Receives ``ChatIntentAction`` values forwarded from the host app's
+    /// App Intents bridge. Set by host apps that expose Siri / Spotlight
+    /// integrations; left `nil` when no such bridge exists.
+    ///
+    /// `BaseChatUI` deliberately does not import `AppIntents` — the handler
+    /// protocol defined in `BaseChatCore` keeps the seam framework-free.
+    /// See ``ChatViewModel/dispatch(_:)`` for the forwarding entry point.
+    public var intentHandler: (any ChatSessionIntentHandler)?
+
     // MARK: - Memory Indicator
 
     /// The current OS-level memory pressure level, forwarded from the handler.
