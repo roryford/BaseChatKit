@@ -158,7 +158,12 @@ let package = Package(
                 "BaseChatTestSupport",
                 "BaseChatMacrosPlugin",
                 .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
-            ]
+            ],
+            // SilentCatchAuditTest reads `silent_catch_allowlist.txt` directly
+            // from its on-disk source location via `#filePath`, so we don't
+            // need to bundle it into the test binary — just tell SwiftPM to
+            // ignore it when collecting resources.
+            exclude: ["silent_catch_allowlist.txt"]
         ),
         // Swift Testing suites split from BaseChatInferenceTests to prevent a
         // libmalloc double-free SIGABRT that occurs when XCTest and Swift Testing
