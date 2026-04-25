@@ -242,6 +242,12 @@ final class GenerationCoordinator {
                 (role: $0.role.rawValue, content: $0.content)
             }
 
+            // Surface the registered tool definitions so the model can call
+            // them. Without this, tools registered on `InferenceService.toolRegistry`
+            // are never advertised to the backend and the model — correctly —
+            // refuses to call something it doesn't know about.
+            let registeredTools = inferenceService.toolRegistry?.definitions ?? []
+
             let (token, stream) = try inferenceService.enqueue(
                 messages: history,
                 systemPrompt: effectiveSystemPrompt,
@@ -250,6 +256,8 @@ final class GenerationCoordinator {
                 repeatPenalty: repeatPenalty(),
                 maxOutputTokens: maxOutputTokens(),
                 maxThinkingTokens: maxThinkingTokens(),
+                tools: registeredTools,
+                toolChoice: .auto,
                 priority: .userInitiated,
                 sessionID: activeSessionID()
             )
