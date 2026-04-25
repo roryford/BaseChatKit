@@ -289,7 +289,11 @@ let package = Package(
                 "BaseChatBackends",
                 "BaseChatInference",
             ],
-            path: "Sources/bck-tools"
+            path: "Sources/bck-tools",
+            swiftSettings: [
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
+            ]
         ),
         .testTarget(
             name: "BaseChatToolsTests",
