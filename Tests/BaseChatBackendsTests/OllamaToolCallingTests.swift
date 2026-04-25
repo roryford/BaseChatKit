@@ -1,3 +1,4 @@
+#if Ollama
 import XCTest
 import Foundation
 @testable import BaseChatBackends
@@ -333,3 +334,4 @@ final class OllamaToolCallingTests: XCTestCase {
         XCTAssertNil(messages[0]["tool_call_id"])
     }
 }
+#endif

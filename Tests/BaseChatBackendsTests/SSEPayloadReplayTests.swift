@@ -1,3 +1,4 @@
+#if CloudSaaS
 import XCTest
 @testable import BaseChatBackends
 @testable import BaseChatCore
@@ -508,3 +509,4 @@ final class SSEPayloadReplayTests: XCTestCase {
         XCTAssertEqual(tokens[2], " \u{4F60}\u{597D}") // Chinese characters (你好)
     }
 }
+#endif

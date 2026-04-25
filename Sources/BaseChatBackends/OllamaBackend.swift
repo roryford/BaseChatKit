@@ -1,3 +1,4 @@
+#if Ollama
 import Foundation
 import os
 import BaseChatInference
@@ -61,12 +62,29 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     /// Creates an Ollama backend.
     ///
     /// - Parameter urlSession: Custom URLSession for testing. Pass `nil` to use the default.
+    ///
+    /// When `urlSession` is `nil` and the runtime kill-switch
+    /// ``URLSessionProvider/networkDisabled`` is set, the underlying property
+    /// access traps. Use ``makeChecked(urlSession:)`` for a throwing variant
+    /// that surfaces the kill-switch as a recoverable error.
     public init(urlSession: URLSession? = nil) {
         super.init(
             defaultModelName: "llama3.2",
             urlSession: urlSession ?? URLSessionProvider.unpinned,
             payloadHandler: OllamaPayloadHandler()
         )
+    }
+
+    /// Throwing factory that propagates ``URLSessionProvider/networkDisabled``
+    /// as ``CloudBackendError/networkDisabled`` instead of trapping.
+    public static func makeChecked(urlSession: URLSession? = nil) throws -> OllamaBackend {
+        let session: URLSession
+        if let urlSession {
+            session = urlSession
+        } else {
+            session = try URLSessionProvider.throwingUnpinned()
+        }
+        return OllamaBackend(urlSession: session)
     }
 
     // MARK: - Subclass Hooks
@@ -1039,3 +1057,5 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
         super.unloadModel()
     }
 }
+#endif
+

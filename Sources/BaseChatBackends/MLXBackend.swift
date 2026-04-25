@@ -57,7 +57,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         maxContextTokens: 8192,
         requiresPromptTemplate: false,
         supportsSystemPrompt: true,
-        supportsToolCalling: false,
+        supportsToolCalling: true,
         supportsStructuredOutput: false,
         supportsNativeJSONMode: false,
         cancellationStyle: .cooperative,
@@ -77,6 +77,14 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     private var _generationTask: Task<Void, Never>?
     /// Access only under `stateLock`.
     private var _conversationHistory: [(role: String, content: String)] = []
+    /// The tool-call dialect detected for the currently loaded model.
+    /// Set by `loadModel(from:plan:)` via `MLXToolDialect.detect(at:)`.
+    /// Access only under `stateLock`.
+    private var _dialect: MLXToolDialect = .unknown
+    /// Tool-aware conversation history, set by `setToolAwareHistory(_:)`.
+    /// When non-nil this supersedes `_conversationHistory` for message building.
+    /// Access only under `stateLock`.
+    private var _toolAwareHistory: [ToolAwareHistoryEntry]?
 
     // MARK: - Load Progress
 
@@ -201,8 +209,10 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 from: url,
                 using: #huggingFaceTokenizerLoader()
             )
+            let detectedDialect = MLXToolDialect.detect(at: url)
             withStateLock {
                 _modelContainer = container
+                _dialect = detectedDialect
             }
             // Apply the cache policy after loadModelContainer succeeds. Doing
             // this *after* the load (rather than before) keeps it inside the
@@ -262,13 +272,57 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         // Build messages in chat format, using full conversation history when available
         // so multi-turn exchanges retain context. Falls back to the bare prompt when
         // setConversationHistory has not been called (e.g. direct unit-test calls).
-        let conversationHistory = withStateLock { _conversationHistory }
+        let (conversationHistory, toolAwareHistory, dialect) = withStateLock {
+            (_conversationHistory, _toolAwareHistory, _dialect)
+        }
+
+        // For Qwen 2.5: serialize tool definitions into a <tools>…</tools> block
+        // appended to the system message content. This is the standard Qwen chat
+        // template mechanism for exposing tools to the model.
+        let effectiveSystemPrompt: String? = {
+            guard !config.tools.isEmpty, dialect == .qwen25 else {
+                return systemPrompt
+            }
+            let toolObjects: [[String: Any]] = config.tools.map { tool -> [String: Any] in
+                var function_: [String: Any] = [
+                    "name": tool.name,
+                    "description": tool.description,
+                ]
+                if let paramsData = try? JSONEncoder().encode(tool.parameters),
+                   let paramsObj = try? JSONSerialization.jsonObject(with: paramsData) {
+                    function_["parameters"] = paramsObj
+                } else {
+                    function_["parameters"] = ["type": "object", "properties": [String: Any]()]
+                }
+                return ["type": "function", "function": function_]
+            }
+            let toolsJSON: String
+            if let data = try? JSONSerialization.data(withJSONObject: toolObjects, options: [.prettyPrinted]),
+               let str = String(data: data, encoding: .utf8) {
+                toolsJSON = str
+            } else {
+                toolsJSON = "[]"
+            }
+            let toolBlock = "\n\n# Tools\n\nYou may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools:\n\n<tools>\n\(toolsJSON)\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>"
+            let base = systemPrompt ?? ""
+            return base + toolBlock
+        }()
+
+        // All messages are encoded as plain [String: String] dictionaries because
+        // MLXModelContainerProtocol.generate(messages:) requires [[String: String]].
+        // For Qwen 2.5 tool history, tool calls are text-encoded into content fields
+        // using the same <tool_call>…</tool_call> format the model emits.
         let messages: [[String: String]] = {
             var msgs: [[String: String]] = []
-            if let systemPrompt, !systemPrompt.isEmpty {
-                msgs.append(["role": "system", "content": systemPrompt])
+            if let sp = effectiveSystemPrompt, !sp.isEmpty {
+                msgs.append(["role": "system", "content": sp])
             }
-            if !conversationHistory.isEmpty {
+            if let toolHistory = toolAwareHistory, !toolHistory.isEmpty {
+                // Encode tool-aware history entries into the Qwen text format.
+                for entry in toolHistory {
+                    msgs.append(Self.encodeToolAwareEntryAsText(entry, dialect: dialect))
+                }
+            } else if !conversationHistory.isEmpty {
                 for msg in conversationHistory {
                     msgs.append(["role": msg.role, "content": msg.content])
                 }
@@ -302,7 +356,13 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 // than being split into `.thinkingToken` events.
                 let thinkingDisabled = config.maxThinkingTokens == 0
                 var thinkingParser = ThinkingParser(markers: config.thinkingMarkers ?? .qwen3)
-                let useParser = !thinkingDisabled && config.thinkingMarkers != nil
+                let useThinkingParser = !thinkingDisabled && config.thinkingMarkers != nil
+
+                // Instantiate the tool-call parser when tools are configured and the
+                // loaded model speaks a known tool-call dialect. The parser is a no-op
+                // pass-through when tools are empty or the dialect is unknown.
+                let useToolParser = !config.tools.isEmpty && dialect != .unknown
+                var toolParser = MLXToolCallParser()
 
                 // Enforces `config.maxThinkingTokens` with the same semantics as
                 // LlamaGenerationDriver: a thinking model that runs away on a 16 GB
@@ -320,23 +380,40 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 outer: for await generation in mlxStream {
                     if Task.isCancelled { break }
                     if let text = generation.chunk {
-                        for event in useParser ? thinkingParser.process(text) : [GenerationEvent.token(text)] {
-                            if isFirstToken {
-                                switch event {
-                                case .token, .thinkingToken:
-                                    await MainActor.run { generationStream.setPhase(.streaming) }
-                                    isFirstToken = false
-                                default: break
-                                }
+                        // Stage 1: tool-call parsing (suppresses tokens inside <tool_call>…</tool_call>).
+                        // Stage 2: thinking parsing on remaining .token events.
+                        let stageOneEvents: [GenerationEvent] = useToolParser
+                            ? toolParser.process(text)
+                            : [.token(text)]
+
+                        for event in stageOneEvents {
+                            // Apply thinking parser only to visible token events.
+                            let finalEvents: [GenerationEvent]
+                            if case .token(let tokenText) = event, useThinkingParser {
+                                finalEvents = thinkingParser.process(tokenText)
+                            } else {
+                                finalEvents = [event]
                             }
-                            // Only count visible output tokens toward maxOutputTokens limit
-                            if case .token = event { outputTokenCount += 1 }
-                            continuation.yield(event)
-                            if case .thinkingToken = event {
-                                thinkingTokenCount += 1
-                                if let limit = config.maxThinkingTokens, thinkingTokenCount >= limit {
-                                    thinkingLimitReached = true
-                                    break
+
+                            for finalEvent in finalEvents {
+                                if isFirstToken {
+                                    switch finalEvent {
+                                    case .token, .thinkingToken, .toolCall:
+                                        await MainActor.run { generationStream.setPhase(.streaming) }
+                                        isFirstToken = false
+                                    default: break
+                                    }
+                                }
+                                // Only count visible output tokens toward maxOutputTokens limit.
+                                // Tool call events do not count as output tokens.
+                                if case .token = finalEvent { outputTokenCount += 1 }
+                                continuation.yield(finalEvent)
+                                if case .thinkingToken = finalEvent {
+                                    thinkingTokenCount += 1
+                                    if let limit = config.maxThinkingTokens, thinkingTokenCount >= limit {
+                                        thinkingLimitReached = true
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -344,7 +421,18 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                         if let limit = outputLimit, outputTokenCount >= limit { break }
                     }
                 }
-                // Flush any bytes held back at the tag-boundary buffer.
+                // Flush any bytes held back at tag-boundary buffers.
+                if useToolParser {
+                    for event in toolParser.finalize() {
+                        if case .token(let tokenText) = event, useThinkingParser {
+                            for finalEvent in thinkingParser.process(tokenText) {
+                                continuation.yield(finalEvent)
+                            }
+                        } else {
+                            continuation.yield(event)
+                        }
+                    }
+                }
                 for event in thinkingParser.finalize() {
                     continuation.yield(event)
                 }
@@ -409,6 +497,8 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             _isModelLoaded = false
             _isGenerating = false
             _conversationHistory = []
+            _toolAwareHistory = nil
+            _dialect = .unknown
             return had
         }
         if hadContainer {
@@ -422,7 +512,80 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
 extension MLXBackend: ConversationHistoryReceiver {
     public func setConversationHistory(_ history: [(role: String, content: String)]) {
-        withStateLock { _conversationHistory = history }
+        withStateLock {
+            _conversationHistory = history
+            // Clear any previously stored tool-aware history so the simpler path takes
+            // effect when the orchestrator calls the non-tool-aware setter.
+            _toolAwareHistory = nil
+        }
+    }
+}
+
+// MARK: - ToolCallingHistoryReceiver
+
+extension MLXBackend: ToolCallingHistoryReceiver {
+    /// Stores a tool-aware conversation history for the next `generate()` call.
+    ///
+    /// When set, this supersedes the plain `(role, content)` history provided
+    /// via `setConversationHistory(_:)`. The entries are encoded into the
+    /// Qwen 2.5 text format (or plain content for `.unknown` dialects) before
+    /// being passed to the MLX generate path.
+    public func setToolAwareHistory(_ messages: [ToolAwareHistoryEntry]) {
+        withStateLock { _toolAwareHistory = messages }
+    }
+}
+
+// MARK: - Tool-Aware Entry Encoding
+
+extension MLXBackend {
+    /// Encodes a ``ToolAwareHistoryEntry`` into a plain `[String: String]` message
+    /// compatible with `MLXModelContainerProtocol.generate(messages:)`.
+    ///
+    /// For the Qwen 2.5 dialect:
+    /// - Assistant entries with `toolCalls` have the calls serialised as
+    ///   `<tool_call>{"name":…,"arguments":…}</tool_call>` appended to (or
+    ///   replacing) the textual content.
+    /// - Tool-role entries (carrying a ``ToolResult``) are represented as
+    ///   `role: "tool"` with the result content. The MLX chat template for
+    ///   Qwen maps the `tool` role to an `<tool_response>` block internally.
+    ///
+    /// For the `.unknown` dialect (and plain text turns) the entry collapses to
+    /// a simple `{role, content}` pair.
+    static func encodeToolAwareEntryAsText(
+        _ entry: ToolAwareHistoryEntry,
+        dialect: MLXToolDialect
+    ) -> [String: String] {
+        // For non-Qwen dialects or plain turns, fall back to the bare shape.
+        guard dialect == .qwen25 else {
+            return ["role": entry.role, "content": entry.content]
+        }
+
+        if let calls = entry.toolCalls, !calls.isEmpty {
+            // Assistant turn that triggered tool calls: encode calls as text.
+            var parts: [String] = []
+            if !entry.content.isEmpty {
+                parts.append(entry.content)
+            }
+            for call in calls {
+                let argsValue: Any
+                if let data = call.arguments.data(using: .utf8),
+                   let parsed = try? JSONSerialization.jsonObject(with: data) {
+                    argsValue = parsed
+                } else {
+                    argsValue = [String: Any]()
+                }
+                let callObj: [String: Any] = ["name": call.toolName, "arguments": argsValue]
+                if let data = try? JSONSerialization.data(withJSONObject: callObj),
+                   let jsonStr = String(data: data, encoding: .utf8) {
+                    parts.append("<tool_call>\n\(jsonStr)\n</tool_call>")
+                }
+            }
+            return ["role": "assistant", "content": parts.joined(separator: "\n")]
+        }
+
+        // Tool result turn: pass role and content as-is.
+        // The Qwen tokenizer template handles `role: "tool"` natively.
+        return ["role": entry.role, "content": entry.content]
     }
 }
 

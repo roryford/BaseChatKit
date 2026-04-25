@@ -1,3 +1,4 @@
+#if Ollama
 import XCTest
 import Foundation
 @testable import BaseChatBackends
@@ -217,3 +218,4 @@ final class OllamaAdversarialJSONTests: XCTestCase {
         XCTAssertEqual(parsed?["city"] as? String, "Paris", "re-serialised arguments must round-trip as valid JSON")
     }
 }
+#endif

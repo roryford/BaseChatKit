@@ -225,6 +225,23 @@ struct ContentView: View {
 | `TokenUsageProvider` | Reports token usage from cloud API responses |
 | `HuggingFaceServiceProtocol` | Abstraction for HuggingFace Hub operations |
 
+## Tool Calling
+
+Register tools with `ToolRegistry` and pass `toolRegistry.definitions` as `GenerationConfig.tools` when enqueueing a request:
+
+```swift
+let registry = ToolRegistry()
+registry.register(MyWeatherTool())
+registry.register(MySearchTool())
+
+let (_, stream) = try inferenceService.enqueue(
+    messages: history,
+    tools: registry.definitions
+)
+```
+
+**Local backend tool ceiling:** Local instruct models (3B–8B) degrade sharply when given more than ~5 tool definitions per request — the model may ignore later tools, hallucinate names, or misroute calls. For cloud backends (OpenAI, Anthropic, large Ollama models) 20+ tools is fine. When targeting a local backend, curate tools per request via `GenerationConfig.tools` and keep definitions at or below 5 per call.
+
 ## Custom Backends
 
 Implement `InferenceBackend` and register it:

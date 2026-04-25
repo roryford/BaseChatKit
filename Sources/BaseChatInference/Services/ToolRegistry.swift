@@ -114,10 +114,20 @@ public protocol JSONSchemaValidating: Sendable {
     }
 
     /// All registered tool definitions, sorted by name for stable diffs / tests.
+    ///
+    /// Pass the result as `GenerationConfig.tools` when enqueueing a request.
+    /// For local backends (3B–8B instruct models), keep this list at or below
+    /// 5 entries — see README "Tool Calling" section.
     public var definitions: [ToolDefinition] {
-        tools.values
+        let result = tools.values
             .map(\.definition)
             .sorted { $0.name < $1.name }
+        #if DEBUG
+        if result.count > 5 {
+            print("[BaseChatKit] ⚠️ \(result.count) tools in this request. Local backends (3B–8B) degrade beyond ~5 — see README Tool Calling section.")
+        }
+        #endif
+        return result
     }
 
     /// Returns the registered executor's ``ToolExecutor/requiresApproval``

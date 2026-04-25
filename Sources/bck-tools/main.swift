@@ -204,10 +204,15 @@ func makeBackend(cli: CLI, scenario: Scenario, model: String) async throws -> an
     case .mock:
         return MockFactory.make(for: scenario)
     case .ollama:
+        #if Ollama
         let backend = OllamaBackend()
         backend.configure(baseURL: cli.ollamaBaseURL, modelName: model)
         try await backend.loadModel(from: cli.ollamaBaseURL, plan: .cloud())
         return backend
+        #else
+        struct OllamaUnavailable: Error, CustomStringConvertible { var description: String { "Ollama backend not available — rebuild with the `Ollama` trait enabled (e.g. `swift build --traits Ollama`)." } }
+        throw OllamaUnavailable()
+        #endif
     }
 }
 
