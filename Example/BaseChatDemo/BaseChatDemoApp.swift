@@ -12,6 +12,9 @@ struct BaseChatDemoApp: App {
     @State private var modelManagementViewModel: ModelManagementViewModel
     @State private var sessionManager = SessionManagerViewModel()
     private let inferenceService: InferenceService
+    private let toolRegistry: ToolRegistry
+    private let sandboxRoot: URL
+    private let pendingDemoScenarioID: String?
 
     /// When `true`, the app was launched with `--uitesting` and should use
     /// an in-memory store, skip auto-model-load, and disable animations.
@@ -31,6 +34,9 @@ struct BaseChatDemoApp: App {
         let testing = CommandLine.arguments.contains("--uitesting")
         self.isUITesting = testing
 
+        let scenarioID = Self.demoScenarioID()
+        self.pendingDemoScenarioID = scenarioID
+
         if testing {
             #if canImport(UIKit)
             UIView.setAnimationsEnabled(false)
@@ -46,8 +52,23 @@ struct BaseChatDemoApp: App {
         // Populate curated model recommendations
         CuratedModel.all = Self.curatedModels
 
-        let toolRegistry = ToolRegistry()
-        DemoTools.register(on: toolRegistry)
+        // Sandbox root: under --uitesting we route writes (notably WriteFileTool)
+        // into a per-launch temp directory so XCUITests leave no residue in
+        // Application Support. Production runs use the long-lived demo root.
+        let resolvedSandbox: URL = {
+            if testing {
+                let tempRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("BaseChatDemo-UITest-\(UUID().uuidString)", isDirectory: true)
+                try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+                return tempRoot
+            }
+            return DemoToolRoot.resolve()
+        }()
+        self.sandboxRoot = resolvedSandbox
+
+        let registry = ToolRegistry()
+        DemoTools.register(on: registry, root: resolvedSandbox)
+        self.toolRegistry = registry
 
         let approvalGate = UIToolApprovalGate(policy: .askOncePerSession)
 
@@ -55,29 +76,28 @@ struct BaseChatDemoApp: App {
         #if DEBUG
         if testing {
             // Under --uitesting, swap in a ScriptedBackend so the approval UI
-            // can be exercised without live inference. Keeps this gated on
-            // the uitesting launch arg so production launches are unaffected.
-            let scripted = ScriptedBackend(turns: [
-                .toolCall(name: "sample_repo_search", arguments: #"{"query":"readme"}"#),
-                .tokens(["Here's ", "a ", "summary ", "of ", "your ", "workspace."])
-            ])
+            // can be exercised without live inference. The turn list is
+            // scenario-aware: when --bck-demo-scenario is supplied the script
+            // matches that scenario's expected tool-call shape; otherwise the
+            // legacy fallback (sample_repo_search) preserves existing tests.
+            let scripted = ScriptedBackend(turns: DemoScenarios.scriptedTurns(for: scenarioID))
             configuredService = InferenceService(
                 backend: scripted,
                 name: "ScriptedUITest",
                 modelName: "scripted-ui",
-                toolRegistry: toolRegistry,
+                toolRegistry: registry,
                 toolApprovalGate: approvalGate
             )
         } else {
             configuredService = InferenceService(
-                toolRegistry: toolRegistry,
+                toolRegistry: registry,
                 toolApprovalGate: approvalGate
             )
             DefaultBackends.register(with: configuredService)
         }
         #else
         configuredService = InferenceService(
-            toolRegistry: toolRegistry,
+            toolRegistry: registry,
             toolApprovalGate: approvalGate
         )
         DefaultBackends.register(with: configuredService)
@@ -178,8 +198,11 @@ struct BaseChatDemoApp: App {
                 if let container = modelContainer {
                     DemoContentView(
                         inferenceService: inferenceService,
+                        toolRegistry: toolRegistry,
+                        sandboxRoot: sandboxRoot,
                         skipAutoModelLoad: isUITesting,
-                        pendingPayloadBuffer: pendingPayloadBuffer
+                        pendingPayloadBuffer: pendingPayloadBuffer,
+                        pendingDemoScenarioID: pendingDemoScenarioID
                     )
                     .environment(chatViewModel)
                     .environment(modelManagementViewModel)
@@ -280,5 +303,17 @@ struct BaseChatDemoApp: App {
             return nil
         }
         return InboundPayload(prompt: args[flagIndex + 1], source: .appIntent)
+    }
+
+    /// Returns the demo-scenario ID supplied via `--bck-demo-scenario <id>`,
+    /// or `nil` when no scenario was requested. Mirrors the
+    /// `--uitesting`-flag pattern: simple positional value follows the flag.
+    private static func demoScenarioID() -> String? {
+        let args = CommandLine.arguments
+        guard let flagIndex = args.firstIndex(of: "--bck-demo-scenario"),
+              flagIndex + 1 < args.count else {
+            return nil
+        }
+        return args[flagIndex + 1]
     }
 }

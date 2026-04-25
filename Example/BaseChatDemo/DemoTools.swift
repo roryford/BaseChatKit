@@ -12,6 +12,18 @@ import BaseChatTools
 /// having to drop their own files in.
 enum DemoTools {
 
+    /// Names of the tools registered by ``register(on:root:)``. Used by the
+    /// scenario runner to clear out variant executors and snap back to the
+    /// baseline set when a scenario starts.
+    static let baselineNames: [String] = [
+        "calc",
+        "now",
+        "read_file",
+        "list_dir",
+        "sample_repo_search",
+        "write_file"
+    ]
+
     /// Registers the full reference toolset on `registry`.
     ///
     /// Runs synchronously on the main actor because ``ToolRegistry`` is
@@ -32,6 +44,20 @@ enum DemoTools {
         registry.register(ReadFileTool.makeExecutor(root: root))
         registry.register(ListDirTool.makeExecutor(root: root))
         registry.register(SampleRepoSearchTool.makeExecutor(root: root))
+        registry.register(WriteFileTool.makeExecutor(root: root))
+    }
+
+    /// Restores `registry` to the baseline tool set.
+    ///
+    /// Used by ``DemoScenarioRunner`` to drop any variant executors a previous
+    /// scenario may have installed (e.g. a deliberately-slow `sample_repo_search`
+    /// for the cancellation scenario) before starting a new one. Idempotent.
+    @MainActor
+    static func resetToDefaults(on registry: ToolRegistry, root: URL = DemoToolRoot.resolve()) {
+        for name in baselineNames {
+            registry.unregister(name: name)
+        }
+        register(on: registry, root: root)
     }
 }
 
@@ -59,13 +85,21 @@ enum DemoToolRoot {
     /// Writes the bundled fixture workspace under `root` when it isn't there.
     ///
     /// The seed is keyed by a marker file; we do not diff contents across
-    /// launches. If the user edits or deletes a seeded file we respect their
-    /// choice — the marker prevents us from clobbering edits on the next
-    /// launch.
+    /// launches. If the user edits a seeded file we respect their choice. If
+    /// they delete the entire workspace (leaving only the marker, or nothing
+    /// at all) we re-seed so demo scenarios that search the fixture don't
+    /// silently look broken.
     static func seedIfNeeded(at root: URL) throws {
         let fm = FileManager.default
         let marker = root.appendingPathComponent(".seeded", isDirectory: false)
-        if fm.fileExists(atPath: marker.path) { return }
+
+        if fm.fileExists(atPath: marker.path) {
+            // Re-seed only when the marker is the sole survivor — not when
+            // user content lives alongside it.
+            let contents = (try? fm.contentsOfDirectory(atPath: root.path)) ?? []
+            let nonMarker = contents.filter { $0 != ".seeded" }
+            if !nonMarker.isEmpty { return }
+        }
 
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         for (path, contents) in Self.fixture {

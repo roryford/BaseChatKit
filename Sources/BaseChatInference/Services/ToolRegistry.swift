@@ -120,6 +120,18 @@ public protocol JSONSchemaValidating: Sendable {
             .sorted { $0.name < $1.name }
     }
 
+    /// Returns the registered executor's ``ToolExecutor/requiresApproval``
+    /// flag, or `false` when no tool is registered under `toolName`.
+    ///
+    /// The generation coordinator queries this before invoking the
+    /// ``ToolApprovalGate`` so read-only tools auto-approve without a UI hop.
+    /// Unknown names return `false` because dispatch will synthesise an
+    /// `unknownTool` error result anyway — there is nothing for the user to
+    /// approve.
+    public func requiresApproval(toolName: String) -> Bool {
+        tools[toolName.lowercased()]?.requiresApproval ?? false
+    }
+
     // MARK: - Dispatch
 
     /// Resolves `call.toolName` to an executor, parses its arguments, runs

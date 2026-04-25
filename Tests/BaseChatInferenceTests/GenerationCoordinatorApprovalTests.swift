@@ -25,6 +25,10 @@ final class GenerationCoordinatorApprovalTests: XCTestCase {
     @MainActor
     private final class FailIfInvokedExecutor: ToolExecutor, @unchecked Sendable {
         let definition: ToolDefinition
+        // Opt in to the approval-gate path. Default is `false` (auto-approve
+        // for read-only tools), which would short-circuit the gate and break
+        // these tests' purpose of exercising gate semantics.
+        let requiresApproval: Bool = true
         private(set) var wasInvoked = false
         init(name: String) {
             self.definition = ToolDefinition(name: name, description: "should not run")

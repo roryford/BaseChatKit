@@ -47,6 +47,11 @@ final class ToolApprovalGateTests: XCTestCase {
     @MainActor
     private final class CountingExecutor: ToolExecutor, @unchecked Sendable {
         let definition: ToolDefinition
+        // These tests exist to validate the approval-gate contract, which
+        // only fires for tools that opt in via `requiresApproval`. The
+        // protocol default is `false` (auto-approve, suitable for read-only
+        // tools); explicit override keeps the gate in the dispatch path.
+        let requiresApproval: Bool = true
         private(set) var callCount = 0
 
         init(name: String) {
