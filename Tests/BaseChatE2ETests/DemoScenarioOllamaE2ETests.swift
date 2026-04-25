@@ -1,3 +1,4 @@
+#if Ollama
 import XCTest
 import BaseChatInference
 import BaseChatTools
@@ -271,3 +272,4 @@ final class DemoScenarioOllamaE2ETests: XCTestCase {
         }
     }
 }
+#endif
