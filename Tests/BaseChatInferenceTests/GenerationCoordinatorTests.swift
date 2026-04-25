@@ -160,6 +160,95 @@ final class GenerationCoordinatorTests: XCTestCase {
         XCTAssertTrue(config.jsonMode)
     }
 
+    // MARK: - Tool-capability silent-ignore warning
+
+    /// When `tools` are passed to `enqueue` and the active backend reports
+    /// `supportsToolCalling == false`, the coordinator must emit a warning so
+    /// callers have a signal that the registry will never see a dispatch.
+    /// Mirrors the jsonMode silent-ignore warning above.
+    ///
+    /// Sabotage check: deleting the warning branch in `GenerationCoordinator.enqueue`
+    /// leaves `captured` empty and this assertion fails.
+    func test_enqueue_toolsOnUnsupportedBackend_emitsWarning() async throws {
+        // MockInferenceBackend defaults to supportsToolCalling == false.
+        let captured = WarningCapture()
+        GenerationCoordinator.toolsUnsupportedWarningHook = { backendType, message in
+            captured.record(backendType: backendType, message: message)
+        }
+        defer { GenerationCoordinator.toolsUnsupportedWarningHook = nil }
+
+        let tool = ToolDefinition(
+            name: "get_weather",
+            description: "Lookup the weather for a city"
+        )
+        let (_, stream) = try coordinator.enqueue(
+            messages: [("user", "What's the weather?")],
+            tools: [tool]
+        )
+        for try await _ in stream.events {}
+
+        let entries = captured.snapshot()
+        XCTAssertEqual(entries.count, 1, "warning must fire exactly once per enqueue")
+        let first = try XCTUnwrap(entries.first)
+        XCTAssertEqual(first.backendType, "MockInferenceBackend",
+                       "warning must name the active backend type")
+        XCTAssertTrue(first.message.contains("supportsToolCalling"),
+                      "warning must reference the capability flag so callers can check it programmatically")
+        XCTAssertTrue(first.message.contains("1 tool"),
+                      "warning should mention how many tools were passed")
+    }
+
+    /// When no tools are passed, the warning must never fire regardless of
+    /// the backend's capability — guards against a future regression that
+    /// flips the condition to `tools.isEmpty`.
+    func test_enqueue_noTools_neverWarns() async throws {
+        let captured = WarningCapture()
+        GenerationCoordinator.toolsUnsupportedWarningHook = { backendType, message in
+            captured.record(backendType: backendType, message: message)
+        }
+        defer { GenerationCoordinator.toolsUnsupportedWarningHook = nil }
+
+        let (_, stream) = try coordinator.enqueue(messages: [("user", "hi")])
+        for try await _ in stream.events {}
+
+        XCTAssertTrue(captured.snapshot().isEmpty,
+                      "warning must not fire when no tools are passed")
+    }
+
+    /// When the backend supports tool calling, the warning must not fire
+    /// even if the request includes tools.
+    func test_enqueue_toolsOnSupportedBackend_noWarning() async throws {
+        let captured = WarningCapture()
+        GenerationCoordinator.toolsUnsupportedWarningHook = { backendType, message in
+            captured.record(backendType: backendType, message: message)
+        }
+        defer { GenerationCoordinator.toolsUnsupportedWarningHook = nil }
+
+        provider.backend.capabilities = BackendCapabilities(
+            supportedParameters: [.temperature],
+            maxContextTokens: 4096,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: true,
+            supportsStructuredOutput: false,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: false
+        )
+
+        let tool = ToolDefinition(
+            name: "get_weather",
+            description: "Lookup the weather for a city"
+        )
+        let (_, stream) = try coordinator.enqueue(
+            messages: [("user", "weather?")],
+            tools: [tool]
+        )
+        for try await _ in stream.events {}
+
+        XCTAssertTrue(captured.snapshot().isEmpty,
+                      "warning must not fire when the backend supports tool calling")
+    }
+
     func test_enqueue_overQueueDepth_throwsQueueFullError() throws {
         // Saturate the coordinator: one active plus eight queued is the hard cap
         // (maxQueueDepth == 8 counts queued requests only).
@@ -331,6 +420,53 @@ final class GenerationCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(freshStream.phase, .queued, "new request must start running after stop")
         coord.stopGeneration()
         do { for try await _ in freshStream.events {} } catch { /* cancel error OK */ }
+    }
+
+    // MARK: - Cancel latency contract
+
+    /// `stopGenerationAndWait()` must return promptly even when the backend
+    /// is mid-token with a long per-token delay. The orchestrator's defer
+    /// block awaits `activeTask?.value`, so any failure to propagate cancel
+    /// through the producer task makes this method hang for the full token
+    /// delay — a real-world wedge where the user taps stop, the UI looks
+    /// responsive, and the C-level inference keeps running until the next
+    /// natural boundary.
+    ///
+    /// This test pins the *contract* (prompt return), not the mechanism:
+    /// with a 60-second per-token delay, stop-and-wait must complete within
+    /// a 2-second wall-clock budget — generous enough to ride out CI
+    /// scheduling jitter on a busy macOS runner without being so loose that
+    /// a real regression sneaks through. SlowMockBackend has three
+    /// cancellation paths — `task.cancel()` from `cancelGeneration`, the
+    /// in-loop `Task.isCancelled` guards, and `continuation.onTermination`
+    /// — and any one of them is sufficient to honour the contract. A future
+    /// change that breaks all three would trip this test; breaking one is
+    /// caught by the dedicated tests for each path elsewhere in this file.
+    func test_stopGenerationAndWait_returnsPromptly_evenWithLongTokenDelay() async throws {
+        let backend = SlowMockBackend(tokenCount: 1, delayMilliseconds: 60_000)
+        let slowProvider = SlowFakeProvider(backend: backend)
+        let coord = GenerationCoordinator()
+        coord.provider = slowProvider
+
+        _ = try coord.enqueue(messages: [("user", "long")], priority: .normal)
+
+        // Yield once so the orchestrator's drainQueue() spawns its Task and
+        // the producer enters its first 60s sleep before we ask to stop.
+        // Without this, stop-and-wait could race ahead of the producer's
+        // launch and pass for the wrong reason.
+        try await Task.sleep(for: .milliseconds(50))
+
+        let start = ContinuousClock.now
+        await coord.stopGenerationAndWait()
+        let elapsed = ContinuousClock.now - start
+
+        XCTAssertLessThan(
+            elapsed, .seconds(2),
+            "stopGenerationAndWait() must return within 2s even when the backend is mid-token; " +
+            "elapsed=\(elapsed). A larger delta indicates cancellation is not propagating to the producer task " +
+            "and the orchestrator is awaiting the natural token boundary instead."
+        )
+        XCTAssertFalse(coord.isGenerating)
     }
 
     // MARK: - discardRequests(notMatching:)
