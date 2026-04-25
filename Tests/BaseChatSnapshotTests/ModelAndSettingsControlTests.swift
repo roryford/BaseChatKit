@@ -252,10 +252,19 @@ final class ModelAndSettingsControlTests: XCTestCase {
 
     func test_generationSettings_hasAPIConfigurationView() {
         let dump = generationSettingsDump()
+        // APIConfigurationView is only instantiated when the Ollama or CloudSaaS traits are enabled
+        // (see GenerationSettingsView.swift:202). Mirror that gate so the assertion stays meaningful in both modes.
+        #if Ollama || CloudSaaS
         XCTAssertTrue(
             dump.contains("APIConfigurationView"),
             "Settings should contain the APIConfigurationView type reference"
         )
+        #else
+        XCTAssertFalse(
+            dump.contains("APIConfigurationView"),
+            "Settings should NOT contain APIConfigurationView when Ollama/CloudSaaS traits are disabled"
+        )
+        #endif
     }
 
     func test_generationSettings_hasPromptInspectorView() {
