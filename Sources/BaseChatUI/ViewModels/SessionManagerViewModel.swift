@@ -22,11 +22,18 @@ public final class SessionManagerViewModel {
     /// Default cap on message search results per query.
     public static let messageSearchLimit: Int = 100
 
+    /// Upper bound on sessions resolved when surfacing message-search hits.
+    /// Sessions beyond this count cannot be surfaced as a "matching session"
+    /// row even if their messages match — in practice the cap is well above
+    /// any realistic single-user history.
+    public static let messageSearchSessionResolveCap: Int = 10_000
+
     /// All currently loaded sessions, sorted by most recently updated.
     ///
-    /// Populated incrementally via ``loadFirstPage()`` / ``loadNextPage()``.
-    /// Calling ``loadSessions()`` collapses pagination and loads all sessions
-    /// at once; existing call sites preserve their previous behaviour.
+    /// Populated incrementally a page at a time. ``loadSessions()`` resets to
+    /// the first page; ``loadNextPage()`` appends the next page. There is no
+    /// path that fetches every session at once — the sidebar is paginated end
+    /// to end so it stays responsive past 1000+ sessions.
     public private(set) var sessions: [ChatSessionRecord] = []
 
     /// `true` when more pages may be available beyond what's loaded.
@@ -352,11 +359,14 @@ public final class SessionManagerViewModel {
             }
             messageHitsBySession = grouped
 
-            // Resolve sessions for the surfaced IDs. We fetch all sessions
-            // (paginated up to a reasonable bound) so a hit in an unloaded
-            // page still gets its session row rendered — otherwise message
-            // search would silently miss matches deep in history.
-            let allSessions = try persistence.fetchSessions(offset: 0, limit: 10_000)
+            // Resolve sessions for the surfaced IDs. We fetch up to
+            // `messageSearchSessionResolveCap` sessions so a hit in an
+            // unloaded page still gets its session row rendered — otherwise
+            // message search would silently miss matches deep in history.
+            let allSessions = try persistence.fetchSessions(
+                offset: 0,
+                limit: Self.messageSearchSessionResolveCap
+            )
             let byID = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
             messageMatchSessions = orderedSessionIDs.compactMap { byID[$0] }
         } catch {
