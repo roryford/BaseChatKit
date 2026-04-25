@@ -41,7 +41,13 @@ struct BaseChatDemoApp: App {
             #if canImport(UIKit)
             UIView.setAnimationsEnabled(false)
             #endif
-            UserDefaults.standard.removeObject(forKey: "showAdvancedSettings")
+            // Default to a known state for UI tests that exercise the Advanced
+            // Settings DisclosureGroup. macOS XCUITest has trouble synthesising
+            // a click on the narrow chevron of a SwiftUI Form DisclosureTriangle
+            // (the row is wide but only the leading glyph toggles), so tests
+            // that need to reach Cloud API / Backend / Debug controls expect
+            // the disclosure to start expanded.
+            UserDefaults.standard.set(true, forKey: "showAdvancedSettings")
         }
         // Configure BaseChatKit for this app
         BaseChatConfiguration.shared = BaseChatConfiguration(
