@@ -6,7 +6,14 @@ public struct GenerationConfig: Sendable, Codable {
     public var topP: Float
     public var repeatPenalty: Float
     @available(*, deprecated, renamed: "maxOutputTokens", message: "Use maxOutputTokens instead.")
-    public var maxTokens: Int32
+    public var maxTokens: Int32 {
+        get { _legacyMaxTokens }
+        set { _legacyMaxTokens = newValue }
+    }
+    /// Backing storage for the deprecated ``maxTokens`` field. Lives separately so the type's
+    /// own initializers and Codable conformance can read/write the legacy value without
+    /// tripping the deprecation warning. See PR #766 follow-up to #747.
+    @usableFromInline internal var _legacyMaxTokens: Int32 = 512
     public var topK: Int32?
     public var typicalP: Float?
 
@@ -89,7 +96,19 @@ public struct GenerationConfig: Sendable, Codable {
         didSet { if maxToolIterations < 1 { maxToolIterations = 1 } }
     }
 
-    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:grammar:) instead.")
+    /// Number of tokens between brief cooperative yields during MLX generation.
+    ///
+    /// Sustained MLX inference on Mac can starve WindowServer's GPU command
+    /// queue and cause hitches in other apps. To mitigate this, ``MLXBackend``
+    /// inserts a 50µs `Task.sleep` every `yieldEveryNTokens` tokens. The same
+    /// pattern is used in `SwiftLM/Server.swift`.
+    ///
+    /// - Defaults to `8` (one yield per ~8 tokens).
+    /// - `0` disables the yield entirely.
+    /// - Only honoured by `MLXBackend`; other backends ignore this field.
+    public var yieldEveryNTokens: Int = 8
+
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:grammar:yieldEveryNTokens:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -104,12 +123,13 @@ public struct GenerationConfig: Sendable, Codable {
         jsonMode: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil,
         maxToolIterations: Int = 10,
-        grammar: String? = nil
+        grammar: String? = nil,
+        yieldEveryNTokens: Int = 8
     ) {
         self.temperature = temperature
         self.topP = topP
         self.repeatPenalty = repeatPenalty
-        self.maxTokens = maxTokens
+        self._legacyMaxTokens = maxTokens
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens
@@ -120,6 +140,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.thinkingMarkers = thinkingMarkers
         self.maxToolIterations = max(1, maxToolIterations)
         self.grammar = grammar
+        self.yieldEveryNTokens = yieldEveryNTokens
     }
 
     public init(
@@ -135,12 +156,12 @@ public struct GenerationConfig: Sendable, Codable {
         jsonMode: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil,
         maxToolIterations: Int = 10,
-        grammar: String? = nil
+        grammar: String? = nil,
+        yieldEveryNTokens: Int = 8
     ) {
         self.temperature = temperature
         self.topP = topP
         self.repeatPenalty = repeatPenalty
-        self.maxTokens = 512
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens
@@ -151,6 +172,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.thinkingMarkers = thinkingMarkers
         self.maxToolIterations = max(1, maxToolIterations)
         self.grammar = grammar
+        self.yieldEveryNTokens = yieldEveryNTokens
     }
 
     // MARK: Codable
@@ -158,6 +180,7 @@ public struct GenerationConfig: Sendable, Codable {
     private enum CodingKeys: String, CodingKey {
         case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
         case tools, toolChoice, maxThinkingTokens, jsonMode, maxToolIterations, grammar
+        case yieldEveryNTokens
     }
 
     public init(from decoder: Decoder) throws {
@@ -166,7 +189,8 @@ public struct GenerationConfig: Sendable, Codable {
         topP = try c.decode(Float.self, forKey: .topP)
         repeatPenalty = try c.decode(Float.self, forKey: .repeatPenalty)
         // maxTokens is deprecated; absent from payloads that never encoded it — fall back to 512.
-        maxTokens = (try c.decodeIfPresent(Int32.self, forKey: .maxTokens)) ?? 512
+        // We write to the backing store directly to avoid the deprecation warning on the property.
+        _legacyMaxTokens = (try c.decodeIfPresent(Int32.self, forKey: .maxTokens)) ?? 512
         topK = try c.decodeIfPresent(Int32.self, forKey: .topK)
         typicalP = try c.decodeIfPresent(Float.self, forKey: .typicalP)
         maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
@@ -182,6 +206,8 @@ public struct GenerationConfig: Sendable, Codable {
         // thinkingMarkers is a per-request runtime hint; it is not persisted.
         thinkingMarkers = nil
         grammar = try c.decodeIfPresent(String.self, forKey: .grammar)
+        // yieldEveryNTokens landed after the original shape; default to 8 when absent.
+        yieldEveryNTokens = (try c.decodeIfPresent(Int.self, forKey: .yieldEveryNTokens)) ?? 8
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -189,7 +215,8 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encode(temperature, forKey: .temperature)
         try c.encode(topP, forKey: .topP)
         try c.encode(repeatPenalty, forKey: .repeatPenalty)
-        try c.encode(maxTokens, forKey: .maxTokens)
+        // Encode the legacy `maxTokens` wire field for backwards-compatible payloads.
+        try c.encode(_legacyMaxTokens, forKey: .maxTokens)
         try c.encodeIfPresent(topK, forKey: .topK)
         try c.encodeIfPresent(typicalP, forKey: .typicalP)
         try c.encodeIfPresent(maxOutputTokens, forKey: .maxOutputTokens)
@@ -199,6 +226,7 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encode(jsonMode, forKey: .jsonMode)
         try c.encode(maxToolIterations, forKey: .maxToolIterations)
         try c.encodeIfPresent(grammar, forKey: .grammar)
+        try c.encode(yieldEveryNTokens, forKey: .yieldEveryNTokens)
     }
 }
 

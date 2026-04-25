@@ -103,6 +103,15 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     /// Defaults to `.auto`, which picks a sensible value based on device RAM.
     public let cachePolicy: MLXCachePolicy
 
+    // MARK: - Test seams
+
+    /// Invoked in place of `Task.sleep(for: .microseconds(50))` at every
+    /// `yieldEveryNTokens`-th token during generation. Tests use this to count
+    /// yield occurrences deterministically without timing assertions.
+    ///
+    /// `nil` in production — the real microsecond sleep runs instead.
+    nonisolated(unsafe) static var _yieldHookForTesting: (@Sendable () async -> Void)?
+
     // MARK: - Init
 
     public init(cachePolicy: MLXCachePolicy = .auto) {
@@ -422,6 +431,13 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                     messages: messages,
                     parameters: generateConfig
                 )
+                // Inserts a brief cooperative yield every N tokens so sustained MLX
+                // generation doesn't starve WindowServer's GPU command queue and
+                // cause UI hitches in other apps. Mirrors the pattern in SwiftLM's
+                // `Server.swift` (50µs sleep every 8 tokens). Configurable via
+                // `GenerationConfig.yieldEveryNTokens`; `0` disables the yield.
+                let yieldEvery = config.yieldEveryNTokens
+                var completionTokenCount = 0
                 outer: for await generation in mlxStream {
                     if Task.isCancelled { break }
                     if let text = generation.chunk {
@@ -464,6 +480,19 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                         }
                         if thinkingLimitReached { break outer }
                         if let limit = outputLimit, outputTokenCount >= limit { break }
+
+                        // Per-chunk yield: count every MLX-emitted chunk (regardless
+                        // of whether it became a visible token, thinking token, or
+                        // got swallowed by the tool-call parser) so the cadence
+                        // tracks real generation work.
+                        completionTokenCount += 1
+                        if yieldEvery > 0 && completionTokenCount % yieldEvery == 0 {
+                            if let hook = MLXBackend._yieldHookForTesting {
+                                await hook()
+                            } else {
+                                try? await Task.sleep(for: .microseconds(50))
+                            }
+                        }
                     }
                 }
                 // Flush any bytes held back at tag-boundary buffers.

@@ -407,6 +407,138 @@ final class MLXBackendGenerationTests: XCTestCase {
         // messages array and failing the count assertion.
     }
 
+    // MARK: - WindowServer yield cadence (#747)
+
+    /// Asserts the cooperative yield inserted to prevent WindowServer GPU-queue
+    /// starvation fires every `yieldEveryNTokens` MLX-emitted chunks. We replace
+    /// the production `Task.sleep(for: .microseconds(50))` with a counting hook
+    /// so the test is deterministic and free of timing assumptions. Setting
+    /// `yieldEveryNTokens = 0` must disable the yield entirely.
+    ///
+    /// `#if MLX` plus the existing mock-container path keep this test running
+    /// in CI without Metal — the production code path is identical, the test
+    /// just substitutes the sleep with a counter.
+    func test_yieldEveryNTokens_firesAtConfiguredCadence() async throws {
+        // Atomically counted from the @Sendable hook to satisfy strict-concurrency.
+        final class YieldCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var _count = 0
+            func increment() {
+                lock.lock(); defer { lock.unlock() }
+                _count += 1
+            }
+            var count: Int {
+                lock.lock(); defer { lock.unlock() }
+                return _count
+            }
+        }
+
+        let counter = YieldCounter()
+        MLXBackend._yieldHookForTesting = { counter.increment() }
+        defer { MLXBackend._yieldHookForTesting = nil }
+
+        // Configured cadence: every 4 chunks. With 12 chunks emitted we expect
+        // exactly 3 yields (at 4, 8, 12). maxOutputTokens is set high enough
+        // that the limit doesn't truncate before the full chunk count.
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = Array(repeating: "x", count: 12)
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+
+        var config = GenerationConfig()
+        config.yieldEveryNTokens = 4
+        config.maxOutputTokens = 100
+
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: config
+        )
+        _ = try await collectTokens(from: stream)
+
+        XCTAssertEqual(counter.count, 3,
+            "Yield must fire exactly every yieldEveryNTokens chunks (12 / 4 = 3)")
+
+        // Now verify yieldEveryNTokens = 0 disables the yield entirely.
+        let counter2 = YieldCounter()
+        MLXBackend._yieldHookForTesting = { counter2.increment() }
+
+        let mock2 = MockMLXModelContainer()
+        mock2.tokensToYield = Array(repeating: "x", count: 12)
+
+        let backend2 = MLXBackend()
+        backend2._inject(mock2)
+
+        var disabledConfig = GenerationConfig()
+        disabledConfig.yieldEveryNTokens = 0
+        disabledConfig.maxOutputTokens = 100
+
+        let stream2 = try backend2.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: disabledConfig
+        )
+        _ = try await collectTokens(from: stream2)
+
+        XCTAssertEqual(counter2.count, 0,
+            "yieldEveryNTokens = 0 must skip the cooperative yield entirely")
+
+        // Sabotage check: changing the modulo condition to `% (yieldEvery + 1)`
+        // in MLXBackend would yield 2 times for 12 chunks at cadence 4 (at 5, 10),
+        // failing the count == 3 assertion.
+    }
+
+    /// Cancellation during the cooperative yield must not crash, must not leak
+    /// `CancellationError` to the consumer (the production sleep is `try?`'d),
+    /// and the next loop iteration's `Task.isCancelled` check must terminate
+    /// the stream cleanly.
+    ///
+    /// The hook substitutes for `Task.sleep`, so to model "cancellation while
+    /// the task is sleeping" we cancel the surrounding generation Task from
+    /// inside the hook itself — this exercises the same control-flow shape as
+    /// a real cancel arriving during the 50µs sleep.
+    func test_yieldEveryNTokens_cancellationDuringYield_terminatesCleanly() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = Array(repeating: "x", count: 32)
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+
+        // Cancel mid-generation from inside the yield hook. By the time the
+        // first yield fires (at chunk 4) we cancel via stopGeneration(), which
+        // cancels the underlying generation Task. The next iteration of the
+        // mlxStream `for await` should observe `Task.isCancelled` and break.
+        MLXBackend._yieldHookForTesting = { [weak backend] in
+            backend?.stopGeneration()
+        }
+        defer { MLXBackend._yieldHookForTesting = nil }
+
+        var config = GenerationConfig()
+        config.yieldEveryNTokens = 4
+        config.maxOutputTokens = 100
+
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: config
+        )
+
+        // Drain the stream — must complete without throwing, even though the
+        // surrounding task was cancelled mid-yield. The `try?` on the sleep
+        // (allowlisted in SilentCatchAuditTest) intentionally swallows any
+        // CancellationError so the for-await observes cancellation at the top
+        // of the next iteration.
+        let tokens = try await collectTokens(from: stream)
+
+        // Expect at most ~yieldEvery tokens to have been emitted before the
+        // cancel propagated. Strictly: no more than one full cadence past the
+        // cancel point. The point of the assertion is simply that we exited
+        // cleanly and didn't drain all 32 tokens.
+        XCTAssertLessThan(tokens.count, 32,
+            "Cancellation during yield must terminate the stream early")
+    }
+
     func test_sendableLMInput_wrapsAndUnwraps() throws {
         // This test verifies `SendableLMInput` at the type level: the wrapper must
         // satisfy Swift's `Sendable` requirement so the compiler allows cross-actor
