@@ -33,11 +33,10 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.31.3"),
-        // Pinned to main-branch commit — mlx-swift-lm 2.31.3 uses HuggingFace.HubCache in
-        // MLXLMCommon without declaring swift-huggingface as an explicit SPM dependency.
-        // Swift 6.3 / Xcode 26 enforces this strictly. The fix (decoupled MLXHuggingFace
-        // target) landed in main but has no tag yet. Revisit when ≥2.32.0 is tagged.
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", revision: "d1b14783c93902b74c1211f480ece8f776f4c29c"),
+        // 3.31.3 ships the decoupled MLXHuggingFace target (the original reason for the
+        // manual revision pin) and adds the `gemma4` model_type to LLMTypeRegistry so
+        // mlx-community/gemma-4-* can load.
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "3.31.3"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
         // Explicit dep required: mlx-swift-lm no longer pulls swift-transformers transitively.
         // The MLXHuggingFace macro generates `AutoTokenizer.from(modelFolder:)` which lives here.

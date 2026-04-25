@@ -80,11 +80,37 @@ public final class ModelStorageService {
                 continue
             }
 
-            // Check for MLX model directories (contain config.json).
+            // MLX layouts:
+            //   1. Flat:       Models/<name>/config.json
+            //   2. Namespaced: Models/<org>/<name>/config.json   (HF org/user prefix)
+            // The download manager writes namespaced layouts for repos like
+            // `mlx-community/gemma-4-…`, so a single-level scan misses them.
             var isDirectory: ObjCBool = false
-            if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
-               isDirectory.boolValue,
-               let model = ModelInfo(mlxDirectory: url) {
+            guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { continue }
+
+            if let model = ModelInfo(mlxDirectory: url) {
+                models.append(model)
+                continue
+            }
+
+            // Treat a directory without its own config.json as a possible namespace
+            // and look one level deeper. We only recurse one level — anything beyond
+            // that is out of scope for this layout convention.
+            let namespace = url.lastPathComponent
+            guard let nestedContents = try? fileManager.contentsOfDirectory(
+                at: url,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for nestedURL in nestedContents {
+                var nestedIsDir: ObjCBool = false
+                guard fileManager.fileExists(atPath: nestedURL.path, isDirectory: &nestedIsDir),
+                      nestedIsDir.boolValue,
+                      let model = ModelInfo(mlxDirectory: nestedURL, namespace: namespace) else {
+                    continue
+                }
                 models.append(model)
             }
         }
