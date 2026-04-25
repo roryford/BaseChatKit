@@ -104,6 +104,56 @@ final class SilentCatchAuditTest: XCTestCase {
         // than masking it with a false architecture error.
         "BaseChatBackends/MLXBackend.swift:guard let data = try? Data(contentsOf: configURL),",
         "BaseChatBackends/MLXBackend.swift:let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
+        // MLXBackend.effectiveSystemPrompt (Qwen tool-block builder): the
+        // `tool.parameters` round-trip through Encoder→JSONObject is a
+        // shape-conversion probe so the parameters merge into the surrounding
+        // [String: Any] tools array. The else-branch falls back to an empty
+        // schema, which is the documented Qwen behaviour for parameterless
+        // tools — failure here is functionally indistinguishable from a tool
+        // declaring no parameters.
+        "BaseChatBackends/MLXBackend.swift:if let paramsData = try? JSONEncoder().encode(tool.parameters),",
+        "BaseChatBackends/MLXBackend.swift:let paramsObj = try? JSONSerialization.jsonObject(with: paramsData) {",
+        // Same builder, outer wrap: serialising the assembled tools array into
+        // pretty-printed JSON for the <tools> block. On failure we emit "[]",
+        // which the Qwen template tolerates (model gets an empty tool list and
+        // declines to call). The visible-quality regression is acceptable
+        // versus throwing during prompt assembly.
+        "BaseChatBackends/MLXBackend.swift:if let data = try? JSONSerialization.data(withJSONObject: toolObjects, options: [.prettyPrinted]),",
+        // MLXBackend tool-call history encoding: model previously emitted a
+        // tool call whose arguments JSON is now being replayed in the chat
+        // history. If the original payload no longer parses (corrupted on the
+        // way back through the buffer), substitute an empty-args dict — this
+        // matches what the model itself would have produced for a no-arg
+        // tool, and the audit-trail content already passed validation when
+        // first emitted.
+        "BaseChatBackends/MLXBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) {",
+        // Re-serialising the same call object into a <tool_call> block. If
+        // the round-trip fails (the parsed dictionary is not JSON-encodable),
+        // we drop this single call from the rendered history rather than
+        // failing the whole prompt — the if-let `data`/`jsonStr` guard
+        // ensures only successfully-encoded calls are appended.
+        "BaseChatBackends/MLXBackend.swift:if let data = try? JSONSerialization.data(withJSONObject: callObj),",
+
+        // MLXToolCallParser.parseToolCall: defensive JSON parse of the buffered
+        // payload between <tool_call>…</tool_call>. Models routinely emit
+        // malformed payloads (truncated, partial Unicode, mid-token streaming);
+        // returning `nil` here lets the caller silently skip this block —
+        // the same way the SSE backends drop unparseable event payloads.
+        "BaseChatBackends/MLXToolCallParser.swift:let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],",
+        // Re-serialising parsed `arguments` dict back into a JSON string for
+        // ToolCall.arguments. If serialisation fails, we substitute "{}" —
+        // a parameterless call is the safest fallback when the wire format
+        // is uninterpretable, and the typed-tool executor will surface a
+        // schema mismatch if the tool actually requires args.
+        "BaseChatBackends/MLXToolCallParser.swift:if let serialised = try? JSONSerialization.data(withJSONObject: argsDict),",
+
+        // MLXToolDialect.detect: best-effort probe of the model dir's
+        // `config.json` to classify the tool dialect. A missing/unreadable
+        // config maps to `.unknown` (tool calling is a no-op), per the
+        // function's documented contract — same shape as MLXBackend's
+        // architecture validator above.
+        "BaseChatBackends/MLXToolDialect.swift:guard let data = try? Data(contentsOf: configURL),",
+        "BaseChatBackends/MLXToolDialect.swift:let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]",
 
         // BaseChatFuzz — SessionScript resource loader uses the "try-each-shape-in-order"
         // decoder pattern: each `try?` is a shape probe (single-object vs. array of scripts).
