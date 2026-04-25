@@ -80,6 +80,7 @@ final class TrafficBoundaryAuditTest: XCTestCase {
         // endpoint goes through URLSessionProvider and lives here.
         "BaseChatBackends/ClaudeBackend.swift",
         "BaseChatBackends/OpenAIBackend.swift",
+        "BaseChatBackends/OpenAIResponsesBackend.swift",
         "BaseChatBackends/OllamaBackend.swift",
         "BaseChatBackends/OllamaModelListService.swift",
         "BaseChatBackends/SSECloudBackend.swift",

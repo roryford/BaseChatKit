@@ -87,6 +87,13 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     /// When non-nil this supersedes `_conversationHistory` for message building.
     /// Access only under `stateLock`.
     private var _toolAwareHistory: [ToolAwareHistoryEntry]?
+    /// Thinking-marker pair auto-detected from the loaded model's
+    /// `tokenizer_config.json` chat template. `nil` when the model is not
+    /// loaded, the chat template is missing, or no known marker pair was
+    /// found in the template. `GenerationConfig.thinkingMarkers` always
+    /// overrides this — see the generate path below.
+    /// Access only under `stateLock`.
+    private var _autoDetectedThinkingMarkers: ThinkingMarkers?
 
     // MARK: - Load Progress
 
@@ -208,6 +215,51 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         return false
     }
 
+    // MARK: - Thinking-Marker Auto-Discovery
+
+    /// Reads `tokenizer_config.json` inside `url` and returns the best-matching
+    /// thinking-marker preset for the chat template it declares.
+    ///
+    /// Best-effort: a missing or unreadable `tokenizer_config.json`, or one
+    /// without a `chat_template` field, returns `nil`. The MLX tokenizer object
+    /// in `mlx-swift-lm` exposes the chat template through Hugging Face's
+    /// swift-transformers, but reaching it requires opening a `ModelContainer`
+    /// session — reading the on-disk JSON directly is faster and avoids
+    /// tying up the GPU during the load.
+    ///
+    /// - Parameter url: The model directory URL (same one passed to
+    ///   `MLXBackend.loadModel(from:plan:)`).
+    /// - Returns: The auto-detected ``ThinkingMarkers`` or `nil` if no known
+    ///   marker pair is present in the template.
+    static func detectThinkingMarkers(at url: URL) -> ThinkingMarkers? {
+        let configURL = url.appendingPathComponent("tokenizer_config.json")
+        guard let data = try? Data(contentsOf: configURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // Missing / unreadable tokenizer_config.json is expected for some
+            // model layouts (older snapshots, partial downloads). Don't warn —
+            // callers explicitly opt out of thinking parsing when this is nil.
+            return nil
+        }
+
+        // `chat_template` is a single string for most HF tokenizers, but a
+        // small number of repos ship an array of `{name, template}` entries
+        // (multi-template configs). When that happens, sniff the first entry
+        // whose name is `default` (or the first entry overall).
+        let templateString: String? = {
+            if let s = json["chat_template"] as? String { return s }
+            if let arr = json["chat_template"] as? [[String: Any]] {
+                if let def = arr.first(where: { ($0["name"] as? String)?.lowercased() == "default" }),
+                   let s = def["template"] as? String {
+                    return s
+                }
+                if let s = arr.first?["template"] as? String { return s }
+            }
+            return nil
+        }()
+        guard let template = templateString else { return nil }
+        return ThinkingMarkers.fromChatTemplate(template)
+    }
+
     // MARK: - Model Lifecycle
 
     public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
@@ -265,9 +317,11 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 )
             }
             let detectedDialect = MLXToolDialect.detect(at: url)
+            let detectedThinkingMarkers = Self.detectThinkingMarkers(at: url)
             withStateLock {
                 _modelContainer = container
                 _dialect = detectedDialect
+                _autoDetectedThinkingMarkers = detectedThinkingMarkers
             }
             // Apply the cache policy after loadModelContainer succeeds. Doing
             // this *after* the load (rather than before) keeps it inside the
@@ -340,8 +394,8 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         // Build messages in chat format, using full conversation history when available
         // so multi-turn exchanges retain context. Falls back to the bare prompt when
         // setConversationHistory has not been called (e.g. direct unit-test calls).
-        let (conversationHistory, toolAwareHistory, dialect) = withStateLock {
-            (_conversationHistory, _toolAwareHistory, _dialect)
+        let (conversationHistory, toolAwareHistory, dialect, autoDetectedMarkers) = withStateLock {
+            (_conversationHistory, _toolAwareHistory, _dialect, _autoDetectedThinkingMarkers)
         }
 
         // For Qwen 2.5: serialize tool definitions into a <tools>…</tools> block
@@ -414,17 +468,24 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 var outputTokenCount = 0
                 var isFirstToken = true
 
-                // Use the caller-configured markers when provided; fall back to .qwen3 (Qwen3/DeepSeek-R1).
-                // mlx-swift-lm exposes no tokenizer API to auto-detect markers at generation time.
-                // TODO: expose thinkingMarkers as a generate() parameter when Gemma 4 / other models land.
+                // Markers are resolved from two sources, manual-override first:
+                //   1. `config.thinkingMarkers` — caller's per-request override.
+                //   2. `autoDetectedMarkers` — sniffed from `tokenizer_config.json`'s
+                //      Jinja chat template at load time.
+                // If both are nil, the model does not advertise reasoning blocks and
+                // the parser stays off — raw `<think>` substrings (if the model emits
+                // them anyway) surface as visible `.token` text instead of being split
+                // into `.thinkingToken` events.
                 //
-                // `config.maxThinkingTokens == 0` disables thinking entirely (issue #597). Even when
-                // `thinkingMarkers` is set, the parser stays off and every chunk flows through as
-                // `.token`. Raw `<think>` / `</think>` substrings surface as visible text rather
-                // than being split into `.thinkingToken` events.
+                // `config.maxThinkingTokens == 0` disables thinking entirely (issue #597),
+                // overriding both sources above.
                 let thinkingDisabled = config.maxThinkingTokens == 0
-                var thinkingParser = ThinkingParser(markers: config.thinkingMarkers ?? .qwen3)
-                let useThinkingParser = !thinkingDisabled && config.thinkingMarkers != nil
+                let resolvedMarkers = config.thinkingMarkers ?? autoDetectedMarkers
+                let useThinkingParser = !thinkingDisabled && resolvedMarkers != nil
+                // ThinkingParser must always be initialized (its initializer can't take nil).
+                // When useThinkingParser is false the parser is never invoked, so the
+                // placeholder marker pair is never observed.
+                var thinkingParser = ThinkingParser(markers: resolvedMarkers ?? .qwen3)
 
                 // Instantiate the tool-call parser when tools are configured and the
                 // loaded model speaks a known tool-call dialect. The parser is a no-op
@@ -559,6 +620,15 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         }
     }
 
+    /// Test-only seam: forces the auto-detected thinking markers to a specific
+    /// value, simulating what the load path would have read from
+    /// `tokenizer_config.json`. Tests use this to verify that
+    /// `config.thinkingMarkers` correctly overrides auto-detection without
+    /// having to stage a real model directory.
+    func _injectAutoDetectedThinkingMarkers(_ markers: ThinkingMarkers?) {
+        withStateLock { _autoDetectedThinkingMarkers = markers }
+    }
+
     // MARK: - Control
 
     public func stopGeneration() {
@@ -587,6 +657,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             _conversationHistory = []
             _toolAwareHistory = nil
             _dialect = .unknown
+            _autoDetectedThinkingMarkers = nil
             return had
         }
         if hadContainer {

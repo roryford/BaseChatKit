@@ -261,6 +261,12 @@ final class GenerationCoordinatorToolLoopTests: XCTestCase {
             ToolResult(callId: "", content: giantContent, errorKind: nil)
         }
         let registry = ToolRegistry()
+        // The registry's default `ToolOutputPolicy` (32 KB rejectWithError)
+        // would short-circuit the 1 MiB payload at dispatch exit. This test
+        // covers the *coordinator's* byte-budget guard, which lives one
+        // layer up — opt out of registry enforcement so the giant payload
+        // still flows through.
+        registry.outputPolicy = ToolOutputPolicy(maxBytes: .max, onOversize: .allow)
         registry.register(executor)
 
         provider.backend.scriptedToolCallsPerTurn = [
