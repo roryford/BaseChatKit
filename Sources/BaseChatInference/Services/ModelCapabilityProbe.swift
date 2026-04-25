@@ -9,10 +9,14 @@ import Foundation
 /// are detected without a code change.
 public struct ModelCapabilities: Sendable, Equatable {
     /// True when `config.json` contains a top-level `vision_config` object.
+    /// An explicit JSON `null` does not count — the key must map to an object.
     public let supportsVision: Bool
     /// True when `config.json` contains a top-level `audio_config` object.
+    /// An explicit JSON `null` does not count — the key must map to an object.
     public let supportsAudio: Bool
-    /// `max_position_embeddings` (preferred) or `n_ctx` if present, else `nil`.
+    /// First non-nil of `max_position_embeddings`, `n_ctx`,
+    /// `text_config.max_position_embeddings`, or `text_config.n_ctx`.
+    /// `nil` when none of those keys are present (e.g. embedding-only models).
     public let contextLength: Int?
 
     public init(
@@ -77,10 +81,23 @@ public enum ModelCapabilityProbe {
         // audio_config keys are authoritative for the flags we expose today,
         // and parsing a second file we don't use would just be noise.
 
-        let supportsVision = config["vision_config"] != nil
-        let supportsAudio = config["audio_config"] != nil
+        // Use `is [String: Any]` rather than `!= nil`: JSONSerialization
+        // turns an explicit `"vision_config": null` into NSNull, which
+        // satisfies `!= nil` and would falsely report vision support. The
+        // transformers library only emits these keys as objects when the
+        // architecture actually has that modality, so requiring an object
+        // is both faithful to the format and robust to null sentinels.
+        let supportsVision = config["vision_config"] is [String: Any]
+        let supportsAudio = config["audio_config"] is [String: Any]
+        // Some VLMs (e.g. PaliGemma, LLaVA-NeXT) nest the language config
+        // under `text_config` and only expose `max_position_embeddings`
+        // there. Fall back to that nested key before giving up so the
+        // probe surfaces a context length for the common multimodal case.
+        let textConfig = config["text_config"] as? [String: Any]
         let contextLength = (config["max_position_embeddings"] as? Int)
             ?? (config["n_ctx"] as? Int)
+            ?? (textConfig?["max_position_embeddings"] as? Int)
+            ?? (textConfig?["n_ctx"] as? Int)
 
         return ModelCapabilities(
             supportsVision: supportsVision,

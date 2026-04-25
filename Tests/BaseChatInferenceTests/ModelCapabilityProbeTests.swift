@@ -143,6 +143,90 @@ final class ModelCapabilityProbeTests: XCTestCase {
         XCTAssertEqual(caps.contextLength, 8192)
     }
 
+    // MARK: - Null / non-object key handling
+
+    func testProbe_treatsExplicitNullVisionConfigAsAbsent() throws {
+        // JSONSerialization turns `"vision_config": null` into NSNull, which is
+        // `!= nil` and would falsely flag vision support if the probe just
+        // checked key presence. Real VLM configs emit an *object*, never null.
+        let dir = try makeFixtureDirectory()
+        try writeConfig(#"""
+        {
+            "model_type": "llama",
+            "max_position_embeddings": 8192,
+            "vision_config": null,
+            "audio_config": null
+        }
+        """#, to: dir)
+
+        let caps = try ModelCapabilityProbe.probe(modelDirectory: dir)
+
+        XCTAssertFalse(caps.supportsVision)
+        XCTAssertFalse(caps.supportsAudio)
+        XCTAssertEqual(caps.contextLength, 8192)
+    }
+
+    func testProbe_treatsScalarVisionConfigAsAbsent() throws {
+        // Defensive: a malformed config.json that puts a scalar where an object
+        // is expected should not be treated as multimodal. Better to under-
+        // report capability than to mis-route a load through VLMModelFactory.
+        let dir = try makeFixtureDirectory()
+        try writeConfig(#"""
+        {
+            "model_type": "llama",
+            "vision_config": "broken",
+            "audio_config": 42
+        }
+        """#, to: dir)
+
+        let caps = try ModelCapabilityProbe.probe(modelDirectory: dir)
+
+        XCTAssertFalse(caps.supportsVision)
+        XCTAssertFalse(caps.supportsAudio)
+    }
+
+    // MARK: - Nested text_config.max_position_embeddings
+
+    func testProbe_readsContextLengthFromNestedTextConfig() throws {
+        // PaliGemma-style layout: top-level config has no max_position_embeddings;
+        // the language model's context lives inside text_config. Without the
+        // fallback, the probe would return nil for these very common VLMs.
+        let dir = try makeFixtureDirectory()
+        try writeConfig(#"""
+        {
+            "model_type": "paligemma",
+            "vision_config": { "hidden_size": 1152 },
+            "text_config": {
+                "model_type": "gemma",
+                "max_position_embeddings": 8192
+            }
+        }
+        """#, to: dir)
+
+        let caps = try ModelCapabilityProbe.probe(modelDirectory: dir)
+
+        XCTAssertTrue(caps.supportsVision)
+        XCTAssertEqual(caps.contextLength, 8192)
+    }
+
+    func testProbe_prefersTopLevelContextOverTextConfig() throws {
+        // When both are present, top-level wins — consistent with HF's own
+        // resolution order and with how mlx-swift-lm reads the config.
+        let dir = try makeFixtureDirectory()
+        try writeConfig(#"""
+        {
+            "model_type": "made_up_vlm",
+            "max_position_embeddings": 16384,
+            "vision_config": { "hidden_size": 1152 },
+            "text_config": { "max_position_embeddings": 4096 }
+        }
+        """#, to: dir)
+
+        let caps = try ModelCapabilityProbe.probe(modelDirectory: dir)
+
+        XCTAssertEqual(caps.contextLength, 16384)
+    }
+
     // MARK: - Error paths
 
     func testProbe_throwsWhenConfigMissing() throws {
