@@ -122,4 +122,65 @@ final class ThinkingStreamingTests: XCTestCase {
             "messageIDsWithStreamingThinking must be empty after generation completes"
         )
     }
+
+    // MARK: - 3. Visible-text appends preserve sibling thinking parts
+    //
+    // Direct unit tests for `appendVisibleText` — the helper that replaces the
+    // `msg.content += batch` line whose setter clobbered any non-text parts
+    // (the latent bug noted in the PR description). These tests pin the
+    // contract so a future refactor can't silently regress to wholesale
+    // replacement.
+
+    func test_appendVisibleText_preservesLeadingThinkingPart() {
+        var msg = ChatMessageRecord(role: .assistant, content: "", sessionID: UUID())
+        msg.contentParts = [.thinking("reasoning"), .text("Hello")]
+
+        GenerationCoordinator.appendVisibleText(", world", into: &msg)
+
+        XCTAssertEqual(msg.contentParts.count, 2)
+        guard case .thinking(let t) = msg.contentParts[0] else {
+            return XCTFail("Expected leading .thinking part to survive append")
+        }
+        XCTAssertEqual(t, "reasoning")
+        guard case .text(let s) = msg.contentParts[1] else {
+            return XCTFail("Expected trailing .text part")
+        }
+        XCTAssertEqual(s, "Hello, world")
+    }
+
+    func test_appendVisibleText_appendsNewTextPart_whenNoneExists() {
+        var msg = ChatMessageRecord(role: .assistant, content: "", sessionID: UUID())
+        msg.contentParts = [.thinking("only reasoning so far")]
+
+        GenerationCoordinator.appendVisibleText("first visible", into: &msg)
+
+        XCTAssertEqual(msg.contentParts.count, 2)
+        guard case .thinking = msg.contentParts[0] else {
+            return XCTFail("Thinking part must remain at index 0")
+        }
+        guard case .text(let s) = msg.contentParts[1] else {
+            return XCTFail("New .text part must be appended after thinking")
+        }
+        XCTAssertEqual(s, "first visible")
+    }
+
+    // MARK: - 4. Partial thinking writes mutate the placeholder in place
+
+    func test_writeThinkingPartialText_replacesExistingPlaceholder() {
+        var msg = ChatMessageRecord(role: .assistant, content: "", sessionID: UUID())
+        msg.contentParts = [.thinking(""), .text("visible")]
+
+        GenerationCoordinator.writeThinkingPartialText("Let me", into: &msg)
+        GenerationCoordinator.writeThinkingPartialText("Let me think", into: &msg)
+
+        XCTAssertEqual(msg.contentParts.count, 2, "No new parts should be appended on partial flushes")
+        guard case .thinking(let t) = msg.contentParts[0] else {
+            return XCTFail("Index 0 must remain a .thinking part")
+        }
+        XCTAssertEqual(t, "Let me think")
+        guard case .text(let s) = msg.contentParts[1] else {
+            return XCTFail("Index 1 must remain the .text part")
+        }
+        XCTAssertEqual(s, "visible")
+    }
 }
