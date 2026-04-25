@@ -98,13 +98,16 @@ final class ChatViewModelIngestPendingPayloadTests: XCTestCase {
         XCTAssertEqual(vm.topP, 0.5)
         XCTAssertEqual(vm.repeatPenalty, 1.25)
 
-        // The preset's system prompt is persisted on the new session row
-        // so a relaunch (which reloads systemPrompt from the session)
+        // The preset is persisted on the new session row so a relaunch
+        // (which reloads sampler params + system prompt from the session)
         // continues to see it.
         guard let activeSession = vm.activeSession else {
             return XCTFail("Expected an active session")
         }
         XCTAssertEqual(activeSession.systemPrompt, "You are a poet.")
+        XCTAssertEqual(activeSession.temperature, 0.42)
+        XCTAssertEqual(activeSession.topP, 0.5)
+        XCTAssertEqual(activeSession.repeatPenalty, 1.25)
     }
 
     func test_textPayload_newSession_withoutModelLoaded_seedsDraftWithoutSending() async {

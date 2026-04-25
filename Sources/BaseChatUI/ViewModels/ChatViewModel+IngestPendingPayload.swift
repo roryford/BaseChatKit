@@ -210,6 +210,17 @@ extension ChatViewModel {
 
         if let preset {
             applyPreset(preset)
+            // Persist the preset onto the session record so sampler params,
+            // selected model, and system prompt survive a relaunch — without
+            // this, only the live VM state has the preset values and they
+            // get lost when the session is reloaded.
+            do {
+                try saveSettingsToSession()
+            } catch {
+                Log.persistence.warning(
+                    "ingestPendingPayload failed to persist preset to session: \(error.localizedDescription)"
+                )
+            }
         }
 
         // Decompose the payload into a text body plus any rich parts
