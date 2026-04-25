@@ -154,8 +154,10 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
 
         // Only request a reasoning summary when the caller asks for thinking
         // output. Sending `reasoning` to non-reasoning models is rejected by
-        // the API, so we omit it unless the caller signals intent.
-        if config.maxThinkingTokens != nil {
+        // the API, so we omit it unless the caller signals intent. A value
+        // of `0` is the documented "disable thinking entirely" sentinel
+        // (see `GenerationConfig.maxThinkingTokens`), so treat it like nil.
+        if let maxThinkingTokens = config.maxThinkingTokens, maxThinkingTokens > 0 {
             body["reasoning"] = ["effort": "medium"]
         }
 
@@ -202,7 +204,12 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
         // transition to visible content so consumers see a clean handoff.
         var thinkingOpen = false
 
-        func noteEventYielded() throws {
+        // Rate-limits every `data:` line received from the upstream,
+        // regardless of whether we yield a `GenerationEvent` for it. This
+        // closes the DoS hole where a hostile/buggy server could spam
+        // structural events (`response.output_item.added`, etc.) we ignore
+        // and bypass the per-stream cap entirely.
+        func noteDataLineReceived() throws {
             let now = ContinuousClock.now
             if now - rateWindowStart >= .seconds(1) {
                 rateWindowStart = now
@@ -215,9 +222,8 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             }
         }
 
-        func flushThinkingCompleteIfNeeded() throws {
+        func flushThinkingCompleteIfNeeded() {
             if thinkingOpen {
-                try noteEventYielded()
                 continuation.yield(.thinkingComplete)
                 thinkingOpen = false
             }
@@ -235,7 +241,6 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
 
             if isReasoningDelta {
                 if let delta = Self.parseDelta(from: data), !delta.isEmpty {
-                    try noteEventYielded()
                     continuation.yield(.thinkingToken(delta))
                     thinkingOpen = true
                 }
@@ -243,21 +248,20 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             }
 
             if isReasoningDone {
-                try flushThinkingCompleteIfNeeded()
+                flushThinkingCompleteIfNeeded()
                 return false
             }
 
             if name == "response.output_text.delta" {
                 if let delta = Self.parseDelta(from: data), !delta.isEmpty {
-                    try flushThinkingCompleteIfNeeded()
-                    try noteEventYielded()
+                    flushThinkingCompleteIfNeeded()
                     continuation.yield(.token(delta))
                 }
                 return false
             }
 
             if name == "response.completed" {
-                try flushThinkingCompleteIfNeeded()
+                flushThinkingCompleteIfNeeded()
                 if let usage = Self.parseUsage(from: data) {
                     handleUsage(usage)
                     if let prompt = usage.promptTokens,
@@ -319,6 +323,11 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             }
 
             if line.hasPrefix("data:") {
+                // Count the line against the per-second cap before we look
+                // at the event name — unknown/ignored events still consume
+                // budget, otherwise an attacker could spam structural
+                // events we discard.
+                try noteDataLineReceived()
                 let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
                 guard let name = currentEventName else {
                     // `data:` without a preceding `event:` — ignore. The
@@ -332,7 +341,7 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             // `id:`, `retry:`, comment lines (`:`) are ignored.
         }
 
-        try flushThinkingCompleteIfNeeded()
+        flushThinkingCompleteIfNeeded()
     }
 
     // MARK: - JSON Parsing

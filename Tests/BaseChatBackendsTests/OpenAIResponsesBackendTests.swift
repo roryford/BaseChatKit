@@ -292,5 +292,27 @@ final class OpenAIResponsesBackendTests: XCTestCase {
         XCTAssertNotNil(reasoning, "reasoning block must appear when maxThinkingTokens is set")
         XCTAssertEqual(reasoning?["effort"] as? String, "medium")
     }
+
+    /// `GenerationConfig.maxThinkingTokens == 0` is the documented "disable
+    /// thinking entirely" sentinel. The request body must omit the
+    /// `reasoning` block in that case so non-reasoning models aren't
+    /// erroneously forced into a reasoning response (and to match the
+    /// `nil` path).
+    func test_requestBody_maxThinkingTokensZero_omitsReasoningBlock() async throws {
+        let (backend, _) = makeBackend()
+        try await load(backend)
+
+        let request = try backend.buildRequest(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: GenerationConfig(maxThinkingTokens: 0)
+        )
+
+        let body = try JSONSerialization.jsonObject(with: request.httpBody!) as? [String: Any]
+        XCTAssertNil(
+            body?["reasoning"],
+            "maxThinkingTokens == 0 means 'disable thinking'; reasoning block must be omitted"
+        )
+    }
 }
 #endif
