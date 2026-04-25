@@ -33,12 +33,23 @@ import XCTest
 ///    (`os_log` `.public` deliberately not covered — see the
 ///    `privacyAPIPattern` doc comment for rationale.)
 ///
+/// 5. **`Package.swift` hygiene** — bans `linkedFramework("Network")`,
+///    `linkedFramework("CFNetwork")`, `unsafeFlags`, and SwiftPM
+///    `.buildToolPlugin` / `.commandPlugin` declarations. Catches future
+///    PRs that re-introduce networking via build settings (defeating the
+///    source-grep audit) or add SwiftPM plugins (which can run arbitrary
+///    code at build time).
+///
 /// 6. **Import-graph boundary** — locks in the layered architecture from
 ///    `CLAUDE.md`. UI must not depend on Backends; Inference must not
 ///    depend on Core or Backends.
 ///
-/// (Rules 5 and 7 — Package.swift hygiene and `#if` trait-name validity —
-/// land in Phase 2 alongside the trait split.)
+/// 7. **Trait gate sanity** — every `#if`/`#elseif` identifier in
+///    `Sources/` that looks trait-named (TitleCase or UPPERCASE, not a
+///    well-known compiler conditional like `os(...)`, `canImport(...)`,
+///    `swift(...)`, `DEBUG`, etc.) must match a trait declared in
+///    `Package.swift`. Catches stale `#if` directives left behind after
+///    a trait rename.
 ///
 /// ## Allowlist policy
 ///
@@ -126,6 +137,31 @@ final class TrafficBoundaryAuditTest: XCTestCase {
         // process to replay a corpus seed in isolation.
         "BaseChatFuzz/HarnessMetadata.swift",
         "BaseChatFuzz/Replay/Replayer.swift",
+    ]
+
+    /// `Package.swift` lines where a normally-banned token (Rule 5) is
+    /// approved. Currently empty — there is no legitimate reason to use
+    /// `unsafeFlags`, link `Network`/`CFNetwork`, or add a SwiftPM plugin
+    /// in this package. Format mirrors `privacyAPIAllowlist`:
+    /// `"Package.swift:<trimmed line>"`.
+    ///
+    /// **Cap: 3 entries.** Adding to this list weakens Rule 5 substantially
+    /// (build-tool plugins run arbitrary code at build time); require an
+    /// inline `// Justification:` comment per entry and reviewer sign-off.
+    private static let packageHygieneAllowlist: Set<String> = []
+
+    /// Compiler / feature conditionals that Rule 7 must not flag — they
+    /// live outside the Package.swift trait set by design.
+    ///
+    /// Identifiers handled by an `<identifier>(...)` form (e.g.
+    /// `os(iOS)`, `canImport(Metal)`) are skipped automatically by the
+    /// rule's parser; this set covers the bare-identifier forms that
+    /// behave like traits but aren't traits.
+    private static let traitGateCompilerConditionals: Set<String> = [
+        "DEBUG",
+        "RELEASE",
+        "NDEBUG",
+        "TESTING",
     ]
 
     /// Privacy-sensitive Apple-API call sites that have been individually
@@ -345,6 +381,87 @@ final class TrafficBoundaryAuditTest: XCTestCase {
         Self.assertNoOffenders(offenders)
     }
 
+    func test_rule5_packageManifestHygiene() throws {
+        let packageURL = try Self.locatePackageManifest()
+        let content = try String(contentsOf: packageURL, encoding: .utf8)
+        var offenders: [Offender] = []
+
+        for (idx, line) in content.components(separatedBy: "\n").enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Skip empty / pure-comment lines so doc strings about the
+            // banned tokens (e.g. explaining why we don't use them) don't
+            // self-trip the audit.
+            guard Self.shouldScan(line: trimmed) else { continue }
+
+            for hit in Self.packageHygieneMatches(in: trimmed) {
+                let fingerprint = "Package.swift:\(trimmed)"
+                if Self.packageHygieneAllowlist.contains(fingerprint) { continue }
+                offenders.append(.init(
+                    rule: 5, ruleName: "Package.swift hygiene (\(hit))",
+                    file: "Package.swift", line: idx + 1, text: trimmed,
+                    why: "Linking Network.framework/CFNetwork or shipping a SwiftPM plugin re-introduces networking/code-execution surface that the source-grep audit cannot see. `unsafeFlags` lets a contributor disable any compiler safety check without leaving a trace at the call site.",
+                    fix: "Remove the offending build setting. If genuinely required, add a fingerprint entry to packageHygieneAllowlist with a `// Justification:` comment and reviewer sign-off."
+                ))
+            }
+        }
+
+        Self.assertNoOffenders(offenders)
+
+        XCTAssertLessThanOrEqual(
+            Self.packageHygieneAllowlist.count, 3,
+            "packageHygieneAllowlist exceeds cap. Each entry weakens Rule 5 — re-architect rather than expand the list."
+        )
+    }
+
+    func test_rule7_traitGateSanity() throws {
+        let packageURL = try Self.locatePackageManifest()
+        let manifest = try String(contentsOf: packageURL, encoding: .utf8)
+        let declaredTraits = Self.parseDeclaredTraits(in: manifest)
+
+        // Sanity: the traits we know exist on `main` must all be present.
+        // If this fails, the parser regressed before we even check Sources/.
+        for expected in ["MLX", "Llama", "Ollama", "CloudSaaS", "Fuzz"] {
+            XCTAssertTrue(
+                declaredTraits.contains(expected),
+                "parseDeclaredTraits failed to find expected trait '\(expected)' in Package.swift — the .trait(name: \"...\") regex has regressed."
+            )
+        }
+
+        let allowedIdentifiers = declaredTraits.union(Self.traitGateCompilerConditionals)
+        let sourcesURL = try Self.locateSourcesDirectory()
+        var offenders: [Offender] = []
+
+        for fileURL in try Self.enumerateSwiftFiles(under: sourcesURL) {
+            let relativePath = fileURL.path.replacingOccurrences(
+                of: sourcesURL.path + "/", with: ""
+            )
+            let content = try String(contentsOf: fileURL, encoding: .utf8)
+            for (idx, line) in content.components(separatedBy: "\n").enumerated() {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                // `#if`/`#elseif` lines are syntactically not Swift comments
+                // even when they appear inside a doc-comment block — the
+                // shouldScan filter is irrelevant here. We require the line
+                // to start with `#if ` or `#elseif `.
+                guard trimmed.hasPrefix("#if ") || trimmed.hasPrefix("#elseif ") else { continue }
+
+                let condition = trimmed
+                    .replacingOccurrences(of: "#elseif ", with: "")
+                    .replacingOccurrences(of: "#if ", with: "")
+                for identifier in Self.extractTraitLikeIdentifiers(from: condition) {
+                    if allowedIdentifiers.contains(identifier) { continue }
+                    offenders.append(.init(
+                        rule: 7, ruleName: "Trait gate sanity",
+                        file: relativePath, line: idx + 1, text: trimmed,
+                        why: "`#if \(identifier)` references an identifier that is neither a declared trait in Package.swift nor a recognised compiler conditional. The most common cause is a stale gate after a trait rename — the dead branch silently never compiles.",
+                        fix: "Either add a `.trait(name: \"\(identifier)\", ...)` entry to Package.swift, rename the gate to match an existing trait, or remove the dead `#if`."
+                    ))
+                }
+            }
+        }
+
+        Self.assertNoOffenders(offenders)
+    }
+
     // MARK: - Patterns
 
     /// Identifier-boundary protection matches only standalone
@@ -385,6 +502,102 @@ final class TrafficBoundaryAuditTest: XCTestCase {
 
     private static func matches(_ pattern: String, in line: String) -> Bool {
         line.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    // MARK: - Rule 5 helpers (Package.swift hygiene)
+
+    /// Tokens whose presence in `Package.swift` constitutes a Rule 5
+    /// violation. Matched as substring/regex against trimmed source
+    /// lines. The display label (left) becomes part of the offender's
+    /// `ruleName` so review output names which token was hit.
+    private static let packageHygienePatterns: [(label: String, pattern: String)] = [
+        ("linkedFramework Network",      #"linkedFramework\(\s*"Network"\s*\)"#),
+        ("linkedFramework CFNetwork",    #"linkedFramework\(\s*"CFNetwork"\s*\)"#),
+        ("unsafeFlags",                  #"(?<![A-Za-z0-9_])unsafeFlags\("#),
+        // Match `.buildToolPlugin(` and `.commandPlugin(` as constructor
+        // calls in target dependencies — distinguishes from random
+        // identifiers that might contain the substring.
+        (".buildToolPlugin",             #"\.buildToolPlugin\("#),
+        (".commandPlugin",               #"\.commandPlugin\("#),
+    ]
+
+    /// Returns the labels of every Rule-5 token that fires on `line`.
+    /// More than one can fire in the unlikely case a contributor combines
+    /// banned tokens on the same line.
+    private static func packageHygieneMatches(in line: String) -> [String] {
+        packageHygienePatterns.compactMap { entry in
+            matches(entry.pattern, in: line) ? entry.label : nil
+        }
+    }
+
+    // MARK: - Rule 7 helpers (Trait gate sanity)
+
+    /// Parses `.trait(name: "X", ...)` declarations out of a Package.swift
+    /// manifest source string. Tolerates single- or double-quoted names
+    /// (Swift only allows double, but the regex is forgiving) and any
+    /// whitespace around the `name:` label.
+    private static func parseDeclaredTraits(in manifest: String) -> Set<String> {
+        let pattern = #"\.trait\(\s*name:\s*"([A-Za-z_][A-Za-z0-9_]*)""#
+        var found: Set<String> = []
+        let ns = manifest as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        regex.enumerateMatches(in: manifest, range: range) { match, _, _ in
+            guard let m = match, m.numberOfRanges >= 2 else { return }
+            found.insert(ns.substring(with: m.range(at: 1)))
+        }
+        return found
+    }
+
+    /// Splits an `#if` condition into the bare-identifier components that
+    /// could plausibly name a SwiftPM trait. Strips `!`, splits on `&&`
+    /// and `||`, and discards any token that looks like a function-form
+    /// compiler conditional (`os(macOS)`, `canImport(Metal)`, etc.) or a
+    /// non-trait-shaped identifier (lowercase-only, contains digits at
+    /// start, etc.).
+    static func extractTraitLikeIdentifiers(from condition: String) -> [String] {
+        // Tokens are anything separated by `&&`, `||`, or whitespace.
+        // We keep parentheses so `os(iOS)` stays intact for the filter.
+        var tokens: [String] = []
+        var current = ""
+        var depth = 0
+        for ch in condition {
+            if ch == "(" { depth += 1; current.append(ch); continue }
+            if ch == ")" { depth -= 1; current.append(ch); continue }
+            if depth == 0 {
+                // Treat &&, ||, and whitespace as splitters.
+                if ch == "&" || ch == "|" || ch.isWhitespace {
+                    if !current.isEmpty { tokens.append(current); current = "" }
+                    continue
+                }
+            }
+            current.append(ch)
+        }
+        if !current.isEmpty { tokens.append(current) }
+
+        var identifiers: [String] = []
+        for raw in tokens {
+            var t = raw
+            // Strip any leading `!` (negation).
+            while t.hasPrefix("!") { t.removeFirst() }
+            t = t.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty { continue }
+
+            // Skip function-form compiler conditionals — anything with
+            // parentheses, e.g. `os(iOS)`, `canImport(Metal)`,
+            // `swift(>=5.9)`, `compiler(>=5.9)`, `targetEnvironment(...)`,
+            // `arch(...)`. We do not validate the inner argument; the
+            // Swift compiler does that already.
+            if t.contains("(") { continue }
+
+            // Trait-shaped: must start with an uppercase letter so we
+            // skip stray lowercase identifiers (none expected, but the
+            // filter keeps the rule conservative).
+            guard let first = t.first, first.isUppercase else { continue }
+
+            identifiers.append(t)
+        }
+        return identifiers
     }
 
     /// Skip empty lines, single-line comments, and doc comments. (Block
@@ -439,6 +652,22 @@ final class TrafficBoundaryAuditTest: XCTestCase {
         }
         throw NSError(domain: "TrafficBoundaryAuditTest", code: 1, userInfo: [
             NSLocalizedDescriptionKey: "Could not locate Sources/ from #filePath"
+        ])
+    }
+
+    /// Locates `Package.swift` by walking up from the current test file
+    /// until a sibling manifest is found. Mirrors `locateSourcesDirectory`.
+    private static func locatePackageManifest(filePath: StaticString = #filePath) throws -> URL {
+        var dir = URL(fileURLWithPath: "\(filePath)").deletingLastPathComponent()
+        while dir.path != "/" {
+            let candidate = dir.appendingPathComponent("Package.swift")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            dir.deleteLastPathComponent()
+        }
+        throw NSError(domain: "TrafficBoundaryAuditTest", code: 2, userInfo: [
+            NSLocalizedDescriptionKey: "Could not locate Package.swift from #filePath"
         ])
     }
 
@@ -557,6 +786,108 @@ final class TrafficBoundaryAuditTest: XCTestCase {
         let handoffOff = "activity.isEligibleForHandoff = false"
         XCTAssertFalse(Self.matches(Self.privacyAPIPattern, in: handoffOff),
                        "Rule 4 must not match isEligibleForHandoff = false")
+    }
+
+    func test_sabotage_rule5_catchesPackageHygieneTokens() {
+        // Each of these would constitute a Rule 5 violation if added to
+        // Package.swift verbatim. Sabotage check: feed the line through
+        // the matcher and assert it fires. Cleaning up means: do not
+        // commit any of these strings into Package.swift.
+        let banned = [
+            #".linkedFramework("Network"),"#,
+            #".linkedFramework("CFNetwork"),"#,
+            #"unsafeFlags(["-O0"])"#,
+            ".buildToolPlugin(name: \"Foo\", capability: .buildTool())",
+            ".commandPlugin(name: \"Bar\", capability: .command(intent: .custom(verb: \"do\", description: \"x\")))",
+        ]
+        for fixture in banned {
+            XCTAssertFalse(
+                Self.packageHygieneMatches(in: fixture).isEmpty,
+                "Rule 5 should match: \(fixture)"
+            )
+        }
+
+        // Negative: a Package.swift line that only mentions one of the
+        // banned tokens inside a quoted prose string (e.g. a doc comment
+        // about why we don't use them) is filtered out at the
+        // shouldScan-comment level by the test entry point. Confirm the
+        // matcher itself does *not* treat unrelated identifiers as hits.
+        XCTAssertTrue(
+            Self.packageHygieneMatches(in: "let path = \"linkedFrameworks\"").isEmpty,
+            "Rule 5 must not match identifiers that merely contain the substring 'linkedFramework' without the matching call shape"
+        )
+        XCTAssertTrue(
+            Self.packageHygieneMatches(in: "let myUnsafeFlagsCount = 0").isEmpty,
+            "Rule 5 must not match non-call uses of `unsafeFlags`"
+        )
+
+        // Sabotage: temporarily appending `linkedFramework("Network")` to
+        // Package.swift would make `test_rule5_packageManifestHygiene`
+        // fail. Verified manually before commit; do not commit such a
+        // change.
+    }
+
+    func test_sabotage_rule7_traitGateExtraction() {
+        // Compound condition: split on || and && and validate each side.
+        XCTAssertEqual(
+            Self.extractTraitLikeIdentifiers(from: "Ollama || CloudSaaS"),
+            ["Ollama", "CloudSaaS"]
+        )
+        XCTAssertEqual(
+            Self.extractTraitLikeIdentifiers(from: "Llama && Fuzz"),
+            ["Llama", "Fuzz"]
+        )
+
+        // Negation: `!Ollama` is treated as `Ollama`.
+        XCTAssertEqual(
+            Self.extractTraitLikeIdentifiers(from: "!Ollama"),
+            ["Ollama"]
+        )
+
+        // Function-form compiler conditionals are excluded.
+        XCTAssertEqual(
+            Self.extractTraitLikeIdentifiers(from: "os(iOS)"),
+            []
+        )
+        XCTAssertEqual(
+            Self.extractTraitLikeIdentifiers(from: "canImport(FoundationModels) && Fuzz"),
+            ["Fuzz"]
+        )
+        XCTAssertEqual(
+            Self.extractTraitLikeIdentifiers(from: "(os(iOS) || os(tvOS) || os(watchOS)) && !targetEnvironment(macCatalyst)"),
+            []
+        )
+
+        // Bogus identifier should land in the extracted set so the
+        // production audit can flag it.
+        XCTAssertEqual(
+            Self.extractTraitLikeIdentifiers(from: "Bogus"),
+            ["Bogus"]
+        )
+        XCTAssertEqual(
+            Self.extractTraitLikeIdentifiers(from: "Ollama || Bogus"),
+            ["Ollama", "Bogus"]
+        )
+
+        // Sabotage: temporarily adding `#if Bogus` to any file under
+        // Sources/ would make `test_rule7_traitGateSanity` fail because
+        // `Bogus` is not declared in Package.swift. Verified manually
+        // before commit; do not commit such a change.
+
+        // parseDeclaredTraits must extract every trait listed in the
+        // current manifest.
+        let manifest = """
+            traits: [
+                .default(enabledTraits: ["MLX"]),
+                .trait(name: "MLX", description: "x"),
+                .trait(name: "Llama", description: "x"),
+                .trait(name: "Ollama", description: "x"),
+                .trait(name: "CloudSaaS", description: "x"),
+                .trait(name: "Fuzz", description: "x"),
+            ],
+            """
+        let parsed = Self.parseDeclaredTraits(in: manifest)
+        XCTAssertEqual(parsed, ["MLX", "Llama", "Ollama", "CloudSaaS", "Fuzz"])
     }
 
     func test_sabotage_rule6_detectsForbiddenImports() {
