@@ -20,9 +20,11 @@ let package = Package(
         .executable(name: "bck-tools", targets: ["bck-tools"]),
     ],
     traits: [
-        .default(enabledTraits: ["MLX", "Llama"]),
+        .default(enabledTraits: ["MLX", "Llama", "Ollama"]),
         .trait(name: "MLX", description: "Enable the MLX inference backend (requires Apple Silicon)"),
         .trait(name: "Llama", description: "Enable the llama.cpp (GGUF) inference backend"),
+        .trait(name: "Ollama", description: "Self-hosted / private-datacenter HTTP inference. Moves out of defaults in next major."),
+        .trait(name: "CloudSaaS", description: "Third-party SaaS providers (Claude, OpenAI). Off by default."),
         // Fuzz is intentionally NOT a default trait. Enabling it adds BaseChatBackends
         // (and transitively LlamaSwift) to fuzz-chat, which conflicts with the MLX
         // integration test targets in the auto-generated Xcode scheme. Run the fuzzer via
@@ -79,7 +81,11 @@ let package = Package(
                 "BaseChatMacrosPlugin",
                 .product(name: "HuggingFace", package: "swift-huggingface"),
             ],
-            path: "Sources/BaseChatInference"
+            path: "Sources/BaseChatInference",
+            swiftSettings: [
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
+            ]
         ),
         // Core: SwiftData persistence (schema, @Model types, container, provider)
         // plus chat export. Re-exports BaseChatInference for source compatibility.
@@ -104,13 +110,19 @@ let package = Package(
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
             ]
         ),
         // UI: SwiftUI views and view models — needs both inference and persistence
         .target(
             name: "BaseChatUI",
             dependencies: ["BaseChatCore", "BaseChatInference"],
-            path: "Sources/BaseChatUI"
+            path: "Sources/BaseChatUI",
+            swiftSettings: [
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
+            ]
         ),
         // Shared test mocks and utilities
         .target(
@@ -124,6 +136,8 @@ let package = Package(
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
             ]
         ),
         .testTarget(
@@ -167,6 +181,8 @@ let package = Package(
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
             ]
         ),
         .testTarget(
@@ -185,6 +201,8 @@ let package = Package(
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
             ]
         ),
         .testTarget(
@@ -196,7 +214,11 @@ let package = Package(
                 "BaseChatTestSupport",
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
-            exclude: ["__Snapshots__"]
+            exclude: ["__Snapshots__"],
+            swiftSettings: [
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
+            ]
         ),
         // Fuzzing engine: corpus, runner, capture, detectors, sink. Backend-agnostic.
         // Trait-free so it never pulls MLX/Llama transitively — backend selection
@@ -223,6 +245,8 @@ let package = Package(
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
                 .define("Fuzz", .when(traits: ["Fuzz"])),
             ]
         ),
@@ -237,6 +261,8 @@ let package = Package(
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
             ]
         ),
         // BaseChatTools: end-to-end tool-calling validation harness.
@@ -287,6 +313,8 @@ let package = Package(
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
             ]
         ),
     ],

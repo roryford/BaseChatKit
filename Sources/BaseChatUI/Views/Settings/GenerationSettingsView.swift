@@ -200,7 +200,11 @@ public struct GenerationSettingsView: View {
                 }
             }
             .sheet(isPresented: $isAPIConfigPresented) {
+                #if Ollama || CloudSaaS
                 APIConfigurationView()
+                #else
+                EmptyView()
+                #endif
             }
             .sheet(isPresented: $isPromptInspectorPresented) {
                 PromptInspectorView(

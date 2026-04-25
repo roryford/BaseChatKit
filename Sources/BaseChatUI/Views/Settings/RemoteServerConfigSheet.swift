@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import SwiftUI
 import BaseChatCore
 import BaseChatInference
@@ -218,3 +219,5 @@ private extension String {
     RemoteServerConfigSheet()
         .modelContainer(for: APIEndpoint.self, inMemory: true)
 }
+#endif
+

@@ -1,3 +1,4 @@
+#if CloudSaaS
 import Testing
 import Foundation
 @testable import BaseChatBackends
@@ -864,3 +865,4 @@ struct SSEHazardTests {
                 "Split SSE frame must produce exactly one event; got \(tokens)")
     }
 }
+#endif

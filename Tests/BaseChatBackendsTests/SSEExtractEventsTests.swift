@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import Testing
 import Foundation
 @testable import BaseChatBackends
@@ -285,3 +286,4 @@ struct SSEExtractEventsTests {
                 "Multiple events in one payload must preserve order and boundary injection; got \(events)")
     }
 }
+#endif

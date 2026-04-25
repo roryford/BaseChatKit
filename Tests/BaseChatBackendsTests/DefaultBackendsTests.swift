@@ -36,23 +36,43 @@ final class DefaultBackendsRoutingTests: XCTestCase {
     }
 
     func test_routing_openAI_mapsToOpenAIBackend() {
+        #if CloudSaaS
         XCTAssertEqual(DefaultBackends.backendTypeName(for: .openAI), "OpenAIBackend")
+        #else
+        XCTAssertNil(DefaultBackends.backendTypeName(for: .openAI))
+        #endif
     }
 
     func test_routing_claude_mapsToClaudeBackend() {
+        #if CloudSaaS
         XCTAssertEqual(DefaultBackends.backendTypeName(for: .claude), "ClaudeBackend")
+        #else
+        XCTAssertNil(DefaultBackends.backendTypeName(for: .claude))
+        #endif
     }
 
     func test_routing_ollama_mapsToOllamaBackend() {
+        #if Ollama
         XCTAssertEqual(DefaultBackends.backendTypeName(for: .ollama), "OllamaBackend")
+        #else
+        XCTAssertNil(DefaultBackends.backendTypeName(for: .ollama))
+        #endif
     }
 
     func test_routing_lmStudio_mapsToOpenAIBackend() {
+        #if CloudSaaS
         XCTAssertEqual(DefaultBackends.backendTypeName(for: .lmStudio), "OpenAIBackend")
+        #else
+        XCTAssertNil(DefaultBackends.backendTypeName(for: .lmStudio))
+        #endif
     }
 
     func test_routing_custom_mapsToOpenAIBackend() {
+        #if CloudSaaS
         XCTAssertEqual(DefaultBackends.backendTypeName(for: .custom), "OpenAIBackend")
+        #else
+        XCTAssertNil(DefaultBackends.backendTypeName(for: .custom))
+        #endif
     }
 }
 

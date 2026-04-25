@@ -143,12 +143,20 @@ public struct ChatView: View {
             get: { showAPIConfiguration && horizontalSizeClass == .compact },
             set: { if !$0 { showAPIConfiguration = false } }
         )) {
+            #if Ollama || CloudSaaS
             APIConfigurationView()
                 .presentationDragIndicator(.visible)
+            #else
+            EmptyView()
+            #endif
         }
         #else
         .sheet(isPresented: $showAPIConfiguration) {
+            #if Ollama || CloudSaaS
             APIConfigurationView()
+            #else
+            EmptyView()
+            #endif
         }
         #endif
     }
@@ -219,8 +227,12 @@ public struct ChatView: View {
                     }
                 }
             )) {
+                #if Ollama || CloudSaaS
                 APIConfigurationView()
                     .frame(minWidth: 360, minHeight: 440)
+                #else
+                EmptyView()
+                #endif
             }
             #endif
         case .selectModel:

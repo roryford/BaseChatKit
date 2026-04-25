@@ -1,3 +1,4 @@
+#if CloudSaaS
 import XCTest
 import BaseChatCore
 import BaseChatInference
@@ -354,3 +355,4 @@ extension OpenAIBackendTests {
         BackendContractChecks.assertAllInvariants { OpenAIBackend() }
     }
 }
+#endif

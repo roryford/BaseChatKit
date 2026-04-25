@@ -1,3 +1,4 @@
+#if CloudSaaS
 import Foundation
 import CommonCrypto
 import BaseChatInference
@@ -212,3 +213,5 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate {
         return Data(hash)
     }
 }
+
+#endif

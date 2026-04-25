@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import SwiftUI
 import SwiftData
 import BaseChatCore
@@ -123,3 +124,5 @@ public struct APIConfigurationView: View {
     APIConfigurationView()
         .modelContainer(for: APIEndpoint.self, inMemory: true)
 }
+#endif
+

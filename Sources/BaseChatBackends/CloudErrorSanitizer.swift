@@ -1,3 +1,4 @@
+#if Ollama || CloudSaaS
 import Foundation
 
 /// Sanitises upstream HTTP error messages before they are surfaced via
@@ -218,3 +219,5 @@ enum CloudErrorSanitizer {
         return "Server error"
     }
 }
+
+#endif

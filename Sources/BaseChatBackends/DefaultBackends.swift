@@ -64,9 +64,14 @@ public enum DefaultBackends {
 
     static func backendTypeName(for provider: APIProvider) -> String? {
         switch provider {
-        case .claude:                    return "ClaudeBackend"
-        case .ollama:                    return "OllamaBackend"
+        #if CloudSaaS
+        case .claude:                     return "ClaudeBackend"
         case .openAI, .lmStudio, .custom: return "OpenAIBackend"
+        #endif
+        #if Ollama
+        case .ollama:                     return "OllamaBackend"
+        #endif
+        default: return nil
         }
     }
 
@@ -74,7 +79,9 @@ public enum DefaultBackends {
 
     @MainActor
     public static func register(with service: InferenceService) {
+        #if CloudSaaS
         PinnedSessionDelegate.loadDefaultPins()
+        #endif
 
         service.registerBackendFactory { modelType in
             switch modelType {
@@ -112,14 +119,20 @@ public enum DefaultBackends {
 
         service.registerCloudBackendFactory { provider in
             switch provider {
-            case .claude: return ClaudeBackend()
-            case .ollama: return OllamaBackend()
+            #if CloudSaaS
+            case .claude:                     return ClaudeBackend()
             case .openAI, .lmStudio, .custom: return OpenAIBackend()
+            #endif
+            #if Ollama
+            case .ollama:                     return OllamaBackend()
+            #endif
+            default: return nil
             }
         }
 
-        // All cloud providers are always supported — declare them unconditionally.
-        for provider in APIProvider.allCases {
+        // Declare every provider this build can actually serve — depends on
+        // which of `Ollama` / `CloudSaaS` traits is enabled.
+        for provider in APIProvider.availableInBuild {
             service.declareSupport(for: provider)
         }
     }

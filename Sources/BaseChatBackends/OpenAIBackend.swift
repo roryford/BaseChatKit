@@ -1,3 +1,4 @@
+#if CloudSaaS
 import Foundation
 import os
 import BaseChatInference
@@ -27,12 +28,29 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     ///
     /// - Parameter urlSession: Custom URLSession. Pass `nil` to use the default
     ///   session with certificate pinning enabled.
+    ///
+    /// When `urlSession` is `nil` and the runtime kill-switch
+    /// ``URLSessionProvider/networkDisabled`` is set, the underlying property
+    /// access traps. Use ``makeChecked(urlSession:)`` for a throwing variant
+    /// that surfaces the kill-switch as a recoverable error.
     public init(urlSession: URLSession? = nil) {
         super.init(
             defaultModelName: "gpt-4o-mini",
             urlSession: urlSession ?? URLSessionProvider.pinned,
             payloadHandler: OpenAIPayloadHandler()
         )
+    }
+
+    /// Throwing factory that propagates ``URLSessionProvider/networkDisabled``
+    /// as ``CloudBackendError/networkDisabled`` instead of trapping.
+    public static func makeChecked(urlSession: URLSession? = nil) throws -> OpenAIBackend {
+        let session: URLSession
+        if let urlSession {
+            session = urlSession
+        } else {
+            session = try URLSessionProvider.throwingPinned()
+        }
+        return OpenAIBackend(urlSession: session)
     }
 
     // MARK: - Subclass Hooks
@@ -280,3 +298,5 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     }
 
 }
+#endif
+

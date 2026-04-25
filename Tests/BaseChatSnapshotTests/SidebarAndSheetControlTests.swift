@@ -255,6 +255,7 @@ final class SidebarAndSheetControlTests: XCTestCase {
 
     // MARK: - APIConfigurationView: Empty State
 
+    #if Ollama || CloudSaaS
     func test_apiConfigurationView_emptyState_showsNoneConfiguredMessage() throws {
         let container = try makeInMemoryContainer()
 
@@ -353,5 +354,6 @@ final class SidebarAndSheetControlTests: XCTestCase {
             "APIConfigurationView must be wrapped in a NavigationStack"
         )
     }
+    #endif
 
 }

@@ -1,3 +1,4 @@
+#if CloudSaaS
 import Foundation
 import os
 import BaseChatInference
@@ -15,12 +16,33 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     ///
     /// - Parameter urlSession: Custom URLSession. Pass `nil` to use the default
     ///   session with certificate pinning enabled.
+    ///
+    /// When `urlSession` is `nil` and the runtime kill-switch
+    /// ``URLSessionProvider/networkDisabled`` is set, the underlying property
+    /// access traps. Use ``makeChecked(urlSession:)`` for a throwing variant
+    /// that surfaces the kill-switch as a recoverable error.
     public init(urlSession: URLSession? = nil) {
         super.init(
             defaultModelName: "claude-sonnet-4-20250514",
             urlSession: urlSession ?? URLSessionProvider.pinned,
             payloadHandler: ClaudePayloadHandler()
         )
+    }
+
+    /// Throwing factory that propagates ``URLSessionProvider/networkDisabled``
+    /// as ``CloudBackendError/networkDisabled`` instead of trapping.
+    ///
+    /// - Parameter urlSession: Optional custom URLSession.
+    /// - Throws: ``CloudBackendError/networkDisabled`` when the runtime
+    ///   kill-switch is set and `urlSession` is `nil`.
+    public static func makeChecked(urlSession: URLSession? = nil) throws -> ClaudeBackend {
+        let session: URLSession
+        if let urlSession {
+            session = urlSession
+        } else {
+            session = try URLSessionProvider.throwingPinned()
+        }
+        return ClaudeBackend(urlSession: session)
     }
 
     // MARK: - Subclass Hooks
@@ -375,3 +397,5 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         return .parseError(message)
     }
 }
+#endif
+
