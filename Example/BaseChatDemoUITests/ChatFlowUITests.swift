@@ -14,18 +14,26 @@ final class ChatFlowUITests: XCTestCase {
 
     func testEmptyStateShowsWelcome() throws {
         // Possible empty-state surfaces:
-        // - ChatView's no-session welcome ("Welcome to …") — pre-session.
-        // - ChatView's no-messages prompt ("Send a message to start chatting.").
-        // - The demo's session-but-no-messages picker ("Try a scenario").
-        // - Sidebar "No Model Selected" when no model is loaded.
-        let welcomeText = app.staticTexts.matching(NSPredicate(
-            format: "label CONTAINS[c] 'Welcome' OR label CONTAINS[c] 'Send a message to start chatting' OR label CONTAINS[c] 'Try a scenario'"
-        )).firstMatch
+        //   - ChatView's no-session welcome ("Welcome to BaseChat Demo") — pre-session.
+        //   - ChatView's no-messages prompt ("Send a message to start chatting.").
+        //   - The demo's session-but-no-messages picker ("Try a scenario").
+        //   - Sidebar "No Model Selected" when no model is loaded.
+        //
+        // On macOS, list/form rows often combine into a single accessibility element
+        // so the literal text isn't always exposed as a separate `staticText`. We
+        // therefore search across `descendants(matching: .any)` rather than just
+        // `staticTexts`.
+        let predicate = NSPredicate(
+            format: """
+            label CONTAINS[c] 'Welcome' \
+            OR label CONTAINS[c] 'Send a message to start chatting' \
+            OR label CONTAINS[c] 'Try a scenario' \
+            OR label CONTAINS[c] 'No Model Selected'
+            """
+        )
+        let anyEmptyText = app.descendants(matching: .any).matching(predicate).firstMatch
 
-        let noModelText = app.staticTexts["No Model Selected"]
-
-        let hasEmptyState = waitForElement(welcomeText, timeout: 5)
-            || waitForElement(noModelText, timeout: 2)
+        let hasEmptyState = waitForElement(anyEmptyText, timeout: 5)
 
         captureScreenshot(name: "Empty-State")
         XCTAssertTrue(hasEmptyState, "Should show a welcome message, empty placeholder, or no-model state on launch")
@@ -118,10 +126,12 @@ final class ChatFlowUITests: XCTestCase {
 
         sendButton.tap()
 
-        // The user message bubble should appear in the chat
-        let userMessage = app.staticTexts.matching(NSPredicate(
-            format: "label CONTAINS[c] 'Hello from UI test'"
-        )).firstMatch
+        // MessageBubbleView combines its content with `accessibilityElement(.combine)`
+        // and exposes a "User said: <content>" label on the wrapping element. On
+        // macOS, that wrapping element is exposed as `otherElement` — not a
+        // `staticText` — so we search across all element types.
+        let predicate = NSPredicate(format: "label CONTAINS[c] 'Hello from UI test'")
+        let userMessage = app.descendants(matching: .any).matching(predicate).firstMatch
 
         let messageAppeared = waitForElement(userMessage, timeout: 5)
         captureScreenshot(name: "Send-Flow-After-Send")

@@ -198,6 +198,22 @@ extension XCTestCase {
     }
 
     func advancedSettingsDisclosure(app: XCUIApplication) -> XCUIElement {
+        // macOS exposes a SwiftUI `DisclosureGroup` row inside a Form as a
+        // `DisclosureTriangle` element which carries the accessibility
+        // identifier we set on the group. Prefer it because tapping the
+        // triangle reliably toggles expansion; the surrounding label/button
+        // forms may not on every OS version.
+        #if os(macOS)
+        let triangleByID = app.disclosureTriangles["advanced-settings-disclosure"]
+        if triangleByID.exists {
+            return triangleByID
+        }
+        let triangleByLabel = app.disclosureTriangles["Advanced Settings"]
+        if triangleByLabel.exists {
+            return triangleByLabel
+        }
+        #endif
+
         let button = app.buttons["advanced-settings-disclosure"]
         if button.exists {
             return button
@@ -218,7 +234,41 @@ extension XCTestCase {
             return text
         }
 
+        let anyDescendant = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == 'advanced-settings-disclosure' OR label == 'Advanced Settings'")
+        ).firstMatch
+        if anyDescendant.exists {
+            return anyDescendant
+        }
+
         return app.buttons["Advanced Settings"]
+    }
+
+    /// Toggles a SwiftUI `DisclosureGroup` exposed as a macOS `DisclosureTriangle`.
+    ///
+    /// `XCUIElement.tap()` synthesises a click at the element's centre. SwiftUI
+    /// renders the triangle glyph at the left edge of a wide row (label + chevron),
+    /// so a centre-click lands on the inert label text and the disclosure does
+    /// not toggle. Clicking near the leading edge reliably hits the chevron.
+    /// Toggles a SwiftUI `DisclosureGroup` exposed as a macOS `DisclosureTriangle`.
+    ///
+    /// `XCUIElement.tap()` synthesises a click at the element's centre. SwiftUI
+    /// renders the chevron at the leading edge of a wide row (label + chevron),
+    /// so a centre-click can land on the inert label text and fail to toggle.
+    /// Click near the leading edge so the synthetic event hits the chevron.
+    /// Tests that depend on a deterministic expanded state should additionally
+    /// rely on the demo's `--uitesting` UserDefaults seeding.
+    @discardableResult
+    func toggleDisclosure(_ element: XCUIElement) -> Bool {
+        guard element.exists else { return false }
+        #if os(macOS)
+        if element.elementType == .disclosureTriangle {
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)).tap()
+            return true
+        }
+        #endif
+        element.tap()
+        return true
     }
 
     func firstSessionRow(app: XCUIApplication) -> XCUIElement {
@@ -292,8 +342,28 @@ extension XCTestCase {
             return true
         }
 
+        // `app.swipeUp()` on macOS XCUITest fails with "Unable to find hit
+        // point for Application" — the application root has no hit-testable
+        // area. Drive the swipe through a coordinate gesture inside whichever
+        // sheet/window is frontmost. Prefer sheets (modal scrolling content)
+        // so the gesture lands on the form being inspected, not on the
+        // underlying chat window.
         for _ in 0..<maxSwipes {
+            #if os(macOS)
+            let target: XCUIElement
+            if app.sheets.firstMatch.exists {
+                target = app.sheets.firstMatch
+            } else if app.windows.firstMatch.exists {
+                target = app.windows.firstMatch
+            } else {
+                target = app
+            }
+            let start = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            let end = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+            start.press(forDuration: 0.05, thenDragTo: end)
+            #else
             app.swipeUp()
+            #endif
             if element.waitForExistence(timeout: 1) {
                 return true
             }

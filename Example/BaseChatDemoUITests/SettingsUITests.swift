@@ -97,8 +97,10 @@ final class SettingsUITests: XCTestCase {
             return
         }
 
-        // Tap to expand the disclosure group
-        advancedDisclosure.tap()
+        // Tap to expand the disclosure group. On macOS, SwiftUI DisclosureGroup
+        // is exposed as a wide DisclosureTriangle whose centre lands on the
+        // inert label; helper clicks near the leading-edge chevron instead.
+        toggleDisclosure(advancedDisclosure)
 
         // After expanding, look for advanced controls like "Top P" or "Repeat Penalty"
         let topPLabel = app.staticTexts["Top P"]
