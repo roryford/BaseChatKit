@@ -171,6 +171,17 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     @ObservationIgnored
     private let tempScanDirectory: URL
 
+    /// `UserDefaults` instance used for the one-time legacy migration.
+    ///
+    /// Defaults to `.standard` so production behaviour is unchanged. Tests inject a
+    /// unique-per-instance suite (`UserDefaults(suiteName:)`) so that two managers
+    /// running in `swift test --parallel` cannot race on the same key — the legacy
+    /// pending-downloads key is a single global string that previously caused a
+    /// flake in `test_migrateFromUserDefaults_keepsUserDefaultsKeyOnWriteFailure`
+    /// when one suite's `set` interleaved with another's `removeObject`.
+    @ObservationIgnored
+    private let userDefaults: UserDefaults
+
     /// URL of the single JSON file that stores all pending-download metadata.
     private var pendingMetadataFileURL: URL {
         persistenceDirectory.appendingPathComponent("pending-downloads.json")
@@ -203,11 +214,19 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     ///     tests to prevent OS-level session collisions between manager instances — reusing the
     ///     same identifier while a previous instance is still being torn down causes the OS to
     ///     deliver callbacks to a deallocated delegate, resulting in a double-free crash.
+    ///   - persistenceDirectory: Directory for the pending-downloads JSON and resume-data
+    ///     binary files. Tests inject a per-instance temporary directory.
+    ///   - tempScanDirectory: Directory scanned by the launch-time stale-temp sweep. Tests
+    ///     inject a per-instance temporary directory.
+    ///   - userDefaults: `UserDefaults` instance used for the one-time legacy migration.
+    ///     Defaults to `.standard`. Tests inject a per-instance suite so that parallel test
+    ///     runs cannot race on the shared `pendingDownloadsKey`.
     public init(
         storageService: ModelStorageService = ModelStorageService(),
         sessionIdentifier: String? = nil,
         persistenceDirectory: URL? = nil,
-        tempScanDirectory: URL? = nil
+        tempScanDirectory: URL? = nil,
+        userDefaults: UserDefaults = .standard
     ) {
         self.storageService = storageService
         self._sessionIdentifier = sessionIdentifier ?? Self.sessionIdentifier
@@ -219,6 +238,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
                 isDirectory: true
             )
         self.tempScanDirectory = tempScanDirectory ?? FileManager.default.temporaryDirectory
+        self.userDefaults = userDefaults
         super.init()
     }
 
@@ -1079,7 +1099,7 @@ public final class BackgroundDownloadManager: NSObject, @unchecked Sendable {
     /// a failed write leaves the data intact for the next launch to retry.
     // internal (not private) so unit tests can call it directly with @testable import.
     internal func migrateFromUserDefaults() {
-        let defaults = UserDefaults.standard
+        let defaults = self.userDefaults
         let pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
 
         // Migrate pending metadata — only when the new file doesn't already exist.

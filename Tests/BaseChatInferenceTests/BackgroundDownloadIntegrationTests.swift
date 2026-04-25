@@ -27,6 +27,11 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
     // runs never share pending-downloads.json or resume-data files.
     private var persistenceDir: URL!
 
+    // Per-instance UserDefaults suite — prevents parallel test runs from racing on
+    // the global `pendingDownloadsKey` in `UserDefaults.standard`.
+    private var suiteName: String!
+    private var testDefaults: UserDefaults!
+
     private var pendingMetadataURL: URL {
         persistenceDir.appendingPathComponent("pending-downloads.json")
     }
@@ -40,10 +45,14 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         persistenceDir = tempDirectory.appendingPathComponent("persistence")
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
 
+        suiteName = "com.basechatkit.test.downloads.\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: suiteName)!
+
         manager = BackgroundDownloadManager(
             sessionIdentifier: testSessionIdentifier,
             persistenceDirectory: persistenceDir,
-            tempScanDirectory: tempDirectory
+            tempScanDirectory: tempDirectory,
+            userDefaults: testDefaults
         )
     }
 
@@ -51,10 +60,15 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
+        if let suiteName {
+            testDefaults?.removePersistentDomain(forName: suiteName)
+        }
         tempDirectory = nil
         persistenceDir = nil
         manager = nil
         testSessionIdentifier = nil
+        testDefaults = nil
+        suiteName = nil
         try await super.tearDown()
     }
 
@@ -380,10 +394,12 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
 
         // A fresh manager starts with no active downloads.
         // Use a unique session identifier to avoid OS-level URLSession collisions with setUp's manager.
+        // Share the per-test UserDefaults suite so the second manager doesn't escape the isolation.
         let freshManager = BackgroundDownloadManager(
             sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)",
             persistenceDirectory: persistenceDir,
-            tempScanDirectory: tempDirectory
+            tempScanDirectory: tempDirectory,
+            userDefaults: testDefaults
         )
         XCTAssertNil(freshManager.activeDownloads[model.id], "No active downloads before reconnect")
 
@@ -398,11 +414,13 @@ final class BackgroundDownloadIntegrationTests: XCTestCase {
 
     func test_reconnectBackgroundSession_restoresPendingMLXSnapshotMetadata() throws {
         // Use a unique session identifier to avoid OS-level URLSession collisions with setUp's manager.
+        // Share the per-test UserDefaults suite so the second manager doesn't escape the isolation.
         let manager = BackgroundDownloadManager(
             storageService: ModelStorageService(baseDirectory: tempDirectory),
             sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)",
             persistenceDirectory: persistenceDir,
-            tempScanDirectory: tempDirectory
+            tempScanDirectory: tempDirectory,
+            userDefaults: testDefaults
         )
         let model = makeModel(
             repoID: "mlx-community/Test-4bit",
