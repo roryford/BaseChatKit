@@ -184,6 +184,10 @@ final class OllamaToolCallLiveReplayTests: XCTestCase {
                     break
                 case .kvCacheReuse:
                     break
+                case .diagnosticThrottle:
+                    // Cooperative thermal pause — informational only;
+                    // raw backend replay neither emits nor projects it.
+                    break
                 }
             }
 
