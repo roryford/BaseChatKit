@@ -77,6 +77,18 @@ public protocol ToolExecutor: Sendable {
     /// (case-insensitive).
     var definition: ToolDefinition { get }
 
+    /// Whether this tool needs explicit per-call user approval before the
+    /// orchestrator dispatches it.
+    ///
+    /// Side-effecting tools (writes a file, sends a message, calls a paid
+    /// API) should set this to `true` so a UI-layer ``ToolApprovalGate`` is
+    /// consulted before execution. Pure-read tools should leave the default
+    /// of `false` so they auto-approve regardless of the host's policy. The
+    /// generation coordinator queries this flag via
+    /// ``ToolRegistry/requiresApproval(toolName:)`` and skips the gate hop
+    /// entirely when false — read-only tools never block on a user prompt.
+    var requiresApproval: Bool { get }
+
     /// Executes the tool with already-parsed JSON arguments.
     ///
     /// The returned ``ToolResult/callId`` may be empty — ``ToolRegistry``
@@ -92,6 +104,12 @@ public protocol ToolExecutor: Sendable {
     /// by the orchestrator; aggregate internally and only throw once you
     /// have decided to abandon the buffer.
     func execute(arguments: JSONSchemaValue) async throws -> ToolResult
+}
+
+extension ToolExecutor {
+    /// Default: read-only tool, no approval needed. Side-effecting tools
+    /// override to `true`.
+    public var requiresApproval: Bool { false }
 }
 
 // MARK: - TypedToolExecutor
@@ -136,6 +154,8 @@ public struct TypedToolExecutor<Arguments: Decodable & Sendable, Result: Encodab
 
     public let definition: ToolDefinition
 
+    public let requiresApproval: Bool
+
     private let handler: @Sendable (Arguments) async throws -> Result
 
     /// Creates a typed executor.
@@ -143,13 +163,18 @@ public struct TypedToolExecutor<Arguments: Decodable & Sendable, Result: Encodab
     /// - Parameters:
     ///   - definition: The tool contract exposed to the model. ``ToolDefinition/parameters``
     ///     should describe the JSON shape of `Arguments`.
+    ///   - requiresApproval: When `true`, the orchestrator routes calls to
+    ///     this tool through a ``ToolApprovalGate`` before execution. Defaults
+    ///     to `false` (auto-approve, suitable for pure-read tools).
     ///   - handler: Runs the tool. Thrown errors become ``ToolResult/ErrorKind/permanent``
     ///     results at the registry layer.
     public init(
         definition: ToolDefinition,
+        requiresApproval: Bool = false,
         handler: @Sendable @escaping (Arguments) async throws -> Result
     ) {
         self.definition = definition
+        self.requiresApproval = requiresApproval
         self.handler = handler
     }
 

@@ -28,6 +28,13 @@
 		BF0012000000000000000000 /* AskBaseChatDemoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10009000000000000000000 /* AskBaseChatDemoIntent.swift */; };
 		BF0013000000000000000000 /* BaseChatDemoShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10010000000000000000000 /* BaseChatDemoShortcuts.swift */; };
 		BF1008000000000000000000 /* AppIntentUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11009000000000000000000 /* AppIntentUITests.swift */; };
+		BF1009000000000000000000 /* DemoScenarioUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11010000000000000000000 /* DemoScenarioUITests.swift */; };
+		BF0014000000000000000000 /* WriteFileTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10012000000000000000000 /* WriteFileTool.swift */; };
+		BF0015000000000000000000 /* DemoScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10013000000000000000000 /* DemoScenario.swift */; };
+		BF0016000000000000000000 /* DemoScenarios.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10014000000000000000000 /* DemoScenarios.swift */; };
+		BF0017000000000000000000 /* DemoScenarios+Scripts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10015000000000000000000 /* DemoScenarios+Scripts.swift */; };
+		BF0018000000000000000000 /* DemoScenarioRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10016000000000000000000 /* DemoScenarioRunner.swift */; };
+		BF0019000000000000000000 /* DemoScenarioCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10017000000000000000000 /* DemoScenarioCard.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,6 +68,13 @@
 		F10010000000000000000000 /* BaseChatDemoShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents/BaseChatDemoShortcuts.swift; sourceTree = "<group>"; };
 		F10011000000000000000000 /* BaseChatDemo.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BaseChatDemo.entitlements; sourceTree = "<group>"; };
 		F11009000000000000000000 /* AppIntentUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentUITests.swift; sourceTree = "<group>"; };
+		F11010000000000000000000 /* DemoScenarioUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoScenarioUITests.swift; sourceTree = "<group>"; };
+		F10012000000000000000000 /* WriteFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WriteFileTool.swift; sourceTree = "<group>"; };
+		F10013000000000000000000 /* DemoScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenario.swift; sourceTree = "<group>"; };
+		F10014000000000000000000 /* DemoScenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenarios.swift; sourceTree = "<group>"; };
+		F10015000000000000000000 /* DemoScenarios+Scripts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scenarios/DemoScenarios+Scripts.swift"; sourceTree = "<group>"; };
+		F10016000000000000000000 /* DemoScenarioRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenarioRunner.swift; sourceTree = "<group>"; };
+		F10017000000000000000000 /* DemoScenarioCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenarioCard.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +122,12 @@
 				F10009000000000000000000 /* AskBaseChatDemoIntent.swift */,
 				F10010000000000000000000 /* BaseChatDemoShortcuts.swift */,
 				F10011000000000000000000 /* BaseChatDemo.entitlements */,
+				F10012000000000000000000 /* WriteFileTool.swift */,
+				F10013000000000000000000 /* DemoScenario.swift */,
+				F10014000000000000000000 /* DemoScenarios.swift */,
+				F10015000000000000000000 /* DemoScenarios+Scripts.swift */,
+				F10016000000000000000000 /* DemoScenarioRunner.swift */,
+				F10017000000000000000000 /* DemoScenarioCard.swift */,
 			);
 			path = BaseChatDemo;
 			sourceTree = "<group>";
@@ -139,6 +159,7 @@
 				F11007000000000000000000 /* CloudAPIUITests.swift */,
 				F11008000000000000000000 /* ToolApprovalUITests.swift */,
 				F11009000000000000000000 /* AppIntentUITests.swift */,
+				F11010000000000000000000 /* DemoScenarioUITests.swift */,
 			);
 			path = BaseChatDemoUITests;
 			sourceTree = "<group>";
@@ -231,6 +252,12 @@
 				BF0011000000000000000000 /* PendingPayloadBuffer.swift in Sources */,
 				BF0012000000000000000000 /* AskBaseChatDemoIntent.swift in Sources */,
 				BF0013000000000000000000 /* BaseChatDemoShortcuts.swift in Sources */,
+				BF0014000000000000000000 /* WriteFileTool.swift in Sources */,
+				BF0015000000000000000000 /* DemoScenario.swift in Sources */,
+				BF0016000000000000000000 /* DemoScenarios.swift in Sources */,
+				BF0017000000000000000000 /* DemoScenarios+Scripts.swift in Sources */,
+				BF0018000000000000000000 /* DemoScenarioRunner.swift in Sources */,
+				BF0019000000000000000000 /* DemoScenarioCard.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -246,6 +273,7 @@
 				BF1006000000000000000000 /* CloudAPIUITests.swift in Sources */,
 				BF1007000000000000000000 /* ToolApprovalUITests.swift in Sources */,
 				BF1008000000000000000000 /* AppIntentUITests.swift in Sources */,
+				BF1009000000000000000000 /* DemoScenarioUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -13,10 +13,13 @@ final class ChatFlowUITests: XCTestCase {
     // MARK: - Empty / Welcome State
 
     func testEmptyStateShowsWelcome() throws {
-        // The app may show a welcome screen when no model is loaded,
-        // or "Send a message to start chatting." when a model is loaded but no messages exist.
+        // Possible empty-state surfaces:
+        // - ChatView's no-session welcome ("Welcome to …") — pre-session.
+        // - ChatView's no-messages prompt ("Send a message to start chatting.").
+        // - The demo's session-but-no-messages picker ("Try a scenario").
+        // - Sidebar "No Model Selected" when no model is loaded.
         let welcomeText = app.staticTexts.matching(NSPredicate(
-            format: "label CONTAINS[c] 'Welcome' OR label CONTAINS[c] 'Send a message to start chatting'"
+            format: "label CONTAINS[c] 'Welcome' OR label CONTAINS[c] 'Send a message to start chatting' OR label CONTAINS[c] 'Try a scenario'"
         )).firstMatch
 
         let noModelText = app.staticTexts["No Model Selected"]

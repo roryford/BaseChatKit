@@ -4,12 +4,14 @@ import Foundation
 ///
 /// Standardises a relative `path` against a `root` directory and rejects the
 /// call when the result escapes the root — even via `..` components or
-/// symlinks. Used by ``ReadFileTool`` and ``ListDirTool``.
-enum SandboxResolver {
+/// symlinks. Used by ``ReadFileTool``, ``ListDirTool``, and the demo's
+/// `WriteFileTool` so all filesystem reference tools share the same
+/// containment guarantee.
+public enum SandboxResolver {
 
     /// Returns `nil` when `path` escapes `root`. Otherwise returns the
     /// fully-resolved absolute URL inside the sandbox.
-    static func resolve(path: String, inside root: URL) -> URL? {
+    public static func resolve(path: String, inside root: URL) -> URL? {
         let standardizedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
 
         // Reject absolute paths outright — they can't be inside a relative

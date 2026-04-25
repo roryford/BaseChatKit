@@ -627,6 +627,12 @@ final class GenerationCoordinator {
                             content: "tool result budget exhausted",
                             errorKind: .permanent
                         )
+                    } else if toolRegistry!.requiresApproval(toolName: call.toolName) == false {
+                        // Read-only / safe tool — skip the gate hop entirely so
+                        // pure-read scenarios don't flash an approval sheet.
+                        // Side-effecting tools opt in via
+                        // ``ToolExecutor/requiresApproval``.
+                        result = await toolRegistry!.dispatch(call)
                     } else {
                         // User-approval gate: invoked on the finalized ToolCall,
                         // after the repeat / byte-budget guards (which both

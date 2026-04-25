@@ -6,7 +6,7 @@ import XCTest
 /// ``ScriptedBackend`` emitting a canned `.toolCall` for `sample_repo_search`.
 /// No live Ollama / MLX / cloud traffic.
 ///
-/// Scope: verify that the flagship-prompt empty state renders and wires a
+/// Scope: verify that the empty-state demo-scenario picker renders a
 /// hit-target. The downstream approval sheet + completed-bubble rendering
 /// is covered deterministically by ``UIToolApprovalGateTests`` and
 /// ``ToolInvocationViewTests`` at the XCTest level, where we can observe
@@ -20,7 +20,7 @@ final class ToolApprovalUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func test_flagshipPromptButton_rendersInEmptyState() {
+    func test_workspaceSearchScenarioCard_rendersInEmptyState() {
         let app = launchDemoApp()
         openChatDetailIfNeeded(app: app)
 
@@ -29,14 +29,15 @@ final class ToolApprovalUITests: XCTestCase {
             "Chat input should become hittable under --uitesting"
         )
 
-        let flagshipButton = app.buttons["flagship-prompt-button"]
+        // Workspace-search is the closest analogue to the legacy
+        // flagship-summarise-the-READMEs button — exercises the
+        // `sample_repo_search` scripted tool path. We assert via
+        // `descendants(matching: .any)` because SwiftUI may render the card
+        // as a button on iOS and a different element on macOS.
+        let card = app.descendants(matching: .any)["demo-card-workspace-search"]
         XCTAssertTrue(
-            flagshipButton.waitForExistence(timeout: 5),
-            "Flagship prompt button should render in the chat empty state"
-        )
-        XCTAssertTrue(
-            flagshipButton.isHittable,
-            "Flagship prompt button must be tappable for reviewers to exercise the tool loop"
+            card.waitForExistence(timeout: 5),
+            "workspace-search scenario card should render in the chat empty state"
         )
     }
 

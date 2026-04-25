@@ -21,6 +21,15 @@ struct DemoContentView: View {
 
     let inferenceService: InferenceService
 
+    /// Tool registry shared with `inferenceService`. Held here so the demo
+    /// scenario runner can install scenario-specific variant executors.
+    let toolRegistry: ToolRegistry
+
+    /// Sandbox root the demo's filesystem tools resolve paths against. Held
+    /// here (rather than re-resolved per-scenario) so `--uitesting` runs use
+    /// a stable temp directory the test harness can inspect.
+    let sandboxRoot: URL
+
     /// When `true`, the auto-model-load and related onAppear work is skipped
     /// so that UI tests start from a deterministic empty state.
     var skipAutoModelLoad: Bool = false
@@ -29,6 +38,10 @@ struct DemoContentView: View {
     /// cold-launch window, before persistence was wired. Drained once
     /// the `onAppear` configuration completes.
     var pendingPayloadBuffer: PendingPayloadBuffer?
+
+    /// Optional demo-scenario ID supplied via `--bck-demo-scenario`. Resolved
+    /// to a ``DemoScenario`` and run after persistence is wired in `onAppear`.
+    var pendingDemoScenarioID: String?
 
     var body: some View {
         // Read the gate's pending queue so SwiftUI observes changes and the
@@ -43,7 +56,7 @@ struct DemoContentView: View {
             sidebar
         } detail: {
             ChatView(showModelManagement: $isModelManagementPresented) {
-                ChatEmptyStateView()
+                ChatEmptyStateView(runScenario: runScenario)
             }
                 .toolbar {
                     // .topBarLeading is iOS-only; macOS NavigationSplitView manages
@@ -159,6 +172,15 @@ struct DemoContentView: View {
                 // path can safely create sessions.
                 if let pendingPayloadBuffer, let payload = await pendingPayloadBuffer.drain() {
                     await viewModel.ingest(payload)
+                }
+
+                // Demo-scenario cold-launch path — `--bck-demo-scenario <id>`
+                // resolved to a scenario in `BaseChatDemoApp.init()` and
+                // forwarded here. Runs *after* the empty initial-session
+                // seeding above so the scenario's session becomes the active
+                // one rather than competing with a placeholder.
+                if let id = pendingDemoScenarioID, let scenario = DemoScenarios.scenario(id: id) {
+                    runScenario(scenario)
                 }
             }
         }
@@ -292,6 +314,23 @@ struct DemoContentView: View {
                 // macOS and iPadOS with a hardware keyboard.
                 .keyboardShortcut("n", modifiers: .command)
             }
+            ToolbarItem(placement: toolbarPlacement) {
+                Menu {
+                    ForEach(DemoScenarios.all) { scenario in
+                        Button {
+                            runScenario(scenario)
+                        } label: {
+                            Label(scenario.title, systemImage: scenario.systemImage)
+                        }
+                        .accessibilityIdentifier("demo-menu-\(scenario.id)")
+                    }
+                } label: {
+                    Label("Demos", systemImage: "sparkles")
+                }
+                .accessibilityLabel("Demo scenarios")
+                .accessibilityIdentifier("demos-menu-button")
+                .disabled(viewModel.isGenerating)
+            }
         }
     }
 
@@ -300,6 +339,20 @@ struct DemoContentView: View {
             try sessionManager.createSession()
         } catch {
             viewModel.errorMessage = "Failed to create session: \(error.localizedDescription)"
+        }
+    }
+
+    /// Closure passed down to `ChatEmptyStateView` and the `Demos` toolbar
+    /// menu so both surfaces share the runner.
+    private func runScenario(_ scenario: DemoScenario) {
+        Task { @MainActor in
+            await DemoScenarioRunner.run(
+                scenario,
+                chat: viewModel,
+                sessions: sessionManager,
+                registry: toolRegistry,
+                sandboxRoot: sandboxRoot
+            )
         }
     }
 
