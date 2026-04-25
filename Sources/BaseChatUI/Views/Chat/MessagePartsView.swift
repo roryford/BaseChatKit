@@ -13,8 +13,21 @@ struct MessagePartsView: View {
     let parts: [MessagePart]
     let role: MessageRole
     var isStreaming: Bool = false
+    /// Identifier of the parent message. When non-nil, used to read whether
+    /// the message's reasoning is actively streaming so ``ThinkingBlockView``
+    /// can render an inline preview rather than the static "Thinking…" label.
+    /// Optional so unit tests that exercise text/tool rendering can omit it.
+    var messageID: UUID? = nil
 
     @Environment(ChatViewModel.self) private var viewModel
+
+    /// True while the parent message's reasoning block is still streaming —
+    /// computed from the view-model's transient streaming-thinking set keyed
+    /// by ``messageID``.
+    private var isThinkingStreaming: Bool {
+        guard let messageID else { return false }
+        return viewModel.messageIDsWithStreamingThinking.contains(messageID)
+    }
 
     /// Set of call IDs whose ``ToolResult`` already appears in `parts`. Used
     /// to decide whether a ``MessagePart/toolCall`` should render as
@@ -51,13 +64,13 @@ struct MessagePartsView: View {
             imageView(data)
 
         case .thinking(let text):
-            // A thinking part with empty text is a streaming placeholder inserted
-            // when the first .thinkingToken arrives; non-empty means the block was
-            // finalized by .thinkingComplete. Using the text emptiness rather than
-            // the overall isStreaming flag allows the disclosure group to appear
-            // as soon as reasoning is complete, even while visible tokens are still
-            // arriving.
-            ThinkingBlockView(text: text, isThinkingStreaming: text.isEmpty && isStreaming)
+            // While reasoning is in progress (`isThinkingStreaming`), the part's
+            // text holds whatever has been flushed so far by the streaming
+            // batcher and is rendered inline as a live preview. Once
+            // `.finalizeThinking` clears the flag, the text becomes the
+            // authoritative final block and the disclosure group switches to
+            // its collapsed-by-default view.
+            ThinkingBlockView(text: text, isThinkingStreaming: isThinkingStreaming)
 
         case .toolCall(let call):
             toolCallView(call)

@@ -109,6 +109,12 @@ final class GenerationCoordinator {
     /// Returns the streaming batch character limit.
     var streamingBatchCharacterLimit: () -> Int = { 128 }
 
+    /// Returns the streaming update interval for reasoning tokens.
+    var thinkingStreamingUpdateInterval: () -> Duration = { .milliseconds(33) }
+
+    /// Returns the streaming batch character limit for reasoning tokens.
+    var thinkingStreamingBatchCharacterLimit: () -> Int = { 128 }
+
     /// Returns the active backend name, or nil if none.
     var activeBackendName: () -> String? = { nil }
 
@@ -164,6 +170,11 @@ final class GenerationCoordinator {
 
     /// Removes an assistant message from the view model (called for empty responses).
     var onRemoveMessage: (UUID) -> Void = { _ in }
+
+    /// Notifies the view model that the given message has started or finished
+    /// streaming reasoning text. The UI uses this to switch between the
+    /// "Thinking… <preview>" affordance and the finalized disclosure group.
+    var onMarkThinkingStreaming: (UUID, Bool) -> Void = { _, _ in }
 
     // MARK: - Dependencies
 
@@ -275,8 +286,17 @@ final class GenerationCoordinator {
                     interval: self.streamingUpdateInterval(),
                     maxBufferedCharacters: self.streamingBatchCharacterLimit()
                 )
+                var thinkingBatcher = StreamingTokenBatcher(
+                    interval: self.thinkingStreamingUpdateInterval(),
+                    maxBufferedCharacters: self.thinkingStreamingBatchCharacterLimit()
+                )
                 var consumer = GenerationStreamConsumer(loopDetectionEnabled: self.loopDetectionEnabled())
                 var thinkingAccumulator = ""
+                // Tracks the text already flushed to the thinking part so partial
+                // updates can append rather than overwrite. Reset on finalize so
+                // a subsequent <think>…</think> block in the same response starts
+                // a fresh accumulator.
+                var thinkingDisplayed = ""
 
                 do {
                     eventLoop: for try await event in stream.events {
@@ -291,7 +311,7 @@ final class GenerationCoordinator {
                             if let batch = batcher.append(token, now: ContinuousClock.now) {
                                 var looping = false
                                 self.onMutateMessage(messageID) { msg in
-                                    msg.content += batch
+                                    Self.appendVisibleText(batch, into: &msg)
                                     if consumer.shouldStopForLoop(content: msg.content) {
                                         looping = true
                                     }
@@ -328,7 +348,11 @@ final class GenerationCoordinator {
                             if isFirstThinkingFragment {
                                 // Insert a placeholder `.thinking("")` part immediately so the
                                 // UI can render the "Thinking…" label during the reasoning phase
-                                // rather than staying on the generic typing placeholder.
+                                // rather than staying on the generic typing placeholder. Mark
+                                // the message's thinking as actively streaming so the disclosure
+                                // group renders an inline preview rather than the "Thinking…"
+                                // static label.
+                                self.onMarkThinkingStreaming(messageID, true)
                                 self.onMutateMessage(messageID) { msg in
                                     if msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) == nil {
                                         let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
@@ -336,17 +360,45 @@ final class GenerationCoordinator {
                                     }
                                 }
                             }
+                            // Flush partial reasoning text into the thinking part on the
+                            // configured cadence so the user sees live progress instead of
+                            // a frozen "Thinking…" label.
+                            if let batch = thinkingBatcher.append(text, now: ContinuousClock.now) {
+                                thinkingDisplayed += batch
+                                let displayed = thinkingDisplayed
+                                self.onMutateMessage(messageID) { msg in
+                                    Self.writeThinkingPartialText(displayed, into: &msg)
+                                }
+                            }
 
                         case .finalizeThinking:
+                            // Drain any buffered partial fragments first so we don't
+                            // miss display content on tight streams that finish before
+                            // the batcher's interval elapses.
+                            if let batch = thinkingBatcher.flush(now: ContinuousClock.now) {
+                                thinkingDisplayed += batch
+                            }
                             let block = thinkingAccumulator
                             thinkingAccumulator = ""
+                            thinkingDisplayed = ""
+                            self.onMarkThinkingStreaming(messageID, false)
                             guard !block.isEmpty else { break }
                             self.onMutateMessage(messageID) { msg in
                                 // Append to any existing thinking part so multiple <think>…</think>
                                 // blocks within one response are concatenated into a single part.
                                 if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
                                     let existing = msg.contentParts[idx].thinkingContent ?? ""
-                                    msg.contentParts[idx] = .thinking(existing.isEmpty ? block : existing + "\n\n" + block)
+                                    // The partial-streaming branch may have already written
+                                    // `block` (or a prefix of it) into `existing`. Replace the
+                                    // contents wholesale with the authoritative final text
+                                    // rather than concatenating it onto an in-flight prefix.
+                                    if existing == block || existing.isEmpty {
+                                        msg.contentParts[idx] = .thinking(block)
+                                    } else if block.hasPrefix(existing) {
+                                        msg.contentParts[idx] = .thinking(block)
+                                    } else {
+                                        msg.contentParts[idx] = .thinking(existing + "\n\n" + block)
+                                    }
                                 } else {
                                     let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
                                     msg.contentParts.insert(.thinking(block), at: insertAt)
@@ -383,24 +435,35 @@ final class GenerationCoordinator {
 
                 // Flush remaining buffered tokens after stream ends (normal, error, or cancellation).
                 if let batch = batcher.flush(now: ContinuousClock.now) {
-                    self.onMutateMessage(messageID) { $0.content += batch }
+                    self.onMutateMessage(messageID) { msg in
+                        Self.appendVisibleText(batch, into: &msg)
+                    }
                 }
 
                 // Finalize an unclosed thinking block — a model may emit <think>…
                 // without a closing tag if generation is cut short.
                 if !thinkingAccumulator.isEmpty {
+                    _ = thinkingBatcher.flush(now: ContinuousClock.now)
                     let block = thinkingAccumulator
                     thinkingAccumulator = ""
+                    thinkingDisplayed = ""
                     self.onMutateMessage(messageID) { msg in
                         if let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) {
                             let existing = msg.contentParts[idx].thinkingContent ?? ""
-                            msg.contentParts[idx] = .thinking(existing.isEmpty ? block : existing + "\n\n" + block)
+                            if existing == block || existing.isEmpty || block.hasPrefix(existing) {
+                                msg.contentParts[idx] = .thinking(block)
+                            } else {
+                                msg.contentParts[idx] = .thinking(existing + "\n\n" + block)
+                            }
                         } else {
                             let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
                             msg.contentParts.insert(.thinking(block), at: insertAt)
                         }
                     }
                 }
+                // Clear any lingering streaming flag if the stream ended without
+                // an explicit `.finalizeThinking` (cancellation, error, etc.).
+                self.onMarkThinkingStreaming(messageID, false)
             }
 
             onSetGenerationTask(task)
@@ -482,6 +545,43 @@ final class GenerationCoordinator {
             }
         }
         onSetBackgroundTask(bgTask)
+    }
+
+    /// Appends streamed visible-token text to a message without clobbering
+    /// any existing non-text parts (thinking, tool calls, tool results).
+    ///
+    /// `ChatMessageRecord.content`'s setter replaces the entire `contentParts`
+    /// array with a single `.text` part — convenient for the legacy text-only
+    /// path, fatal for messages that hold a `.thinking` part placed ahead of
+    /// the text. Preserve those parts by mutating only the trailing `.text`
+    /// (or appending one when none exists).
+    static func appendVisibleText(_ batch: String, into msg: inout ChatMessageRecord) {
+        if let lastIdx = msg.contentParts.indices.reversed().first(where: {
+            if case .text = msg.contentParts[$0] { return true } else { return false }
+        }), case .text(let existing) = msg.contentParts[lastIdx] {
+            msg.contentParts[lastIdx] = .text(existing + batch)
+        } else {
+            msg.contentParts.append(.text(batch))
+        }
+    }
+
+    /// Writes `partial` into the message's last `.thinking` part for live preview.
+    ///
+    /// Used between `.appendThinkingText` events to flush batched reasoning text
+    /// before the authoritative `.finalizeThinking` write. The text is written
+    /// in-place into the existing placeholder (inserted on the first thinking
+    /// fragment) so each flush mutates the same part rather than appending new
+    /// ones — keeping the message structure stable across rerenders.
+    static func writeThinkingPartialText(_ partial: String, into msg: inout ChatMessageRecord) {
+        guard let idx = msg.contentParts.firstIndex(where: { $0.thinkingContent != nil }) else {
+            // The placeholder should always exist by the time partial flushes
+            // run, but if it doesn't (e.g. tests that drive this helper
+            // directly), insert one ahead of any visible text.
+            let insertAt = msg.contentParts.firstIndex(where: { $0.textContent != nil }) ?? 0
+            msg.contentParts.insert(.thinking(partial), at: insertAt)
+            return
+        }
+        msg.contentParts[idx] = .thinking(partial)
     }
 
     /// Substitutes `{{key}}` tokens in `text` with values from `context`.
