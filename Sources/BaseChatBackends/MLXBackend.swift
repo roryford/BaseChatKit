@@ -4,6 +4,7 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 import MLXVLM
+import MLXRandom
 import MLXHuggingFace
 import Tokenizers
 import os
@@ -317,10 +318,23 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         }
         Self.logger.debug("MLX generate started")
 
+        // Seed the MLX global RandomState before constructing GenerateParameters so the
+        // sampler's per-instance `RandomState()` (initialised from the default state)
+        // produces a deterministic token stream. `nil` skips seeding entirely — the
+        // process keeps whatever entropy MLX last picked up.
+        if let seed = config.seed {
+            MLXRandom.seed(seed)
+        }
+
+        // Honour `config.minP` and `config.repetitionPenalty` when set; fall back to the
+        // upstream defaults / `repeatPenalty` for callers that haven't migrated to the
+        // explicit knobs yet.
         let generateConfig = GenerateParameters(
             temperature: config.temperature,
             topP: config.topP,
-            repetitionPenalty: config.repeatPenalty
+            topK: Int(config.topK ?? 0),
+            minP: config.minP ?? 0.0,
+            repetitionPenalty: config.repetitionPenalty ?? config.repeatPenalty
         )
 
         // Build messages in chat format, using full conversation history when available

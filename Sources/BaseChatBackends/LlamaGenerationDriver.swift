@@ -124,12 +124,16 @@ struct LlamaGenerationDriver {
         }
         defer { llama_sampler_free(sampler) }
 
-        if config.repeatPenalty > 1.0 {
+        // Prefer the explicit `repetitionPenalty` knob when callers supplied it; fall
+        // back to the legacy `repeatPenalty` field otherwise. Both flow through the
+        // same > 1.0 gate so a no-op penalty (1.0) skips the sampler chain.
+        let effectiveRepetitionPenalty = config.repetitionPenalty ?? config.repeatPenalty
+        if effectiveRepetitionPenalty > 1.0 {
             llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
-                64,                    // last_n tokens to penalize
-                config.repeatPenalty,  // repeat penalty
-                0.0,                   // frequency penalty
-                0.0                    // presence penalty
+                64,                            // last_n tokens to penalize
+                effectiveRepetitionPenalty,    // repeat penalty
+                0.0,                           // frequency penalty
+                0.0                            // presence penalty
             ))
         }
 
@@ -163,10 +167,24 @@ struct LlamaGenerationDriver {
         if config.topP < 1.0 {
             llama_sampler_chain_add(sampler, llama_sampler_init_top_p(config.topP, 1))
         }
-        llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
+        // Honour `config.minP` when supplied; default to 0.05 for parity with prior behaviour.
+        let effectiveMinP = config.minP ?? 0.05
+        llama_sampler_chain_add(sampler, llama_sampler_init_min_p(effectiveMinP, 1))
         llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
 
-        llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 0...UInt32.max)))
+        // Use the caller-supplied seed when available so consecutive runs with the same
+        // prompt + config produce identical token streams. `llama_sampler_init_dist`
+        // takes `uint32_t`, so we truncate the GenerationConfig's `UInt64` seed —
+        // collisions across the truncation boundary are not a correctness issue, only
+        // a slight loss of seed-space entropy. Falls back to a fresh random seed when
+        // the caller didn't request determinism.
+        let samplerSeed: UInt32
+        if let seed = config.seed {
+            samplerSeed = UInt32(truncatingIfNeeded: seed)
+        } else {
+            samplerSeed = UInt32.random(in: 0...UInt32.max)
+        }
+        llama_sampler_chain_add(sampler, llama_sampler_init_dist(samplerSeed))
 
         // MARK: Chunked prompt decode
 
