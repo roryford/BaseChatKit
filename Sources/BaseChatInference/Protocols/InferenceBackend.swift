@@ -103,10 +103,22 @@ public struct GenerationConfig: Sendable, Codable {
     /// Defaults to `nil` (no grammar constraint).
     public var grammar: String?
 
-    /// Thinking markers for this request's model/template, or nil if the model does not emit
-    /// reasoning blocks. Set by the caller when the selected `PromptTemplate` has
-    /// `thinkingMarkers != nil`. Backends use this to activate `ThinkingParser`; backends that
-    /// do not support thinking ignore it.
+    /// Per-request override for the thinking-marker pair the backend should use
+    /// to split reasoning tokens from visible output.
+    ///
+    /// - `nil` — let the backend use whatever it auto-detected when the model
+    ///   was loaded (e.g. by reading the Jinja chat template from the GGUF or
+    ///   `tokenizer_config.json`). If the backend's auto-detection also
+    ///   returned `nil`, no thinking parsing happens — every chunk surfaces
+    ///   as a plain `.token` event.
+    /// - non-`nil` — overrides whatever the backend auto-detected. Use this
+    ///   when the caller knows better (e.g. a fine-tune that ships an empty
+    ///   chat template but still emits `<think>` blocks at runtime).
+    ///
+    /// Backends without thinking support (`BackendCapabilities.supportsThinking == false`)
+    /// silently ignore this field. There is no longer a hardcoded fallback to
+    /// `.qwen3` — if neither auto-detection nor the caller surfaces markers,
+    /// the parser stays off.
     public var thinkingMarkers: ThinkingMarkers?
 
     /// Maximum number of tool-call iterations permitted inside a single

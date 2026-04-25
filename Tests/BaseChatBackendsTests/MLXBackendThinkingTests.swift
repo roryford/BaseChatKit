@@ -309,7 +309,116 @@ final class MLXBackendThinkingTests: XCTestCase {
         // all 4 thinking tokens plus "answer" through, failing both assertions.
     }
 
-    // MARK: - 6. maxThinkingTokens == 0 disables thinking entirely (#597)
+    // MARK: - 6. Auto-detected markers used when config.thinkingMarkers is nil (#479)
+
+    /// Closes #479 (MLX half) — the backend's auto-detected thinking markers are
+    /// used at generate time when `config.thinkingMarkers` is nil. The injection
+    /// helper `_injectAutoDetectedThinkingMarkers` simulates the load-time
+    /// `tokenizer_config.json` sniff that would otherwise populate the field.
+    func test_autoDetectedMarkers_engageParser_whenConfigMarkersAreNil() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["<think>", "reason", "</think>", "answer"]
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+        // Simulate what loadModel(from:plan:) would have detected from the
+        // model's tokenizer_config.json chat template.
+        backend._injectAutoDetectedThinkingMarkers(.qwen3)
+
+        // config.thinkingMarkers stays nil — the parser must engage from the
+        // auto-detected fallback.
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        )
+
+        let events = try await collectAllEvents(from: stream)
+        let thinkingTexts = events.compactMap { ev -> String? in
+            if case .thinkingToken(let t) = ev { return t } else { return nil }
+        }
+        XCTAssertTrue(thinkingTexts.joined().contains("reason"),
+            "Auto-detected markers must drive ThinkingParser when config.thinkingMarkers is nil")
+
+        // Sabotage check: removing the `?? autoDetectedMarkers` fallback in
+        // MLXBackend.generate would leave `useThinkingParser` false here and
+        // raw `<think>` would surface as `.token`, failing the assertion above.
+    }
+
+    /// Manual override beats auto-detection: the caller's `config.thinkingMarkers`
+    /// is honoured even when the backend already auto-detected a different family.
+    func test_configMarkers_overrideAutoDetected() async throws {
+        let mock = MockMLXModelContainer()
+        // The model emits phi4-style markers, NOT qwen3.
+        mock.tokensToYield = ["<reasoning>", "step1", "</reasoning>", "answer"]
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+        // Auto-detection landed on .qwen3 (e.g. the chat template advertised
+        // <think>/</think>) — but the runtime stream uses <reasoning>/</reasoning>.
+        backend._injectAutoDetectedThinkingMarkers(.qwen3)
+
+        // Caller forces .phi4 to match the actual stream content.
+        var config = GenerationConfig()
+        config.thinkingMarkers = .phi4
+
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: config
+        )
+
+        let events = try await collectAllEvents(from: stream)
+        let thinkingTexts = events.compactMap { ev -> String? in
+            if case .thinkingToken(let t) = ev { return t } else { return nil }
+        }
+        XCTAssertTrue(thinkingTexts.joined().contains("step1"),
+            "config.thinkingMarkers (.phi4) must override the auto-detected .qwen3")
+
+        // The qwen3 markers never matched the stream, so if auto-detection had
+        // won we would see zero thinkingTokens and "step1" would surface as .token.
+    }
+
+    /// Both sources nil: parser stays off, raw `<think>` text reaches `.token`.
+    /// This is the behaviour that replaces the old hardcoded `.qwen3` fallback.
+    func test_noMarkers_anywhere_parserStaysOff() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["<think>", "reason", "</think>", "answer"]
+
+        let backend = MLXBackend()
+        backend._inject(mock)
+        // Simulate "tokenizer_config.json said nothing about thinking" — the
+        // load path's nil result for a non-reasoning model.
+        backend._injectAutoDetectedThinkingMarkers(nil)
+
+        // Caller also leaves thinkingMarkers nil.
+        let stream = try backend.generate(
+            prompt: "hi",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        )
+
+        let events = try await collectAllEvents(from: stream)
+        let thinkingEvents = events.filter {
+            if case .thinkingToken = $0 { return true }
+            if case .thinkingComplete = $0 { return true }
+            return false
+        }
+        XCTAssertTrue(thinkingEvents.isEmpty,
+            "Both config.thinkingMarkers and auto-detected nil → parser must stay off")
+
+        let visibleText = events.compactMap { ev -> String? in
+            if case .token(let t) = ev { return t } else { return nil }
+        }.joined()
+        XCTAssertTrue(visibleText.contains("<think>"),
+            "Raw <think> must pass through as .token text when no markers are configured")
+
+        // Sabotage check: re-introducing `?? .qwen3` in MLXBackend.generate
+        // engages the parser here and routes `reason` to .thinkingToken,
+        // causing this assertion to fail.
+    }
+
+    // MARK: - 7. maxThinkingTokens == 0 disables thinking entirely (#597)
 
     /// Verifies that `GenerationConfig.maxThinkingTokens == 0` short-circuits
     /// the `ThinkingParser` on MLX so zero `.thinkingToken` / `.thinkingComplete`

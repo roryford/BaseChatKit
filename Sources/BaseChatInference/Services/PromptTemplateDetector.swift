@@ -53,6 +53,41 @@ struct PromptTemplateDetector {
         return .chatML
     }
 
+    /// Detects which `ThinkingMarkers` preset (if any) a Jinja chat template
+    /// advertises.
+    ///
+    /// Pure substring matching. Both halves of a marker pair must appear in
+    /// the template for that family to be returned — a stray `<think>` with no
+    /// closer is not a thinking template. Returns `nil` when no known pair
+    /// matches, signalling that the model does not emit reasoning blocks.
+    ///
+    /// Precedence (most specific first): qwen3 → mistralReasoning → phi4 →
+    /// reflection → gemma4. The first family whose tag pair appears in the
+    /// template wins, so a Frankenstein template that mentions multiple
+    /// pairs collapses to the most-Qwen-like one. That's deliberate — the
+    /// chat-template tags say what the model *emits*, and Qwen-style is the
+    /// default for the families we ship presets for.
+    static func detectThinkingMarkers(from chatTemplate: String) -> ThinkingMarkers? {
+        if chatTemplate.contains("<think>") && chatTemplate.contains("</think>") {
+            return .qwen3
+        }
+        if chatTemplate.contains("<thinking>") && chatTemplate.contains("</thinking>") {
+            return .mistralReasoning
+        }
+        if chatTemplate.contains("<reasoning>") && chatTemplate.contains("</reasoning>") {
+            return .phi4
+        }
+        if chatTemplate.contains("<reflection>") && chatTemplate.contains("</reflection>") {
+            return .reflection
+        }
+        // Gemma 4's thinking turn opens with `<|turn>think\n` and closes with the
+        // standard `<|end_of_turn>` delimiter; both must appear.
+        if chatTemplate.contains("<|turn>think\n") && chatTemplate.contains("<|end_of_turn>") {
+            return .gemma4
+        }
+        return nil
+    }
+
     /// Detects a prompt template from the GGUF `general.architecture` field.
     ///
     /// Maps known architecture identifiers to their canonical prompt formats.

@@ -55,6 +55,67 @@ final class PromptTemplateDetectorTests: XCTestCase {
         XCTAssertEqual(PromptTemplateDetector.detect(fromChatTemplate: template), .chatML)
     }
 
+    // MARK: - Thinking Marker Detection from Chat Template
+
+    func test_detectThinkingMarkers_qwen3Template() {
+        // Realistic Qwen3 chat template excerpt — both halves of the pair appear.
+        let template = "{% for m in messages %}{{ m.role }}: {{ m.content }}{% endfor %}<think>{{ thinking }}</think>"
+        XCTAssertEqual(PromptTemplateDetector.detectThinkingMarkers(from: template), .qwen3)
+    }
+
+    func test_detectThinkingMarkers_plainChatML_returnsNil() {
+        // Standard ChatML template — no thinking markers anywhere.
+        let template = "{% for m in messages %}<|im_start|>{{ m.role }}\n{{ m.content }}<|im_end|>\n{% endfor %}"
+        XCTAssertNil(PromptTemplateDetector.detectThinkingMarkers(from: template),
+                     "Plain ChatML must not be misidentified as a thinking model")
+    }
+
+    func test_detectThinkingMarkers_partialMatch_openWithoutClose_returnsNil() {
+        // `<think>` is present but `</think>` is missing — should NOT report .qwen3.
+        let template = "{{ messages[0].content }} <think>partial..."
+        XCTAssertNil(PromptTemplateDetector.detectThinkingMarkers(from: template),
+                     "An open tag with no closer must not match a marker family")
+    }
+
+    func test_detectThinkingMarkers_partialMatch_closeWithoutOpen_returnsNil() {
+        let template = "{{ messages[0].content }} </think>tail"
+        XCTAssertNil(PromptTemplateDetector.detectThinkingMarkers(from: template))
+    }
+
+    func test_detectThinkingMarkers_mistralReasoningTemplate() {
+        let template = "[INST] {{ content }} [/INST] <thinking>{{ reasoning }}</thinking>"
+        XCTAssertEqual(PromptTemplateDetector.detectThinkingMarkers(from: template), .mistralReasoning)
+    }
+
+    func test_detectThinkingMarkers_phi4Template() {
+        let template = "<|user|>\n{{ content }}<|end|>\n<|assistant|>\n<reasoning>{{ analysis }}</reasoning>"
+        XCTAssertEqual(PromptTemplateDetector.detectThinkingMarkers(from: template), .phi4)
+    }
+
+    func test_detectThinkingMarkers_reflectionTemplate() {
+        let template = "{{ content }}<reflection>{{ critique }}</reflection>"
+        XCTAssertEqual(PromptTemplateDetector.detectThinkingMarkers(from: template), .reflection)
+    }
+
+    func test_detectThinkingMarkers_gemma4Template() {
+        // Gemma 4's thinking turn signature: open marker is `<|turn>think\n`,
+        // close is the standard `<|end_of_turn>` delimiter.
+        let template = "<|turn>think\n{{ analysis }}<|end_of_turn>\n<|turn>model\n{{ content }}<|end_of_turn>"
+        XCTAssertEqual(PromptTemplateDetector.detectThinkingMarkers(from: template), .gemma4)
+    }
+
+    func test_detectThinkingMarkers_emptyTemplate_returnsNil() {
+        XCTAssertNil(PromptTemplateDetector.detectThinkingMarkers(from: ""))
+    }
+
+    // ThinkingMarkers.fromChatTemplate is the public entry point that delegates
+    // to the detector — pin one case to ensure the surface stays wired.
+    func test_thinkingMarkers_fromChatTemplate_publicSurface() {
+        let template = "<think>{{ x }}</think>"
+        XCTAssertEqual(ThinkingMarkers.fromChatTemplate(template), .qwen3)
+        XCTAssertNil(ThinkingMarkers.fromChatTemplate("plain text only"))
+    }
+
     // MARK: - Architecture Detection
 
     func test_detect_fromArchitecture_llama() {
