@@ -236,8 +236,7 @@ registry.register(MySearchTool())
 
 let (_, stream) = try inferenceService.enqueue(
     messages: history,
-    tools: registry.definitions,
-    toolChoice: .auto
+    tools: registry.definitions
 )
 ```
 
