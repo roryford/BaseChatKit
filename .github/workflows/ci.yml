@@ -75,6 +75,33 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-spm-
             ${{ runner.os }}-${{ runner.arch }}-spm-
 
+      - name: Verify Swift toolchain matches Package.swift tools-version
+        # The runner's Xcode (pinned above) ships a specific Swift version. If
+        # `swift-tools-version` in Package.swift exceeds that, `swift package
+        # resolve` and every subsequent build will fail with a confusing error.
+        # Catch the mismatch here with a clear message naming both versions.
+        run: |
+          set -euo pipefail
+          tools_line=$(head -n 1 Package.swift)
+          tools_version=$(printf '%s\n' "$tools_line" | sed -E 's|^//[[:space:]]*swift-tools-version:[[:space:]]*([0-9]+\.[0-9]+).*|\1|')
+          if ! [[ "$tools_version" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "Could not parse swift-tools-version from first line of Package.swift: $tools_line"
+            exit 1
+          fi
+          swift_version_full=$(xcrun swift -version | head -n 1)
+          swift_version=$(printf '%s\n' "$swift_version_full" | sed -E 's|.*Swift version ([0-9]+\.[0-9]+).*|\1|')
+          if ! [[ "$swift_version" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "Could not parse Swift major.minor from: $swift_version_full"
+            exit 1
+          fi
+          tools_major=${tools_version%.*}; tools_minor=${tools_version#*.}
+          swift_major=${swift_version%.*}; swift_minor=${swift_version#*.}
+          if (( tools_major > swift_major )) || { (( tools_major == swift_major )) && (( tools_minor > swift_minor )); }; then
+            echo "::error::Package.swift requires swift-tools-version $tools_version but runner has Swift $swift_version. Lower swift-tools-version or upgrade the pinned Xcode."
+            exit 1
+          fi
+          echo "swift-tools-version=$tools_version OK against runner Swift $swift_version"
+
       - name: Verify Package.resolved is up to date
         # Was a separate `resolve-check` job on its own macos-15 runner; folding
         # it into `test` removes one 10×-billed runner per PR and eliminates the
@@ -121,7 +148,38 @@ jobs:
       # execution avoids that and `--parallel` would still need a UI-test-only
       # carve-out, which negates most of the speedup anyway.
       - name: Test — XCTest suites (Core + UI + Backends + Inference + TestSupport)
+        timeout-minutes: 25
         run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatBackendsTests --filter BaseChatInferenceTests --filter BaseChatTestSupportTests --disable-default-traits --skip-update
 
       - name: Test — Inference (Swift Testing, isolated process)
+        timeout-minutes: 25
         run: scripts/test.sh --filter BaseChatInferenceSwiftTestingTests --disable-default-traits --skip-update
+
+      - name: Stage test diagnostics
+        # scripts/test.sh writes full captured output to $TMPDIR/test_output.txt
+        # but $TMPDIR on macOS runners is a per-process /var/folders path that
+        # actions/upload-artifact cannot reliably address. Copy into the
+        # workspace so the upload step below can find it. Each test step
+        # overwrites this file, so on failure it holds the failing step's log.
+        if: failure()
+        run: |
+          mkdir -p test-diagnostics
+          if [ -n "${TMPDIR:-}" ] && [ -f "${TMPDIR}/test_output.txt" ]; then
+            cp "${TMPDIR}/test_output.txt" test-diagnostics/test_output.txt
+          fi
+          # Best-effort: copy any xcresult bundles a future xcodebuild step
+          # might have produced under DerivedData.
+          find "${HOME}/Library/Developer/Xcode/DerivedData" -type d -name "*.xcresult" -maxdepth 6 2>/dev/null \
+            | while read -r r; do cp -R "$r" test-diagnostics/ || true; done
+
+      - name: Upload test diagnostics on failure
+        # swift test does not produce .xcresult bundles, so we upload whatever
+        # diagnostics the failing step left behind (captured stdout/stderr,
+        # plus any xcresult bundles if they exist).
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xcresult-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: test-diagnostics/
