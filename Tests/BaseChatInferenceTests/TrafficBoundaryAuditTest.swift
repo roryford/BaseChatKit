@@ -274,7 +274,7 @@ final class TrafficBoundaryAuditTest: XCTestCase {
                         offenders.append(.init(
                             rule: 4, ruleName: "Privacy-sensitive Apple API",
                             file: relativePath, line: idx + 1, text: trimmed,
-                            why: "CloudKit, iCloud key-value sync, Handoff, Universal Clipboard, weakened file protection, and `os_log` `.public` interpolation all leak data outside the device — bypassing every network audit.",
+                            why: "CloudKit, iCloud key-value sync, Handoff, Universal Clipboard, and weakened file protection all leak data outside the device — bypassing every network audit.",
                             fix: "Use a local-only alternative (e.g. `UIPasteboard.general.setItems(_:options:)` with `.localOnly = true`). If genuinely required, add a fingerprint entry to privacyAPIAllowlist with `// Justification:` comment."
                         ))
                     }
@@ -347,14 +347,16 @@ final class TrafficBoundaryAuditTest: XCTestCase {
 
     // MARK: - Patterns
 
-    /// Word-boundary protection ensures `MockURLSession` matches (it's a
-    /// URLSession type) but `MyURLSessionStub` doesn't accidentally match
-    /// `URLSessionStub` as a fragment.
+    /// Identifier-boundary protection matches only standalone
+    /// `URLSession`/`URLRequest`/`URLSessionConfiguration` references, and
+    /// does not match larger identifiers that merely contain those names
+    /// as substrings (for example `MockURLSession` or
+    /// `MyURLSessionStub`).
     private static let networkIOPattern =
         #"(?<![A-Za-z0-9_])(URLSession|URLRequest|URLSessionConfiguration)(?![A-Za-z0-9_])"#
 
     private static let cInteropPattern =
-        #"(?<![A-Za-z0-9_])(@_silgen_name|@_cdecl|dlopen\(|dlsym\(|NSClassFromString|objc_getClass|class_createInstance|NSTask|posix_spawn|popen\()"#
+        #"(?<![A-Za-z0-9_])(@_silgen_name|@_cdecl|dlopen\(|dlsym\(|NSClassFromString|objc_getClass|class_createInstance|NSTask|posix_spawn|popen\()|(?<![A-Za-z0-9_.])system\("#
 
     /// `Process(` as a constructor call — distinguishes from Swift's
     /// `Process` type used as a parameter type. The open-paren is the
@@ -491,6 +493,7 @@ final class TrafficBoundaryAuditTest: XCTestCase {
             "let i = class_createInstance(cls, 0)",
             "var pid: pid_t = 0; posix_spawn(&pid, path, nil, nil, argv, envp)",
             "let f = popen(\"ls\", \"r\")",
+            "let r = system(\"/bin/ls\")",
         ]
         for fixture in cases {
             XCTAssertTrue(Self.matches(Self.cInteropPattern, in: fixture),
@@ -511,6 +514,11 @@ final class TrafficBoundaryAuditTest: XCTestCase {
         let systemNonCall = "let mySystem = configure()"
         XCTAssertFalse(Self.matches(Self.cInteropPattern, in: systemNonCall),
                        "Rule 2 must not match identifier 'system' without open-paren")
+
+        // Negative: SwiftUI's `.system(...)` member call must not match.
+        let swiftUIFontCall = "Text(\"Hi\").font(.system(.body))"
+        XCTAssertFalse(Self.matches(Self.cInteropPattern, in: swiftUIFontCall),
+                       "Rule 2 must not match SwiftUI's .system(...) member call")
     }
 
     func test_sabotage_rule3_catchesHostnameLiterals() {

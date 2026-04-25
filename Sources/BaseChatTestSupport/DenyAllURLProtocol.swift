@@ -127,12 +127,15 @@ public final class DenyAllURLProtocol: URLProtocol {
     /// by this helper — otherwise the canary will not see its requests.
     ///
     /// - Parameter base: The starting configuration. Defaults to `.ephemeral`.
-    ///   If you pass `.default`, remember each access returns a fresh instance,
-    ///   so the returned config is independent of any other caller's `.default`.
+    ///   The returned configuration is a defensive copy — `base` is not
+    ///   mutated, even when callers pass a configuration they share elsewhere.
     public static func installedConfiguration(
         base: URLSessionConfiguration = .ephemeral
     ) -> URLSessionConfiguration {
-        let config = base
+        // URLSessionConfiguration is a reference type — copy before mutating
+        // so callers who pass their own configuration aren't surprised by
+        // in-place changes.
+        let config = base.copy() as! URLSessionConfiguration
         var classes = config.protocolClasses ?? []
         classes.insert(DenyAllURLProtocol.self, at: 0)
         config.protocolClasses = classes
