@@ -106,6 +106,17 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             messages.append(["role": "system", "content": systemPrompt])
         }
         if let history = conversationHistory {
+            // Reasoning-model asymmetry: OpenAI-compatible providers (DeepSeek,
+            // o-series, hosted Qwen reasoning) deliver chain-of-thought via
+            // `reasoning_content` / `reasoning` deltas but **don't** require
+            // it on multi-turn replay — and most providers reject blocks they
+            // didn't emit. ``GenerationCoordinator`` already collapsed
+            // structured history to `(role, content)` text via
+            // ``StructuredMessage/textContent``, which drops `.thinking`
+            // parts. So thinking is informational only on this backend's
+            // replay path. Anthropic's multi-turn signature contract is
+            // handled by ``ClaudeBackend`` reading the structured history
+            // directly. (#604)
             messages.append(contentsOf: history.map { ["role": $0.role, "content": $0.content] })
         } else {
             messages.append(["role": "user", "content": prompt])

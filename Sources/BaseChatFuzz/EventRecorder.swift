@@ -83,6 +83,12 @@ public struct EventRecorder: Sendable {
                     events.append(.init(t: t, kind: "kvCacheReuse", v: "\(tokens)"))
                 case .diagnosticThrottle(let reason):
                     events.append(.init(t: t, kind: "diagnosticThrottle", v: reason))
+                case .thinkingSignature(let signature):
+                    // Provider-issued opaque token for multi-turn replay
+                    // (Anthropic extended thinking). Surface in the trace so
+                    // fuzz scenarios can pin its presence/absence without
+                    // affecting reasoning text accumulation.
+                    events.append(.init(t: t, kind: "thinkingSignature", v: signature))
                 }
                 memoryTick()
             }

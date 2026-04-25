@@ -5,7 +5,7 @@ import BaseChatInference
 /// Configurable mock inference backend for testing.
 ///
 /// Shared across all test targets via the `BaseChatTestSupport` module.
-public final class MockInferenceBackend: InferenceBackend, ConversationHistoryReceiver, @unchecked Sendable {
+public final class MockInferenceBackend: InferenceBackend, ConversationHistoryReceiver, StructuredHistoryReceiver, @unchecked Sendable {
     public var isModelLoaded: Bool = false
     public var isGenerating: Bool = false
     public var capabilities: BackendCapabilities
@@ -13,6 +13,19 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     // Configurable behavior
     public var tokensToYield: [String] = ["Hello", " world"]
     public var thinkingTokensToYield: [String] = []
+
+    /// Multi-block reasoning script. When non-empty this **takes precedence
+    /// over** ``thinkingTokensToYield``: each inner array is one reasoning
+    /// block, emitted as a sequence of `.thinkingToken` events followed by
+    /// a `.thinkingComplete`. Used by tests that exercise the multi-block
+    /// finalize path (#604: Anthropic emits one signature per block).
+    public var thinkingBlocksToYield: [[String]] = []
+
+    /// Optional signature to emit (via `.thinkingSignature`) immediately
+    /// after the thinking tokens of the block at index `i`. `nil` skips
+    /// emission for that block. Padded shorter than ``thinkingBlocksToYield``
+    /// is fine — missing entries are treated as `nil`.
+    public var signaturesPerThinkingBlock: [String?] = []
     public var shouldThrowOnGenerate: Error? = nil
     public var shouldThrowOnLoad: Error? = nil
 
@@ -128,13 +141,33 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
                 self.activeContinuation = nil
                 self.continuationLock.unlock()
             }
+            let multiBlocks = self.thinkingBlocksToYield
+            let signatures = self.signaturesPerThinkingBlock
             Task {
-                for t in thinkingTokens {
-                    if Task.isCancelled { break }
-                    continuation.yield(.thinkingToken(t))
-                }
-                if !thinkingTokens.isEmpty && !Task.isCancelled {
-                    continuation.yield(.thinkingComplete)
+                if !multiBlocks.isEmpty {
+                    // Multi-block reasoning script: each inner array is one
+                    // `<think>…</think>` round, separated by its own
+                    // `.thinkingComplete`. Lets tests assert the per-block
+                    // finalize → multi-`.thinking`-part contract.
+                    for (idx, block) in multiBlocks.enumerated() {
+                        for t in block {
+                            if Task.isCancelled { break }
+                            continuation.yield(.thinkingToken(t))
+                        }
+                        if Task.isCancelled { break }
+                        if idx < signatures.count, let sig = signatures[idx] {
+                            continuation.yield(.thinkingSignature(sig))
+                        }
+                        continuation.yield(.thinkingComplete)
+                    }
+                } else {
+                    for t in thinkingTokens {
+                        if Task.isCancelled { break }
+                        continuation.yield(.thinkingToken(t))
+                    }
+                    if !thinkingTokens.isEmpty && !Task.isCancelled {
+                        continuation.yield(.thinkingComplete)
+                    }
                 }
                 for token in tokens {
                     if Task.isCancelled { break }
@@ -187,5 +220,14 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
 
     public func setConversationHistory(_ messages: [(role: String, content: String)]) {
         lastReceivedHistory = messages
+    }
+
+    /// Last structured history the coordinator handed to this backend.
+    /// Tests assert on this to verify the structured threading path
+    /// preserves thinking signatures end-to-end (#482, #604).
+    public var lastReceivedStructuredHistory: [StructuredMessage]?
+
+    public func setStructuredHistory(_ messages: [StructuredMessage]) {
+        lastReceivedStructuredHistory = messages
     }
 }
