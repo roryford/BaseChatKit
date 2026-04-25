@@ -213,3 +213,46 @@ All changes go through PRs — direct pushes to `main` are blocked for everyone.
 CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatInferenceSwiftTestingTests` + `BaseChatUITests` + `BaseChatBackendsTests`) before merge is allowed.
 
 `BaseChatBackendsTests` runs in CI without hardware traits — only cloud backend and SSE tests execute; MLX and Llama tests are excluded by `#if MLX`/`#if Llama` conditional compilation. Run with `--traits MLX,Llama` locally on Apple Silicon before merging backend changes. `BaseChatE2ETests` requires physical hardware and does not run in CI.
+
+## Issue & PR hygiene
+
+CI is macOS-only (10× billing) and runs ~5 minutes per push. Each unnecessary PR or issue costs real money and the maintainer's attention. The default is **fewer, larger units of work**.
+
+### Don't open GitHub issues for follow-ups, phases, or "while I'm here" cleanups
+
+The issue tracker is for things that need cross-session memory **and** external visibility (real bugs, real feature asks, things a future contributor would search for). It is **not**:
+
+- A scratchpad for ideas surfaced during a session.
+- Cross-session memory for Claude Code (use the memory system or `TODO.md` instead).
+- A pre-written list of PR titles waiting to be opened.
+- A way to track sub-phases of a larger effort (use a checklist on the parent issue).
+
+If you find yourself wanting to open more than **one** issue in a session, stop. Either fold the work into the current PR, add it as a checkbox on an existing tracking issue, or leave a `// TODO:` comment in the code. Don't ask the user "should I open an issue for this?" — default to no.
+
+When an issue genuinely is needed, the bar is: would an external contributor benefit from seeing this in the open queue? If no, don't open it.
+
+### One feature = one PR, even across backends
+
+A change like "tool calling" or "thinking budget" touches MLX + Llama + Foundation + Cloud + fixtures. Ship it as **one PR with a backend checklist in the body**, not five PRs. Per-backend fan-out drove past PR storms (15–24 PRs in a day). Reviewers see the cross-cutting types once, CI runs once.
+
+Exceptions: when one backend is genuinely blocked (e.g., waiting on an upstream fix), ship the unblocked backends and add a `track:` comment on the umbrella issue listing what's left.
+
+### Tests and docs ship in the feature PR
+
+Don't open standalone `test:` or `docs:` PRs for in-flight features. Acceptance tests belong in the PR that introduces the capability — splitting them costs CI minutes and invents merge conflicts. The same applies to demo scenarios that exercise a new capability: they ship with the capability, not as a follow-up.
+
+Standalone `test:`/`docs:` PRs are appropriate only for already-shipped features (e.g., adding coverage for a corner case discovered later, or rewriting prose that's now wrong).
+
+### Single-file PRs are a smell
+
+Before opening a PR that touches one file, check whether there's a sibling PR you could batch into. If you've opened 3+ single-file PRs in a row, the third should have been part of the first.
+
+### Tracking issues
+
+When work genuinely needs to be split across multiple PRs (e.g., depends on a prerequisite landing first), use **one** tracking issue with a checklist of PR-sized batches. Don't open one issue per batch. Existing tracking umbrellas:
+
+- #753 — tool calling coordinated rollout
+- #754 — demo-picker test-suite matrix
+- #755 — fuzz harness v2
+
+Add to these instead of creating new umbrellas in the same area.
