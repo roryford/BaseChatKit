@@ -1,4 +1,6 @@
-// Does not require the Fuzz trait — uses OllamaBackend only (always compiled).
+// Does not require the Fuzz trait. The Ollama path is gated behind the
+// `Ollama` trait (default-on for now); pass `--disable-default-traits`
+// to drop it. The mock path is always available.
 // For generation fuzzing with real backends, see scripts/fuzz.sh.
 import Foundation
 import BaseChatInference
