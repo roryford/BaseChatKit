@@ -170,6 +170,43 @@ final class ModelStorageServiceTests: XCTestCase {
         XCTAssertEqual(mlxMatch?.modelType, .mlx)
     }
 
+    func test_discoverModels_findsNamespacedMlxDirectory() throws {
+        // Layout: <Models>/<namespace>/<model>/{config.json,weights.safetensors}
+        // The HF-style namespace directory itself has no config.json — discovery
+        // must recurse one level when the parent isn't a model directory.
+        let namespace = "mlx-community"
+        let modelName = "gemma-4-test-\(UUID().uuidString)"
+
+        let namespaceURL = service.modelsDirectory.appendingPathComponent(namespace)
+        let modelURL = namespaceURL.appendingPathComponent(modelName)
+        try FileManager.default.createDirectory(at: modelURL, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: modelURL.appendingPathComponent("config.json"))
+        try Data(repeating: 0xCC, count: 1024).write(to: modelURL.appendingPathComponent("weights.safetensors"))
+        // Track the top-level namespace directory so tearDown removes the whole tree.
+        createdURLs.append(namespaceURL)
+
+        let models = service.discoverModels()
+        let expectedFileName = "\(namespace)/\(modelName)"
+        let match = models.first { $0.fileName == expectedFileName }
+
+        XCTAssertNotNil(match, "Should discover the namespaced MLX directory")
+        XCTAssertEqual(match?.modelType, .mlx)
+    }
+
+    func test_discoverModels_namespaceWithoutModels_yieldsNothing() throws {
+        // An empty namespace directory (no nested config.json anywhere) must not
+        // produce a phantom ModelInfo.
+        let namespaceURL = service.modelsDirectory
+            .appendingPathComponent("empty-namespace-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: namespaceURL, withIntermediateDirectories: true)
+        createdURLs.append(namespaceURL)
+
+        let models = service.discoverModels()
+        let match = models.first { $0.fileName.hasPrefix(namespaceURL.lastPathComponent) }
+
+        XCTAssertNil(match, "Empty namespace directory should not yield a model")
+    }
+
     func test_discoverModels_sortedByName() throws {
         // Create files with names that sort in a known order.
         // Use a shared prefix so we can filter to just our test files.

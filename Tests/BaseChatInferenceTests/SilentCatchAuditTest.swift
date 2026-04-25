@@ -74,6 +74,10 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatInference/Services/DownloadFileValidator.swift:guard let headerData = try? handle.read(upToCount: 4), headerData.count == 4 else {",
         "BaseChatInference/Services/GGUFMetadataReader.swift:guard let handle = try? FileHandle(forReadingFrom: url) else { return false }",
         "BaseChatInference/Services/ModelStorageService.swift:guard let contents = try? fileManager.contentsOfDirectory(",
+        // Same best-effort directory walk one level deeper for HF-namespaced MLX
+        // layouts (Models/<org>/<model>/). An unreadable namespace dir is just
+        // skipped — we move on to the next entry rather than failing the whole scan.
+        "BaseChatInference/Services/ModelStorageService.swift:guard let nestedContents = try? fileManager.contentsOfDirectory(",
 
         // BaseChatCore
         // File-protection hardening: enumerating the store directory to locate
