@@ -70,6 +70,39 @@ import Foundation
 ///   sees the returned ``ToolResult``.
 /// - A future extension may add an explicit partial-content channel; until
 ///   then, this atomic request/response shape is the contract.
+///
+/// ## Cooperative cancellation
+///
+/// `execute(arguments:)` runs inside a `Task` owned by the orchestrator
+/// (``ToolRegistry/dispatch(_:)`` is invoked from a child task in
+/// `GenerationCoordinator`). When the user hits stop mid-generation, the
+/// orchestrator calls `Task.cancel()` on its active generation task and the
+/// cancellation propagates into this executor through structured concurrency.
+///
+/// Executors **must** cooperate with cancellation. Concretely:
+///
+/// - Use cancellation-aware async APIs. `Task.sleep(for:)`, `URLSession`'s
+///   async overloads, and most Foundation async APIs already throw when the
+///   surrounding task is cancelled.
+/// - Long CPU-bound or non-cancellable work should poll
+///   `Task.checkCancellation()` (or check `Task.isCancelled`) at sensible
+///   yield points and throw `CancellationError` to bail out promptly.
+/// - Bridged callback APIs (e.g. `URLSessionDataTask` via
+///   `withTaskCancellationHandler`) must register an `onCancel:` closure
+///   that calls the underlying `cancel()` so the in-flight request is torn
+///   down. Otherwise the request leaks past the user's stop.
+///
+/// When the executor cooperates, ``ToolRegistry/dispatch(_:)`` synthesises
+/// a ``ToolResult`` with ``ToolResult/ErrorKind/cancelled`` and the fixed
+/// content `"cancelled by user"`. The orchestrator records it in the
+/// transcript and **stops the dispatch loop** — no further backend turn
+/// runs after a cancelled tool. Executors that fail to cooperate may
+/// produce a real value before cancellation is observed; in that case the
+/// registry still upgrades the outcome to
+/// ``ToolResult/ErrorKind/cancelled`` because the contract is "no
+/// post-stop tool output flows into the transcript" — but the executor
+/// has wasted user-visible work and may have leaked resources (open file
+/// handles, in-flight HTTP requests). Cooperate.
 public protocol ToolExecutor: Sendable {
 
     /// The JSON-Schema contract exposed to the model and the ``ToolRegistry``

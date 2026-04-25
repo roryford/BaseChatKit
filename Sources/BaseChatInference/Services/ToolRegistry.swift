@@ -152,8 +152,15 @@ public protocol JSONSchemaValidating: Sendable {
     /// - Malformed argument JSON → ``ToolResult/ErrorKind/invalidArguments``
     /// - Schema validation failure (when ``validator`` is set) →
     ///   ``ToolResult/ErrorKind/invalidArguments``
-    /// - Executor throws → ``ToolResult/ErrorKind/permanent`` with
-    ///   `String(describing: error)` as the content
+    /// - Executor throws `CancellationError`, or the surrounding task is
+    ///   cancelled mid-execute →
+    ///   ``ToolResult/ErrorKind/cancelled`` with a fixed
+    ///   `"cancelled by user"` content. This is the cooperative-cancellation
+    ///   path the orchestrator relies on when the user hits stop while a
+    ///   tool is in flight; see ``ToolExecutor`` for the executor-author
+    ///   contract.
+    /// - Executor throws any other error → ``ToolResult/ErrorKind/permanent``
+    ///   with `String(describing: error)` as the content.
     ///
     /// The returned ``ToolResult/callId`` always matches the incoming
     /// ``ToolCall/id``, regardless of what the executor returned.
@@ -212,12 +219,41 @@ public protocol JSONSchemaValidating: Sendable {
         // 4. Execute and stamp callId.
         do {
             let raw = try await executor.execute(arguments: parsedArguments)
+            // If the surrounding task was cancelled but the executor returned
+            // a value anyway (didn't observe cancellation), still treat the
+            // outcome as cancelled so the orchestrator's transcript records
+            // the contract-defined ``ToolResult`` instead of a stale value.
+            if Task.isCancelled {
+                return ToolResult(
+                    callId: call.id,
+                    content: "cancelled by user",
+                    errorKind: .cancelled
+                )
+            }
             return ToolResult(
                 callId: call.id,
                 content: raw.content,
                 errorKind: raw.errorKind
             )
+        } catch is CancellationError {
+            return ToolResult(
+                callId: call.id,
+                content: "cancelled by user",
+                errorKind: .cancelled
+            )
         } catch {
+            // Foundation APIs that observe cancellation often throw
+            // `URLError(.cancelled)` rather than `CancellationError`. When
+            // the surrounding task has been cancelled, classify any thrown
+            // error as a cooperative cancellation so the dispatcher can
+            // distinguish "user hit stop" from a true permanent failure.
+            if Task.isCancelled {
+                return ToolResult(
+                    callId: call.id,
+                    content: "cancelled by user",
+                    errorKind: .cancelled
+                )
+            }
             return ToolResult(
                 callId: call.id,
                 content: String(describing: error),
