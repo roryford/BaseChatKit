@@ -13,6 +13,11 @@ final class ResumableDownloadTests: XCTestCase {
     // Separate subdir for persistence so the blocker test can plant a file at this
     // path without destroying tempDirectory itself (which tearDown removes).
     private var persistenceDir: URL!
+    // Per-instance UserDefaults suite: parallel test runs would otherwise race on
+    // the global `pendingDownloadsKey` in `UserDefaults.standard` and cause flakes
+    // in `test_migrateFromUserDefaults_keepsUserDefaultsKeyOnWriteFailure`.
+    private var suiteName: String!
+    private var testDefaults: UserDefaults!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -22,10 +27,14 @@ final class ResumableDownloadTests: XCTestCase {
         persistenceDir = tempDirectory.appendingPathComponent("persistence")
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
 
+        suiteName = "com.basechatkit.test.downloads.\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: suiteName)!
+
         manager = BackgroundDownloadManager(
             storageService: ModelStorageService(baseDirectory: tempDirectory),
             sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)",
-            persistenceDirectory: persistenceDir
+            persistenceDirectory: persistenceDir,
+            userDefaults: testDefaults
         )
     }
 
@@ -33,9 +42,14 @@ final class ResumableDownloadTests: XCTestCase {
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
+        if let suiteName {
+            testDefaults?.removePersistentDomain(forName: suiteName)
+        }
         tempDirectory = nil
         persistenceDir = nil
         manager = nil
+        testDefaults = nil
+        suiteName = nil
         try await super.tearDown()
     }
 
@@ -344,7 +358,8 @@ final class ResumableDownloadTests: XCTestCase {
         let pendingKey = BaseChatConfiguration.shared.pendingDownloadsKey
         let modelID = "test/migrate-model::migrate-model.gguf"
 
-        // Seed legacy UserDefaults data.
+        // Seed legacy UserDefaults data into the per-instance suite (not .standard)
+        // so parallel runs can't race on the shared key.
         let legacy: [String: [String: String]] = [
             modelID: [
                 "repoID": "test/migrate-model",
@@ -354,7 +369,7 @@ final class ResumableDownloadTests: XCTestCase {
                 "sizeBytes": "999",
             ]
         ]
-        UserDefaults.standard.set(legacy, forKey: pendingKey)
+        testDefaults.set(legacy, forKey: pendingKey)
 
         // Ensure the destination file does NOT already exist so the migration branch runs.
         let metadataURL = persistenceDir.appendingPathComponent("pending-downloads.json")
@@ -372,7 +387,7 @@ final class ResumableDownloadTests: XCTestCase {
 
         // The UserDefaults key must be gone after a successful write.
         XCTAssertNil(
-            UserDefaults.standard.dictionary(forKey: pendingKey),
+            testDefaults.dictionary(forKey: pendingKey),
             "UserDefaults key must be removed after a successful migration"
         )
     }
@@ -392,7 +407,9 @@ final class ResumableDownloadTests: XCTestCase {
                 "sizeBytes": "1",
             ]
         ]
-        UserDefaults.standard.set(legacy, forKey: pendingKey)
+        // Use the per-instance suite (not .standard) so parallel runs can't race
+        // on the shared key — that race was the source of the original CI flake.
+        testDefaults.set(legacy, forKey: pendingKey)
 
         // Block the write by placing a regular FILE where the persistence DIRECTORY should be,
         // so ensurePersistenceDirectory() and createDirectory() both fail.
@@ -404,7 +421,7 @@ final class ResumableDownloadTests: XCTestCase {
 
         // The UserDefaults key must still be present because the write failed.
         XCTAssertNotNil(
-            UserDefaults.standard.dictionary(forKey: pendingKey),
+            testDefaults.dictionary(forKey: pendingKey),
             "UserDefaults key must be preserved when the file write fails"
         )
 
@@ -413,8 +430,8 @@ final class ResumableDownloadTests: XCTestCase {
         // even on failure — causing this assertion to fail.
 
         // Clean up: remove the blocker file so tearDown can clean up tempDirectory.
+        // The suite itself is removed in tearDown via removePersistentDomain.
         try? FileManager.default.removeItem(at: persistenceDir)
-        UserDefaults.standard.removeObject(forKey: pendingKey)
     }
 
     // MARK: - deleteOrphanedResumeDataFiles

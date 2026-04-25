@@ -18,14 +18,22 @@ final class DownloadTempCleanupTests: XCTestCase {
     /// Fresh manager per test — session identifier and scan directory are both unique.
     private var manager: BackgroundDownloadManager!
 
+    /// Per-instance UserDefaults suite — prevents parallel test runs from racing
+    /// on the global `pendingDownloadsKey` in `UserDefaults.standard`.
+    private var suiteName: String!
+    private var testDefaults: UserDefaults!
+
     override func setUp() async throws {
         try await super.setUp()
         tempScanDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("DownloadTempCleanupTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempScanDir, withIntermediateDirectories: true)
+        suiteName = "com.basechatkit.test.downloads.\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: suiteName)!
         manager = BackgroundDownloadManager(
             sessionIdentifier: "com.basechatkit.test.cleanup.\(UUID().uuidString)",
-            tempScanDirectory: tempScanDir
+            tempScanDirectory: tempScanDir,
+            userDefaults: testDefaults
         )
     }
 
@@ -33,8 +41,13 @@ final class DownloadTempCleanupTests: XCTestCase {
         if let tempScanDir {
             try? FileManager.default.removeItem(at: tempScanDir)
         }
+        if let suiteName {
+            testDefaults?.removePersistentDomain(forName: suiteName)
+        }
         tempScanDir = nil
         manager = nil
+        testDefaults = nil
+        suiteName = nil
         try await super.tearDown()
     }
 

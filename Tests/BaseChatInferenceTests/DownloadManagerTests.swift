@@ -7,14 +7,22 @@ final class DownloadManagerTests: XCTestCase {
     private var manager: BackgroundDownloadManager!
     private var tempDirectory: URL!
 
+    /// Per-instance UserDefaults suite — prevents parallel test runs from racing
+    /// on the global `pendingDownloadsKey` in `UserDefaults.standard`.
+    private var suiteName: String!
+    private var testDefaults: UserDefaults!
+
     override func setUp() async throws {
         try await super.setUp()
         tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("DownloadManagerTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        suiteName = "com.basechatkit.test.downloads.\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: suiteName)!
         manager = BackgroundDownloadManager(
             storageService: ModelStorageService(baseDirectory: tempDirectory),
-            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)"
+            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)",
+            userDefaults: testDefaults
         )
     }
 
@@ -23,8 +31,13 @@ final class DownloadManagerTests: XCTestCase {
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
+        if let suiteName {
+            testDefaults?.removePersistentDomain(forName: suiteName)
+        }
         tempDirectory = nil
         manager = nil
+        testDefaults = nil
+        suiteName = nil
         try await super.tearDown()
     }
 
@@ -205,7 +218,8 @@ final class DownloadManagerTests: XCTestCase {
 
     func test_activeDownloads_initiallyEmpty() {
         let freshManager = BackgroundDownloadManager(
-            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)"
+            sessionIdentifier: "com.basechatkit.test.download.\(UUID().uuidString)",
+            userDefaults: testDefaults
         )
         XCTAssertTrue(
             freshManager.activeDownloads.isEmpty,
