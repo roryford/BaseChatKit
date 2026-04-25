@@ -12,7 +12,7 @@ on:
   pull_request:
     paths:
       - "Sources/**"
-      - "Tests/**"
+      - "Tests/BaseChatFuzzTests/**"
       - "Package.swift"
       - "Package.resolved"
       - ".github/fuzz-allowlist.json"
