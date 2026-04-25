@@ -121,7 +121,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     /// a freshly supported model.
     static let supportedLMArchitectures: Set<String> = [
         "mistral", "llama", "phi", "phi3", "phimoe",
-        "gemma", "gemma2", "gemma3", "gemma3_text", "gemma3n",
+        "gemma", "gemma2", "gemma3", "gemma3_text", "gemma3n", "gemma4",
         "qwen2", "qwen3", "qwen3_moe", "qwen3_next",
         "qwen3_5", "qwen3_5_moe", "qwen3_5_text",
         "minicpm", "starcoder2", "cohere", "openelm", "internlm2",

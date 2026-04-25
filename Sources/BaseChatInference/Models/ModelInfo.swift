@@ -122,7 +122,12 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
     /// Creates a ModelInfo from an MLX model directory containing `config.json`.
     ///
     /// Returns `nil` if the directory doesn't contain `config.json` or can't be read.
-    public init?(mlxDirectory url: URL) {
+    ///
+    /// - Parameter namespace: When the directory lives under a HuggingFace org/user
+    ///   prefix (e.g. `mlx-community/gemma-4-…`), pass that prefix so the resulting
+    ///   `fileName` is `"<namespace>/<lastPathComponent>"`. This matches the
+    ///   `DownloadableModel.fileName` shape used by `isModelDownloaded`.
+    public init?(mlxDirectory url: URL, namespace: String? = nil) {
         let fileManager = FileManager.default
 
         // Must be a directory containing config.json.
@@ -161,7 +166,7 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         guard hasSafetensors else { return nil }
 
         self.id = Self.stableID(for: url)
-        self.fileName = url.lastPathComponent
+        self.fileName = namespace.map { "\($0)/\(url.lastPathComponent)" } ?? url.lastPathComponent
         self.name = Self.displayName(from: url.lastPathComponent, strippingExtension: nil)
         self.url = url
         self.fileSize = totalSize

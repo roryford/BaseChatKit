@@ -120,6 +120,29 @@ final class ModelInfoTests: XCTestCase {
         XCTAssertNil(model)
     }
 
+    func test_mlxInit_withNamespace_prefixesFileName() throws {
+        let mlxDir = tempDirectory.appendingPathComponent("gemma-4-26b-a4b-it-4bit")
+        try FileManager.default.createDirectory(at: mlxDir, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: mlxDir.appendingPathComponent("config.json"))
+        try Data(repeating: 0, count: 1024).write(to: mlxDir.appendingPathComponent("weights.safetensors"))
+
+        let model = try XCTUnwrap(ModelInfo(mlxDirectory: mlxDir, namespace: "mlx-community"))
+
+        XCTAssertEqual(model.fileName, "mlx-community/gemma-4-26b-a4b-it-4bit")
+        XCTAssertEqual(model.modelType, .mlx)
+    }
+
+    func test_mlxInit_nilNamespace_keepsBareFileName() throws {
+        let mlxDir = tempDirectory.appendingPathComponent("flat-mlx-model")
+        try FileManager.default.createDirectory(at: mlxDir, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: mlxDir.appendingPathComponent("config.json"))
+        try Data(repeating: 0, count: 256).write(to: mlxDir.appendingPathComponent("weights.safetensors"))
+
+        let model = try XCTUnwrap(ModelInfo(mlxDirectory: mlxDir, namespace: nil))
+
+        XCTAssertEqual(model.fileName, "flat-mlx-model")
+    }
+
     func test_mlxInit_nestedSafetensors_countsRecursiveSize() throws {
         let mlxDir = tempDirectory.appendingPathComponent("nested-mlx-model")
         try FileManager.default.createDirectory(at: mlxDir, withIntermediateDirectories: true)
