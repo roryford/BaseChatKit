@@ -8,7 +8,7 @@ import XCTest
 /// kinds of offences:
 ///
 /// 1. `try?` used as an unobserved error swallow. Any line containing
-///    `try?` is captured and checked against ``allowlist``.
+///    `try?` is captured and checked against the allowlist.
 ///
 /// 2. Empty `catch { }` blocks. A catch block is considered empty when,
 ///    after the opening `catch { ... {` on one line, the next non-blank,
@@ -16,13 +16,22 @@ import XCTest
 ///    `catch {}` forms are detected directly.
 ///
 /// Both categories use the same `"relative/path.swift:<trimmed line>"`
-/// fingerprint format and are checked against the same ``allowlist``.
+/// fingerprint format and are checked against the same allowlist.
 ///
-/// Adding a new swallow: if the `try?` or empty catch is a legitimate
-/// optional conversion (e.g., `guard let x = try? Decoder.decode(...)`)
-/// or an intentional best-effort cleanup, append its fingerprint to
-/// ``allowlist``. If it's an unobserved error that should be surfaced,
-/// route it through ``DiagnosticsService.record(_:)`` instead.
+/// ## Allowlist
+///
+/// Approved exceptions live in `silent_catch_allowlist.txt`, sitting next
+/// to this file. The format is one fingerprint per line; `#`-prefixed
+/// lines and blank lines are ignored. Adding a new swallow: if the
+/// `try?` or empty catch is a legitimate optional conversion (e.g.,
+/// `guard let x = try? Decoder.decode(...)`) or an intentional
+/// best-effort cleanup, append its fingerprint to that file with a brief
+/// `#` comment explaining why. If it's an unobserved error that should be
+/// surfaced, route it through ``DiagnosticsService.record(_:)`` instead.
+///
+/// Externalising the list (PR refactoring out a hard-coded `Set<String>`)
+/// means refactor PRs no longer have to touch this test file to add a
+/// reviewed exception — they edit `silent_catch_allowlist.txt`.
 ///
 /// Limitation: the empty-catch detector is line-based, not AST-based,
 /// so nested `catch` inside interpolated strings or multi-line
@@ -31,205 +40,22 @@ import XCTest
 /// catches drift immediately.
 final class SilentCatchAuditTest: XCTestCase {
 
-    /// Exact-match allowlist of `try?` call sites that existed when this
-    /// audit test was added and have been reviewed as either (a) benign
-    /// optional conversions or (b) existing Task.sleep call sites that
-    /// deliberately ignore cancellation. Format: `"relative/path.swift:<trimmed line>"`.
-    ///
-    /// DO NOT add entries to make a failing test pass without human review.
-    private static let allowlist: Set<String> = [
-        // BaseChatInference
-        // False positive: `ToolRegistry?` as an optional type annotation contains
-        // the substring `try?` inside `Regis‑try?`. No `try?` call site is present
-        // on either line; the audit's substring scan is not AST-aware.
-        "BaseChatInference/Services/GenerationCoordinator.swift:let toolRegistry: ToolRegistry?",
-        "BaseChatInference/Services/GenerationCoordinator.swift:toolRegistry: ToolRegistry? = nil,",
-        "BaseChatInference/Services/InferenceService.swift:public var toolRegistry: ToolRegistry? {",
-        "BaseChatInference/Services/InferenceService.swift:toolRegistry: ToolRegistry? = nil,",
-        // JSONSchemaValue uses the standard "try-each-type-in-order" decoder pattern for
-        // heterogeneous JSON. Each `try?` is bound to a named constant and the result is
-        // used immediately; there is no silent discard — the next branch handles the miss.
-        "BaseChatInference/Models/ToolTypes.swift:} else if let b = try? container.decode(Bool.self) {",
-        "BaseChatInference/Models/ToolTypes.swift:} else if let n = try? container.decode(Double.self) {",
-        "BaseChatInference/Models/ToolTypes.swift:} else if let s = try? container.decode(String.self) {",
-        "BaseChatInference/Models/ToolTypes.swift:} else if let arr = try? container.decode([JSONSchemaValue].self) {",
-        "BaseChatInference/Models/ModelInfo.swift:guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),",
-        "BaseChatInference/Models/ModelInfo.swift:if let metadata = try? GGUFMetadataReader.readMetadata(from: url) {",
-        "BaseChatInference/Models/ModelInfo.swift:guard let contents = try? fileManager.contentsOfDirectory(",
-        "BaseChatInference/Models/ModelInfo.swift:let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])",
-        "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: tempURL)",
-        // Best-effort temp-file cleanup before throwing a path-traversal error; the removal
-        // failure is irrelevant since the download is already being rejected.
-        "BaseChatInference/Services/BackgroundDownloadManager+URLSessionDelegate.swift:try? FileManager.default.removeItem(at: tempURL)",
-        // File-based persistence helpers: reading optional data whose absence is expected
-        // (no pending downloads or no resume data), decoding optional JSON (corrupt file
-        // falls back to empty dict), and best-effort cleanup of stale/consumed files.
-        "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let data = try? Data(contentsOf: url) else { return nil }",
-        "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: url)",
-        "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let data = try? Data(contentsOf: pendingMetadataFileURL) else { return nil }",
-        "BaseChatInference/Services/BackgroundDownloadManager.swift:return try? JSONDecoder().decode([String: [String: String]].self, from: data)",
-        "BaseChatInference/Services/BackgroundDownloadManager.swift:try? FileManager.default.removeItem(at: resumeDataFileURL(for: id))",
-        "BaseChatInference/Services/BackgroundDownloadManager.swift:guard let contents = try? FileManager.default.contentsOfDirectory(",
-        "BaseChatInference/Services/DownloadFileValidator.swift:guard let handle = try? FileHandle(forReadingFrom: fileURL) else {",
-        "BaseChatInference/Services/DownloadFileValidator.swift:guard let headerData = try? handle.read(upToCount: 4), headerData.count == 4 else {",
-        "BaseChatInference/Services/GGUFMetadataReader.swift:guard let handle = try? FileHandle(forReadingFrom: url) else { return false }",
-        "BaseChatInference/Services/ModelStorageService.swift:guard let contents = try? fileManager.contentsOfDirectory(",
-        // Same best-effort directory walk one level deeper for HF-namespaced MLX
-        // layouts (Models/<org>/<model>/). An unreadable namespace dir is just
-        // skipped — we move on to the next entry rather than failing the whole scan.
-        "BaseChatInference/Services/ModelStorageService.swift:guard let nestedContents = try? fileManager.contentsOfDirectory(",
-
-        // BaseChatCore
-        // File-protection hardening: enumerating the store directory to locate
-        // SQLite WAL sidecars is best-effort. If the directory read fails
-        // (permissions race, parent unmounted), we skip sidecar protection and
-        // the main store is still protected — the error is not actionable.
-        "BaseChatCore/ModelContainerFactory.swift:guard let entries = try? fm.contentsOfDirectory(atPath: directory.path) else {",
-
-        // BaseChatBackends
-        "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
-        // parseEventType / parseThinkingDelta: SSE payload probes. Malformed
-        // JSON is a non-event (ignore the payload) — same pattern as parseToken.
-        "BaseChatBackends/ClaudeBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
-        "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
-        "BaseChatBackends/OllamaBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
-        // /api/show thinking-detection probe: best-effort optimization that skips
-        // the 2048-token reserve on non-thinking models. Failures are logged at
-        // info level and fall through to `isThinkingModel = false`, which is the
-        // same safe default we'd pick if the endpoint didn't exist (older Ollama).
-        "BaseChatBackends/OllamaBackend.swift:self.isThinkingModel = (try? await detectThinkingCapability()) ?? false",
-        "BaseChatBackends/OllamaBackend.swift:guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
-        "BaseChatBackends/OpenAIBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
-        "BaseChatBackends/SSECloudBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
-        // MLXBackend.validateArchitecture: best-effort read of the MLX model's
-        // `config.json`. A missing/unreadable/malformed config is not fatal here
-        // — we deliberately fall through so mlx-swift-lm's own load path produces
-        // the real diagnostic (missing weights, malformed directory, etc.) rather
-        // than masking it with a false architecture error.
-        "BaseChatBackends/MLXBackend.swift:guard let data = try? Data(contentsOf: configURL),",
-        "BaseChatBackends/MLXBackend.swift:let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {",
-        // MLXBackend.effectiveSystemPrompt (Qwen tool-block builder): the
-        // `tool.parameters` round-trip through Encoder→JSONObject is a
-        // shape-conversion probe so the parameters merge into the surrounding
-        // [String: Any] tools array. The else-branch falls back to an empty
-        // schema, which is the documented Qwen behaviour for parameterless
-        // tools — failure here is functionally indistinguishable from a tool
-        // declaring no parameters.
-        "BaseChatBackends/MLXBackend.swift:if let paramsData = try? JSONEncoder().encode(tool.parameters),",
-        "BaseChatBackends/MLXBackend.swift:let paramsObj = try? JSONSerialization.jsonObject(with: paramsData) {",
-        // Same builder, outer wrap: serialising the assembled tools array into
-        // pretty-printed JSON for the <tools> block. On failure we emit "[]",
-        // which the Qwen template tolerates (model gets an empty tool list and
-        // declines to call). The visible-quality regression is acceptable
-        // versus throwing during prompt assembly.
-        "BaseChatBackends/MLXBackend.swift:if let data = try? JSONSerialization.data(withJSONObject: toolObjects, options: [.prettyPrinted]),",
-        // MLXBackend tool-call history encoding: model previously emitted a
-        // tool call whose arguments JSON is now being replayed in the chat
-        // history. If the original payload no longer parses (corrupted on the
-        // way back through the buffer), substitute an empty-args dict — this
-        // matches what the model itself would have produced for a no-arg
-        // tool, and the audit-trail content already passed validation when
-        // first emitted.
-        "BaseChatBackends/MLXBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) {",
-        // Re-serialising the same call object into a <tool_call> block. If
-        // the round-trip fails (the parsed dictionary is not JSON-encodable),
-        // we drop this single call from the rendered history rather than
-        // failing the whole prompt — the if-let `data`/`jsonStr` guard
-        // ensures only successfully-encoded calls are appended.
-        "BaseChatBackends/MLXBackend.swift:if let data = try? JSONSerialization.data(withJSONObject: callObj),",
-
-        // MLXToolCallParser.parseToolCall: defensive JSON parse of the buffered
-        // payload between <tool_call>…</tool_call>. Models routinely emit
-        // malformed payloads (truncated, partial Unicode, mid-token streaming);
-        // returning `nil` here lets the caller silently skip this block —
-        // the same way the SSE backends drop unparseable event payloads.
-        "BaseChatBackends/MLXToolCallParser.swift:let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],",
-        // Re-serialising parsed `arguments` dict back into a JSON string for
-        // ToolCall.arguments. If serialisation fails, we substitute "{}" —
-        // a parameterless call is the safest fallback when the wire format
-        // is uninterpretable, and the typed-tool executor will surface a
-        // schema mismatch if the tool actually requires args.
-        "BaseChatBackends/MLXToolCallParser.swift:if let serialised = try? JSONSerialization.data(withJSONObject: argsDict),",
-
-        // MLXToolDialect.detect: best-effort probe of the model dir's
-        // `config.json` to classify the tool dialect. A missing/unreadable
-        // config maps to `.unknown` (tool calling is a no-op), per the
-        // function's documented contract — same shape as MLXBackend's
-        // architecture validator above.
-        "BaseChatBackends/MLXToolDialect.swift:guard let data = try? Data(contentsOf: configURL),",
-        "BaseChatBackends/MLXToolDialect.swift:let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]",
-
-        // BaseChatFuzz — SessionScript resource loader uses the "try-each-shape-in-order"
-        // decoder pattern: each `try?` is a shape probe (single-object vs. array of scripts).
-        // When both shape probes miss, SessionScript.loadAll writes an explicit stderr
-        // diagnostic on the next line. The Data(contentsOf:) swallow is a benign
-        // skip-this-resource case — the loader continues with the remaining scripts.
-        "BaseChatFuzz/SessionScript.swift:guard let data = try? Data(contentsOf: url) else { continue }",
-        "BaseChatFuzz/SessionScript.swift:if let one = try? decoder.decode(SessionScript.self, from: data) {",
-        "BaseChatFuzz/SessionScript.swift:if let many = try? decoder.decode([SessionScript].self, from: data) {",
-
-        // BaseChatFuzz/Scenarios — ScenarioTestBackend pauses mid-thinking to give
-        // cancel/retry scenarios a deterministic window. The sleep is best-effort:
-        // if the Task is cancelled during the pause, we deliberately fall through
-        // to the post-thinking emit check (which honours Task.isCancelled on its
-        // own) rather than observing the CancellationError.
-        "BaseChatFuzz/Scenarios/ScenarioTestBackend.swift:try? await Task.sleep(for: pause)",
-
-        // BaseChatUI — Task.sleep cancellation is intentionally ignored;
-        // parser/rendering fallbacks are benign optional conversions.
-        "BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))",
-        "BaseChatUI/Views/Chat/AssistantMarkdownView.swift:if let parsed = try? AttributedString(",
-        "BaseChatUI/Views/Chat/TypingIndicatorView.swift:try? await Task.sleep(for: .milliseconds(400))",
-        // False positive: `toolRegistry?` optional chain contains the substring
-        // `try?` inside `Regis‑try?`. No `try?` call site is present on this
-        // line; the audit's substring scan is not AST-aware.
-        "BaseChatUI/ViewModels/GenerationCoordinator.swift:let registeredTools = inferenceService.toolRegistry?.definitions ?? []",
-
-        // BaseChatTestSupport — test-only helpers, not production paths.
-        // withTimeout deadline task: Task.sleep cancellation is intentionally swallowed so
-        // the deadline fires immediately when the parent task is cancelled, rather than
-        // propagating CancellationError and racing with the operation task's resume path.
-        "BaseChatTestSupport/TestHelpers.swift:try? await Task.sleep(for: timeout)",
-        "BaseChatTestSupport/TestHelpers.swift:try? FileManager.default.removeItem(at: url)",
-        "BaseChatTestSupport/SlowMockBackend.swift:try? await Task.sleep(for: delay)",
-        "BaseChatTestSupport/PerceivedLatencyBackend.swift:try? await Task.sleep(for: ttft)",
-        "BaseChatTestSupport/PerceivedLatencyBackend.swift:try? await Task.sleep(for: delay)",
-        "BaseChatTestSupport/ChaosBackend.swift:try? await Task.sleep(for: delay)",
-        "BaseChatTestSupport/ChaosBackend.swift:try? await Task.sleep(for: stallDuration)",
-        "BaseChatTestSupport/HardwareRequirements.swift:let configData = try? Data(contentsOf: configURL),",
-        "BaseChatTestSupport/HardwareRequirements.swift:let json = try? JSONSerialization.jsonObject(with: configData) as? [String: Any],",
-        "BaseChatTestSupport/HardwareRequirements.swift:let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],",
-        "BaseChatTestSupport/HardwareRequirements.swift:if let containers = try? fm.contentsOfDirectory(",
-        "BaseChatTestSupport/HardwareRequirements.swift:guard let contents = try? fm.contentsOfDirectory(",
-        "BaseChatTestSupport/HardwareRequirements.swift:guard let files = try? fileManager.contentsOfDirectory(",
-        "BaseChatTestSupport/HardwareRequirements.swift:let values = try? candidate.resourceValues(",
-
-        // Empty `catch { }` blocks. These are best-effort reads whose
-        // partial result is still useful; swallowing the error is
-        // intentional and the remaining behaviour is correct.
-        //
-        // ClaudeBackend.readErrorBody: we're assembling an error body
-        // for a log message after the upstream request already failed.
-        // A truncated body is better than crashing the error handler.
-        "BaseChatBackends/ClaudeBackend.swift:} catch {",
-
-        // BaseChatTools — bck-tools CLI harness. Two benign catches:
-        //   - TranscriptLogger.deinit can't propagate a close() failure and
-        //     the file is about to be reaped with the process anyway.
-        //   - NowTool.EmptyArgs.init(from:) probes the keyed container so
-        //     it accepts both `{}` and `null`; a missing container is a
-        //     valid zero-argument payload and not an error condition.
-        "BaseChatTools/TranscriptLogger.swift:} catch {",
-        "BaseChatTools/ReferenceTools/NowTool.swift:} catch {",
-        // SampleRepoSearchTool walks the sandbox directory skipping files it
-        // cannot read (binary data with a text extension, permission races,
-        // non-UTF-8 encodings). Surfacing these as errors would make a noisy
-        // search tool that fails on a single bad file instead of returning
-        // the matches it did find. Mirrors the pattern in BackgroundDownloadManager
-        // and ModelStorageService for directory walkers.
-        "BaseChatTools/ReferenceTools/SampleRepoSearchTool.swift:let values = try? url.resourceValues(forKeys: Set(keys))",
-        "BaseChatTools/ReferenceTools/SampleRepoSearchTool.swift:guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }",
-    ]
+    /// Lazily loaded set of approved fingerprints from
+    /// `silent_catch_allowlist.txt`. The file lives next to this test
+    /// source file; we resolve it via `#filePath` so it works under both
+    /// `swift test` and `xcodebuild test` without requiring the resource
+    /// to be bundled into the test target.
+    private static let allowlist: Set<String> = {
+        do {
+            return try loadAllowlist()
+        } catch {
+            // Fall back to an empty allowlist; the test will then fail
+            // loudly with the file-loading error reported alongside the
+            // first offender.
+            XCTFail("Failed to load silent_catch_allowlist.txt: \(error)")
+            return []
+        }
+    }()
 
     func test_sourcesDirectoryContainsNoUnapprovedSilentSwallows() throws {
         let sourcesURL = try Self.locateSourcesDirectory()
@@ -274,7 +100,7 @@ final class SilentCatchAuditTest: XCTestCase {
                 .joined(separator: "\n")
             XCTFail("""
                 Unapproved silent error swallows found in Sources/.
-                Route these through DiagnosticsService.record(_:) or add the fingerprint to SilentCatchAuditTest.allowlist with reviewer sign-off.
+                Route these through DiagnosticsService.record(_:) or add the fingerprint to Tests/BaseChatInferenceTests/silent_catch_allowlist.txt with reviewer sign-off.
 
                 \(formatted)
                 """)
@@ -286,12 +112,49 @@ final class SilentCatchAuditTest: XCTestCase {
         if !stale.isEmpty {
             let formatted = stale.sorted().joined(separator: "\n  ")
             XCTFail("""
-                SilentCatchAuditTest.allowlist has stale entries that no longer exist in Sources/.
+                silent_catch_allowlist.txt has stale entries that no longer exist in Sources/.
                 Remove them:
 
                   \(formatted)
                 """)
         }
+    }
+
+    // MARK: - Allowlist loading
+
+    /// Reads `silent_catch_allowlist.txt` from beside this source file
+    /// and returns the set of approved fingerprints. Blank lines and
+    /// lines whose first non-whitespace character is `#` are skipped.
+    /// Each remaining line is trimmed of trailing whitespace only —
+    /// leading whitespace is preserved because some fingerprints embed
+    /// indentation-significant tokens.
+    static func loadAllowlist(filePath: StaticString = #filePath) throws -> Set<String> {
+        let url = allowlistURL(filePath: filePath)
+        let content = try String(contentsOf: url, encoding: .utf8)
+        var entries: Set<String> = []
+        for rawLine in content.components(separatedBy: "\n") {
+            // Strip trailing CR (handles CRLF files) and trailing
+            // whitespace introduced by editors.
+            var line = rawLine
+            if line.hasSuffix("\r") { line.removeLast() }
+            while let last = line.last, last == " " || last == "\t" {
+                line.removeLast()
+            }
+            // Skip blank lines.
+            let leading = line.drop(while: { $0 == " " || $0 == "\t" })
+            if leading.isEmpty { continue }
+            // Skip comment lines (first non-whitespace char is `#`).
+            if leading.first == "#" { continue }
+            entries.insert(line)
+        }
+        return entries
+    }
+
+    /// URL of `silent_catch_allowlist.txt` next to this test source file.
+    private static func allowlistURL(filePath: StaticString = #filePath) -> URL {
+        URL(fileURLWithPath: "\(filePath)")
+            .deletingLastPathComponent()
+            .appendingPathComponent("silent_catch_allowlist.txt")
     }
 
     // MARK: - Helpers
