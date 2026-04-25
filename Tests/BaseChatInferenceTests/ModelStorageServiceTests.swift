@@ -193,6 +193,46 @@ final class ModelStorageServiceTests: XCTestCase {
         XCTAssertEqual(match?.modelType, .mlx)
     }
 
+    func test_discoverModels_findsFlatAndMultipleNamespacedMlxDirectories() throws {
+        // Coexisting layouts under a single Models/ root:
+        //   - flat:                Models/<flat>/
+        //   - namespace #1:        Models/mlx-community-<uuid>/<a>/
+        //   - namespace #2:        Models/Qwen-<uuid>/<b>/
+        // All three must be discovered; namespaced ones carry their org prefix
+        // in fileName. Sabotage check: changing the inner `for nestedURL` loop
+        // to `break` after the first match drops the second namespaced model.
+        let flatURL = try createMlxDirectory(named: "mixed-flat")
+
+        let nsA = service.modelsDirectory.appendingPathComponent("mlx-community-\(UUID().uuidString)")
+        let modelA = nsA.appendingPathComponent("model-a")
+        try FileManager.default.createDirectory(at: modelA, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: modelA.appendingPathComponent("config.json"))
+        try Data(repeating: 0xAA, count: 256).write(to: modelA.appendingPathComponent("a.safetensors"))
+        createdURLs.append(nsA)
+
+        let nsB = service.modelsDirectory.appendingPathComponent("Qwen-\(UUID().uuidString)")
+        let modelB = nsB.appendingPathComponent("model-b")
+        try FileManager.default.createDirectory(at: modelB, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: modelB.appendingPathComponent("config.json"))
+        try Data(repeating: 0xBB, count: 256).write(to: modelB.appendingPathComponent("b.safetensors"))
+        createdURLs.append(nsB)
+
+        let models = service.discoverModels()
+
+        XCTAssertNotNil(
+            models.first { $0.fileName == flatURL.lastPathComponent },
+            "Flat MLX directory should be discovered"
+        )
+        XCTAssertNotNil(
+            models.first { $0.fileName == "\(nsA.lastPathComponent)/model-a" },
+            "Namespaced MLX directory under \(nsA.lastPathComponent) should be discovered"
+        )
+        XCTAssertNotNil(
+            models.first { $0.fileName == "\(nsB.lastPathComponent)/model-b" },
+            "Namespaced MLX directory under \(nsB.lastPathComponent) should be discovered"
+        )
+    }
+
     func test_discoverModels_namespaceWithoutModels_yieldsNothing() throws {
         // An empty namespace directory (no nested config.json anywhere) must not
         // produce a phantom ModelInfo.

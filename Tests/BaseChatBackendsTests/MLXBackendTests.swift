@@ -97,6 +97,14 @@ final class MLXBackendTests: XCTestCase {
         XCTAssertNoThrow(try MLXBackend.validateArchitecture(at: url))
     }
 
+    func test_validateArchitecture_acceptsGemma4() throws {
+        // mlx-community/gemma-4-* ships `model_type: "gemma4"` (added to
+        // mlx-swift-lm's LLMTypeRegistry in 3.31.3). Sabotage check: removing
+        // "gemma4" from `supportedLMArchitectures` makes this throw.
+        let url = try writeTempConfig(["model_type": "gemma4"])
+        XCTAssertNoThrow(try MLXBackend.validateArchitecture(at: url))
+    }
+
     func test_validateArchitecture_acceptsLlamaViaArchitectures() throws {
         // HF repos that omit `model_type` but ship `architectures: ["LlamaForCausalLM"]`
         // must still pass — snake_case prefix match keeps older snapshots working.
