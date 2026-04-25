@@ -24,7 +24,6 @@
 
 - ``generate(messages:systemPrompt:temperature:topP:repeatPenalty:maxOutputTokens:)``
 - ``stopGeneration()``
-- ``generationDidFinish()``
 
 ### Backend Registration
 
@@ -40,3 +39,7 @@
 ### Tokenization
 
 - ``tokenizer``
+
+### Deprecated
+
+- ``generationDidFinish()``
