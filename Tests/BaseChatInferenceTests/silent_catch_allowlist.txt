@@ -257,3 +257,9 @@ BaseChatTools/ReferenceTools/NowTool.swift:} catch {
 # and ModelStorageService for directory walkers.
 BaseChatTools/ReferenceTools/SampleRepoSearchTool.swift:let values = try? url.resourceValues(forKeys: Set(keys))
 BaseChatTools/ReferenceTools/SampleRepoSearchTool.swift:guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
+
+# SessionListView debounces search input via Task.sleep; ignoring the
+# CancellationError is the standard pattern for sleeps that exist solely
+# as a debounce — the surrounding `if Task.isCancelled` guard short-circuits
+# the work that would otherwise execute on a stale query.
+BaseChatUI/Views/Sidebar/SessionListView.swift:try? await Task.sleep(nanoseconds: 200_000_000)

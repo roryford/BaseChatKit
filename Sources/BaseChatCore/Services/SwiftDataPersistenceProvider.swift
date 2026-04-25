@@ -79,6 +79,54 @@ public final class SwiftDataPersistenceProvider: ChatPersistenceProvider {
         return try modelContext.fetch(descriptor).map { $0.toRecord() }
     }
 
+    public func fetchSessions(offset: Int, limit: Int) throws -> [ChatSessionRecord] {
+        var descriptor = FetchDescriptor<ChatSession>(
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        // SwiftData's fetchOffset/fetchLimit push pagination into the store
+        // engine; falling back to fetch-all-then-slice would defeat the
+        // point on a 1000-session sidebar.
+        descriptor.fetchOffset = max(0, offset)
+        descriptor.fetchLimit = max(0, limit)
+        return try modelContext.fetch(descriptor).map { $0.toRecord() }
+    }
+
+    // MARK: - Search
+
+    public func searchMessages(query: String, limit: Int) throws -> [MessageSearchHit] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, limit > 0 else { return [] }
+
+        // SwiftData #Predicate localizedStandardContains is case- and
+        // diacritic-insensitive and runs in-store, so we don't pull every
+        // message into memory just to filter. A small over-fetch (limit*2)
+        // covers the case where the plain-text `content` cache is stale and
+        // a snippet pass rejects the match.
+        let needle = trimmed
+        var descriptor = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate { $0.content.localizedStandardContains(needle) },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        descriptor.fetchLimit = limit
+
+        let results = try modelContext.fetch(descriptor)
+        var hits: [MessageSearchHit] = []
+        hits.reserveCapacity(results.count)
+        for message in results {
+            guard let (snippet, range) = makeMessageSearchSnippet(content: message.content, query: trimmed) else {
+                continue
+            }
+            hits.append(MessageSearchHit(
+                messageID: message.id,
+                sessionID: message.sessionID,
+                snippet: snippet,
+                matchRange: range,
+                timestamp: message.timestamp
+            ))
+        }
+        return hits
+    }
+
     // MARK: - Messages
 
     public func insertMessage(_ record: ChatMessageRecord) throws {

@@ -3,16 +3,58 @@ import Observation
 import BaseChatCore
 import BaseChatInference
 
+/// Scope for ``SessionManagerViewModel`` search.
+public enum SessionSearchScope: String, CaseIterable, Hashable, Sendable {
+    /// Filter the loaded session list by title (client-side).
+    case titles
+    /// Search across persisted message bodies (server-side via the persistence provider).
+    case messages
+}
+
 /// Manages chat session CRUD operations and the session list.
 @Observable
 @MainActor
 public final class SessionManagerViewModel {
 
-    /// All sessions, sorted by most recently updated.
+    /// Default page size used when paginating the session list.
+    public static let sessionsPageSize: Int = 50
+
+    /// Default cap on message search results per query.
+    public static let messageSearchLimit: Int = 100
+
+    /// All currently loaded sessions, sorted by most recently updated.
+    ///
+    /// Populated incrementally via ``loadFirstPage()`` / ``loadNextPage()``.
+    /// Calling ``loadSessions()`` collapses pagination and loads all sessions
+    /// at once; existing call sites preserve their previous behaviour.
     public private(set) var sessions: [ChatSessionRecord] = []
+
+    /// `true` when more pages may be available beyond what's loaded.
+    public private(set) var hasMoreSessions: Bool = false
 
     /// The currently active session.
     public var activeSession: ChatSessionRecord?
+
+    // MARK: - Search
+
+    /// Current search scope. Defaults to titles.
+    public var searchScope: SessionSearchScope = .titles
+
+    /// Live query string. The view layer is responsible for debouncing input
+    /// before reassigning this — the VM treats every set as authoritative.
+    public var searchQuery: String = ""
+
+    /// Message-search hits indexed by session ID. Empty when scope is titles
+    /// or query is empty.
+    public private(set) var messageHitsBySession: [UUID: [MessageSearchHit]] = [:]
+
+    /// Sessions matching the current title-scope query. Empty when scope is
+    /// messages or query is empty.
+    public private(set) var titleMatches: [ChatSessionRecord] = []
+
+    /// Sessions surfaced by the most recent message-scope search, ordered by
+    /// their most recent matching message.
+    public private(set) var messageMatchSessions: [ChatSessionRecord] = []
 
     private var persistence: ChatPersistenceProvider?
 
@@ -185,14 +227,150 @@ public final class SessionManagerViewModel {
     }
 
     /// Reloads sessions from the persistence provider.
+    ///
+    /// Resets pagination and loads the first page. Mutations elsewhere in the
+    /// VM (create/delete/rename) call this to refresh the list — the caller's
+    /// expectation is "show me the freshest top of the list", which page 1
+    /// always satisfies.
     public func loadSessions() {
         guard let persistence else { return }
 
         do {
-            sessions = try persistence.fetchSessions()
+            let firstPage = try persistence.fetchSessions(offset: 0, limit: Self.sessionsPageSize)
+            sessions = firstPage
+            hasMoreSessions = firstPage.count == Self.sessionsPageSize
         } catch {
             Log.persistence.error("Failed to load sessions: \(error)")
             sessions = []
+            hasMoreSessions = false
         }
+    }
+
+    // MARK: - Pagination
+
+    /// Fetches a page of sessions from the persistence provider.
+    ///
+    /// Used by ``SessionListView`` to drive incremental loading as the user
+    /// scrolls. Caller is responsible for appending the result to
+    /// ``sessions``; this method does not mutate VM state directly so tests
+    /// can assert on raw page contents.
+    public func fetchSessionsPage(offset: Int, limit: Int) throws -> [ChatSessionRecord] {
+        guard let persistence else {
+            throw ChatPersistenceError.providerNotConfigured
+        }
+        return try persistence.fetchSessions(offset: offset, limit: limit)
+    }
+
+    /// Appends the next page of sessions, if any, to ``sessions``.
+    ///
+    /// No-op when no more pages are available, when a search is active, or
+    /// when persistence is unconfigured.
+    public func loadNextPage() {
+        guard hasMoreSessions, persistence != nil else { return }
+        let offset = sessions.count
+        do {
+            let next = try fetchSessionsPage(offset: offset, limit: Self.sessionsPageSize)
+            // Defensive against duplicates if a concurrent insert raced the
+            // page boundary — keys are session IDs, so the dedupe is cheap.
+            let existing = Set(sessions.map(\.id))
+            let unique = next.filter { !existing.contains($0.id) }
+            sessions.append(contentsOf: unique)
+            hasMoreSessions = next.count == Self.sessionsPageSize
+        } catch {
+            Log.persistence.error("Failed to load next sessions page: \(error)")
+            hasMoreSessions = false
+        }
+    }
+
+    // MARK: - Search
+
+    /// Computes the visible session list given the current scope and query.
+    ///
+    /// Returns the unfiltered ``sessions`` list when no search is active.
+    /// Title scope filters in-memory; message scope returns sessions surfaced
+    /// by the most recent ``runMessageSearch(_:)`` call.
+    public var displayedSessions: [ChatSessionRecord] {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return sessions }
+        switch searchScope {
+        case .titles:
+            return titleMatches
+        case .messages:
+            return messageMatchSessions
+        }
+    }
+
+    /// `true` when an active search produced no results.
+    public var hasNoSearchResults: Bool {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        switch searchScope {
+        case .titles:
+            return titleMatches.isEmpty
+        case .messages:
+            return messageMatchSessions.isEmpty
+        }
+    }
+
+    /// Recomputes ``titleMatches`` against the currently loaded ``sessions``.
+    public func runTitleSearch(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            titleMatches = []
+            return
+        }
+        titleMatches = sessions.filter {
+            $0.title.range(of: trimmed, options: .caseInsensitive) != nil
+        }
+    }
+
+    /// Runs a message-scope search via the persistence provider.
+    ///
+    /// Populates ``messageHitsBySession`` and ``messageMatchSessions``. The
+    /// result list is ordered by hit recency (most recent matching message
+    /// first), matching the rest of the sidebar's recency-first ordering.
+    public func runMessageSearch(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let persistence else {
+            messageHitsBySession = [:]
+            messageMatchSessions = []
+            return
+        }
+
+        do {
+            let hits = try persistence.searchMessages(query: trimmed, limit: Self.messageSearchLimit)
+            var grouped: [UUID: [MessageSearchHit]] = [:]
+            grouped.reserveCapacity(hits.count)
+            // Preserve the first occurrence of each sessionID to keep
+            // recency ordering — `hits` is already newest-first.
+            var orderedSessionIDs: [UUID] = []
+            for hit in hits {
+                if grouped[hit.sessionID] == nil {
+                    orderedSessionIDs.append(hit.sessionID)
+                }
+                grouped[hit.sessionID, default: []].append(hit)
+            }
+            messageHitsBySession = grouped
+
+            // Resolve sessions for the surfaced IDs. We fetch all sessions
+            // (paginated up to a reasonable bound) so a hit in an unloaded
+            // page still gets its session row rendered — otherwise message
+            // search would silently miss matches deep in history.
+            let allSessions = try persistence.fetchSessions(offset: 0, limit: 10_000)
+            let byID = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
+            messageMatchSessions = orderedSessionIDs.compactMap { byID[$0] }
+        } catch {
+            Log.persistence.error("Message search failed: \(error)")
+            messageHitsBySession = [:]
+            messageMatchSessions = []
+        }
+    }
+
+    /// Clears search state and falls back to the unfiltered session list.
+    public func clearSearch() {
+        searchQuery = ""
+        titleMatches = []
+        messageHitsBySession = [:]
+        messageMatchSessions = []
     }
 }

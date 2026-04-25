@@ -4,8 +4,8 @@ import BaseChatInference
 
 /// Displays the list of chat sessions in the sidebar.
 ///
-/// Supports selection, swipe-to-delete, and swipe-to-rename. Shows an empty
-/// state when no sessions exist, prompting the user to create one.
+/// Supports selection, swipe-to-delete, swipe-to-rename, paginated loading,
+/// and search across either session titles or persisted message bodies.
 public struct SessionListView: View {
 
     @Environment(SessionManagerViewModel.self) private var sessionManager
@@ -15,43 +15,73 @@ public struct SessionListView: View {
     @State private var renameText: String = ""
     @State private var errorMessage: String?
 
+    @State private var searchText: String = ""
+    @State private var searchScope: SessionSearchScope = .titles
+    @State private var debounceTask: Task<Void, Never>?
+
     public init() {}
 
     public var body: some View {
         @Bindable var sessionManager = sessionManager
 
         Group {
-            if sessionManager.sessions.isEmpty {
+            if sessionManager.sessions.isEmpty && searchText.isEmpty {
                 ContentUnavailableView {
                     Label("No Chats", systemImage: "bubble.left.and.bubble.right")
                 } description: {
                     Text("Tap the + button to start a new chat.")
                 }
+            } else if sessionManager.hasNoSearchResults {
+                ContentUnavailableView.search(text: searchText)
             } else {
-                List(sessionManager.sessions, selection: $sessionManager.activeSession) { session in
-                    SessionRowView(session: session)
-                        .tag(session)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                sessionToDelete = session
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                List(selection: $sessionManager.activeSession) {
+                    ForEach(sessionManager.displayedSessions) { session in
+                        rowContent(for: session)
+                            .tag(session)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    sessionToDelete = session
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
-                        }
-                        .swipeActions(edge: .leading) {
-                            Button {
-                                renameText = session.title
-                                sessionToRename = session
-                            } label: {
-                                Label("Rename", systemImage: "pencil")
+                            .swipeActions(edge: .leading) {
+                                Button {
+                                    renameText = session.title
+                                    sessionToRename = session
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                .tint(.blue)
                             }
-                            .tint(.blue)
-                        }
+                            .onAppear {
+                                // Trigger pagination only for the unfiltered list — search
+                                // results already pull from a wider window in the VM.
+                                if searchText.isEmpty,
+                                   session.id == sessionManager.sessions.last?.id {
+                                    sessionManager.loadNextPage()
+                                }
+                            }
+                    }
                 }
                 .accessibilityIdentifier("session-list")
             }
         }
         .animation(.default, value: sessionManager.sessions.isEmpty)
+        .searchable(text: $searchText, prompt: "Search chats")
+        .searchScopes($searchScope) {
+            Text("Titles").tag(SessionSearchScope.titles)
+            Text("Messages").tag(SessionSearchScope.messages)
+        }
+        .onChange(of: searchText) { _, newValue in
+            scheduleSearch(query: newValue, scope: searchScope)
+        }
+        .onChange(of: searchScope) { _, newScope in
+            // Re-run immediately on scope change so the user sees a result swap
+            // without the 200ms typing debounce — they didn't type anything.
+            sessionManager.searchScope = newScope
+            runSearch(query: searchText, scope: newScope)
+        }
         .alert("Rename Chat", isPresented: .init(
             get: { sessionToRename != nil },
             set: { if !$0 { sessionToRename = nil } }
@@ -92,6 +122,74 @@ public struct SessionListView: View {
             Button("OK") { errorMessage = nil }
         } message: {
             if let errorMessage { Text(errorMessage) }
+        }
+    }
+
+    @ViewBuilder
+    private func rowContent(for session: ChatSessionRecord) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SessionRowView(session: session)
+
+            if searchScope == .messages,
+               !searchText.isEmpty,
+               let hits = sessionManager.messageHitsBySession[session.id],
+               let firstHit = hits.first {
+                Text(highlightedSnippet(for: firstHit, query: searchText))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("session-search-snippet")
+            }
+        }
+    }
+
+    /// Builds an `AttributedString` with the query term emphasised.
+    private func highlightedSnippet(for hit: MessageSearchHit, query: String) -> AttributedString {
+        var attributed = AttributedString(hit.snippet)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let range = attributed.range(of: trimmed, options: .caseInsensitive) else {
+            return attributed
+        }
+        attributed[range].font = .caption.bold()
+        attributed[range].foregroundColor = .primary
+        return attributed
+    }
+
+    private func scheduleSearch(query: String, scope: SessionSearchScope) {
+        debounceTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Mirror the live state into the VM so observers (and tests) see the
+        // current query immediately, even before the debounce fires.
+        sessionManager.searchQuery = query
+        if trimmed.isEmpty {
+            sessionManager.clearSearch()
+            return
+        }
+        debounceTask = Task { @MainActor [sessionManager] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if Task.isCancelled { return }
+            runSearch(query: query, scope: scope, on: sessionManager)
+        }
+    }
+
+    private func runSearch(query: String, scope: SessionSearchScope) {
+        runSearch(query: query, scope: scope, on: sessionManager)
+    }
+
+    private func runSearch(query: String, scope: SessionSearchScope, on vm: SessionManagerViewModel) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        vm.searchQuery = query
+        vm.searchScope = scope
+        if trimmed.isEmpty {
+            vm.clearSearch()
+            return
+        }
+        switch scope {
+        case .titles:
+            vm.runTitleSearch(query)
+        case .messages:
+            vm.runMessageSearch(query)
         }
     }
 }
