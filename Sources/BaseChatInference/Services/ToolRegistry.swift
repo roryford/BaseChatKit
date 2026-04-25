@@ -370,7 +370,9 @@ public protocol JSONSchemaValidating: Sendable {
     ///   preserving the original ``ToolResult/errorKind``. Error messages
     ///   that overflow the budget are pathological enough that the
     ///   trimmed payload is always more useful than a hard reject.
-    /// - ``OversizeAction/allow`` skips the ceiling entirely (debug only).
+    /// - ``OversizeAction/allow`` skips the ceiling only for non-errored
+    ///   oversize results; already-errored results are still trimmed as
+    ///   described above (debug only).
     static func applyOutputPolicy(
         _ policy: ToolOutputPolicy,
         to result: ToolResult

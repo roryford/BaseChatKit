@@ -174,4 +174,19 @@ final class ToolOutputPolicyTests: XCTestCase {
         XCTAssertNil(result.errorKind)
         XCTAssertEqual(result.content, "{\"answer\":42}")
     }
+
+    // MARK: - negative maxBytes is clamped to 0
+
+    func test_negativeMaxBytes_isClampedToZero_atInit() {
+        // Negative values would otherwise make every successful result oversize
+        // and produce confusing "exceeds maxBytes (5 > -1)" diagnostics.
+        let policy = ToolOutputPolicy(maxBytes: -1, onOversize: .rejectWithError)
+        XCTAssertEqual(policy.maxBytes, 0)
+    }
+
+    func test_negativeMaxBytes_isClampedToZero_onSetterMutation() {
+        var policy = ToolOutputPolicy(maxBytes: 1024)
+        policy.maxBytes = -100
+        XCTAssertEqual(policy.maxBytes, 0)
+    }
 }

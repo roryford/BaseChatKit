@@ -42,8 +42,10 @@ import Foundation
 ///   UTF-8 boundary and the suffix (default `"... [truncated]"`) is
 ///   appended. Use when partial output is genuinely useful, e.g. log
 ///   tails.
-/// - ``OversizeAction/allow``: no enforcement. Debug only — disables the
-///   safety net.
+/// - ``OversizeAction/allow``: no enforcement for *successful* results.
+///   Already-errored results whose content overflows are still trimmed
+///   (the registry never re-classifies an existing error). Debug only —
+///   disables the safety net for happy-path responses.
 ///
 /// ## Example
 ///
@@ -61,8 +63,12 @@ public struct ToolOutputPolicy: Sendable, Equatable {
     /// result's ``ToolResult/content``.
     ///
     /// Defaults to `32_768` (~8K tokens). The byte count is measured via
-    /// `String.utf8.count` after the executor returns.
-    public var maxBytes: Int
+    /// `String.utf8.count` after the executor returns. Negative values
+    /// are clamped to `0` at the property setter so a misconfigured host
+    /// can't accidentally invert the policy and reject every result.
+    public var maxBytes: Int {
+        didSet { if maxBytes < 0 { maxBytes = 0 } }
+    }
 
     /// What to do when a result exceeds ``maxBytes``.
     public var onOversize: OversizeAction
@@ -71,6 +77,8 @@ public struct ToolOutputPolicy: Sendable, Equatable {
     ///
     /// - Parameters:
     ///   - maxBytes: Permitted UTF-8 byte ceiling. Defaults to `32_768`.
+    ///     Negative values are clamped to `0` (every successful result
+    ///     becomes oversize and is handled per ``onOversize``).
     ///   - onOversize: Action when the ceiling is exceeded. Defaults to
     ///     ``OversizeAction/rejectWithError`` so oversize results surface
     ///     as a recognisable error rather than silently disappearing.
@@ -78,7 +86,7 @@ public struct ToolOutputPolicy: Sendable, Equatable {
         maxBytes: Int = 32_768,
         onOversize: OversizeAction = .rejectWithError
     ) {
-        self.maxBytes = maxBytes
+        self.maxBytes = max(0, maxBytes)
         self.onOversize = onOversize
     }
 }
@@ -105,8 +113,11 @@ public enum OversizeAction: Sendable, Equatable {
     /// emitting just the suffix truncated to fit. Don't configure that.
     case truncate(suffix: String)
 
-    /// No enforcement — pass the result through unchanged. Intended for
-    /// debug builds and tests; production hosts should keep the default
-    /// ``rejectWithError`` policy.
+    /// No oversize enforcement for successful results — pass them
+    /// through unchanged. Already-errored results whose content
+    /// overflows ``ToolOutputPolicy/maxBytes`` are still trimmed by the
+    /// registry; this case never re-classifies an existing error.
+    /// Intended for debug builds and tests; production hosts should
+    /// keep the default ``rejectWithError`` policy.
     case allow
 }
