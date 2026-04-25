@@ -115,7 +115,13 @@ final class SessionController {
 
         do {
             let page = try persistence.fetchRecentMessages(for: sessionID, limit: Self.messagePageSize)
-            messages = page
+            // Heal orphan tool calls before exposing the transcript: a process
+            // killed mid-tool leaves a `.toolCall` part with no matching
+            // `.toolResult`, which cloud APIs reject on the next turn. The
+            // healer synthesises a `.cancelled` ToolResult for each orphan so
+            // the next request is well-formed without re-dispatching the
+            // (potentially side-effecting) original call. See issue #629.
+            messages = TranscriptHealer.heal(page)
             hasOlderMessages = page.count >= Self.messagePageSize
             Log.persistence.info("Loaded \(page.count) messages (hasOlder: \(self.hasOlderMessages))")
         } catch {
