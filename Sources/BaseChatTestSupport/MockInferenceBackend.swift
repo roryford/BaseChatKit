@@ -158,9 +158,13 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     }
 
     public func stopGeneration() {
+        // `stopCallCount` is read-modify-written under the same lock that
+        // guards `activeContinuation`. Without synchronization, concurrent
+        // stops race on the increment and tests counting fan-out invocations
+        // observe lost updates (see StopGenerationConcurrencyTests #418).
+        continuationLock.lock()
         stopCallCount += 1
         isGenerating = false
-        continuationLock.lock()
         let cont = activeContinuation
         activeContinuation = nil
         continuationLock.unlock()
