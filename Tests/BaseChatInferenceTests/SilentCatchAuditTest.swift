@@ -126,6 +126,10 @@ final class SilentCatchAuditTest: XCTestCase {
         "BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))",
         "BaseChatUI/Views/Chat/AssistantMarkdownView.swift:if let parsed = try? AttributedString(",
         "BaseChatUI/Views/Chat/TypingIndicatorView.swift:try? await Task.sleep(for: .milliseconds(400))",
+        // False positive: `toolRegistry?` optional chain contains the substring
+        // `try?` inside `Regis‑try?`. No `try?` call site is present on this
+        // line; the audit's substring scan is not AST-aware.
+        "BaseChatUI/ViewModels/GenerationCoordinator.swift:let registeredTools = inferenceService.toolRegistry?.definitions ?? []",
 
         // BaseChatTestSupport — test-only helpers, not production paths.
         // withTimeout deadline task: Task.sleep cancellation is intentionally swallowed so
