@@ -17,7 +17,9 @@ extension DemoScenarios {
         switch scenarioID {
         case tipCalc.id:
             return [
-                .toolCall(name: "calc", arguments: #"{"expression":"73.40 * 0.18"}"#),
+                // CalcTool.Args expects {a, op, b}; `expression` is not part of
+                // the schema and would fail the real executor's Decodable probe.
+                .toolCall(name: "calc", arguments: #"{"a":73.40,"op":"*","b":0.18}"#),
                 .tokens([
                     "An ", "18% ", "tip ", "on ", "$73.40 ", "is ", "$13.21. ",
                     "Each ", "person's ", "share ", "is ", "about ", "$21.65."
@@ -26,7 +28,10 @@ extension DemoScenarios {
 
         case worldClock.id:
             return [
-                .toolCall(name: "now", arguments: #"{"timezone":"Asia/Tokyo"}"#),
+                // NowTool accepts zero arguments; its schema declares
+                // `properties: {}` / `required: []`. Pass an empty object so
+                // the scripted call mirrors what a well-behaved model emits.
+                .toolCall(name: "now", arguments: #"{}"#),
                 .tokens([
                     "It's ", "currently ", "the ", "afternoon ", "in ", "Tokyo."
                 ])
