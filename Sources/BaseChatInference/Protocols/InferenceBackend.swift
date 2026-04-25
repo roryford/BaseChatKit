@@ -6,7 +6,14 @@ public struct GenerationConfig: Sendable, Codable {
     public var topP: Float
     public var repeatPenalty: Float
     @available(*, deprecated, renamed: "maxOutputTokens", message: "Use maxOutputTokens instead.")
-    public var maxTokens: Int32
+    public var maxTokens: Int32 {
+        get { _legacyMaxTokens }
+        set { _legacyMaxTokens = newValue }
+    }
+    /// Backing storage for the deprecated ``maxTokens`` field. Lives separately so the type's
+    /// own initializers and Codable conformance can read/write the legacy value without
+    /// tripping the deprecation warning. See PR #766 follow-up to #747.
+    @usableFromInline internal var _legacyMaxTokens: Int32 = 512
     public var topK: Int32?
     public var typicalP: Float?
 
@@ -122,7 +129,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.temperature = temperature
         self.topP = topP
         self.repeatPenalty = repeatPenalty
-        self.maxTokens = maxTokens
+        self._legacyMaxTokens = maxTokens
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens
@@ -155,7 +162,6 @@ public struct GenerationConfig: Sendable, Codable {
         self.temperature = temperature
         self.topP = topP
         self.repeatPenalty = repeatPenalty
-        self.maxTokens = 512
         self.topK = topK
         self.typicalP = typicalP
         self.maxOutputTokens = maxOutputTokens
@@ -183,7 +189,8 @@ public struct GenerationConfig: Sendable, Codable {
         topP = try c.decode(Float.self, forKey: .topP)
         repeatPenalty = try c.decode(Float.self, forKey: .repeatPenalty)
         // maxTokens is deprecated; absent from payloads that never encoded it — fall back to 512.
-        maxTokens = (try c.decodeIfPresent(Int32.self, forKey: .maxTokens)) ?? 512
+        // We write to the backing store directly to avoid the deprecation warning on the property.
+        _legacyMaxTokens = (try c.decodeIfPresent(Int32.self, forKey: .maxTokens)) ?? 512
         topK = try c.decodeIfPresent(Int32.self, forKey: .topK)
         typicalP = try c.decodeIfPresent(Float.self, forKey: .typicalP)
         maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
@@ -208,7 +215,8 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encode(temperature, forKey: .temperature)
         try c.encode(topP, forKey: .topP)
         try c.encode(repeatPenalty, forKey: .repeatPenalty)
-        try c.encode(maxTokens, forKey: .maxTokens)
+        // Encode the legacy `maxTokens` wire field for backwards-compatible payloads.
+        try c.encode(_legacyMaxTokens, forKey: .maxTokens)
         try c.encodeIfPresent(topK, forKey: .topK)
         try c.encodeIfPresent(typicalP, forKey: .typicalP)
         try c.encodeIfPresent(maxOutputTokens, forKey: .maxOutputTokens)
