@@ -643,6 +643,81 @@ final class GenerationCoordinatorTests: XCTestCase {
         )
     }
 
+    /// `stopGenerationAndWait()` must unwind cleanly while the per-token
+    /// loop is parked in the thermal-pause re-check loop — no deadlock,
+    /// no hang waiting for thermal state to drop. The pause loop bails on
+    /// `Task.isCancelled` and propagates `CancellationError` thrown by the
+    /// injected `thermalSleep` hook (the production default `Task.sleep(for:)`
+    /// throws on cancellation).
+    ///
+    /// We invoke `stopGenerationAndWait()` so the assertion fails fast if
+    /// the loop fails to observe cancellation: the await will simply hang
+    /// past the test's overall deadline, surfaced here as a 2s race timeout.
+    ///
+    /// Sabotage check: change `while !Task.isCancelled` in
+    /// `pauseWhileThermalCritical` to `while true` AND swallow the
+    /// `CancellationError` in the catch (e.g. `continue`). With both
+    /// guards removed the activeTask spins forever and the
+    /// `stopGenerationAndWait()` await never returns — the timeout race
+    /// returns `false` and the assertion fails.
+    func test_perTokenLoop_thermalPause_cancellationUnwindsCleanly() async throws {
+        // Provider always reports `.critical` so the pause loop would
+        // otherwise spin forever. Cancellation is the only exit.
+        let coord = GenerationCoordinator(
+            thermalStateProvider: { @Sendable in .critical },
+            thermalSleep: { @Sendable duration in
+                // Forward to the real sleep so the cooperative cancellation
+                // contract is exercised end-to-end. The duration is the
+                // production 2s cadence, but cancellation should fire the
+                // throw long before that.
+                try await Task.sleep(for: duration)
+            }
+        )
+        coord.provider = provider
+        provider.backend.tokensToYield = ["a", "b"]
+
+        let (_, stream) = try coord.enqueue(
+            messages: [("user", "hi")], priority: .normal
+        )
+
+        // Drain the stream until we see the throttle event, then trigger
+        // cancellation. We don't fully drain here — `stopGenerationAndWait`
+        // below is the real assertion that the activeTask unwinds.
+        var sawThrottle = false
+        for try await event in stream.events {
+            if case .diagnosticThrottle = event {
+                sawThrottle = true
+                break
+            }
+        }
+        XCTAssertTrue(
+            sawThrottle,
+            "pause loop must emit a throttle event before we cancel; otherwise the test isn't exercising the pause path"
+        )
+
+        // Race `stopGenerationAndWait()` against a 2s wall-clock deadline.
+        // If the pause loop ignores `Task.isCancelled` the wait hangs
+        // forever and the race returns `false`.
+        let unwoundCleanly = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
+            group.addTask {
+                await coord.stopGenerationAndWait()
+                return true
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(2))
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+
+        XCTAssertTrue(
+            unwoundCleanly,
+            "stopGenerationAndWait() must return promptly while the pause loop is parked — pause loop must observe Task.isCancelled and propagate the CancellationError thrown by thermalSleep"
+        )
+    }
+
     // MARK: - Exact preflight (TokenCountingBackend)
 
     /// When the backend fits within the context window on the first count,
