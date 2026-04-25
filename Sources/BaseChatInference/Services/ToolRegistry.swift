@@ -50,12 +50,57 @@ public protocol JSONSchemaValidating: Sendable {
 /// an actor would force a hop on every dispatch for no benefit. The executor's
 /// async `execute` call may still suspend off the main actor inside its own
 /// implementation.
+///
+/// ## Reentrancy
+///
+/// MainActor isolation serialises *entry* into ``register(_:)``,
+/// ``unregister(name:)``, and ``dispatch(_:)``, but `await
+/// executor.execute(arguments:)` inside ``dispatch(_:)`` suspends the
+/// current task. While that suspension is in flight, another MainActor
+/// caller can enter the registry and mutate the tool table — register
+/// a replacement, unregister the in-flight tool, swap the validator, or
+/// adjust the ``outputPolicy``.
+///
+/// The dispatch contract is:
+///
+/// > ``ToolRegistry`` captures the executor at dispatch entry. Registry
+/// > mutations during a suspended dispatch do not affect that dispatch's
+/// > outcome — the originally-resolved executor runs to completion.
+/// > Subsequent dispatches see the mutated state.
+///
+/// Concretely:
+///
+/// - The executor is looked up exactly once, at the top of ``dispatch(_:)``.
+///   The local `executor` reference holds the value; later table mutations
+///   on the same name do not retarget it.
+/// - The ``outputPolicy`` and ``validator`` references are also captured
+///   into local constants at dispatch entry, so a mid-flight policy swap
+///   only affects subsequent dispatches.
+/// - Snapshots taken from ``definitions`` reflect whatever state the
+///   table is in when the snapshot is read. Mid-dispatch mutations are
+///   visible immediately — the registry doesn't hide the change, it
+///   merely refuses to retarget the in-flight call.
+///
+/// As an observability hook, ``unregister(name:)`` emits a warning when
+/// it drops a tool that has at least one dispatch in flight. The
+/// in-flight dispatch still completes against the originally-resolved
+/// executor; the warning exists so ad-hoc registry juggling is visible
+/// in the inference log.
 @MainActor public final class ToolRegistry {
 
     // MARK: Storage
 
     /// Keyed on the lowercased tool name for case-insensitive lookup.
     private var tools: [String: any ToolExecutor] = [:]
+
+    /// In-flight dispatch counter, keyed on the lowercased tool name.
+    ///
+    /// Incremented at the top of ``dispatch(_:)`` once the executor has
+    /// been resolved, decremented in `defer`. ``unregister(name:)``
+    /// reads this to decide whether to log the
+    /// "unregistering while dispatch is in flight" warning. The counter
+    /// is single-threaded — every mutator hops the MainActor first.
+    private var dispatchesInFlight: [String: Int] = [:]
 
     // MARK: Configuration
 
@@ -66,6 +111,19 @@ public protocol JSONSchemaValidating: Sendable {
     /// concrete ``JSONSchemaValidator`` (or any other ``JSONSchemaValidating``
     /// conformer) so failures come back as ``ToolResult/ErrorKind/invalidArguments``.
     public var validator: (any JSONSchemaValidating)? = nil
+
+    /// Size policy applied to tool results before they are returned from
+    /// ``dispatch(_:)``.
+    ///
+    /// Defaults to ``ToolOutputPolicy``'s default — 32 KB
+    /// (``OversizeAction/rejectWithError``). See ``ToolOutputPolicy`` for
+    /// guidance on when to raise the ceiling (long file reads on
+    /// large-context backends) versus keep the default.
+    ///
+    /// The policy is captured into a local constant at dispatch entry, so
+    /// changing it mid-dispatch only affects subsequent dispatches —
+    /// matching the reentrancy contract on the registry itself.
+    public var outputPolicy: ToolOutputPolicy = ToolOutputPolicy()
 
     // MARK: - Init
 
@@ -104,8 +162,20 @@ public protocol JSONSchemaValidating: Sendable {
     }
 
     /// Removes a tool by name. No-op when the name is not registered.
+    ///
+    /// When the named tool has at least one in-flight dispatch, this method
+    /// logs an observability warning before removing the entry. The
+    /// in-flight dispatch still completes against the executor that was
+    /// resolved at its entry point — see the type-level "Reentrancy"
+    /// section.
     public func unregister(name: String) {
-        tools.removeValue(forKey: name.lowercased())
+        let key = name.lowercased()
+        if let inFlight = dispatchesInFlight[key], inFlight > 0 {
+            Log.inference.warning(
+                "ToolRegistry: unregistering '\(name, privacy: .public)' while a dispatch for that tool is in flight; the in-flight dispatch will complete with the originally-resolved executor"
+            )
+        }
+        tools.removeValue(forKey: key)
     }
 
     /// Returns `true` when a tool is registered under `name` (case-insensitive).
@@ -180,6 +250,24 @@ public protocol JSONSchemaValidating: Sendable {
             )
         }
 
+        // Capture mutable configuration into local constants so a mid-flight
+        // mutation of `outputPolicy`/`validator` does not retarget this
+        // dispatch. See the type-level "Reentrancy" section.
+        let policy = outputPolicy
+        let activeValidator = validator
+
+        // Track this dispatch as in-flight so unregister(name:) can emit an
+        // observability warning if the registry is mutated mid-dispatch.
+        dispatchesInFlight[key, default: 0] += 1
+        defer {
+            let remaining = (dispatchesInFlight[key] ?? 1) - 1
+            if remaining <= 0 {
+                dispatchesInFlight.removeValue(forKey: key)
+            } else {
+                dispatchesInFlight[key] = remaining
+            }
+        }
+
         // 2. Parse the raw argument JSON.
         let parsedArguments: JSONSchemaValue
         if call.arguments.isEmpty {
@@ -207,8 +295,8 @@ public protocol JSONSchemaValidating: Sendable {
         }
 
         // 3. Optional schema validation (wave 2 wiring).
-        if let validator,
-           let message = validator.validateAgainst(executor.definition.parameters, value: parsedArguments) {
+        if let activeValidator,
+           let message = activeValidator.validateAgainst(executor.definition.parameters, value: parsedArguments) {
             return ToolResult(
                 callId: call.id,
                 content: "arguments failed schema validation: \(message)",
@@ -216,7 +304,8 @@ public protocol JSONSchemaValidating: Sendable {
             )
         }
 
-        // 4. Execute and stamp callId.
+        // 4. Execute, stamp callId, and apply the size policy.
+        let outcome: ToolResult
         do {
             let raw = try await executor.execute(arguments: parsedArguments)
             // If the surrounding task was cancelled but the executor returned
@@ -230,7 +319,7 @@ public protocol JSONSchemaValidating: Sendable {
                     errorKind: .cancelled
                 )
             }
-            return ToolResult(
+            outcome = ToolResult(
                 callId: call.id,
                 content: raw.content,
                 errorKind: raw.errorKind
@@ -260,5 +349,127 @@ public protocol JSONSchemaValidating: Sendable {
                 errorKind: .permanent
             )
         }
+
+        return Self.applyOutputPolicy(policy, to: outcome)
+    }
+
+    // MARK: - Output policy
+
+    /// Applies ``outputPolicy`` to a finalized ``ToolResult``.
+    ///
+    /// Behaviour:
+    ///
+    /// - Successful results that fit within ``ToolOutputPolicy/maxBytes``
+    ///   pass through unchanged.
+    /// - Successful results that exceed the ceiling are rejected,
+    ///   truncated, or allowed according to ``ToolOutputPolicy/onOversize``.
+    /// - Already-errored results bypass the ``OversizeAction`` switch:
+    ///   re-classifying a `.permanent` error as `.invalidArguments` would
+    ///   confuse the model's retry logic, so oversize error content is
+    ///   simply truncated to ``ToolOutputPolicy/maxBytes`` while
+    ///   preserving the original ``ToolResult/errorKind``. Error messages
+    ///   that overflow the budget are pathological enough that the
+    ///   trimmed payload is always more useful than a hard reject.
+    /// - ``OversizeAction/allow`` skips the ceiling entirely (debug only).
+    static func applyOutputPolicy(
+        _ policy: ToolOutputPolicy,
+        to result: ToolResult
+    ) -> ToolResult {
+        let byteLength = result.content.utf8.count
+        if byteLength <= policy.maxBytes {
+            return result
+        }
+
+        // Already-errored results: keep the original errorKind, just trim.
+        if result.errorKind != nil {
+            return ToolResult(
+                callId: result.callId,
+                content: truncateUTF8(result.content, toByteLimit: policy.maxBytes),
+                errorKind: result.errorKind
+            )
+        }
+
+        switch policy.onOversize {
+        case .allow:
+            return result
+
+        case .rejectWithError:
+            return ToolResult(
+                callId: result.callId,
+                content: "output exceeds maxBytes (\(byteLength) > \(policy.maxBytes))",
+                errorKind: .invalidArguments
+            )
+
+        case .truncate(let suffix):
+            let suffixBytes = suffix.utf8.count
+            // Degenerate: suffix alone overflows the budget. Fall back to a
+            // best-effort truncation of the suffix itself so we still emit
+            // something within the byte limit.
+            if suffixBytes >= policy.maxBytes {
+                return ToolResult(
+                    callId: result.callId,
+                    content: truncateUTF8(suffix, toByteLimit: policy.maxBytes),
+                    errorKind: nil
+                )
+            }
+            let bodyBudget = policy.maxBytes - suffixBytes
+            let trimmed = truncateUTF8(result.content, toByteLimit: bodyBudget)
+            return ToolResult(
+                callId: result.callId,
+                content: trimmed + suffix,
+                errorKind: nil
+            )
+        }
+    }
+
+    /// Trims `string` so its UTF-8 byte length is `<= byteLimit` without
+    /// splitting a multi-byte codepoint.
+    ///
+    /// Walks back from the limit until we find a byte that begins a UTF-8
+    /// scalar (i.e. is not a continuation byte `0b10xxxxxx`). Cheap and
+    /// boundary-safe for any Swift `String`.
+    static func truncateUTF8(_ string: String, toByteLimit byteLimit: Int) -> String {
+        if byteLimit <= 0 { return "" }
+        let utf8 = string.utf8
+        if utf8.count <= byteLimit { return string }
+
+        var endIndex = utf8.index(utf8.startIndex, offsetBy: byteLimit)
+        // Walk back past continuation bytes (10xxxxxx) so we don't slice
+        // mid-codepoint. The leading byte of any valid UTF-8 scalar has
+        // top bits 0xxxxxxx, 110xxxxx, 1110xxxx, or 11110xxx — never
+        // 10xxxxxx.
+        while endIndex > utf8.startIndex {
+            let byte = utf8[utf8.index(before: endIndex)]
+            if (byte & 0b1100_0000) == 0b1000_0000 {
+                endIndex = utf8.index(before: endIndex)
+            } else {
+                // The byte before endIndex is a leading byte. We need to
+                // confirm the scalar starting there fits entirely within
+                // the limit; if not, drop it.
+                let leadingIndex = utf8.index(before: endIndex)
+                let leading = utf8[leadingIndex]
+                let scalarLength: Int
+                if leading & 0b1000_0000 == 0 {
+                    scalarLength = 1
+                } else if leading & 0b1110_0000 == 0b1100_0000 {
+                    scalarLength = 2
+                } else if leading & 0b1111_0000 == 0b1110_0000 {
+                    scalarLength = 3
+                } else if leading & 0b1111_1000 == 0b1111_0000 {
+                    scalarLength = 4
+                } else {
+                    // Malformed leading byte — treat as 1 to make progress.
+                    scalarLength = 1
+                }
+                let scalarEnd = utf8.index(leadingIndex, offsetBy: scalarLength)
+                if scalarEnd <= endIndex {
+                    endIndex = scalarEnd
+                } else {
+                    endIndex = leadingIndex
+                }
+                break
+            }
+        }
+        return String(decoding: utf8[utf8.startIndex..<endIndex], as: UTF8.self)
     }
 }
