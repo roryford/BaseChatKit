@@ -31,6 +31,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # paths-filter needs the parent commit to diff against on `push` events;
+          # `pull_request` works with the default shallow clone.
+          fetch-depth: 2
+
+      - name: Detect dependency-graph changes
+        id: deps-changed
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            deps:
+              - 'Package.swift'
+              - 'Package.resolved'
 
       - name: Select Xcode
         id: setup-xcode
@@ -63,6 +76,10 @@ jobs:
         # Was a separate `resolve-check` job on its own macos-15 runner; folding
         # it into `test` removes one 10×-billed runner per PR and eliminates the
         # second queue wait that `needs: [resolve-check]` imposed.
+        # Gated on the deps-changed filter: Package.resolved can only go stale
+        # when Package.swift is edited, so skipping when neither file changed
+        # avoids ~47s of wasted resolve work on the typical PR (~15% of total CI).
+        if: steps.deps-changed.outputs.deps == 'true'
         run: |
           swift package resolve
           git diff --exit-code Package.resolved || \
@@ -81,9 +98,10 @@ jobs:
       #   Apple Silicon for MLX/llama.cpp paths.
       # - Run `swift test --filter BaseChatE2ETests` on physical hardware.
 
-      # --skip-update: the Verify step above already ran `swift package resolve`,
-      # so the dependency graph is up to date. Without this flag, every `swift
-      # build`/`swift test` invocation re-contacts every git remote (~10-15s).
+      # --skip-update: Package.resolved pins every dependency, so the graph is
+      # already up to date (the Verify step re-confirms this when deps changed).
+      # Without this flag, every `swift build`/`swift test` invocation re-contacts
+      # every git remote (~10-15s).
       - name: Build
         run: swift build --build-tests --disable-default-traits --skip-update
 
