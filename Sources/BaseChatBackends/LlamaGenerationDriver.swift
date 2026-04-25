@@ -104,7 +104,18 @@ struct LlamaGenerationDriver {
 
         // MARK: Sampler chain setup
 
-        // Sampler chain order matters: penalties → top_k → top_p → temp → dist
+        // Sampler chain order matters. Grammar (when present) must run BEFORE the
+        // probability filters (top_k / top_p / min_p) so it can prune invalid
+        // tokens to -inf while every candidate is still in play. If grammar runs
+        // after min_p, the filters can shrink the candidate pool to a set that
+        // contains no grammar-valid tokens; the grammar then masks all remaining
+        // logits to -inf, dist samples a numerical fallback (e.g. token 365 `(`),
+        // and the chain's automatic accept step inside `llama_sampler_sample`
+        // calls `llama_grammar_accept_token`, which throws
+        // `std::runtime_error: Unexpected empty grammar stack` across the C ABI
+        // and aborts the process with libc++abi (see prior crash logs from
+        // test_grammar_cancelCleansTeardown). Final order:
+        //   penalties → grammar → top_k → top_p → min_p → temp → dist
         let sparams = llama_sampler_chain_default_params()
         guard let sampler = llama_sampler_chain_init(sparams) else {
             await MainActor.run { generationStream.setPhase(.failed("Failed to create sampler")) }
@@ -121,17 +132,13 @@ struct LlamaGenerationDriver {
                 0.0                    // presence penalty
             ))
         }
-        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40))
-        if config.topP < 1.0 {
-            llama_sampler_chain_add(sampler, llama_sampler_init_top_p(config.topP, 1))
-        }
-        llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
-        llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
 
-        // Grammar-constrained sampling: GBNF grammar from config, inserted before dist
-        // so it prunes the logit distribution before final token selection. Parse failure
-        // (invalid GBNF) is surfaced as an error — silent fallback to unconstrained sampling
-        // would produce output that violates the caller's grammar contract.
+        // Grammar-constrained sampling: GBNF grammar from config, inserted at the
+        // front of the chain (right after penalties) so it prunes the logit
+        // distribution before any probability-based filter narrows the candidate
+        // set. Parse failure (invalid GBNF) is surfaced as an error — silent
+        // fallback to unconstrained sampling would produce output that violates
+        // the caller's grammar contract.
         if let grammarString = config.grammar {
             var grammarSamplerCreated = false
             grammarString.withCString { grammarCStr in
@@ -151,6 +158,13 @@ struct LlamaGenerationDriver {
                 return true
             }
         }
+
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40))
+        if config.topP < 1.0 {
+            llama_sampler_chain_add(sampler, llama_sampler_init_top_p(config.topP, 1))
+        }
+        llama_sampler_chain_add(sampler, llama_sampler_init_min_p(0.05, 1))
+        llama_sampler_chain_add(sampler, llama_sampler_init_temp(config.temperature))
 
         llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 0...UInt32.max)))
 
