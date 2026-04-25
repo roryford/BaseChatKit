@@ -97,6 +97,10 @@ public final class ScenarioRunner {
                     // Advisory pause signal from the orchestrator; scenarios
                     // are deterministic replays so we just keep accumulating.
                     continue
+                case .toolCallStart, .toolCallArgumentsDelta:
+                    // Streaming tool-call deltas are observational; the
+                    // authoritative call lands on `.toolCall(_:)`.
+                    continue
                 }
             }
 

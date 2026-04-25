@@ -18,6 +18,25 @@ public enum GenerationEvent: Sendable, Equatable {
     /// call and feeding a ``ToolResult`` back into the conversation.
     case toolCall(ToolCall)
 
+    /// Streaming start of a tool call. `callId` matches ``ToolCall/id`` of the
+    /// corresponding ``toolCall(_:)`` event later in this round; `name` is
+    /// final (no `.toolCallNameDelta` exists — providers emit name up front).
+    ///
+    /// Backends only emit this when
+    /// ``BackendCapabilities/streamsToolCallArguments`` is `true`. Backends
+    /// that produce whole calls (MLX inline parser, Ollama non-streaming)
+    /// skip start/delta and emit only ``toolCall(_:)``.
+    ///
+    /// Contract: `callId` is non-empty, unique within a turn, and matches
+    /// the id of the ``toolCall(_:)`` event that closes this stream.
+    case toolCallStart(callId: String, name: String)
+
+    /// JSON-arguments fragment for an in-flight call, emitted in
+    /// concatenation order. Consumers may attempt forgiving partial-JSON
+    /// parsing for progressive UI; the authoritative arguments string lands
+    /// on the final ``toolCall(_:)`` event.
+    case toolCallArgumentsDelta(callId: String, textDelta: String)
+
     /// A fragment of model reasoning (inside a thinking block). Streamed during generation.
     case thinkingToken(String)
 

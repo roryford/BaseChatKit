@@ -99,6 +99,19 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
     /// `GenerationConfig.thinkingMarkers`, which is a per-request runtime hint.
     public let supportsThinking: Bool
 
+    /// True when the backend emits ``GenerationEvent/toolCallStart(callId:name:)``
+    /// and ``GenerationEvent/toolCallArgumentsDelta(callId:textDelta:)`` before
+    /// each ``GenerationEvent/toolCall(_:)``. Cloud streaming backends set
+    /// `true`; local inline-parser backends and non-streaming HTTP backends
+    /// set `false`.
+    public let streamsToolCallArguments: Bool
+
+    /// True when the backend can emit multiple ``GenerationEvent/toolCall(_:)``
+    /// events in one generation round (parallel batch). Single-call backends
+    /// and small local models that only reliably emit one call at a time set
+    /// `false`.
+    public let supportsParallelToolCalls: Bool
+
     /// Parameters the UI should present controls for.
     public var visibleParameters: [GenerationParameter] {
         GenerationParameter.allCases.filter { supportedParameters.contains($0) }
@@ -120,7 +133,9 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         isRemote: Bool = false,
         supportsKVCachePersistence: Bool = false,
         supportsGrammarConstrainedSampling: Bool = false,
-        supportsThinking: Bool = false
+        supportsThinking: Bool = false,
+        streamsToolCallArguments: Bool = false,
+        supportsParallelToolCalls: Bool = false
     ) {
         self.supportedParameters = supportedParameters
         self.maxContextTokens = maxContextTokens
@@ -138,6 +153,8 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         self.supportsKVCachePersistence = supportsKVCachePersistence
         self.supportsGrammarConstrainedSampling = supportsGrammarConstrainedSampling
         self.supportsThinking = supportsThinking
+        self.streamsToolCallArguments = streamsToolCallArguments
+        self.supportsParallelToolCalls = supportsParallelToolCalls
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -157,6 +174,8 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         case supportsKVCachePersistence
         case supportsGrammarConstrainedSampling
         case supportsThinking
+        case streamsToolCallArguments
+        case supportsParallelToolCalls
     }
 
     public init(from decoder: Decoder) throws {
@@ -177,6 +196,8 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         supportsKVCachePersistence = (try c.decodeIfPresent(Bool.self, forKey: .supportsKVCachePersistence)) ?? false
         supportsGrammarConstrainedSampling = (try c.decodeIfPresent(Bool.self, forKey: .supportsGrammarConstrainedSampling)) ?? false
         supportsThinking = (try c.decodeIfPresent(Bool.self, forKey: .supportsThinking)) ?? false
+        streamsToolCallArguments = (try c.decodeIfPresent(Bool.self, forKey: .streamsToolCallArguments)) ?? false
+        supportsParallelToolCalls = (try c.decodeIfPresent(Bool.self, forKey: .supportsParallelToolCalls)) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -197,5 +218,7 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
         try c.encode(supportsKVCachePersistence, forKey: .supportsKVCachePersistence)
         try c.encode(supportsGrammarConstrainedSampling, forKey: .supportsGrammarConstrainedSampling)
         try c.encode(supportsThinking, forKey: .supportsThinking)
+        try c.encode(streamsToolCallArguments, forKey: .streamsToolCallArguments)
+        try c.encode(supportsParallelToolCalls, forKey: .supportsParallelToolCalls)
     }
 }

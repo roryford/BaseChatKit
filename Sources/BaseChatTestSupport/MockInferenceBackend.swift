@@ -60,6 +60,31 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
     /// back to the flat ``tokensToYield`` property.
     public var tokensToYieldPerTurn: [[String]] = []
 
+    /// A scripted streaming tool-call event the mock can emit before the
+    /// authoritative ``GenerationEvent/toolCall(_:)``. Mirrors what cloud
+    /// streaming backends produce for backends that flip
+    /// ``BackendCapabilities/streamsToolCallArguments``.
+    public enum ScriptedToolCallDelta: Sendable {
+        /// `.toolCallStart(callId:name:)` event.
+        case start(callId: String, name: String)
+        /// `.toolCallArgumentsDelta(callId:textDelta:)` event.
+        case delta(callId: String, textDelta: String)
+        /// Authoritative `.toolCall(_:)` event that closes a streamed call.
+        case call(ToolCall)
+    }
+
+    /// Scripted streaming tool-call delta sequence per turn. When a turn's
+    /// inner array is non-empty, it takes precedence over the per-turn
+    /// `(scriptedToolCallsPerTurn, tokensToYieldPerTurn)` for tool-call
+    /// emission: events fire in the order listed. Visible-text tokens for
+    /// that turn still come from ``tokensToYieldPerTurn`` at the matching
+    /// index.
+    ///
+    /// Use this to drive tests that exercise the streaming-delta path —
+    /// e.g. asserting the orchestrator forwards `.toolCallStart` /
+    /// `.toolCallArgumentsDelta` verbatim before the closing `.toolCall`.
+    public var scriptedToolCallDeltasPerTurn: [[ScriptedToolCallDelta]] = []
+
     // Track calls
     public var loadModelCallCount = 0
     public var generateCallCount = 0
@@ -118,6 +143,12 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         // front so successive generate() calls drive different turns.
         let toolCalls: [ToolCall]
         let tokens: [String]
+        let deltaSequence: [ScriptedToolCallDelta]
+        if !scriptedToolCallDeltasPerTurn.isEmpty {
+            deltaSequence = scriptedToolCallDeltasPerTurn.removeFirst()
+        } else {
+            deltaSequence = []
+        }
         if !scriptedToolCallsPerTurn.isEmpty {
             toolCalls = scriptedToolCallsPerTurn.removeFirst()
             if !tokensToYieldPerTurn.isEmpty {
@@ -127,7 +158,11 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
             }
         } else {
             toolCalls = scriptedToolCalls
-            tokens = tokensToYield
+            if !tokensToYieldPerTurn.isEmpty {
+                tokens = tokensToYieldPerTurn.removeFirst()
+            } else {
+                tokens = tokensToYield
+            }
         }
 
         let thinkingTokens = thinkingTokensToYield
@@ -174,9 +209,23 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
                     continuation.yield(.token(token))
                 }
                 if !Task.isCancelled {
-                    for call in toolCalls {
-                        if Task.isCancelled { break }
-                        continuation.yield(.toolCall(call))
+                    if !deltaSequence.isEmpty {
+                        for entry in deltaSequence {
+                            if Task.isCancelled { break }
+                            switch entry {
+                            case .start(let callId, let name):
+                                continuation.yield(.toolCallStart(callId: callId, name: name))
+                            case .delta(let callId, let textDelta):
+                                continuation.yield(.toolCallArgumentsDelta(callId: callId, textDelta: textDelta))
+                            case .call(let call):
+                                continuation.yield(.toolCall(call))
+                            }
+                        }
+                    } else {
+                        for call in toolCalls {
+                            if Task.isCancelled { break }
+                            continuation.yield(.toolCall(call))
+                        }
                     }
                 }
                 self.isGenerating = false

@@ -49,6 +49,15 @@ public struct GenerationStreamConsumer: Sendable {
             // a "paused — device throttling" badge observe the raw event
             // upstream instead of going through the action mapping.
             return .ignore
+
+        case .toolCallStart, .toolCallArgumentsDelta:
+            // Streaming tool-call deltas are observed by UI surfaces
+            // upstream (rendering an in-flight call card). The
+            // GenerationStreamConsumer drives chat-message text/thinking
+            // state and has nothing to do for the deltas — the
+            // authoritative arguments string lands on `.toolCall(_:)`,
+            // which `dispatchToolCall` already handles.
+            return .ignore
         }
     }
 

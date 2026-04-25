@@ -110,6 +110,20 @@ public protocol ToolExecutor: Sendable {
     /// (case-insensitive).
     var definition: ToolDefinition { get }
 
+    /// Whether this executor is safe to dispatch concurrently with itself or
+    /// with other tools in the same batch.
+    ///
+    /// Default `false` (sequential dispatch). Override `true` for stateless
+    /// executors — HTTP fetches, pure computations, read-only filesystem.
+    ///
+    /// ``ToolCallLoopOrchestrator`` consults this flag when a generation
+    /// round produces more than one ``ToolCall``: parallel dispatch via
+    /// `withTaskGroup` is used only when *every* executor in the batch opts
+    /// in. If any returns `false`, the orchestrator falls back to sequential
+    /// dispatch — preserving the registry's reentrancy contract for tools
+    /// with shared state.
+    var supportsConcurrentDispatch: Bool { get }
+
     /// Whether this tool needs explicit per-call user approval before the
     /// orchestrator dispatches it.
     ///
@@ -143,6 +157,10 @@ extension ToolExecutor {
     /// Default: read-only tool, no approval needed. Side-effecting tools
     /// override to `true`.
     public var requiresApproval: Bool { false }
+
+    /// Default: sequential dispatch. Stateless executors should override
+    /// to `true` to opt into parallel batch dispatch.
+    public var supportsConcurrentDispatch: Bool { false }
 }
 
 // MARK: - TypedToolExecutor
