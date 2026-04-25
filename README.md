@@ -82,7 +82,35 @@ Add the targets you need:
 ])
 ```
 
-### 2. Configure at app startup
+### 2. Build modes
+
+BaseChatKit ships four pre-blessed build configurations keyed by use case. Backends are gated behind Swift package traits so consumers in regulated or air-gapped environments can compile out everything that touches the network.
+
+| Use case | Build command | Backends available |
+|----------|---------------|--------------------|
+| Default consumer app | `swift build` | MLX, Llama, Ollama |
+| Regulated vertical (local-only, no networking) | `swift build --disable-default-traits --traits MLX,Llama` | MLX, Llama |
+| Self-hosted / private datacenter | `swift build --disable-default-traits --traits MLX,Llama,Ollama` | MLX, Llama, Ollama |
+| Full / SaaS-enabled | `swift build --traits MLX,Llama,Ollama,CloudSaaS` | MLX, Llama, Ollama, Claude, OpenAI |
+
+Pass the matching set as `traits:` on your `.package(...)` entry to lock the configuration in a consumer manifest:
+
+```swift
+.package(
+    url: "https://github.com/roryford/BaseChatKit.git",
+    from: "0.11.0",
+    traits: [
+        .trait(name: "MLX"),
+        .trait(name: "Llama"),
+        .trait(name: "Ollama"),       // remove for local-only builds
+        .trait(name: "CloudSaaS"),    // add to enable Claude / OpenAI
+    ]
+)
+```
+
+`CloudSaaS` is opt-in today. **`Ollama` is in the default trait set for the current minor release but moves to opt-in in the next major** — call sites that construct `OllamaBackend()` directly emit a deprecation warning pointing at this table. Route through `DefaultBackends.register(_:)` (which gates Ollama on the trait) or add `Ollama` explicitly to your manifest to silence it. See [#714](https://github.com/roryford/BaseChatKit/issues/714).
+
+### 3. Configure at app startup
 
 ```swift
 import BaseChatCore
@@ -140,7 +168,7 @@ struct MyApp: App {
 }
 ```
 
-### 3. Wire up the UI
+### 4. Wire up the UI
 
 ```swift
 struct ContentView: View {
