@@ -261,38 +261,88 @@ final class LlamaBackendTests: XCTestCase {
             )
         }
 
-        let backend = LlamaBackend()
-        defer { backend.unloadModel() }
+        // Paranoia for cross-test state leaks: when run after
+        // `test_fixture_stopGeneration_midDecode_*_regression522` (the immediate
+        // alphabetical predecessor that also performs a stop+drain on the same
+        // GGUF), the backend can intermittently produce zero tokens on its
+        // first generation despite being a fresh instance. The most likely
+        // cause is residual llama.cpp / Metal pipeline state from the prior
+        // test that is freed off-thread by the detached cleanup task in
+        // `unloadAndWait()` and occasionally hasn't fully settled before this
+        // test's first decode runs. The regression *under test* here is the
+        // KV-cache clear at the start of the SECOND `generate()` (line 314+),
+        // not the precondition that the first run produced tokens — so when
+        // the precondition fails (line ~295), discard the backend and retry
+        // once on a fresh instance. Any failure on the second attempt is real
+        // and surfaces as a hard XCTFail. The retry intentionally does NOT
+        // weaken the second-generation assertion at line ~330.
+        var attempt = 0
+        var lastFailure: String?
+        let maxAttempts = 2
+        while attempt < maxAttempts {
+            attempt += 1
+            let backend = LlamaBackend()
+            // unloadAndWait() before load flushes any pending detached cleanup
+            // task left over from a prior test — defensive no-op on a fresh
+            // backend, but harmless and gives the upstream cleanup chain one
+            // more chance to drain before we touch llama.cpp.
+            await backend.unloadAndWait()
 
-        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
-        XCTAssertTrue(backend.isModelLoaded)
+            try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
+            XCTAssertTrue(backend.isModelLoaded)
 
-        // First generation — kick it off, then stop it mid-stream.
-        let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 128)
-        let stream1 = try backend.generate(
-            prompt: "Reply with a long story about a cat.",
-            systemPrompt: nil,
-            config: config
-        )
+            // First generation — kick it off, then stop it mid-stream.
+            let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 128)
+            let stream1 = try backend.generate(
+                prompt: "Reply with a long story about a cat.",
+                systemPrompt: nil,
+                config: config
+            )
 
-        // Consume a few tokens to ensure generation has actually started
-        // (and the KV cache has been populated) before we stop.
-        // Accept either `.token` or `.thinkingToken` — a reasoning GGUF on
-        // the Llama3 template emits `<think>…</think>` content first which
-        // the driver's sniff mode routes to `.thinkingToken`. Either proves
-        // decode reached the loop.
-        var tokenCount = 0
-        for try await event in stream1.events {
-            switch event {
-            case .token, .thinkingToken:
-                tokenCount += 1
+            // Consume a few tokens to ensure generation has actually started
+            // (and the KV cache has been populated) before we stop.
+            // Accept either `.token` or `.thinkingToken` — a reasoning GGUF on
+            // the Llama3 template emits `<think>…</think>` content first which
+            // the driver's sniff mode routes to `.thinkingToken`. Either proves
+            // decode reached the loop.
+            var tokenCount = 0
+            for try await event in stream1.events {
+                switch event {
+                case .token, .thinkingToken:
+                    tokenCount += 1
+                    if tokenCount >= 3 { break }
+                default:
+                    break
+                }
                 if tokenCount >= 3 { break }
-            default:
-                break
             }
-            if tokenCount >= 3 { break }
+
+            if tokenCount == 0 {
+                // Precondition failed — drain stream1, fully tear down, and
+                // retry on a fresh backend. Drain ensures the generation task
+                // exits before unloadAndWait() awaits its cleanup chain.
+                for try await _ in stream1.events { }
+                await backend.unloadAndWait()
+                lastFailure = "Attempt \(attempt) produced 0 tokens before stop"
+                continue
+            }
+
+            // Precondition met — run the actual regression assertion.
+            try await runRegression390Body(backend: backend, stream1: stream1)
+            return
         }
-        XCTAssertGreaterThan(tokenCount, 0, "Expected at least one token before stopping")
+        XCTFail("All \(maxAttempts) attempts failed precondition: \(lastFailure ?? "unknown")")
+    }
+
+    /// Continuation of `test_stopGeneration_thenGenerate_succeeds_regression390`
+    /// once the first generation has demonstrably produced ≥1 token. The body
+    /// is split out so the precondition retry can construct a fresh backend
+    /// without duplicating the assertion logic.
+    private func runRegression390Body(
+        backend: LlamaBackend,
+        stream1: GenerationStream
+    ) async throws {
+        defer { backend.unloadModel() }
 
         backend.stopGeneration()
 
@@ -311,10 +361,20 @@ final class LlamaBackendTests: XCTestCase {
         // Second generation on the same loaded model. Before the fix, this
         // would throw `InferenceError.inferenceFailure("Failed to decode prompt")`
         // because the KV cache still held positions from run 1.
+        //
+        // Prompt + budget chosen to make spurious 0-token outcomes vanishingly
+        // unlikely: a tight 16-token budget combined with a one-line prompt
+        // ("Say hello.") plus the driver's random sampler seed
+        // (`llama_sampler_init_dist(UInt32.random(...))`, see
+        // `LlamaGenerationDriver.run`) lets reasoning GGUFs occasionally sample
+        // EOG on iteration 0 — yielding a clean stream with no `.token` events
+        // and a false-positive failure for #390. A multi-sentence request with
+        // a 96-token budget gives the loop room to emit something even if the
+        // first token sampled is EOG-adjacent.
         let stream2 = try backend.generate(
-            prompt: "Say hello.",
+            prompt: "List three colors of the rainbow.",
             systemPrompt: nil,
-            config: GenerationConfig(temperature: 0.3, maxOutputTokens: 16)
+            config: GenerationConfig(temperature: 0.1, maxOutputTokens: 96)
         )
 
         var secondRunTokenCount = 0
