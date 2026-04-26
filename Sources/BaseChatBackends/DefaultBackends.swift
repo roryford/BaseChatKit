@@ -78,69 +78,22 @@ public enum DefaultBackends {
 
     // MARK: - Registration
 
+    /// The default registrar fold. Order is significant only for
+    /// `CloudBackends`, which calls `PinnedSessionDelegate.loadDefaultPins()`
+    /// and must run before any URLSession factory. Local backends are
+    /// independent.
+    @MainActor
+    public static let registrars: [any BackendRegistrar.Type] = [
+        CloudBackends.self,
+        MLXBackends.self,
+        LlamaBackends.self,
+        FoundationBackends.self,
+    ]
+
     @MainActor
     public static func register(with service: InferenceService) {
-        #if CloudSaaS
-        PinnedSessionDelegate.loadDefaultPins()
-        #endif
-
-        service.registerBackendFactory { modelType in
-            switch modelType {
-            #if MLX
-            case .mlx: return MLXBackend()
-            #endif
-            #if canImport(FoundationModels)
-            case .foundation:
-                if #available(iOS 26, macOS 26, *) {
-                    return FoundationBackend()
-                } else {
-                    return nil
-                }
-            #endif
-            #if Llama
-            case .gguf: return LlamaBackend()
-            #endif
-            default: return nil
-            }
-        }
-
-        // Declare which local model types this build can handle so the service
-        // can answer capability queries without instantiating any backend.
-        #if MLX
-        service.declareSupport(for: .mlx)
-        #endif
-        #if canImport(FoundationModels)
-        if #available(iOS 26, macOS 26, *) {
-            service.declareSupport(for: .foundation)
-        }
-        #endif
-        #if Llama
-        service.declareSupport(for: .gguf)
-        #endif
-
-        service.registerCloudBackendFactory { provider in
-            switch provider {
-            #if CloudSaaS
-            case .claude:                     return ClaudeBackend()
-            case .openAI, .lmStudio, .custom: return OpenAIBackend()
-            case .openAIResponses:            return OpenAIResponsesBackend()
-            #endif
-            #if Ollama
-            // FIXME(#714): expected deprecation warning until the next major
-            // release flips `Ollama` out of default traits. This internal
-            // registration is the supported migration path consumers are
-            // pointed at — silencing the warning here would defeat the
-            // signal it sends to direct callers of `OllamaBackend()`.
-            case .ollama:                     return OllamaBackend()
-            #endif
-            default: return nil
-            }
-        }
-
-        // Declare every provider this build can actually serve — depends on
-        // which of `Ollama` / `CloudSaaS` traits is enabled.
-        for provider in APIProvider.availableInBuild {
-            service.declareSupport(for: provider)
+        for registrar in registrars {
+            registrar.register(with: service)
         }
     }
 }
