@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.12.0](https://github.com/roryford/BaseChatKit/compare/v0.11.8...v0.12.0) (2026-04-26)
+
+### Highlights
+
+#### Compose backend registration with `BackendRegistrar`
+
+`DefaultBackends.register(with:)` was a single closure that conditionally registered every shipped backend, which forced apps that only wanted one slice of the matrix (cloud-only, local-only) to pull the whole module and made parallel work on MLX, Llama, and cloud collide on the same file. v0.12.0 introduces a `BackendRegistrar` protocol and four per-backend conformers — `MLXBackends`, `LlamaBackends`, `FoundationBackends`, `CloudBackends` — each owning its own factory and `declareSupport` calls. `DefaultBackends.register` is now a fold over `DefaultBackends.registrars`, preserving the single-call API for existing consumers while opening up explicit per-backend composition.
+
+```swift
+let service = InferenceService()
+
+// Existing one-call API still works — no migration required.
+DefaultBackends.register(with: service)
+
+// Or compose explicitly:
+MLXBackends.register(with: service)
+CloudBackends.register(with: service)
+```
+
+Each registrar is unconditionally `public` at file scope; trait gates live inside the function body so a disabled trait is a no-op rather than a missing-symbol link error.
+
+See [#794](https://github.com/roryford/BaseChatKit/pull/794).
+
+#### Peel `BaseChatUIModelManagement` out of `BaseChatUI`
+
+The model browser, downloader, storage panels, and cloud API endpoint editors lived in `BaseChatUI` whether a host used them or not — ~1,800 LOC of management surface a chat-only embedded consumer would always ship. v0.12.0 moves those views (plus `ModelManagementViewModel`) into a new `BaseChatUIModelManagement` product. `BaseChatUI` now contains only the chat-runtime surface; consumers that need the management UI add one product dependency and one import.
+
+```swift
+import BaseChatUI
+import BaseChatUIModelManagement   // new — pulls in ModelManagementSheet, APIConfigurationView, etc.
+
+ChatView(
+    showModelManagement: $showModelManagement,
+    apiConfiguration: { APIConfigurationView() }
+)
+```
+
+`ChatView` and `GenerationSettingsView` previously instantiated `APIConfigurationView()` directly, which would have closed a dep cycle the moment that view moved. Both are now generic over an `APIConfig: View` type built from a `@ViewBuilder` closure, so `BaseChatUI` never imports the peeled module. There is no default no-op overload by design — callers must pass the closure intentionally so a silent `EmptyView()` regression cannot ship. A CI lint locks the one-way edge by failing if any file under `Sources/BaseChatUI/` ever introduces `import BaseChatUIModelManagement`. A codemod at `scripts/migrate-uimm-imports.sh` adds the new import to every consumer file that uses one of the moved symbols.
+
+**BREAKING:** every `ChatView(...)` and `GenerationSettingsView(...)` call site must now pass `apiConfiguration: { APIConfigurationView() }`.
+
+See [#796](https://github.com/roryford/BaseChatKit/pull/796).
+
+#### Drop `Ollama` from default traits
+
+`Ollama` shipped in `Package.swift`'s `.default(enabledTraits:)` since the trait system landed, with a deprecation note that it would move out at the next major. v0.12.0 carries through.
+
+```swift
+.default(enabledTraits: ["MLX", "Llama"])   // Ollama removed
+```
+
+Hosts that bundle `OllamaBackend` now need `--traits Ollama` (or an explicit list in their `Package.swift`). Apps that never used Ollama keep working unchanged.
+
+See [#796](https://github.com/roryford/BaseChatKit/pull/796).
+
+### Features
+
+- **backends:** `BackendRegistrar` protocol + per-backend `MLXBackends` / `LlamaBackends` / `FoundationBackends` / `CloudBackends` register hooks ([#794](https://github.com/roryford/BaseChatKit/pull/794))
+- **ui:** new `BaseChatUIModelManagement` product housing model browser, downloader, storage panels, and cloud API endpoint editors ([#796](https://github.com/roryford/BaseChatKit/pull/796))
+- **ui:** `ChatView` and `GenerationSettingsView` are now generic over `APIConfig: View` and accept an `apiConfiguration:` `@ViewBuilder` parameter ([#796](https://github.com/roryford/BaseChatKit/pull/796))
+- **build:** `Ollama` removed from default traits — hosts opt in explicitly ([#796](https://github.com/roryford/BaseChatKit/pull/796))
+
 ## [0.11.8](https://github.com/roryford/BaseChatKit/compare/v0.11.7...v0.11.8) (2026-04-26)
 
 ### Highlights
