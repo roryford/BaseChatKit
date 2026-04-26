@@ -27,15 +27,18 @@ final class BackendCapabilitiesContractTests: XCTestCase {
 
     #if Ollama && CloudSaaS
     func test_cloudBackends_toolCallingCapabilities() {
-        // Ollama advertises tool calling since Wave 2 dispatch wiring (PR #640)
-        // — it emits OpenAI-compatible `tool_calls` over NDJSON and the
-        // orchestrator loop in GenerationCoordinator dispatches them. Claude
-        // and OpenAI backends remain without tool calling until their
-        // per-vendor wire-format work lands (tracked under #435).
-        XCTAssertFalse(ClaudeBackend().capabilities.supportsToolCalling,
-                       "ClaudeBackend tool calling wiring is tracked under #435")
-        XCTAssertFalse(OpenAIBackend().capabilities.supportsToolCalling,
-                       "OpenAIBackend tool calling wiring is tracked under #435")
+        // Tool calling is advertised by every cloud backend now that the
+        // per-vendor wire-format work in #435 has landed:
+        //   - Ollama: Wave 2 dispatch wiring (PR #640) — OpenAI-compatible
+        //     `tool_calls` over NDJSON.
+        //   - OpenAI: Chat Completions `tools[]` + streaming `tool_calls[]`
+        //     deltas keyed by `index`.
+        //   - Claude: Anthropic Messages `tools[]` + `content_block_*`
+        //     events keyed by tool_use index.
+        XCTAssertTrue(ClaudeBackend().capabilities.supportsToolCalling,
+                      "ClaudeBackend advertises tool calling since #435 Anthropic wiring")
+        XCTAssertTrue(OpenAIBackend().capabilities.supportsToolCalling,
+                      "OpenAIBackend advertises tool calling since #435 Chat Completions wiring")
         XCTAssertTrue(OllamaBackend().capabilities.supportsToolCalling,
                       "OllamaBackend advertises tool calling since Wave 2 dispatch wiring")
     }

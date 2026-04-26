@@ -104,7 +104,11 @@ BaseChatBackends/SSECloudBackend.swift:let parsed = try? JSONSerialization.jsonO
 # OpenAI Responses-API named-event stream. Malformed JSON on a probe is a
 # non-event — the parser ignores the payload, same pattern as the Chat
 # Completions handlers above.
+# parseFunctionCallItem / parseFunctionCallArgumentsDelta added in the
+# tool-calling rollout (#435) follow the same shape — a malformed payload
+# means we silently skip the event and let the next valid one drive state.
 BaseChatBackends/OpenAIResponsesBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+BaseChatBackends/OpenAIResponsesBackend.swift:let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
 
 # MLXBackend.validateArchitecture: best-effort read of the MLX model's
 # `config.json`. A missing/unreadable/malformed config is not fatal here

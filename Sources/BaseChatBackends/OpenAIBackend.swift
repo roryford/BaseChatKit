@@ -20,7 +20,7 @@ import BaseChatInference
 /// let stream = try backend.generate(prompt: "Hello", systemPrompt: nil, config: .init())
 /// for try await event in stream.events { if case .token(let t) = event { print(t, terminator: "") } }
 /// ```
-public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBackendURLModelConfigurable, CloudBackendKeychainConfigurable, @unchecked Sendable {
+public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBackendURLModelConfigurable, CloudBackendKeychainConfigurable, ToolCallingHistoryReceiver, @unchecked Sendable {
 
     // MARK: - Init
 
@@ -63,7 +63,13 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             maxContextTokens: 128_000,
             requiresPromptTemplate: false,
             supportsSystemPrompt: true,
-            supportsToolCalling: false,
+            // Chat Completions tool calling: the request encodes BCK
+            // ``ToolDefinition``s into OpenAI's `tools[]` envelope, the
+            // streaming response delivers `tool_calls[]` deltas keyed by
+            // `index`, and the backend buffers them so consumers see a clean
+            // `.toolCallStart` → N×`.toolCallArgumentsDelta` → `.toolCall`
+            // sequence per call.
+            supportsToolCalling: true,
             supportsStructuredOutput: true,
             supportsNativeJSONMode: true,
             cancellationStyle: .cooperative,
@@ -71,8 +77,22 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             memoryStrategy: .external,
             maxOutputTokens: 16_384,
             supportsStreaming: true,
-            isRemote: true
+            isRemote: true,
+            streamsToolCallArguments: true,
+            supportsParallelToolCalls: true
         )
+    }
+
+    // MARK: - Tool-Aware Conversation History
+
+    /// Cached tool-aware history from the most recent
+    /// `setToolAwareHistory(_:)` call. Consumed once by `buildRequest` and
+    /// cleared after use so a subsequent non-tool generation falls back to the
+    /// plain string history in `conversationHistory`.
+    private var toolAwareHistory: [ToolAwareHistoryEntry]?
+
+    public func setToolAwareHistory(_ messages: [ToolAwareHistoryEntry]) {
+        withStateLock { self.toolAwareHistory = messages }
     }
 
     // MARK: - Model Lifecycle
@@ -101,11 +121,23 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
 
         let completionsURL = baseURL.appendingPathComponent("v1/chat/completions")
 
-        var messages: [[String: String]] = []
+        // Snapshot and clear: tool-aware history is a one-shot payload supplied
+        // by the orchestrator loop. If a subsequent non-tool generation runs on
+        // the same backend instance, it must fall back to `conversationHistory`
+        // rather than replaying stale tool-result messages.
+        let snapshotToolHistory: [ToolAwareHistoryEntry]? = withStateLock {
+            let snapshot = self.toolAwareHistory
+            self.toolAwareHistory = nil
+            return snapshot
+        }
+
+        var messages: [[String: Any]] = []
         if let systemPrompt, !systemPrompt.isEmpty {
             messages.append(["role": "system", "content": systemPrompt])
         }
-        if let history = conversationHistory {
+        if let toolHistory = snapshotToolHistory {
+            messages.append(contentsOf: toolHistory.map(OpenAIToolEncoding.encodeChatCompletionsEntry))
+        } else if let history = conversationHistory {
             // Reasoning-model asymmetry: OpenAI-compatible providers (DeepSeek,
             // o-series, hosted Qwen reasoning) deliver chain-of-thought via
             // `reasoning_content` / `reasoning` deltas but **don't** require
@@ -117,7 +149,7 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             // replay path. Anthropic's multi-turn signature contract is
             // handled by ``ClaudeBackend`` reading the structured history
             // directly. (#604)
-            messages.append(contentsOf: history.map { ["role": $0.role, "content": $0.content] })
+            messages.append(contentsOf: history.map { ["role": $0.role, "content": $0.content] as [String: Any] })
         } else {
             messages.append(["role": "user", "content": prompt])
         }
@@ -133,6 +165,15 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         ]
         if config.jsonMode {
             body["response_format"] = ["type": "json_object"]
+        }
+
+        // Tool definitions — OpenAI accepts the canonical
+        // `[{type:"function", function:{...}}]` envelope. `tool_choice` is
+        // applied via the shared encoding helper so the same logic powers
+        // ``OpenAIResponsesBackend``.
+        if !config.tools.isEmpty {
+            body["tools"] = config.tools.map(OpenAIToolEncoding.encodeToolDefinition)
+            OpenAIToolEncoding.applyToolChoice(config.toolChoice, into: &body)
         }
 
         var request = URLRequest(url: completionsURL)
@@ -177,6 +218,23 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
 
         var thinking = ThinkingBlockManager()
+        let toolAccumulator = StreamingToolCallAccumulator()
+        // Tracks whether we've finalised tool calls already (for non-streaming
+        // whole responses delivered as a single chunk, where `finish_reason`
+        // and the final `tool_calls[]` arrive in the same payload).
+        var finalisedToolCalls = false
+
+        func finaliseToolCalls() {
+            guard !finalisedToolCalls else { return }
+            finalisedToolCalls = true
+            for entry in toolAccumulator.finalizedEntries() {
+                continuation.yield(.toolCall(ToolCall(
+                    id: entry.callId,
+                    toolName: entry.name,
+                    arguments: entry.arguments
+                )))
+            }
+        }
 
         do {
             for try await payload in tokenStream {
@@ -198,11 +256,77 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
                     continuation.yield(.token(token))
                 }
 
+                // Tool-call deltas (streaming) — keyed by `index`. The first delta
+                // for each `index` carries `id` + `function.name`; subsequent
+                // deltas carry `function.arguments` fragments. Some compat servers
+                // do not re-emit `id` on later deltas, so we sticky-buffer it.
+                let toolDeltas = Self.parseToolCallDeltas(from: payload)
+                for delta in toolDeltas {
+                    let key = "\(delta.index)"
+                    let isNew = toolAccumulator.upsert(
+                        key: key,
+                        id: delta.id,
+                        name: delta.name,
+                        argumentsDelta: delta.argumentsDelta
+                    )
+                    if isNew {
+                        thinking.flushIfOpen(into: continuation)
+                    }
+                    // Emit `.toolCallStart` once we have both an id and a name.
+                    if let entry = toolAccumulator.entriesByKey[key],
+                       !entry.started, !entry.name.isEmpty {
+                        let resolvedId = toolAccumulator.resolvedId(forKey: key)
+                        continuation.yield(.toolCallStart(callId: resolvedId, name: entry.name))
+                        toolAccumulator.markStarted(key: key)
+                    }
+                    // Stream argument fragments under the resolved (sticky) id.
+                    if let fragment = delta.argumentsDelta, !fragment.isEmpty {
+                        let resolvedId = toolAccumulator.resolvedId(forKey: key)
+                        continuation.yield(.toolCallArgumentsDelta(callId: resolvedId, textDelta: fragment))
+                    }
+                }
+
+                // Non-streaming whole-message tool_calls (`message.tool_calls[]`).
+                if !finalisedToolCalls {
+                    let wholeCalls = Self.parseWholeToolCalls(from: payload)
+                    if !wholeCalls.isEmpty {
+                        thinking.flushIfOpen(into: continuation)
+                        for call in wholeCalls {
+                            let key = call.id.isEmpty ? UUID().uuidString : call.id
+                            toolAccumulator.upsert(
+                                key: key,
+                                id: call.id,
+                                name: call.name,
+                                argumentsDelta: call.arguments
+                            )
+                            let resolvedId = toolAccumulator.resolvedId(forKey: key)
+                            continuation.yield(.toolCallStart(callId: resolvedId, name: call.name))
+                            toolAccumulator.markStarted(key: key)
+                            if !call.arguments.isEmpty {
+                                continuation.yield(.toolCallArgumentsDelta(
+                                    callId: resolvedId,
+                                    textDelta: call.arguments
+                                ))
+                            }
+                        }
+                    }
+                }
+
                 if let usage = extractUsage(from: payload) {
                     handleUsage(usage)
                     if let prompt = usage.promptTokens,
                        let completion = usage.completionTokens {
                         continuation.yield(.usage(prompt: prompt, completion: completion))
+                    }
+                }
+
+                // `finish_reason: "tool_calls"` finalises any buffered streaming
+                // tool calls. When the assistant turn ends with `stop` we still
+                // flush any accumulated tool calls so callers in the non-stream
+                // path see a uniform shape.
+                if let reason = Self.parseFinishReason(from: payload) {
+                    if reason == "tool_calls" || !toolAccumulator.entriesByKey.isEmpty {
+                        finaliseToolCalls()
                     }
                 }
 
@@ -223,6 +347,14 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         }
 
         thinking.flushIfOpen(into: continuation)
+        // Stream end fallback: if the upstream closed without a `finish_reason`
+        // (some compat servers omit it), emit any buffered tool calls now so
+        // the orchestrator can dispatch them. On cancellation we deliberately
+        // skip this — dropping the consumer mid-stream must not produce
+        // phantom `.toolCall` events.
+        if !Task.isCancelled {
+            finaliseToolCalls()
+        }
     }
 
     // MARK: - SSE Payload Handler
@@ -289,6 +421,96 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             return content
         }
         return nil
+    }
+
+    // MARK: - Tool-call delta parsing
+
+    /// Decoded shape of one streaming `tool_calls[]` entry inside a `delta`.
+    struct ToolCallDelta {
+        let index: Int
+        let id: String?
+        let name: String?
+        let argumentsDelta: String?
+    }
+
+    /// Decoded shape of one whole `message.tool_calls[]` entry (non-streaming
+    /// path or compat servers that deliver completed calls in a single chunk).
+    struct WholeToolCall {
+        let id: String
+        let name: String
+        let arguments: String
+    }
+
+    /// Parses `choices[0].delta.tool_calls[]` from a streaming chunk.
+    ///
+    /// Each entry carries an `index` (required), an `id` and `function.name`
+    /// (typically only on the first delta for that index), and a
+    /// `function.arguments` fragment (typically on subsequent deltas).
+    /// Compat servers vary on whether `id` is repeated; the accumulator
+    /// handles that by stickying the first non-empty value seen per index.
+    static func parseToolCallDeltas(from json: String) -> [ToolCallDelta] {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = parsed["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let delta = firstChoice["delta"] as? [String: Any],
+              let rawCalls = delta["tool_calls"] as? [[String: Any]] else {
+            return []
+        }
+
+        var result: [ToolCallDelta] = []
+        for raw in rawCalls {
+            guard let index = raw["index"] as? Int else { continue }
+            let id = raw["id"] as? String
+            let function = raw["function"] as? [String: Any]
+            let name = function?["name"] as? String
+            let argumentsDelta = function?["arguments"] as? String
+            result.append(ToolCallDelta(
+                index: index,
+                id: id,
+                name: name,
+                argumentsDelta: argumentsDelta
+            ))
+        }
+        return result
+    }
+
+    /// Parses a whole `choices[0].message.tool_calls[]` array from a
+    /// non-streaming response chunk.
+    static func parseWholeToolCalls(from json: String) -> [WholeToolCall] {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = parsed["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let rawCalls = message["tool_calls"] as? [[String: Any]] else {
+            return []
+        }
+        var result: [WholeToolCall] = []
+        for raw in rawCalls {
+            guard let function = raw["function"] as? [String: Any],
+                  let name = function["name"] as? String,
+                  !name.isEmpty else {
+                continue
+            }
+            let id = (raw["id"] as? String) ?? ""
+            let arguments = (function["arguments"] as? String) ?? "{}"
+            result.append(WholeToolCall(id: id, name: name, arguments: arguments))
+        }
+        return result
+    }
+
+    /// Parses `choices[0].finish_reason` (e.g. `"stop"`, `"tool_calls"`).
+    static func parseFinishReason(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = parsed["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let reason = firstChoice["finish_reason"] as? String,
+              !reason.isEmpty else {
+            return nil
+        }
+        return reason
     }
 
     /// Extracts token usage from an OpenAI streaming response chunk.

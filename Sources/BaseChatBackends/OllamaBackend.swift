@@ -114,7 +114,18 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             memoryStrategy: .external,
             maxOutputTokens: 128_000,
             supportsStreaming: true,
-            isRemote: true
+            isRemote: true,
+            // Ollama emits tool calls as whole entries on a single NDJSON
+            // line — no incremental `arguments` fragments arrive across
+            // multiple lines (some `qwen2.5:7b` configs may stream deltas
+            // but BCK treats Ollama as whole-call only for v1; see
+            // TODO(#753) below in `parseResponseStream`).
+            streamsToolCallArguments: false,
+            // `/api/chat` is happy to return multiple `tool_calls[]` entries
+            // in a single assistant message — the loop in `parseResponseStream`
+            // emits them in array order so the orchestrator's serial dispatch
+            // honours the model's intent.
+            supportsParallelToolCalls: true
         )
     }
 
@@ -492,8 +503,38 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
             // single assistant message. Dispatch them in emission order so
             // the coordinator's serial dispatch loop sees them in the same
             // order the model produced them.
+            //
+            // Event-shape contract (PR #783): every tool call surfaces as a
+            // uniform start + single arguments-delta + toolCall triple, even
+            // for whole-call backends like Ollama. That keeps consumers
+            // (orchestrator, UI) on a single code path regardless of whether
+            // the underlying transport streams arguments incrementally.
+            //
+            // TODO(#753): Some Ollama configs (notably `qwen2.5:7b` against
+            // newer servers) reportedly emit incremental tool_call deltas
+            // across multiple NDJSON lines. v1 treats Ollama as whole-call
+            // only; if we observe incremental deltas in the wild, lift
+            // `StreamingToolCallAccumulator` from `OpenAIToolEncoding.swift`
+            // and key by tool-call index here. `streamsToolCallArguments`
+            // would flip to `true` at the same time.
             if let toolCalls = parsed.toolCalls, !toolCalls.isEmpty {
                 for call in toolCalls {
+                    // Cancellation contract: a consumer that drops the
+                    // stream mid-flight must NOT observe `.toolCall` events
+                    // for entries the orchestrator never agreed to dispatch.
+                    // Honour `Task.isCancelled` at the emit boundary so a
+                    // single-line tool_calls payload arriving alongside the
+                    // cancel doesn't fire a phantom dispatch.
+                    if Task.isCancelled { return }
+                    try noteEventYielded()
+                    continuation.yield(.toolCallStart(callId: call.id, name: call.toolName))
+                    if !call.arguments.isEmpty {
+                        try noteEventYielded()
+                        continuation.yield(.toolCallArgumentsDelta(
+                            callId: call.id,
+                            textDelta: call.arguments
+                        ))
+                    }
                     try noteEventYielded()
                     continuation.yield(.toolCall(call))
                 }
