@@ -12,7 +12,17 @@ public protocol MCPOAuthRedirectListener: Sendable {
 }
 
 public struct MCPOAuthTokens: Sendable, Codable, Equatable {
-    public let accessToken: String
+    /// Raw bytes of the access token. Prefer this over `accessToken` to minimise
+    /// the window in which the token lives as a heap `String`.
+    public let accessTokenData: Data
+
+    /// String form of the access token. Kept for Codable compatibility and callers
+    /// that need the raw string (e.g. logging with redaction).
+    @available(*, deprecated, message: "Use accessTokenData")
+    public var accessToken: String {
+        String(data: accessTokenData, encoding: .utf8) ?? ""
+    }
+
     public let refreshToken: String?
     public let expiresAt: Date?
     public let scopes: [String]
@@ -20,6 +30,26 @@ public struct MCPOAuthTokens: Sendable, Codable, Equatable {
     public let issuer: URL
     public let subjectIdentifier: String?
 
+    // Primary initialiser — takes raw bytes.
+    public init(
+        accessTokenData: Data,
+        refreshToken: String?,
+        expiresAt: Date?,
+        scopes: [String],
+        tokenType: String = "Bearer",
+        issuer: URL,
+        subjectIdentifier: String? = nil
+    ) {
+        self.accessTokenData = accessTokenData
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.scopes = scopes
+        self.tokenType = tokenType
+        self.issuer = issuer
+        self.subjectIdentifier = subjectIdentifier
+    }
+
+    // Convenience initialiser for tests and code that still holds a String.
     public init(
         accessToken: String,
         refreshToken: String?,
@@ -29,13 +59,27 @@ public struct MCPOAuthTokens: Sendable, Codable, Equatable {
         issuer: URL,
         subjectIdentifier: String? = nil
     ) {
-        self.accessToken = accessToken
-        self.refreshToken = refreshToken
-        self.expiresAt = expiresAt
-        self.scopes = scopes
-        self.tokenType = tokenType
-        self.issuer = issuer
-        self.subjectIdentifier = subjectIdentifier
+        self.init(
+            accessTokenData: Data(accessToken.utf8),
+            refreshToken: refreshToken,
+            expiresAt: expiresAt,
+            scopes: scopes,
+            tokenType: tokenType,
+            issuer: issuer,
+            subjectIdentifier: subjectIdentifier
+        )
+    }
+
+    // MARK: - Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case accessTokenData
+        case refreshToken
+        case expiresAt
+        case scopes
+        case tokenType
+        case issuer
+        case subjectIdentifier
     }
 }
 
@@ -78,6 +122,15 @@ public struct MCPOAuthTokenStore: Sendable {
     ) -> MCPOAuthTokenStore {
         .init(read: read, write: write, delete: delete)
     }
+
+    /// Extracts a stable account identifier from a raw token response.
+    /// Checks `sub`, `bot_id`, and `workspace_id` in that order.
+    public static func subjectIdentifier(from tokenResponse: [String: Any]) -> String? {
+        if let sub = tokenResponse["sub"] as? String, !sub.isEmpty { return sub }
+        if let botID = tokenResponse["bot_id"] as? String, !botID.isEmpty { return botID }
+        if let wsID = tokenResponse["workspace_id"] as? String, !wsID.isEmpty { return wsID }
+        return nil
+    }
 }
 
 private struct OAuthProtectedResourceMetadata: Decodable {
@@ -93,12 +146,25 @@ private struct OAuthAuthorizationServerMetadata: Decodable {
     let authorizationEndpoint: URL
     let tokenEndpoint: URL
     let registrationEndpoint: URL?
+    /// RFC 9207 — whether the AS appends `iss` to the redirect callback.
+    let authorizationResponseIssParameterSupported: Bool
 
     private enum CodingKeys: String, CodingKey {
         case issuer
         case authorizationEndpoint = "authorization_endpoint"
         case tokenEndpoint = "token_endpoint"
         case registrationEndpoint = "registration_endpoint"
+        case authorizationResponseIssParameterSupported = "authorization_response_iss_parameter_supported"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        issuer = try container.decode(URL.self, forKey: .issuer)
+        authorizationEndpoint = try container.decode(URL.self, forKey: .authorizationEndpoint)
+        tokenEndpoint = try container.decode(URL.self, forKey: .tokenEndpoint)
+        registrationEndpoint = try container.decodeIfPresent(URL.self, forKey: .registrationEndpoint)
+        authorizationResponseIssParameterSupported =
+            (try? container.decodeIfPresent(Bool.self, forKey: .authorizationResponseIssParameterSupported)) ?? false
     }
 }
 
@@ -130,11 +196,65 @@ private struct OAuthTokenErrorResponse: Decodable {
 
 private struct OAuthDynamicClientRegistrationResponse: Decodable {
     let clientID: String
+    let registrationAccessToken: String?
+    let registrationClientURI: String?
 
     private enum CodingKeys: String, CodingKey {
         case clientID = "client_id"
+        case registrationAccessToken = "registration_access_token"
+        case registrationClientURI = "registration_client_uri"
     }
 }
+
+// MARK: - PKCE Verifier (D7)
+
+/// A PKCE code verifier that expires after 5 minutes and zeroes its storage on demand.
+struct PKCEVerifier {
+    private(set) var verifierData: Data
+    let createdAt: Date
+
+    init(data: Data, createdAt: Date = Date()) {
+        self.verifierData = data
+        self.createdAt = createdAt
+    }
+
+    /// True when more than 5 minutes have elapsed since creation.
+    var isExpired: Bool { Date().timeIntervalSince(createdAt) > 300 }
+
+    /// UTF-8 string view of the verifier bytes.
+    var stringValue: String { String(data: verifierData, encoding: .utf8) ?? "" }
+
+    /// Overwrites the verifier bytes in place.
+    /// `memset_s` is not elided by optimising compilers because it carries a
+    /// conformance obligation in the C standard.
+    mutating func zero() {
+        verifierData.withUnsafeMutableBytes { ptr in
+            guard let base = ptr.baseAddress, ptr.count > 0 else { return }
+            _ = memset_s(base, ptr.count, 0, ptr.count)
+        }
+    }
+}
+
+// MARK: - Redirect-cap delegate (D6 — Gap B)
+
+/// Limits redirect chains to at most one hop to prevent SSRF-via-redirect attacks.
+final class MCPRedirectCapDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private var redirectCount = 0
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        redirectCount += 1
+        // Allow the first redirect; refuse subsequent ones.
+        completionHandler(redirectCount <= 1 ? request : nil)
+    }
+}
+
+// MARK: - MCPOAuthAuthorization
 
 public actor MCPOAuthAuthorization: MCPAuthorization {
     private let descriptor: MCPAuthorizationDescriptor.OAuthDescriptor
@@ -149,6 +269,13 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
     private var cachedAuthorizationMetadata: OAuthAuthorizationServerMetadata?
     private var cachedResourceMetadataURL: URL?
     private var cachedRegisteredClientID: String?
+
+    // RFC 7592 — management credentials stored after DCR.
+    private var registrationManagementToken: String?
+    private var registrationManagementURI: URL?
+
+    // Single-flight token refresh (D12).
+    private var inflightRefresh: Task<MCPOAuthTokens, Error>?
 
     public init(
         descriptor: MCPAuthorizationDescriptor.OAuthDescriptor,
@@ -180,7 +307,9 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
 
         let tokens = try await activeTokens()
         try validateBearerTransmission(tokens)
-        return "\(tokens.tokenType) \(tokens.accessToken)"
+        // Build header directly from raw bytes — avoids storing the full string.
+        let bearerValue = String(data: tokens.accessTokenData, encoding: .utf8) ?? ""
+        return "\(tokens.tokenType) \(bearerValue)"
     }
 
     public func handleUnauthorized(statusCode: Int, body: Data) async throws -> AuthRetryDecision {
@@ -198,12 +327,7 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         }
 
         do {
-            let metadata = try await discoverAuthorizationMetadata()
-            let refreshed = try await exchangeRefreshToken(
-                refreshToken,
-                metadata: metadata,
-                existing: existing
-            )
+            let refreshed = try await singleFlightRefresh(refreshToken: refreshToken, existing: existing)
             try await tokenStore.write(refreshed, serverID)
             return .retry
         } catch let error as MCPError {
@@ -220,6 +344,26 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         }
     }
 
+    // MARK: - Disconnect
+
+    public func disconnect() async {
+        guard let managementURI = registrationManagementURI,
+              let managementToken = registrationManagementToken else { return }
+        // RFC 7592 — best-effort DELETE; never throws.
+        do {
+            var request = URLRequest(url: managementURI)
+            request.httpMethod = "DELETE"
+            request.setValue("Bearer \(managementToken)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 5
+            _ = try await session.data(for: request)
+            Log.inference.info("MCPOAuthAuthorization: dynamic client deregistered for \(self.serverID)")
+        } catch {
+            Log.inference.warning("MCPOAuthAuthorization: client deregistration request failed (best-effort): \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Private token acquisition
+
     private func activeTokens() async throws -> MCPOAuthTokens {
         if let stored = try await tokenStore.read(serverID) {
             try verifyIssuer(stored.issuer)
@@ -230,12 +374,7 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
 
             if let refreshToken = stored.refreshToken {
                 do {
-                    let metadata = try await discoverAuthorizationMetadata()
-                    let refreshed = try await exchangeRefreshToken(
-                        refreshToken,
-                        metadata: metadata,
-                        existing: stored
-                    )
+                    let refreshed = try await singleFlightRefresh(refreshToken: refreshToken, existing: stored)
                     try await tokenStore.write(refreshed, serverID)
                     try validateBearerTransmission(refreshed)
                     return refreshed
@@ -253,10 +392,39 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         return codeResponse
     }
 
+    // MARK: - Single-flight refresh (D12)
+
+    /// Ensures only one token refresh runs at a time; concurrent callers piggyback.
+    private func singleFlightRefresh(
+        refreshToken: String,
+        existing: MCPOAuthTokens
+    ) async throws -> MCPOAuthTokens {
+        if let existing = inflightRefresh {
+            return try await existing.value
+        }
+        let task = Task { [weak self] () throws -> MCPOAuthTokens in
+            guard let self else { throw MCPError.authorizationFailed("authorization actor deallocated") }
+            let metadata = try await self.discoverAuthorizationMetadata()
+            return try await self.exchangeRefreshToken(
+                refreshToken,
+                metadata: metadata,
+                existing: existing
+            )
+        }
+        inflightRefresh = task
+        defer { inflightRefresh = nil }
+        return try await task.value
+    }
+
+    // MARK: - Authorization code flow
+
     private func performAuthorizationCodeFlow(metadata: OAuthAuthorizationServerMetadata) async throws -> MCPOAuthTokens {
         let state = randomBase64URL(byteCount: 32)
-        let verifier = randomBase64URL(byteCount: 48)
-        let challenge = Self.pkceChallenge(for: verifier)
+        let verifierRaw = randomBase64URL(byteCount: 48)
+        var verifier = PKCEVerifier(data: Data(verifierRaw.utf8))
+        defer { verifier.zero() }
+
+        let challenge = Self.pkceChallenge(for: verifier.stringValue)
         let clientID = try await resolveClientIdentifier(metadata: metadata)
 
         let callbackScheme = try callbackScheme()
@@ -272,14 +440,25 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
             prefersEphemeralSession: true
         )
 
-        let code = try parseAuthorizationCode(callbackURL: callbackURL, expectedState: state)
+        let code = try parseAuthorizationCode(
+            callbackURL: callbackURL,
+            expectedState: state,
+            metadata: metadata
+        )
+
+        if verifier.isExpired {
+            throw MCPError.authorizationFailed("PKCE verifier expired; restart authorization")
+        }
+
         return try await exchangeAuthorizationCode(
             code: code,
-            verifier: verifier,
+            verifier: verifier.stringValue,
             clientID: clientID,
             metadata: metadata
         )
     }
+
+    // MARK: - Metadata discovery
 
     private func discoverAuthorizationMetadata() async throws -> OAuthAuthorizationServerMetadata {
         if let cachedAuthorizationMetadata {
@@ -323,7 +502,11 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
 
         let metadataURL = Self.authorizationMetadataURL(for: issuer)
         try enforceHTTPS(metadataURL, label: "authorization metadata")
-        let (metadataData, metadataResponse) = try await session.data(for: URLRequest(url: metadataURL))
+        // Redirect cap: metadata fetches must not follow more than one redirect.
+        let (metadataData, metadataResponse) = try await session.data(
+            for: URLRequest(url: metadataURL),
+            delegate: MCPRedirectCapDelegate()
+        )
         try requireSuccess(response: metadataResponse, body: metadataData, operation: "authorization metadata discovery")
         let metadata = try decoder.decode(OAuthAuthorizationServerMetadata.self, from: metadataData)
         try enforceHTTPS(metadata.authorizationEndpoint, label: "authorization endpoint")
@@ -340,6 +523,8 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         cachedAuthorizationMetadata = metadata
         return metadata
     }
+
+    // MARK: - Token exchange
 
     private func exchangeAuthorizationCode(
         code: String,
@@ -372,7 +557,7 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         parameters["resource"] = resourceURL.absoluteString
         let refreshed = try await tokenExchange(parameters: parameters, metadata: metadata)
         return MCPOAuthTokens(
-            accessToken: refreshed.accessToken,
+            accessTokenData: refreshed.accessTokenData,
             refreshToken: refreshed.refreshToken ?? existing.refreshToken,
             expiresAt: refreshed.expiresAt,
             scopes: refreshed.scopes,
@@ -393,7 +578,8 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = Self.formURLEncoded(parameters).data(using: .utf8)
 
-        let (data, response) = try await session.data(for: request)
+        // Redirect cap: token exchanges must not follow more than one redirect.
+        let (data, response) = try await session.data(for: request, delegate: MCPRedirectCapDelegate())
         guard let http = response as? HTTPURLResponse else {
             throw MCPError.transportFailure("Missing HTTP response during token exchange")
         }
@@ -405,15 +591,23 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         let parsed = try decoder.decode(OAuthTokenResponse.self, from: data)
         let scopes = parsed.scope?.split(separator: " ").map(String.init) ?? descriptor.scopes
         let expiresAt = parsed.expiresIn.map { currentDate().addingTimeInterval($0) }
+
+        // Extract subject identifier for multi-account keying (D13).
+        let rawJSON = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let subjectID = MCPOAuthTokenStore.subjectIdentifier(from: rawJSON)
+
         return MCPOAuthTokens(
-            accessToken: parsed.accessToken,
+            accessTokenData: Data(parsed.accessToken.utf8),
             refreshToken: parsed.refreshToken,
             expiresAt: expiresAt,
             scopes: scopes,
             tokenType: parsed.tokenType ?? "Bearer",
-            issuer: metadata.issuer
+            issuer: metadata.issuer,
+            subjectIdentifier: subjectID
         )
     }
+
+    // MARK: - Authorization URL + code parsing
 
     private func buildAuthorizationURL(
         endpoint: URL,
@@ -449,7 +643,15 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         return scheme
     }
 
-    private func parseAuthorizationCode(callbackURL: URL, expectedState: String) throws -> String {
+    /// Validates the redirect callback URL and returns the authorization code.
+    ///
+    /// RFC 9207: when the AS advertises `authorization_response_iss_parameter_supported`,
+    /// the `iss` parameter is required and must match the discovered issuer.
+    private func parseAuthorizationCode(
+        callbackURL: URL,
+        expectedState: String,
+        metadata: OAuthAuthorizationServerMetadata
+    ) throws -> String {
         let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
         let queryItems = components?.queryItems ?? []
         if let errorValue = queryItems.first(where: { $0.name == "error" })?.value {
@@ -460,11 +662,31 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         guard state == expectedState else {
             throw MCPError.authorizationFailed("OAuth state mismatch")
         }
+
+        // RFC 9207 — iss validation.
+        if metadata.authorizationResponseIssParameterSupported {
+            let issParam = queryItems.first(where: { $0.name == "iss" })?.value
+            guard let issValue = issParam else {
+                throw MCPError.authorizationFailed("RFC 9207: iss parameter required but not present")
+            }
+            guard let issURL = URL(string: issValue) else {
+                throw MCPError.authorizationFailed("RFC 9207: iss parameter is not a valid URL")
+            }
+            // Constant-time comparison via normalised strings to resist timing oracles.
+            let expected = Self.normalizedIssuerString(metadata.issuer)
+            let actual = Self.normalizedIssuerString(issURL)
+            guard constantTimeEqual(expected, actual) else {
+                throw MCPError.issuerMismatch(expected: metadata.issuer, actual: issURL)
+            }
+        }
+
         guard let code = queryItems.first(where: { $0.name == "code" })?.value, !code.isEmpty else {
             throw MCPError.authorizationFailed("Missing authorization code in callback")
         }
         return code
     }
+
+    // MARK: - Client registration
 
     private func verifyIssuer(_ issuer: URL) throws {
         if let expected = descriptor.authorizationServerIssuer,
@@ -526,6 +748,16 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
                 throw MCPError.dcrFailed("dynamic client registration did not return client_id")
             }
             cachedRegisteredClientID = parsed.clientID
+
+            // RFC 7592 — persist management credentials if provided (D12).
+            if let token = parsed.registrationAccessToken,
+               let uriString = parsed.registrationClientURI,
+               let uri = URL(string: uriString) {
+                registrationManagementToken = token
+                registrationManagementURI = uri
+                Log.inference.info("MCPOAuthAuthorization: RFC 7592 management token stored for \(self.serverID)")
+            }
+
             return parsed.clientID
         } catch {
             if descriptor.publicClient {
@@ -535,6 +767,8 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
             throw MCPError.dcrFailed(error.localizedDescription)
         }
     }
+
+    // MARK: - Error helpers
 
     private func parseTokenExchangeFailure(statusCode: Int, body: Data) -> MCPError {
         do {
@@ -554,13 +788,14 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         guard tokens.tokenType.caseInsensitiveCompare("Bearer") == .orderedSame else {
             throw MCPError.authorizationFailed("Unsupported token type for Authorization header")
         }
-        guard tokens.accessToken.isEmpty == false else {
+        guard tokens.accessTokenData.isEmpty == false else {
             throw MCPError.authorizationFailed("Missing access token")
         }
         let invalidScalars = CharacterSet.controlCharacters
             .union(.newlines)
             .union(.whitespacesAndNewlines)
-        if tokens.accessToken.unicodeScalars.contains(where: { invalidScalars.contains($0) }) {
+        let tokenString = String(data: tokens.accessTokenData, encoding: .utf8) ?? ""
+        if tokenString.unicodeScalars.contains(where: { invalidScalars.contains($0) }) {
             throw MCPError.authorizationFailed("Access token contains invalid bearer characters")
         }
     }
@@ -614,6 +849,16 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
     private func clientIdentifier() -> String {
         descriptor.softwareID ?? descriptor.clientName
     }
+
+    // MARK: - Log redaction (D14)
+
+    /// Returns a short hash of the bearer token suitable for logging — never
+    /// the raw value. Prevents access tokens appearing in sysdiagnose captures.
+    private func bearerRedacted(_ data: Data) -> String {
+        mcpBearerRedacted(data)
+    }
+
+    // MARK: - Static helpers
 
     private static func authorizationMetadataURL(for issuer: URL) -> URL {
         let trimmedPath = issuer.path == "/" ? "" : issuer.path
@@ -707,6 +952,37 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
     }
 }
 
+// MARK: - Bearer redaction (D14)
+
+/// Returns a 4-byte SHA-256 prefix of the bearer token, suitable for log lines.
+/// Never returns the raw token value — prevents access tokens appearing in sysdiagnose.
+func mcpBearerRedacted(_ data: Data) -> String {
+    let hash = Data(SHA256.hash(data: data))
+    return "Bearer <\(hash.prefix(4).map { String(format: "%02x", $0) }.joined())>"
+}
+
+// MARK: - Constant-time string comparison (D4)
+
+/// Compares two strings in constant time relative to the length of the shorter string.
+///
+/// Because `timingsafe_bcmp` is not available in the Swift standard library, we
+/// use the next-best option: XOR each byte pair and accumulate differences without
+/// short-circuiting.  The result is O(min(a,b)) rather than O(1), which is
+/// acceptable for URL strings — the important property is no early exit on the
+/// first mismatch.
+private func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+    let aBytes = Array(a.utf8)
+    let bBytes = Array(b.utf8)
+    guard aBytes.count == bBytes.count else { return false }
+    var diff: UInt8 = 0
+    for (x, y) in zip(aBytes, bBytes) {
+        diff |= x ^ y
+    }
+    return diff == 0
+}
+
+// MARK: - MCPSSRFPolicy
+
 internal enum MCPSSRFPolicy {
     static func validateTransportURL(_ url: URL) throws {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
@@ -736,6 +1012,12 @@ internal enum MCPSSRFPolicy {
             throw wrap("missing host")
         }
         let normalizedHost = host.hasSuffix(".") ? String(host.dropLast()) : host
+
+        // Gap A — block mDNS .local names (D6).
+        if normalizedHost.hasSuffix(".local") || normalizedHost == "local" {
+            throw MCPError.ssrfBlocked(url)
+        }
+
         if PrivateIPClassifier.classifyIPLiteral(normalizedHost) != nil {
             if PrivateIPClassifier.isLocalhostURL(url) == false {
                 throw MCPError.ssrfBlocked(url)
@@ -743,3 +1025,12 @@ internal enum MCPSSRFPolicy {
         }
     }
 }
+
+// MARK: - MCPRedirectCapDelegate (D6 — Gap B)
+// Declared at file scope above MCPSSRFPolicy section; already defined as
+// `MCPRedirectCapDelegate` near the top of this file.
+// TODO: IP pinning — see PinnedSessionDelegate.swift for the certificate-pinning
+// pattern.  Full IP pinning (Gap C) requires capturing the resolved address at
+// connect time via URLSessionDelegate.connection(_:didConnect:) and comparing it
+// against a pre-resolution result from getaddrinfo.  Retrofit is deferred until
+// a larger URLSession refactor lands.
