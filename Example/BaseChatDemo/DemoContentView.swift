@@ -91,7 +91,13 @@ struct DemoContentView: View {
                 .environment(viewModel)
         }
         .sheet(isPresented: $isConnectedServicesPresented) {
-            ConnectedServicesView(toolRegistry: toolRegistry)
+            // Probe the active backend by name. ``ModelLifecycleCoordinator``
+            // labels the Foundation Models backend "Apple"; matching that
+            // string keeps the demo independent of `import BaseChatBackends`.
+            ConnectedServicesView(
+                toolRegistry: toolRegistry,
+                isFoundationModelsActive: { viewModel.activeBackendName == "Apple" }
+            )
         }
         .sheet(isPresented: approvalSheetIsPresented) {
             if let call = viewModel.toolApprovalGate?.pending.first {
