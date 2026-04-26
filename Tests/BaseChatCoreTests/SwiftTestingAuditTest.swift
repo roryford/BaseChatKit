@@ -70,7 +70,7 @@ final class SwiftTestingAuditTest: XCTestCase {
         "BaseChatBackendsTests/CloudErrorSanitizerTests.swift": 23,
         "BaseChatBackendsTests/CloudThinkingTokenTests.swift": 8,
         "BaseChatBackendsTests/OllamaBackendTests.swift": 66,
-        "BaseChatBackendsTests/OpenAICompatEndpointTests.swift": 17,
+        "BaseChatBackendsTests/OpenAICompatEndpointTests.swift": 20,
         "BaseChatBackendsTests/SecureBytesTests.swift": 10,
         "BaseChatBackendsTests/SSEExtractEventsTests.swift": 5,
     ]
