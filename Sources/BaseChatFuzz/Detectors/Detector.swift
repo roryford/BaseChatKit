@@ -19,6 +19,7 @@ public enum DetectorRegistry {
         RaceStallDetector(),
         ContextExhaustionSilentDetector(),
         TimeoutDetector(),
+        ToolCallValidityDetector(),
     ]
 
     public static func resolve(_ filter: Set<String>?) -> [any Detector] {

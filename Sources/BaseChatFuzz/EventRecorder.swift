@@ -24,6 +24,44 @@ public struct EventRecorder: Sendable {
         public var promptTokens: Int?
         public var completionTokens: Int?
         public var stopReason: String
+        /// Full `.toolCall` payloads, preserved for `ToolCallValidityDetector`.
+        public var toolCalls: [ToolCall]
+        /// Full `.toolResult` payloads.
+        public var toolResults: [ToolResult]
+
+        public init(
+            events: [RunRecord.EventSnapshot],
+            raw: String,
+            thinkingRaw: String,
+            thinkingParts: [String],
+            thinkingCompleteCount: Int,
+            phase: String,
+            error: String?,
+            firstTokenMs: Double?,
+            totalMs: Double,
+            peakBytes: UInt64?,
+            promptTokens: Int?,
+            completionTokens: Int?,
+            stopReason: String,
+            toolCalls: [ToolCall] = [],
+            toolResults: [ToolResult] = []
+        ) {
+            self.events = events
+            self.raw = raw
+            self.thinkingRaw = thinkingRaw
+            self.thinkingParts = thinkingParts
+            self.thinkingCompleteCount = thinkingCompleteCount
+            self.phase = phase
+            self.error = error
+            self.firstTokenMs = firstTokenMs
+            self.totalMs = totalMs
+            self.peakBytes = peakBytes
+            self.promptTokens = promptTokens
+            self.completionTokens = completionTokens
+            self.stopReason = stopReason
+            self.toolCalls = toolCalls
+            self.toolResults = toolResults
+        }
     }
 
     /// - Parameter maxOutputTokens: the cap requested in `GenerationConfig`, used to
@@ -42,6 +80,8 @@ public struct EventRecorder: Sendable {
         var completionTokens: Int?
         var phase = "done"
         var errorString: String?
+        var toolCalls: [ToolCall] = []
+        var toolResults: [ToolResult] = []
 
         func memoryTick() {
             if let now = AppMemoryUsage.currentBytes() {
@@ -80,8 +120,10 @@ public struct EventRecorder: Sendable {
                     completionTokens = c
                     events.append(.init(t: t, kind: "usage", v: "\(p)/\(c)"))
                 case .toolCall(let call):
+                    toolCalls.append(call)
                     events.append(.init(t: t, kind: "toolCall", v: call.toolName))
                 case .toolResult(let result):
+                    toolResults.append(result)
                     events.append(.init(t: t, kind: "toolResult", v: result.callId))
                 case .toolLoopLimitReached(let iterations):
                     events.append(.init(t: t, kind: "toolLoopLimitReached", v: "\(iterations)"))
@@ -143,7 +185,9 @@ public struct EventRecorder: Sendable {
             peakBytes: peakBytes,
             promptTokens: promptTokens,
             completionTokens: completionTokens,
-            stopReason: stopReason
+            stopReason: stopReason,
+            toolCalls: toolCalls,
+            toolResults: toolResults
         )
     }
 }

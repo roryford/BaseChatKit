@@ -29,6 +29,10 @@ public struct FuzzConfig: Sendable {
     /// Named corpus subset. Defaults to `.full`. PR-tier CI passes `.smoke`
     /// for a deterministic, backend-agnostic seed list.
     public let corpusSubset: Corpus.Subset
+    /// When `true`, the runner injects `SyntheticToolset` into every iteration so
+    /// `ToolCallValidityDetector` has invariants to check against. Pairs with the
+    /// `--tools` CLI flag.
+    public let tools: Bool
 
     public init(
         backend: BackendChoice = .ollama,
@@ -41,7 +45,8 @@ public struct FuzzConfig: Sendable {
         calibrate: Bool = false,
         quiet: Bool = false,
         sessionScripts: Bool = false,
-        corpusSubset: Corpus.Subset = .full
+        corpusSubset: Corpus.Subset = .full,
+        tools: Bool = false
     ) {
         self.backend = backend
         self.minutes = minutes
@@ -54,5 +59,6 @@ public struct FuzzConfig: Sendable {
         self.quiet = quiet
         self.sessionScripts = sessionScripts
         self.corpusSubset = corpusSubset
+        self.tools = tools
     }
 }

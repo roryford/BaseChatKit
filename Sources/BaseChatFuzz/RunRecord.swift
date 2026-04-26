@@ -43,6 +43,19 @@ public struct RunRecord: Codable, Sendable, Equatable {
     /// Coarse stop classification: `naturalStop`, `maxTokens`, `userStop`, `error`, `unknown`.
     /// Detectors gate on this to avoid false positives from token-cap truncation.
     public var stopReason: String?
+    /// Tool calls emitted by the model during this run. `EventRecorder` populates
+    /// this from `.toolCall` events; legacy backends with no tool support yield an
+    /// empty array. Captured in full so `ToolCallValidityDetector` can re-validate
+    /// arguments against the schema declared in `toolDefinitions`.
+    public var toolCalls: [ToolCall]
+    /// Tool results fed back into the loop. Mirrors `toolCalls` shape.
+    public var toolResults: [ToolResult]
+    /// Snapshot of the tool definitions made available to the model for this run.
+    /// Empty when the run did not configure tools. Schema validation in
+    /// `ToolCallValidityDetector.schema-violation` matches `ToolCall.toolName` against
+    /// this array; orphan calls (call name not in this list) are recorded by
+    /// `unknown-tool-name` rather than misattributed as malformed JSON.
+    public var toolDefinitions: [ToolDefinition]
 
     public init(
         schemaVersion: Int = RunRecord.currentSchema,
@@ -63,7 +76,10 @@ public struct RunRecord: Codable, Sendable, Equatable {
         timing: TimingSnapshot,
         phase: String,
         error: String? = nil,
-        stopReason: String? = nil
+        stopReason: String? = nil,
+        toolCalls: [ToolCall] = [],
+        toolResults: [ToolResult] = [],
+        toolDefinitions: [ToolDefinition] = []
     ) {
         self.schemaVersion = schemaVersion
         self.runId = runId
@@ -84,6 +100,9 @@ public struct RunRecord: Codable, Sendable, Equatable {
         self.phase = phase
         self.error = error
         self.stopReason = stopReason
+        self.toolCalls = toolCalls
+        self.toolResults = toolResults
+        self.toolDefinitions = toolDefinitions
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -91,6 +110,7 @@ public struct RunRecord: Codable, Sendable, Equatable {
         case runId, ts, harness, model, config, prompt, events, raw, rendered
         case thinkingRaw, thinkingParts, thinkingCompleteCount, templateMarkers
         case memory, timing, phase, error, stopReason
+        case toolCalls, toolResults, toolDefinitions
     }
 
     /// Decodes a record, defaulting `schemaVersion` to `1` when the field is
@@ -116,6 +136,11 @@ public struct RunRecord: Codable, Sendable, Equatable {
         self.phase = try c.decode(String.self, forKey: .phase)
         self.error = try c.decodeIfPresent(String.self, forKey: .error)
         self.stopReason = try c.decodeIfPresent(String.self, forKey: .stopReason)
+        // Default empty for legacy records written before `ToolCallValidityDetector`
+        // landed; keeps round-trip stable.
+        self.toolCalls = try c.decodeIfPresent([ToolCall].self, forKey: .toolCalls) ?? []
+        self.toolResults = try c.decodeIfPresent([ToolResult].self, forKey: .toolResults) ?? []
+        self.toolDefinitions = try c.decodeIfPresent([ToolDefinition].self, forKey: .toolDefinitions) ?? []
     }
 
     /// Errors surfaced by `validate(schemaVersion:)`.
@@ -164,6 +189,40 @@ public struct RunRecord: Codable, Sendable, Equatable {
         public var topP: Float
         public var maxTokens: Int?
         public var systemPrompt: String?
+        /// `auto` | `none` | `required` | `tool:<name>`. `nil` when this run did
+        /// not configure tools. `ToolCallValidityDetector.toolchoice-violation`
+        /// reads this to assert the model honoured the constraint.
+        public var toolChoice: String?
+
+        public init(
+            seed: UInt64,
+            temperature: Float,
+            topP: Float,
+            maxTokens: Int?,
+            systemPrompt: String?,
+            toolChoice: String? = nil
+        ) {
+            self.seed = seed
+            self.temperature = temperature
+            self.topP = topP
+            self.maxTokens = maxTokens
+            self.systemPrompt = systemPrompt
+            self.toolChoice = toolChoice
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case seed, temperature, topP, maxTokens, systemPrompt, toolChoice
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            seed = try c.decode(UInt64.self, forKey: .seed)
+            temperature = try c.decode(Float.self, forKey: .temperature)
+            topP = try c.decode(Float.self, forKey: .topP)
+            maxTokens = try c.decodeIfPresent(Int.self, forKey: .maxTokens)
+            systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
+            toolChoice = try c.decodeIfPresent(String.self, forKey: .toolChoice)
+        }
     }
 
     public struct PromptSnapshot: Codable, Sendable, Equatable {

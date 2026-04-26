@@ -176,12 +176,19 @@ public actor FuzzRunner {
         let start = ContinuousClock.now
 
         let prompt = entry.turns.map(\.text).joined(separator: "\n")
-        let cfg = GenerationConfig(
+        let toolDefs: [ToolDefinition] = config.tools ? SyntheticToolset.definitions : []
+        // `.auto` keeps the model honest — `.required` would mask the
+        // toolchoice-violation sub-check during the day-one campaign. When the
+        // detector matures we can sample across choice variants per iteration.
+        let toolChoice: ToolChoice = .auto
+        var cfg = GenerationConfig(
             temperature: temperature,
             topP: topP,
             repeatPenalty: 1.1,
             maxOutputTokens: maxTokens
         )
+        cfg.tools = toolDefs
+        cfg.toolChoice = toolChoice
 
         var capture: EventRecorder.Capture
         do {
@@ -234,7 +241,8 @@ public actor FuzzRunner {
                 temperature: temperature,
                 topP: topP,
                 maxTokens: maxTokens,
-                systemPrompt: entry.system
+                systemPrompt: entry.system,
+                toolChoice: toolDefs.isEmpty ? nil : encodeToolChoice(toolChoice)
             ),
             prompt: RunRecord.PromptSnapshot(
                 corpusId: entry.id,
@@ -260,7 +268,10 @@ public actor FuzzRunner {
             ),
             phase: capture.phase,
             error: capture.error,
-            stopReason: capture.stopReason
+            stopReason: capture.stopReason,
+            toolCalls: capture.toolCalls,
+            toolResults: capture.toolResults,
+            toolDefinitions: toolDefs
         )
     }
 }

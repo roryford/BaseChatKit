@@ -1,0 +1,186 @@
+import XCTest
+@testable import BaseChatFuzz
+import BaseChatInference
+
+final class ToolCallValidityDetectorTests: XCTestCase {
+
+    private func makeRecord(
+        toolCalls: [ToolCall] = [],
+        toolResults: [ToolResult] = [],
+        toolDefinitions: [ToolDefinition] = SyntheticToolset.definitions,
+        toolChoice: String? = "auto"
+    ) -> RunRecord {
+        RunRecord(
+            runId: "test-run",
+            ts: "2026-04-27T00:00:00Z",
+            harness: .init(
+                fuzzVersion: "0.0.0-test",
+                packageGitRev: "deadbeef",
+                packageGitDirty: false,
+                swiftVersion: "6.1",
+                osBuild: "test",
+                thermalState: "nominal"
+            ),
+            model: .init(
+                backend: "mock",
+                id: "tool-validity-test",
+                url: "mem://test",
+                fileSHA256: nil,
+                tokenizerHash: nil
+            ),
+            config: .init(
+                seed: 0,
+                temperature: 0.0,
+                topP: 1.0,
+                maxTokens: nil,
+                systemPrompt: nil,
+                toolChoice: toolChoice
+            ),
+            prompt: .init(
+                corpusId: "tool-validity-test",
+                mutators: [],
+                messages: [.init(role: "user", text: "what is the weather in london?")]
+            ),
+            events: [],
+            raw: "",
+            rendered: "",
+            thinkingRaw: "",
+            thinkingParts: [],
+            thinkingCompleteCount: 0,
+            templateMarkers: nil,
+            memory: .init(beforeBytes: nil, peakBytes: nil, afterBytes: nil),
+            timing: .init(firstTokenMs: nil, totalMs: 0, tokensPerSec: nil),
+            phase: "done",
+            error: nil,
+            stopReason: "naturalStop",
+            toolCalls: toolCalls,
+            toolResults: toolResults,
+            toolDefinitions: toolDefinitions
+        )
+    }
+
+    // MARK: - orphan-result (issue's headline case)
+
+    func test_orphanResult_fires_whenResultReferencesUnknownCallId() {
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "call_1", toolName: "get_weather", arguments: #"{"city":"London"}"#)
+            ],
+            toolResults: [
+                ToolResult(callId: "call_1", content: "sunny"),
+                ToolResult(callId: "call_phantom", content: "??"),
+            ]
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "orphan-result" },
+                      "expected orphan-result to fire on unknown callId")
+    }
+
+    func test_cleanRun_producesNoFindings() {
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "call_1", toolName: "get_weather", arguments: #"{"city":"London","units":"metric"}"#)
+            ],
+            toolResults: [
+                ToolResult(callId: "call_1", content: "sunny")
+            ]
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertEqual(findings, [], "clean run should produce no findings; got: \(findings.map(\.subCheck))")
+    }
+
+    // MARK: - malformed-json-args
+
+    func test_malformedJSONArgs_fires_whenArgumentsAreNotJSON() {
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "c1", toolName: "get_weather", arguments: "city=London")
+            ]
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "malformed-json-args" })
+    }
+
+    // MARK: - schema-violation
+
+    func test_schemaViolation_fires_whenRequiredFieldMissing() {
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "c1", toolName: "get_weather", arguments: #"{"units":"metric"}"#)
+            ]
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "schema-violation" })
+    }
+
+    // MARK: - id-reuse
+
+    func test_idReuse_fires_whenSameCallIdAppearsTwice() {
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "dup", toolName: "get_weather", arguments: #"{"city":"London"}"#),
+                ToolCall(id: "dup", toolName: "get_weather", arguments: #"{"city":"Paris"}"#),
+            ]
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "id-reuse" })
+    }
+
+    // MARK: - toolchoice-violation
+
+    func test_toolchoiceViolation_fires_whenRequiredProducesZeroCalls() {
+        let r = makeRecord(toolCalls: [], toolChoice: "required")
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "toolchoice-violation" })
+    }
+
+    func test_toolchoiceViolation_fires_whenNoneProducesCalls() {
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "c1", toolName: "get_weather", arguments: #"{"city":"London"}"#)
+            ],
+            toolChoice: "none"
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "toolchoice-violation" })
+    }
+
+    func test_toolchoiceViolation_fires_whenToolNameMismatch() {
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "c1", toolName: "get_weather", arguments: #"{"city":"London"}"#)
+            ],
+            toolChoice: "tool:schedule_alarm"
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "toolchoice-violation" })
+    }
+
+    // MARK: - severity
+
+    func test_allSubChecks_shipAtFlakySeverity() {
+        // Severity promotion is tracked under #488; this test pins the day-one
+        // contract so a future change can't silently bump to confirmed.
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "c1", toolName: "get_weather", arguments: "not json"),
+                ToolCall(id: "c1", toolName: "get_weather", arguments: #"{"city":"London"}"#),
+            ],
+            toolResults: [
+                ToolResult(callId: "phantom", content: "")
+            ],
+            toolChoice: "none"
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertFalse(findings.isEmpty)
+        for f in findings {
+            XCTAssertEqual(f.severity, .flaky, "sub-check \(f.subCheck) should ship at .flaky")
+        }
+    }
+
+    // MARK: - registry
+
+    func test_detectorRegistered_inAll() {
+        XCTAssertTrue(DetectorRegistry.all.contains { $0.id == "tool-call-validity" })
+    }
+}
