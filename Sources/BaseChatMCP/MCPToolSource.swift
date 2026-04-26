@@ -25,7 +25,7 @@ public final class MCPToolSource: @unchecked Sendable {
         self.toolFilter = .allowAll
         self.listTools = nil
         self.callTool = nil
-        self.storage = MCPToolSourceStorage(serverID: serverID, approvalPolicy: .perCall)
+        self.storage = MCPToolSourceStorage(serverID: serverID, serverDisplayName: displayName, approvalPolicy: .perCall)
     }
 
     internal init(
@@ -45,7 +45,7 @@ public final class MCPToolSource: @unchecked Sendable {
         self.toolFilter = toolFilter
         self.listTools = listTools
         self.callTool = callTool
-        self.storage = MCPToolSourceStorage(serverID: serverID, approvalPolicy: approvalPolicy)
+        self.storage = MCPToolSourceStorage(serverID: serverID, serverDisplayName: displayName, approvalPolicy: approvalPolicy)
     }
 
     public var capabilities: MCPCapabilities {
@@ -138,7 +138,7 @@ public final class MCPToolSource: @unchecked Sendable {
         let namespacePrefix = normalizedNamespace(toolNamespace)
         var seen: Set<String> = []
         return try filtered.map { tool in
-            let namespacedName = namespacePrefix.map { "\($0).\(tool.originalName)" } ?? tool.originalName
+            let namespacedName = namespacePrefix.map { "\($0)__\(tool.originalName)" } ?? tool.originalName
             let key = namespacedName.lowercased()
             if seen.contains(key) {
                 throw MCPError.malformedMetadata("Duplicate tool name after namespacing: \(namespacedName)")
@@ -236,6 +236,7 @@ internal struct MCPToolRefreshDelta: Sendable {
 
 private actor MCPToolSourceStorage {
     private let serverID: UUID
+    private let serverDisplayName: String
     private let approvalPolicy: MCPApprovalPolicy
     private var executorsByStableKey: [String: MCPToolExecutor] = [:]
     private var toolsByStableKey: [String: MCPRemoteTool] = [:]
@@ -243,8 +244,9 @@ private actor MCPToolSourceStorage {
     private var serverApproved = false
     private var turnApproved = false
 
-    init(serverID: UUID, approvalPolicy: MCPApprovalPolicy) {
+    init(serverID: UUID, serverDisplayName: String, approvalPolicy: MCPApprovalPolicy) {
         self.serverID = serverID
+        self.serverDisplayName = serverDisplayName
         self.approvalPolicy = approvalPolicy
     }
 
@@ -299,6 +301,7 @@ private actor MCPToolSourceStorage {
                     description: tool.description,
                     parameters: tool.inputSchema
                 ),
+                serverDisplayName: serverDisplayName,
                 remoteToolName: tool.originalName,
                 requiresApproval: requiresApproval,
                 toolApprovalDidSucceed: { [weak self] in
@@ -478,7 +481,14 @@ private extension MCPRemoteTool {
 private func normalizedNamespace(_ namespace: String?) -> String? {
     guard let namespace else { return nil }
     let trimmed = namespace.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
+    guard !trimmed.isEmpty else { return nil }
+    // Dots and whitespace are invalid in OpenAI tool names — replace with underscores.
+    let normalized = trimmed
+        .replacingOccurrences(of: ".", with: "_")
+        .components(separatedBy: .whitespaces)
+        .filter { !$0.isEmpty }
+        .joined(separator: "_")
+    return normalized.isEmpty ? nil : normalized
 }
 
 private extension MCPToolFilter {

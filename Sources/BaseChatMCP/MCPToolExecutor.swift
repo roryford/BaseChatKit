@@ -4,6 +4,7 @@ import BaseChatInference
 public final class MCPToolExecutor: ToolExecutor, @unchecked Sendable {
     public let definition: ToolDefinition
     private let remoteToolName: String
+    private let serverDisplayName: String
     private let callTool: @Sendable (_ toolName: String, _ arguments: JSONSchemaValue) async throws -> JSONSchemaValue?
     private let toolApprovalDidSucceed: (@Sendable () async -> Void)?
     private let lock = NSLock()
@@ -12,6 +13,7 @@ public final class MCPToolExecutor: ToolExecutor, @unchecked Sendable {
     public init(definition: ToolDefinition) {
         self.definition = definition
         self.remoteToolName = definition.name
+        self.serverDisplayName = definition.name
         self.callTool = { name, _ in
             throw MCPError.toolNotFound(name)
         }
@@ -21,12 +23,14 @@ public final class MCPToolExecutor: ToolExecutor, @unchecked Sendable {
 
     internal init(
         definition: ToolDefinition,
+        serverDisplayName: String,
         remoteToolName: String,
         requiresApproval: Bool,
         toolApprovalDidSucceed: (@Sendable () async -> Void)? = nil,
         callTool: @Sendable @escaping (_ toolName: String, _ arguments: JSONSchemaValue) async throws -> JSONSchemaValue?
     ) {
         self.definition = definition
+        self.serverDisplayName = serverDisplayName
         self.remoteToolName = remoteToolName
         self.toolApprovalDidSucceed = toolApprovalDidSucceed
         self.callTool = callTool
@@ -54,7 +58,11 @@ public final class MCPToolExecutor: ToolExecutor, @unchecked Sendable {
             let response = try await callTool(remoteToolName, arguments)
             try Task.checkCancellation()
             let parsed = Self.parseResult(response)
-            return ToolResult(callId: "", content: Self.sanitize(parsed.content), errorKind: parsed.errorKind)
+            let wrapped = MCPContentSanitizer.wrapForUntrustedSurface(
+                Self.sanitize(parsed.content),
+                serverDisplayName: serverDisplayName
+            )
+            return ToolResult(callId: "", content: wrapped, errorKind: parsed.errorKind)
         } catch is CancellationError {
             return ToolResult(callId: "", content: "cancelled by user", errorKind: .cancelled)
         } catch let error as MCPError {
