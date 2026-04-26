@@ -925,5 +925,28 @@ final class LlamaBackendTests: XCTestCase {
             "Visible output must still appear when thinking is disabled — the generation loop "
             + "must not starve .token events")
     }
+
+    // MARK: - HeuristicTokenizer Parity
+
+    /// On a `LlamaBackend` with no model loaded the `tokenCount(_:)` fallback
+    /// must route through the shared `HeuristicTokenizer.tokenCount(_:)` so
+    /// the `chars / 4` heuristic stays in one place across
+    /// `BaseChatInference` and `BaseChatBackends`.
+    ///
+    /// Sabotage: change `HeuristicTokenizer.tokenCount` to `text.count / 8`
+    /// — this test fails (and the shared `HeuristicTokenizerTests` in
+    /// `BaseChatInferenceSwiftTestingTests` also fail).
+    func test_tokenCount_noVocab_matchesHeuristicTokenizer() {
+        let backend = LlamaBackend()
+        XCTAssertFalse(backend.isModelLoaded)
+
+        let short = "hi"
+        let long = String(repeating: "the quick brown fox ", count: 32) // ~640 chars
+
+        XCTAssertEqual(backend.tokenCount(short), HeuristicTokenizer.tokenCount(short),
+                       "short-string fallback must match shared heuristic")
+        XCTAssertEqual(backend.tokenCount(long), HeuristicTokenizer.tokenCount(long),
+                       "long-string fallback must match shared heuristic")
+    }
 }
 #endif

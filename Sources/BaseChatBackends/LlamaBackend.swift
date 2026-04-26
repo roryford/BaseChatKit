@@ -545,10 +545,10 @@ extension LlamaBackend: TokenizerVendor, TokenizerProvider {
         // Snapshot vocab under stateLock to avoid a use-after-free race with
         // unloadModel() — mirrors the `countTokens(_:)` pattern below.
         guard let currentVocab = withStateLock({ vocab }) else {
-            return max(1, text.count / 4)
+            return HeuristicTokenizer.tokenCount(text)
         }
         let tokens = LlamaTokenization.tokenize(text, vocab: currentVocab, addBos: false, parseSpecial: false)
-        return tokens.isEmpty ? max(1, text.count / 4) : tokens.count
+        return tokens.isEmpty ? HeuristicTokenizer.tokenCount(text) : tokens.count
     }
 }
 
