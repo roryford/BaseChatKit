@@ -3,6 +3,7 @@ import SwiftData
 import BaseChatCore
 import BaseChatInference
 import BaseChatUI
+import BaseChatUIModelManagement
 import BaseChatBackends
 import BaseChatTools
 

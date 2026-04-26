@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import BaseChatCore
 import BaseChatUI
+import BaseChatUIModelManagement
 
 struct MinimalContentView: View {
     @Environment(ChatViewModel.self) private var viewModel

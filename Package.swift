@@ -15,13 +15,14 @@ let package = Package(
         .library(name: "BaseChatCore", targets: ["BaseChatCore"]),
         .library(name: "BaseChatBackends", targets: ["BaseChatBackends"]),
         .library(name: "BaseChatUI", targets: ["BaseChatUI"]),
+        .library(name: "BaseChatUIModelManagement", targets: ["BaseChatUIModelManagement"]),
         .library(name: "BaseChatFuzz", targets: ["BaseChatFuzz"]),
         .executable(name: "fuzz-chat", targets: ["fuzz-chat"]),
         .library(name: "BaseChatTools", targets: ["BaseChatTools"]),
         .executable(name: "bck-tools", targets: ["bck-tools"]),
     ],
     traits: [
-        .default(enabledTraits: ["MLX", "Llama", "Ollama"]),
+        .default(enabledTraits: ["MLX", "Llama"]),
         .trait(name: "MLX", description: "Enable the MLX inference backend (requires Apple Silicon)"),
         .trait(name: "Llama", description: "Enable the llama.cpp (GGUF) inference backend"),
         .trait(name: "Ollama", description: "Self-hosted / private-datacenter HTTP inference. Moves out of defaults in next major."),
@@ -142,6 +143,22 @@ let package = Package(
                 .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
             ]
         ),
+        // Model management UI: download/storage browser, API endpoint editors,
+        // remote-server configuration. Peeled out of BaseChatUI in v2.0 so a
+        // chat-only host can ship without ~1,800 LOC of management surface.
+        // Depends on BaseChatUI (the moved views consume `ChatViewModel` via
+        // `@Environment`); BaseChatUI MUST NOT depend on this target — that
+        // would close the dep cycle. The CI lint in `.github/workflows/ci.yml`
+        // enforces this.
+        .target(
+            name: "BaseChatUIModelManagement",
+            dependencies: ["BaseChatUI", "BaseChatCore", "BaseChatInference"],
+            path: "Sources/BaseChatUIModelManagement",
+            swiftSettings: [
+                .define("Ollama", .when(traits: ["Ollama"])),
+                .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
+            ]
+        ),
         // Shared test mocks and utilities
         .target(
             name: "BaseChatTestSupport",
@@ -228,6 +245,16 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "BaseChatUIModelManagementTests",
+            dependencies: [
+                "BaseChatUIModelManagement",
+                "BaseChatUI",
+                "BaseChatCore",
+                "BaseChatInference",
+                "BaseChatTestSupport",
+            ]
+        ),
+        .testTarget(
             name: "BaseChatE2ETests",
             dependencies: ["BaseChatBackends", "BaseChatUI", "BaseChatCore", "BaseChatInference", "BaseChatTestSupport", "BaseChatTools"],
             swiftSettings: [
@@ -241,6 +268,7 @@ let package = Package(
             name: "BaseChatSnapshotTests",
             dependencies: [
                 "BaseChatUI",
+                "BaseChatUIModelManagement",
                 "BaseChatCore",
                 "BaseChatInference",
                 "BaseChatTestSupport",

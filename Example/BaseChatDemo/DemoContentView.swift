@@ -3,6 +3,7 @@ import SwiftData
 import BaseChatCore
 import BaseChatInference
 import BaseChatUI
+import BaseChatUIModelManagement
 
 struct DemoContentView: View {
     @Environment(ChatViewModel.self) private var viewModel

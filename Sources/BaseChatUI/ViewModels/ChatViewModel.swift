@@ -29,7 +29,13 @@ public final class ChatViewModel {
 
     // MARK: - Services
 
-    let inferenceService: InferenceService
+    /// `package`-visible so views in `BaseChatUIModelManagement` (the peeled
+    /// model-management surface) can read static capability queries off the
+    /// service. Intentionally not `public` per CLAUDE.md — exposing the full
+    /// `InferenceService` API on `ChatViewModel`'s public contract would lock
+    /// in load-coordination internals. Hosts that need a shared service
+    /// instance keep using the constructor-injection pattern documented there.
+    package let inferenceService: InferenceService
     let deviceCapability: DeviceCapabilityService
     let modelStorage: ModelStorageService
     let memoryPressure: MemoryPressureHandler

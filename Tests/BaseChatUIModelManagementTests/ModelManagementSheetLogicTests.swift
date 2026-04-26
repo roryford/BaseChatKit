@@ -4,6 +4,7 @@ import AppKit
 #endif
 import SwiftUI
 @testable import BaseChatUI
+@testable import BaseChatUIModelManagement
 @testable import BaseChatCore
 @testable import BaseChatInference
 import BaseChatTestSupport
