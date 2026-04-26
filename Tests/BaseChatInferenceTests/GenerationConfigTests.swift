@@ -31,6 +31,11 @@ final class GenerationConfigTests: XCTestCase {
         XCTAssertFalse(config.jsonMode)
     }
 
+    func test_defaultInit_streamPrefillProgress_isFalse() {
+        let config = GenerationConfig()
+        XCTAssertFalse(config.streamPrefillProgress)
+    }
+
     // MARK: - Custom Init
 
     func test_customInit_propagatesAllValues() {
@@ -80,6 +85,12 @@ final class GenerationConfigTests: XCTestCase {
         XCTAssertTrue(config.jsonMode)
     }
 
+    func test_streamPrefillProgress_isMutable() {
+        var config = GenerationConfig()
+        config.streamPrefillProgress = true
+        XCTAssertTrue(config.streamPrefillProgress)
+    }
+
     // MARK: - Mock Backend Captures maxOutputTokens
 
     func test_mockBackend_capturesMaxOutputTokens() async throws {
@@ -122,6 +133,11 @@ final class GenerationConfigTests: XCTestCase {
         XCTAssertEqual(config.seed, 42)
     }
 
+    func test_customInit_propagatesStreamPrefillProgress() {
+        let config = GenerationConfig(streamPrefillProgress: true)
+        XCTAssertTrue(config.streamPrefillProgress)
+    }
+
     func test_minP_isMutable() {
         var config = GenerationConfig()
         config.minP = 0.1
@@ -147,6 +163,7 @@ final class GenerationConfigTests: XCTestCase {
         original.minP = 0.07
         original.repetitionPenalty = 1.3
         original.seed = 9_999_999_999  // exceeds UInt32 to assert UInt64 storage
+        original.streamPrefillProgress = true
 
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(GenerationConfig.self, from: data)
@@ -154,6 +171,7 @@ final class GenerationConfigTests: XCTestCase {
         XCTAssertEqual(decoded.minP, 0.07)
         XCTAssertEqual(decoded.repetitionPenalty, 1.3)
         XCTAssertEqual(decoded.seed, 9_999_999_999)
+        XCTAssertTrue(decoded.streamPrefillProgress)
     }
 
     func test_codableDecode_legacyPayload_omittingParityKnobs() throws {
@@ -176,5 +194,6 @@ final class GenerationConfigTests: XCTestCase {
         XCTAssertNil(decoded.minP)
         XCTAssertNil(decoded.repetitionPenalty)
         XCTAssertNil(decoded.seed)
+        XCTAssertFalse(decoded.streamPrefillProgress)
     }
 }

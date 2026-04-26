@@ -163,6 +163,52 @@ struct OpenAICompatEndpointTests {
         #expect(usage?.completionTokens == 1)
     }
 
+    @Test func compat_prefillProgress_eventsEmitAndPreserveOrdering() async throws {
+        let (backend, url) = makeCompatBackend(modelName: "test-model")
+        defer { MockURLProtocol.unstub(url: url) }
+
+        let prefill1 = Data("""
+        event: prefill_progress
+        data: {"n_past":1024,"n_total":4096,"tokens_per_second":280.0}
+
+        """.utf8)
+        let prefill2 = Data("""
+        event: prefill_progress
+        data: {"n_past":3072,"n_total":4096,"tokens_per_second":300.5}
+
+        """.utf8)
+        let prefillFinal = Data("""
+        event: prefill_progress
+        data: {"n_past":4096,"n_total":4096,"tokens_per_second":295.0}
+
+        """.utf8)
+        let token = sseData("""
+        {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+        """)
+        MockURLProtocol.stub(
+            url: url,
+            response: .sse(chunks: [prefill1, prefill2, prefillFinal, token, sseDone], statusCode: 200)
+        )
+
+        try await loadBackend(backend)
+        let stream = try backend.generate(
+            prompt: "Hello",
+            systemPrompt: nil,
+            config: GenerationConfig(streamPrefillProgress: true)
+        )
+
+        var events: [GenerationEvent] = []
+        for try await event in stream.events {
+            events.append(event)
+        }
+
+        #expect(events.count == 4)
+        #expect(events[0] == .prefillProgress(nPast: 1024, nTotal: 4096, tokensPerSecond: 280.0))
+        #expect(events[1] == .prefillProgress(nPast: 3072, nTotal: 4096, tokensPerSecond: 300.5))
+        #expect(events[2] == .prefillProgress(nPast: 4096, nTotal: 4096, tokensPerSecond: 295.0))
+        #expect(events[3] == .token("Hello"))
+    }
+
     /// Ollama versions before 0.4.0 do not support `stream_options` and silently
     /// ignore it. The final chunk has no `usage` field. OpenAIBackend should handle
     /// this gracefully (lastUsage stays nil).
@@ -319,6 +365,56 @@ struct OpenAICompatEndpointTests {
 
         // max_tokens should be present
         #expect(json["max_tokens"] != nil)
+    }
+
+    @Test func requestHeaders_prefillProgressOptIn_isOffByDefault() async throws {
+        let (backend, url) = makeCompatBackend(modelName: "test-model")
+        defer { MockURLProtocol.unstub(url: url) }
+
+        let chunks: [Data] = [
+            sseData("""
+            {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}
+            """),
+            sseDone,
+        ]
+
+        MockURLProtocol.stub(url: url, response: .sse(chunks: chunks, statusCode: 200))
+
+        try await loadBackend(backend)
+        let stream = try backend.generate(
+            prompt: "Hello",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        )
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
+        #expect(captured?.value(forHTTPHeaderField: "X-BaseChat-Prefill-Progress") == nil)
+    }
+
+    @Test func requestHeaders_prefillProgressOptIn_setsHeader() async throws {
+        let (backend, url) = makeCompatBackend(modelName: "test-model")
+        defer { MockURLProtocol.unstub(url: url) }
+
+        let chunks: [Data] = [
+            sseData("""
+            {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}
+            """),
+            sseDone,
+        ]
+
+        MockURLProtocol.stub(url: url, response: .sse(chunks: chunks, statusCode: 200))
+
+        try await loadBackend(backend)
+        let stream = try backend.generate(
+            prompt: "Hello",
+            systemPrompt: nil,
+            config: GenerationConfig(streamPrefillProgress: true)
+        )
+        for try await _ in stream.events { }
+
+        let captured = MockURLProtocol.capturedRequests.last(where: { $0.url == url })
+        #expect(captured?.value(forHTTPHeaderField: "X-BaseChat-Prefill-Progress") == "true")
     }
 
     /// INCOMPATIBILITY DOCUMENTED: OpenAIBackend sends `stream_options`
