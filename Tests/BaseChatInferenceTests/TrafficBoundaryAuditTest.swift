@@ -113,7 +113,7 @@ final class TrafficBoundaryAuditTest: XCTestCase {
 
         // MCP module transport/auth networking surfaces.
         "BaseChatMCP/InternalMCPTransport.swift",
-        "BaseChatMCP/BaseChatMCP.swift",
+        "BaseChatMCP/MCPOAuth.swift",
     ]
 
     /// Files where hostname literals (e.g. `https://api.anthropic.com`) are
