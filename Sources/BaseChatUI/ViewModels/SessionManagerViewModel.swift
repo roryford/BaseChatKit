@@ -63,7 +63,7 @@ public final class SessionManagerViewModel {
     /// their most recent matching message.
     public private(set) var messageMatchSessions: [ChatSessionRecord] = []
 
-    private var persistence: ChatPersistenceProvider?
+    var persistence: ChatPersistenceProvider?
 
     /// Optional diagnostics sink for non-fatal operational failures
     /// (e.g., auto-rename inference errors). Inject via `configure` so
@@ -91,10 +91,7 @@ public final class SessionManagerViewModel {
     /// manually tapped a row.
     @discardableResult
     public func createSession(title: String = "New Chat") throws -> ChatSessionRecord {
-        guard let persistence else {
-            Log.persistence.warning("createSession called before persistence was configured")
-            throw ChatPersistenceError.providerNotConfigured
-        }
+        let persistence = try requirePersistence("createSession")
         let record = ChatSessionRecord(title: title)
         try persistence.insertSession(record)
         loadSessions()
@@ -104,10 +101,7 @@ public final class SessionManagerViewModel {
 
     /// Deletes a session and all its messages.
     public func deleteSession(_ session: ChatSessionRecord) throws {
-        guard let persistence else {
-            Log.persistence.warning("deleteSession called before persistence was configured")
-            throw ChatPersistenceError.providerNotConfigured
-        }
+        let persistence = try requirePersistence("deleteSession")
         try persistence.deleteSession(session.id)
 
         if activeSession?.id == session.id {
@@ -119,10 +113,7 @@ public final class SessionManagerViewModel {
 
     /// Renames a session.
     public func renameSession(_ session: ChatSessionRecord, title: String) throws {
-        guard let persistence else {
-            Log.persistence.warning("renameSession called before persistence was configured")
-            throw ChatPersistenceError.providerNotConfigured
-        }
+        let persistence = try requirePersistence("renameSession")
         var updated = session
         updated.title = title
         updated.updatedAt = Date()
@@ -262,9 +253,7 @@ public final class SessionManagerViewModel {
     /// ``sessions``; this method does not mutate VM state directly so tests
     /// can assert on raw page contents.
     public func fetchSessionsPage(offset: Int, limit: Int) throws -> [ChatSessionRecord] {
-        guard let persistence else {
-            throw ChatPersistenceError.providerNotConfigured
-        }
+        let persistence = try requirePersistence("fetchSessionsPage")
         return try persistence.fetchSessions(offset: offset, limit: limit)
     }
 

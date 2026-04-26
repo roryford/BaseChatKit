@@ -183,12 +183,7 @@ extension ChatViewModel {
         _ payload: PendingPayload,
         preset: IngestionPreset?
     ) async {
-        guard let persistence else {
-            Log.ui.warning(
-                "ChatViewModel.ingestPendingPayload(.newSession) called before persistence was configured"
-            )
-            return
-        }
+        guard let persistence = persistenceOrLog("ingestPendingPayload(.newSession)") else { return }
 
         // Pre-resolve the system prompt so the new session is inserted
         // with the preset already applied — avoids a second persistence
