@@ -1,4 +1,3 @@
-import Foundation
 import BaseChatInference
 
 /// Tracks whether a streaming parser is currently inside a thinking block and
