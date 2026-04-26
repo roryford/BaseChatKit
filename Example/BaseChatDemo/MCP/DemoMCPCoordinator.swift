@@ -21,9 +21,20 @@ final class DemoMCPCoordinator {
     let catalog: [MCPServerDescriptor]
     let catalogHelpText: String
 
-    init(toolRegistry: ToolRegistry) {
+    /// Probe used to decide whether the Foundation Models tool cap is biting.
+    /// When `true`, each per-server snapshot's `enabledToolCount` reflects only
+    /// the tools that pass ``MCPToolSource/foundationModelsEnabledNames(maxDepth:cap:)``
+    /// (schema-compatible, capped at ``MCPToolFilter/foundationModelsToolCap``).
+    /// When `false`, `enabledToolCount` mirrors `toolCount`.
+    var isFoundationModelsActive: () -> Bool
+
+    init(
+        toolRegistry: ToolRegistry,
+        isFoundationModelsActive: @escaping () -> Bool = { false }
+    ) {
         self.toolRegistry = toolRegistry
         self.client = MCPClient()
+        self.isFoundationModelsActive = isFoundationModelsActive
 
         #if MCPBuiltinCatalog
         self.catalog = MCPCatalog.all
@@ -70,6 +81,15 @@ final class DemoMCPCoordinator {
                 let source = try await client.connect(descriptor)
                 await source.register(in: toolRegistry)
                 let count = await source.currentToolNames().count
+                // Snapshot the probe once so the enabled-count calculation and the
+                // `foundationModelsCapActive` flag agree on the same backend state,
+                // even if the user switches models mid-await. (PR #797 review fix.)
+                let foundationActive = isFoundationModelsActive()
+                let enabledCount = await self.enabledCount(
+                    for: source,
+                    totalCount: count,
+                    foundationActive: foundationActive
+                )
                 await MainActor.run {
                     self.sourcesByID[descriptor.id] = source
                     self.updateSnapshot(descriptor.id) { snapshot in
@@ -77,6 +97,8 @@ final class DemoMCPCoordinator {
                         snapshot.isConnected = true
                         snapshot.state = .ready
                         snapshot.toolCount = count
+                        snapshot.enabledToolCount = enabledCount
+                        snapshot.foundationModelsCapActive = foundationActive
                         snapshot.errorMessage = nil
                         snapshot.authorizationRequest = nil
                     }
@@ -120,6 +142,7 @@ final class DemoMCPCoordinator {
                     snapshot.isConnected = false
                     snapshot.state = .idle
                     snapshot.toolCount = 0
+                    snapshot.enabledToolCount = 0
                     snapshot.errorMessage = nil
                     snapshot.authorizationRequest = nil
                 }
@@ -161,6 +184,7 @@ final class DemoMCPCoordinator {
                 snapshot.isConnected = false
                 snapshot.isBusy = false
                 snapshot.toolCount = 0
+                snapshot.enabledToolCount = 0
             }
         case .error(let serverID, let error):
             updateSnapshot(serverID) { snapshot in
@@ -188,12 +212,44 @@ final class DemoMCPCoordinator {
 
     private func refreshToolCount(for serverID: UUID) async {
         guard let source = sourcesByID[serverID] else { return }
+        // Snapshot the probe once and reuse it for both the enabled-count
+        // calculation and the snapshot flag, so they can't disagree if the
+        // active backend changes mid-await. (PR #797 review fix.)
+        let foundationActive = isFoundationModelsActive()
         let toolCount = await source.currentToolNames().count
+        let enabledCount = await enabledCount(
+            for: source,
+            totalCount: toolCount,
+            foundationActive: foundationActive
+        )
         await MainActor.run {
             self.updateSnapshot(serverID) { snapshot in
                 snapshot.toolCount = toolCount
+                snapshot.enabledToolCount = enabledCount
+                snapshot.foundationModelsCapActive = foundationActive
                 snapshot.isConnected = true
             }
+        }
+    }
+
+    private func enabledCount(
+        for source: MCPToolSource,
+        totalCount: Int,
+        foundationActive: Bool
+    ) async -> Int {
+        guard foundationActive else { return totalCount }
+        return await source.foundationModelsEnabledNames().count
+    }
+
+    /// Re-runs the per-server enabled-count projection using the current
+    /// `isFoundationModelsActive()` value. Call this when the active backend
+    /// changes (e.g., user picks a new model in Settings) so the
+    /// "X of Y enabled" labels stay in sync without waiting for a tools/list
+    /// refresh.
+    func refreshEnabledCounts() {
+        let serverIDs = Array(sourcesByID.keys)
+        for serverID in serverIDs {
+            Task { await refreshToolCount(for: serverID) }
         }
     }
 

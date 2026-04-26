@@ -10,8 +10,14 @@ struct ConnectedServicesView: View {
     @State private var coordinator: DemoMCPCoordinator
     @State private var pendingConnect: MCPServerDescriptor?
 
-    init(toolRegistry: ToolRegistry) {
-        _coordinator = State(initialValue: DemoMCPCoordinator(toolRegistry: toolRegistry))
+    init(
+        toolRegistry: ToolRegistry,
+        isFoundationModelsActive: @escaping () -> Bool = { false }
+    ) {
+        _coordinator = State(initialValue: DemoMCPCoordinator(
+            toolRegistry: toolRegistry,
+            isFoundationModelsActive: isFoundationModelsActive
+        ))
     }
 
     var body: some View {
@@ -128,6 +134,18 @@ struct ConnectedServicesView: View {
                     .lineLimit(3)
             }
 
+            if snapshot.foundationModelsCapActive,
+               snapshot.isConnected,
+               snapshot.enabledToolCount < snapshot.toolCount {
+                Label(
+                    "Apple Intelligence supports up to \(MCPToolFilter.foundationModelsToolCap) tools with simple schemas — extras are hidden until you switch to a different backend.",
+                    systemImage: "exclamationmark.shield"
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("connected-service-cap-footnote-\(descriptor.id.uuidString)")
+            }
+
             DisclosureGroup("Data use") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(descriptor.dataDisclosure)
@@ -167,7 +185,18 @@ struct ConnectedServiceSnapshot {
     var state: MCPConnectionState = .idle
     var isConnected = false
     var isBusy = false
+    /// Total number of MCP tools registered for this server after the source's
+    /// own filter (allowList/denyList/maxToolCount) has been applied.
     var toolCount = 0
+    /// Number of tools currently surfaced to the active backend. When the
+    /// Foundation Models cap (D18 + D21) is biting, this drops below
+    /// ``toolCount`` and the UI shows "X of Y enabled" so users can see
+    /// the cap in action.
+    var enabledToolCount = 0
+    /// Mirror of `DemoMCPCoordinator.isFoundationModelsActive()` captured at
+    /// the most recent refresh. The view uses this to decide whether to
+    /// surface the cap explanation footnote.
+    var foundationModelsCapActive = false
     var errorMessage: String?
     var authorizationRequest: MCPAuthorizationRequest?
 
@@ -182,6 +211,10 @@ struct ConnectedServiceSnapshot {
             }
         }()
         if isConnected {
+            // "X of Y enabled" when the cap is biting; otherwise just "X tools".
+            if foundationModelsCapActive, enabledToolCount < toolCount {
+                return "\(stateText) · \(enabledToolCount) of \(toolCount) tools enabled"
+            }
             return "\(stateText) · \(toolCount) tools"
         }
         return stateText
@@ -195,8 +228,14 @@ struct ConnectedServicesView: View {
 
     let toolRegistry: ToolRegistry
 
-    init(toolRegistry: ToolRegistry) {
+    init(
+        toolRegistry: ToolRegistry,
+        isFoundationModelsActive: @escaping () -> Bool = { false }
+    ) {
         self.toolRegistry = toolRegistry
+        // Probe is captured but unused — there's no MCP surface to filter when
+        // BaseChatMCP isn't linked. Keeps call sites symmetrical.
+        _ = isFoundationModelsActive
     }
 
     var body: some View {
