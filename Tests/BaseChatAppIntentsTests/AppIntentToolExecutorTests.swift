@@ -176,6 +176,35 @@ struct DateIntent: AppIntent, Decodable {
     }
 }
 
+/// Phantom-storage fixture: one `@Parameter` field plus an unrelated stored
+/// property the schema builder must NOT publish.
+@available(iOS 26, macOS 26, *)
+struct PhantomStorageIntent: AppIntent, Decodable {
+
+    static let title: LocalizedStringResource = "Phantom"
+
+    @Parameter(title: "Real")
+    var real: String
+
+    // Plain stored property — must not show up in the synthesised schema.
+    private var cache: [String] = []
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        self.real = try c.decode(String.self, forKey: .real)
+    }
+
+    private enum CodingKeys: String, CodingKey { case real }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        _ = cache  // silence "never read" warning
+        return .result(value: real)
+    }
+}
+
 // MARK: - Tests
 
 @available(iOS 26, macOS 26, *)
@@ -329,6 +358,23 @@ final class AppIntentToolExecutorTests: XCTestCase {
         XCTAssertTrue(
             result.content.contains(iso),
             "expected round-tripped ISO-8601 string in result body, got \(result.content)"
+        )
+    }
+
+    // MARK: schema hygiene
+
+    func testSchemaSkipsNonParameterStoredProperties() {
+        let executor = AppIntentToolExecutor(PhantomStorageIntent.self)
+        guard case .object(let root) = executor.definition.parameters,
+              case .object(let properties) = root["properties"]
+        else {
+            return XCTFail("schema root must be an object with properties")
+        }
+
+        XCTAssertEqual(
+            Set(properties.keys),
+            ["real"],
+            "only @Parameter-wrapped properties may appear in the synthesised schema; got \(properties.keys.sorted())"
         )
     }
 

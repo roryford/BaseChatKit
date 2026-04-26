@@ -5,9 +5,11 @@ backend can invoke it like any other registered tool.
 
 ## Overview
 
-`BaseChatAppIntents` ships a single public type, ``AppIntentToolExecutor``,
-that wraps any `AppIntent` and exposes it through the `ToolExecutor` protocol
-in `BaseChatInference`. The executor:
+`BaseChatAppIntents` ships two public types: ``AppIntentToolExecutor``, which
+wraps any `AppIntent` and exposes it through the `ToolExecutor` protocol in
+`BaseChatInference`, and ``IntentEnumParameter``, the marker protocol your
+parameter enums adopt so the schema builder can enumerate their cases. The
+executor:
 
 1. Walks the intent's `@Parameter` properties via reflection and synthesises a
    JSON-Schema document for ``ToolDefinition/parameters``.

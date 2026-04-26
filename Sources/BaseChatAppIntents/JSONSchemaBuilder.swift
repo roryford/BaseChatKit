@@ -68,6 +68,15 @@ enum JSONSchemaBuilder {
 
         for child in mirror.children {
             guard let label = child.label else { continue }
+            // Only publish properties that are actually `@Parameter`-wrapped.
+            // Plain stored properties (caches, computed-but-stored helpers,
+            // future AppIntents framework storage) would otherwise leak into
+            // the schema as phantom tool arguments. We gate on the
+            // `IntentParameter<...>` type-name shape — which is exactly what
+            // `wrappedTypeName(from:)` is built to detect.
+            let typeName = String(reflecting: type(of: child.value))
+            guard wrappedTypeName(from: typeName) != nil else { continue }
+
             // SwiftUI/AppIntents property wrappers expose the underlying
             // storage with a leading underscore in the mirror — strip it so
             // the schema property matches the intent's declared name.
