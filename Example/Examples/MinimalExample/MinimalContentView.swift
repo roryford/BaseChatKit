@@ -12,7 +12,10 @@ struct MinimalContentView: View {
 
     var body: some View {
         NavigationStack {
-            ChatView(showModelManagement: $isModelManagementPresented)
+            ChatView(
+                showModelManagement: $isModelManagementPresented,
+                apiConfiguration: { APIConfigurationView() }
+            )
                 .sheet(isPresented: $isModelManagementPresented) {
                     ModelManagementSheet()
                         .environment(viewModel)

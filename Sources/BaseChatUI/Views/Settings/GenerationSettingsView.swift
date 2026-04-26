@@ -10,7 +10,7 @@ import BaseChatInference
 /// cloud APIs) hidden behind a `DisclosureGroup` that is collapsed by default.
 /// The disclosure state is persisted via `@AppStorage` so power users who
 /// expand it once keep it expanded.
-public struct GenerationSettingsView: View {
+public struct GenerationSettingsView<APIConfig: View>: View {
 
     @Environment(ChatViewModel.self) private var viewModel
     @Environment(\.dismiss) private var dismiss
@@ -21,7 +21,14 @@ public struct GenerationSettingsView: View {
     @State private var isAPIConfigPresented = false
     @State private var isPromptInspectorPresented = false
 
-    public init() {}
+    /// Builder for the API configuration view shown from the "Manage Cloud APIs"
+    /// row. Closure-injected so this view stays free of any back-edge to the
+    /// `BaseChatUIModelManagement` module that owns `APIConfigurationView`.
+    private let apiConfigurationBuilder: () -> APIConfig
+
+    public init(@ViewBuilder apiConfiguration: @escaping () -> APIConfig) {
+        self.apiConfigurationBuilder = apiConfiguration
+    }
 
     public var body: some View {
         @Bindable var viewModel = viewModel
@@ -200,11 +207,7 @@ public struct GenerationSettingsView: View {
                 }
             }
             .sheet(isPresented: $isAPIConfigPresented) {
-                #if Ollama || CloudSaaS
-                APIConfigurationView()
-                #else
-                EmptyView()
-                #endif
+                apiConfigurationBuilder()
             }
             .sheet(isPresented: $isPromptInspectorPresented) {
                 PromptInspectorView(
@@ -219,6 +222,6 @@ public struct GenerationSettingsView: View {
 // MARK: - Preview
 
 #Preview("Generation Settings") {
-    GenerationSettingsView()
+    GenerationSettingsView { EmptyView() }
         .environment(ChatViewModel())
 }

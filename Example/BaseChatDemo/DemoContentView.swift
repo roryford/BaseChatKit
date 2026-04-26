@@ -56,9 +56,11 @@ struct DemoContentView: View {
         ) {
             sidebar
         } detail: {
-            ChatView(showModelManagement: $isModelManagementPresented) {
-                ChatEmptyStateView(runScenario: runScenario)
-            }
+            ChatView(
+                showModelManagement: $isModelManagementPresented,
+                emptyState: { ChatEmptyStateView(runScenario: runScenario) },
+                apiConfiguration: { APIConfigurationView() }
+            )
                 .toolbar {
                     // .topBarLeading is iOS-only; macOS NavigationSplitView manages
                     // sidebar visibility via its own controls so this button is not

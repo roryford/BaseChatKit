@@ -6,7 +6,13 @@ import BaseChatInference
 ///
 /// Shows a scrolling message history with auto-scroll, an input bar at the
 /// bottom, and toolbar actions for device info, settings, and clearing the chat.
-public struct ChatView: View {
+///
+/// `APIConfig` is the type of the host-supplied API configuration view, which
+/// `ChatView` presents as a sheet/popover when the user triggers the API key
+/// recovery flow. Callers typically pass `{ APIConfigurationView() }` from
+/// `BaseChatUIModelManagement`. The closure-injection keeps `BaseChatUI` free
+/// of any back-edge to the model-management module.
+public struct ChatView<APIConfig: View>: View {
 
     @Environment(ChatViewModel.self) private var viewModel
     #if os(iOS)
@@ -30,9 +36,19 @@ public struct ChatView: View {
     /// view here to surface a flagship prompt button, first-run hints, etc.
     private let customEmptyPlaceholder: AnyView?
 
-    public init(showModelManagement: Binding<Bool>) {
+    /// Builder for the API configuration view. Held as a closure (rather than the
+    /// pre-built view) so that any `@Environment` / `@Bindable` lookups inside
+    /// `APIConfigurationView` resolve at sheet/popover presentation time, not at
+    /// `ChatView` init.
+    private let apiConfigurationBuilder: () -> APIConfig
+
+    public init(
+        showModelManagement: Binding<Bool>,
+        @ViewBuilder apiConfiguration: @escaping () -> APIConfig
+    ) {
         self._showModelManagement = showModelManagement
         self.customEmptyPlaceholder = nil
+        self.apiConfigurationBuilder = apiConfiguration
     }
 
     /// Creates a ``ChatView`` with a host-supplied empty-state view rendered
@@ -42,10 +58,12 @@ public struct ChatView: View {
     /// tour, or any other call-to-action in place of the default placeholder.
     public init<EmptyContent: View>(
         showModelManagement: Binding<Bool>,
-        @ViewBuilder emptyState: () -> EmptyContent
+        @ViewBuilder emptyState: () -> EmptyContent,
+        @ViewBuilder apiConfiguration: @escaping () -> APIConfig
     ) {
         self._showModelManagement = showModelManagement
         self.customEmptyPlaceholder = AnyView(emptyState())
+        self.apiConfigurationBuilder = apiConfiguration
     }
 
     // MARK: - Body
@@ -127,7 +145,7 @@ public struct ChatView: View {
         // the toolbar buttons use `.popover` only on iOS (see button definitions below).
         #if !os(iOS)
         .sheet(isPresented: $isSettingsPresented) {
-            GenerationSettingsView()
+            GenerationSettingsView(apiConfiguration: apiConfigurationBuilder)
         }
         .sheet(isPresented: $isExportPresented) {
             ChatExportSheet()
@@ -143,20 +161,12 @@ public struct ChatView: View {
             get: { showAPIConfiguration && horizontalSizeClass == .compact },
             set: { if !$0 { showAPIConfiguration = false } }
         )) {
-            #if Ollama || CloudSaaS
-            APIConfigurationView()
+            apiConfigurationBuilder()
                 .presentationDragIndicator(.visible)
-            #else
-            EmptyView()
-            #endif
         }
         #else
         .sheet(isPresented: $showAPIConfiguration) {
-            #if Ollama || CloudSaaS
-            APIConfigurationView()
-            #else
-            EmptyView()
-            #endif
+            apiConfigurationBuilder()
         }
         #endif
     }
@@ -227,12 +237,8 @@ public struct ChatView: View {
                     }
                 }
             )) {
-                #if Ollama || CloudSaaS
-                APIConfigurationView()
+                apiConfigurationBuilder()
                     .frame(minWidth: 360, minHeight: 440)
-                #else
-                EmptyView()
-                #endif
             }
             #endif
         case .selectModel:
@@ -459,7 +465,7 @@ public struct ChatView: View {
         // (which also claims Cmd+,).
         .keyboardShortcut(",", modifiers: .command)
         .popover(isPresented: $isSettingsPresented) {
-            GenerationSettingsView()
+            GenerationSettingsView(apiConfiguration: apiConfigurationBuilder)
                 .frame(minWidth: 320, minHeight: 400)
         }
         #endif
@@ -607,7 +613,10 @@ struct ErrorBannerView<Recovery: View>: View {
 
 #Preview("Chat View") {
     NavigationStack {
-        ChatView(showModelManagement: .constant(false))
+        ChatView(
+            showModelManagement: .constant(false),
+            apiConfiguration: { EmptyView() }
+        )
     }
     .environment(ChatViewModel())
 }
