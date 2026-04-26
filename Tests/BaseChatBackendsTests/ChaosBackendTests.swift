@@ -84,6 +84,24 @@ final class ChaosBackendTests: XCTestCase {
         )
     }
 
+    /// Back-to-back `generate()` calls must each produce a fresh stream and
+    /// leave `isGenerating == false` between runs. This catches regressions
+    /// in the lifecycle helper's task-slot clearing.
+    func test_backToBackGenerate_eachCallProducesFreshStream() async throws {
+        let backend = ChaosBackend(mode: .none, tokensToYield: ["x", "y"])
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
+
+        let (firstTokens, firstError) = await collect(backend)
+        XCTAssertNil(firstError)
+        XCTAssertEqual(firstTokens, ["x", "y"])
+        XCTAssertFalse(backend.isGenerating, "isGenerating must reset after first run")
+
+        let (secondTokens, secondError) = await collect(backend)
+        XCTAssertNil(secondError)
+        XCTAssertEqual(secondTokens, ["x", "y"], "Second run must yield the same token sequence")
+        XCTAssertFalse(backend.isGenerating, "isGenerating must reset after second run")
+    }
+
     func test_networkError_throwsAfterPartialStream() async throws {
         let backend = ChaosBackend(mode: .networkError(afterTokens: 3), tokensToYield: allTokens)
         try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
