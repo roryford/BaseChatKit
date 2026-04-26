@@ -37,6 +37,7 @@
 		BF0018000000000000000000 /* DemoScenarioRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10016000000000000000000 /* DemoScenarioRunner.swift */; };
 		BF0019000000000000000000 /* DemoScenarioCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10017000000000000000000 /* DemoScenarioCard.swift */; };
 		BF0021000000000000000000 /* ConnectedServicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10018000000000000000000 /* ConnectedServicesView.swift */; };
+		BF0022000000000000000000 /* DemoMCPCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10019000000000000000000 /* DemoMCPCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -78,6 +79,7 @@
 		F10016000000000000000000 /* DemoScenarioRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenarioRunner.swift; sourceTree = "<group>"; };
 		F10017000000000000000000 /* DemoScenarioCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenarioCard.swift; sourceTree = "<group>"; };
 		F10018000000000000000000 /* ConnectedServicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectedServicesView.swift; sourceTree = "<group>"; };
+		F10019000000000000000000 /* DemoMCPCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMCPCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -133,6 +135,7 @@
 				F10016000000000000000000 /* DemoScenarioRunner.swift */,
 				F10017000000000000000000 /* DemoScenarioCard.swift */,
 				F10018000000000000000000 /* ConnectedServicesView.swift */,
+				F10019000000000000000000 /* DemoMCPCoordinator.swift */,
 			);
 			path = BaseChatDemo;
 			sourceTree = "<group>";
@@ -265,6 +268,7 @@
 				BF0018000000000000000000 /* DemoScenarioRunner.swift in Sources */,
 				BF0019000000000000000000 /* DemoScenarioCard.swift in Sources */,
 				BF0021000000000000000000 /* ConnectedServicesView.swift in Sources */,
+				BF0022000000000000000000 /* DemoMCPCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
