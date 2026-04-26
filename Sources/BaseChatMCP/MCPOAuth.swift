@@ -266,6 +266,10 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
     private let session: URLSession
     private let currentDate: @Sendable () -> Date
 
+    // Optional event stream for surfacing scope downgrades and TOFU discovery events
+    // to the host app without requiring a full MCPClient dependency.
+    var eventContinuation: AsyncStream<MCPConnectionEvent>.Continuation?
+
     private var cachedAuthorizationMetadata: OAuthAuthorizationServerMetadata?
     private var cachedResourceMetadataURL: URL?
     private var cachedRegisteredClientID: String?
@@ -286,7 +290,8 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         clock: any Clock<Duration> = ContinuousClock(),
         random: @escaping @Sendable () -> Data = { Data() },
         session: URLSession = .shared,
-        currentDate: @escaping @Sendable () -> Date = Date.init
+        currentDate: @escaping @Sendable () -> Date = Date.init,
+        eventContinuation: AsyncStream<MCPConnectionEvent>.Continuation? = nil
     ) {
         self.descriptor = descriptor
         self.serverID = serverID
@@ -296,6 +301,7 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         self.random = random
         self.session = session
         self.currentDate = currentDate
+        self.eventContinuation = eventContinuation
         _ = clock
     }
 
@@ -434,6 +440,24 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
             state: state,
             verifierChallenge: challenge
         )
+
+        // When the AS was discovered via TOFU (no pinned issuer), surface an
+        // informational event so the host can show "Connecting to <issuer>…" UI
+        // or cancel if the discovered AS is unexpected. This does not block
+        // the browser from opening — it is purely informational.
+        if descriptor.authorizationServerIssuer == nil {
+            let resourceMetadataURL = cachedResourceMetadataURL ?? Self.resourceMetadataURL(for: resourceURL)
+            eventContinuation?.yield(.authorizationRequired(
+                serverID: serverID,
+                request: MCPAuthorizationRequest(
+                    serverID: serverID,
+                    resourceMetadataURL: resourceMetadataURL,
+                    authorizationServerURL: metadata.issuer,
+                    requiredScopes: descriptor.scopes
+                )
+            ))
+        }
+
         let callbackURL = try await redirectListener.authorize(
             authorizationURL: authorizationURL,
             callbackURLScheme: callbackScheme,
@@ -591,6 +615,17 @@ public actor MCPOAuthAuthorization: MCPAuthorization {
         let parsed = try decoder.decode(OAuthTokenResponse.self, from: data)
         let scopes = parsed.scope?.split(separator: " ").map(String.init) ?? descriptor.scopes
         let expiresAt = parsed.expiresIn.map { currentDate().addingTimeInterval($0) }
+
+        // Surface a scope downgrade if the AS granted fewer permissions than requested.
+        // Silently dropped scopes can be a security or UX surprise; the host app
+        // deserves visibility so it can warn the user or retry with a narrower request.
+        if parsed.scope != nil, Set(scopes) != Set(descriptor.scopes) {
+            eventContinuation?.yield(.scopeDowngraded(
+                serverID: serverID,
+                requested: descriptor.scopes,
+                granted: scopes
+            ))
+        }
 
         // Extract subject identifier for multi-account keying (D13).
         let rawJSON = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]

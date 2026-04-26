@@ -1013,6 +1013,181 @@ final class AuthMCPOAuthAuthorizationTests: XCTestCase {
         await authorization.disconnect()
     }
 
+    // MARK: - Fix 1: Scope downgrade emission
+
+    func test_scopeDowngrade_emitsConnectionEvent() async throws {
+        // Sabotage check: remove the eventContinuation?.yield(.scopeDowngraded…) call
+        // in tokenExchange — the emitted events count becomes zero and this test fails.
+        let serverID = UUID()
+        let resourceURL = URL(string: "https://resource.example.com/mcp")!
+        let issuer = URL(string: "https://auth.example.com")!
+        let metadataURL = URL(string: "https://auth.example.com/.well-known/oauth-authorization-server")!
+        let tokenEndpoint = URL(string: "https://auth.example.com/token")!
+
+        MockURLProtocol.stub(url: metadataURL, response: .immediate(data: Data(
+            """
+            {
+              "issuer": "https://auth.example.com",
+              "authorization_endpoint": "https://auth.example.com/authorize",
+              "token_endpoint": "https://auth.example.com/token"
+            }
+            """.utf8
+        ), statusCode: 200, headers: ["Content-Type": "application/json"]))
+        // Server grants only "read" but the descriptor requested ["read", "write"].
+        MockURLProtocol.stub(url: tokenEndpoint, response: .immediate(data: Data(
+            """
+            {
+              "access_token": "downgraded-token",
+              "expires_in": 3600,
+              "scope": "read",
+              "token_type": "Bearer"
+            }
+            """.utf8
+        ), statusCode: 200, headers: ["Content-Type": "application/json"]))
+
+        let tokenStore = MCPOAuthTokenStore.inMemory()
+        try await tokenStore.write(
+            MCPOAuthTokens(
+                accessToken: "expired",
+                refreshToken: "refresh-scope",
+                expiresAt: Date().addingTimeInterval(-60),
+                scopes: ["read", "write"],
+                issuer: issuer
+            ),
+            serverID
+        )
+
+        var emittedEvents: [MCPConnectionEvent] = []
+        let (stream, continuation) = AsyncStream<MCPConnectionEvent>.makeStream()
+
+        let descriptor = MCPAuthorizationDescriptor.OAuthDescriptor(
+            clientName: "BaseChatKit",
+            scopes: ["read", "write"],
+            redirectURI: URL(string: "basechat://oauth/callback")!,
+            authorizationServerIssuer: issuer
+        )
+
+        let authorization = MCPOAuthAuthorization(
+            descriptor: descriptor,
+            serverID: serverID,
+            resourceURL: resourceURL,
+            redirectListener: RedirectListenerMock { _ in
+                XCTFail("Redirect listener should not be used for refresh")
+                return URL(string: "basechat://oauth/callback?code=unused&state=unused")!
+            },
+            tokenStore: tokenStore,
+            session: makeSession(),
+            eventContinuation: continuation
+        )
+
+        _ = try await authorization.authorizationHeader(for: resourceURL)
+        continuation.finish()
+
+        for await event in stream {
+            emittedEvents.append(event)
+        }
+
+        let downgradeEvents = emittedEvents.compactMap { event -> (requested: [String], granted: [String])? in
+            if case .scopeDowngraded(let sid, let requested, let granted) = event, sid == serverID {
+                return (requested, granted)
+            }
+            return nil
+        }
+        XCTAssertEqual(downgradeEvents.count, 1, "Expected exactly one scopeDowngraded event")
+        XCTAssertEqual(Set(downgradeEvents.first?.requested ?? []), Set(["read", "write"]))
+        XCTAssertEqual(downgradeEvents.first?.granted, ["read"])
+    }
+
+    // MARK: - Fix 2: TOFU authorizationRequired pre-browser event
+
+    func test_tofu_emitsAuthorizationRequiredEvent_beforeBrowserOpens() async throws {
+        // Sabotage check: change the guard to `descriptor.authorizationServerIssuer != nil`
+        // — the event is never emitted for the TOFU path and the count becomes zero.
+        let serverID = UUID()
+        let resourceURL = URL(string: "https://resource.example.com/mcp")!
+        let resourceMetadataURL = URL(string: "https://resource.example.com/.well-known/oauth-protected-resource")!
+        let authMetadataURL = URL(string: "https://auth.example.com/.well-known/oauth-authorization-server")!
+        let tokenEndpoint = URL(string: "https://auth.example.com/token")!
+
+        MockURLProtocol.stub(url: resourceMetadataURL, response: .immediate(data: Data(
+            """
+            { "authorization_servers": ["https://auth.example.com"] }
+            """.utf8
+        ), statusCode: 200, headers: ["Content-Type": "application/json"]))
+        MockURLProtocol.stub(url: authMetadataURL, response: .immediate(data: Data(
+            """
+            {
+              "issuer": "https://auth.example.com",
+              "authorization_endpoint": "https://auth.example.com/authorize",
+              "token_endpoint": "https://auth.example.com/token"
+            }
+            """.utf8
+        ), statusCode: 200, headers: ["Content-Type": "application/json"]))
+        MockURLProtocol.stub(url: tokenEndpoint, response: .immediate(data: Data(
+            """
+            {
+              "access_token": "tofu-token",
+              "expires_in": 3600,
+              "scope": "tools:read tools:write",
+              "token_type": "Bearer"
+            }
+            """.utf8
+        ), statusCode: 200, headers: ["Content-Type": "application/json"]))
+
+        // Track the order: authorizationRequired must arrive before authorize() is called.
+        actor OrderTracker {
+            var authRequiredSeenBeforeBrowser = false
+            var authRequiredEventCount = 0
+            var authRequiredSeenCount = 0
+
+            func recordAuthRequired() { authRequiredSeenCount += 1 }
+            func recordBrowserOpen(seen: Int) { authRequiredSeenBeforeBrowser = seen > 0 }
+            func incrementEventCount() { authRequiredEventCount += 1 }
+        }
+        let tracker = OrderTracker()
+
+        let (stream, continuation) = AsyncStream<MCPConnectionEvent>.makeStream()
+
+        // descriptor with no pinned issuer — TOFU path.
+        let descriptor = makeDescriptor(issuer: nil)
+        let listener = RedirectListenerMock { authorizationURL in
+            // Record browser-open moment; the event must have already been yielded.
+            let items = URLComponents(url: authorizationURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let state = items.first(where: { $0.name == "state" })?.value ?? ""
+            Task { await tracker.recordBrowserOpen(seen: await tracker.authRequiredSeenCount) }
+            return URL(string: "basechat://oauth/callback?code=abc&state=\(state)")!
+        }
+
+        let authorization = MCPOAuthAuthorization(
+            descriptor: descriptor,
+            serverID: serverID,
+            resourceURL: resourceURL,
+            redirectListener: listener,
+            tokenStore: .inMemory(),
+            session: makeSession(),
+            eventContinuation: continuation
+        )
+
+        // Collect events in a background task concurrently with the auth flow.
+        let collectTask = Task {
+            for await event in stream {
+                if case .authorizationRequired(let sid, _) = event, sid == serverID {
+                    await tracker.recordAuthRequired()
+                    await tracker.incrementEventCount()
+                }
+            }
+        }
+
+        _ = try await authorization.authorizationHeader(for: resourceURL)
+        continuation.finish()
+        await collectTask.value
+
+        let count = await tracker.authRequiredEventCount
+        XCTAssertEqual(count, 1, "Expected exactly one authorizationRequired event for TOFU flow")
+        let seenFirst = await tracker.authRequiredSeenBeforeBrowser
+        XCTAssertTrue(seenFirst, "authorizationRequired must be emitted before the browser opens")
+    }
+
     private func makeDescriptor(issuer: URL?) -> MCPAuthorizationDescriptor.OAuthDescriptor {
         MCPAuthorizationDescriptor.OAuthDescriptor(
             clientName: "BaseChatKit",
