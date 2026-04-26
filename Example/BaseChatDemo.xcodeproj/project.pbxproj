@@ -14,6 +14,7 @@
 		BF0005000000000000000000 /* BaseChatBackends in Frameworks */ = {isa = PBXBuildFile; productRef = F30003000000000000000000 /* BaseChatBackends */; };
 		BF0006000000000000000000 /* BaseChatTools in Frameworks */ = {isa = PBXBuildFile; productRef = F30004000000000000000000 /* BaseChatTools */; };
 		BF0020000000000000000000 /* BaseChatMCP in Frameworks */ = {isa = PBXBuildFile; productRef = F30005000000000000000000 /* BaseChatMCP */; };
+		BF0021000000000000000000 /* BaseChatUIModelManagement in Frameworks */ = {isa = PBXBuildFile; productRef = F30006000000000000000000 /* BaseChatUIModelManagement */; };
 		BF0007000000000000000000 /* DemoTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10004000000000000000000 /* DemoTools.swift */; };
 		BF0008000000000000000000 /* ChatEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10005000000000000000000 /* ChatEmptyStateView.swift */; };
 		BF0009000000000000000000 /* ToolApprovalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10006000000000000000000 /* ToolApprovalSheet.swift */; };
@@ -89,6 +90,7 @@
 			files = (
 				BF0003000000000000000000 /* BaseChatCore in Frameworks */,
 				BF0004000000000000000000 /* BaseChatUI in Frameworks */,
+				BF0021000000000000000000 /* BaseChatUIModelManagement in Frameworks */,
 				BF0005000000000000000000 /* BaseChatBackends in Frameworks */,
 				BF0006000000000000000000 /* BaseChatTools in Frameworks */,
 				BF0020000000000000000000 /* BaseChatMCP in Frameworks */,
@@ -190,6 +192,7 @@
 			packageProductDependencies = (
 				F30001000000000000000000 /* BaseChatCore */,
 				F30002000000000000000000 /* BaseChatUI */,
+				F30006000000000000000000 /* BaseChatUIModelManagement */,
 				F30003000000000000000000 /* BaseChatBackends */,
 				F30004000000000000000000 /* BaseChatTools */,
 				F30005000000000000000000 /* BaseChatMCP */,
@@ -589,6 +592,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F20001000000000000000000 /* XCLocalSwiftPackageReference ".." */;
 			productName = BaseChatMCP;
+		};
+		F30006000000000000000000 /* BaseChatUIModelManagement */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F20001000000000000000000 /* XCLocalSwiftPackageReference ".." */;
+			productName = BaseChatUIModelManagement;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

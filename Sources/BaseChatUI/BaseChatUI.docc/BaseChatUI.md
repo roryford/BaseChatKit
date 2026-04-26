@@ -63,7 +63,6 @@ For a sidebar-based layout with multiple sessions, combine ``ChatView`` with ``S
 
 - ``ChatViewModel``
 - ``SessionManagerViewModel``
-- ``ModelManagementViewModel``
 
 ### Chat Views
 
@@ -71,15 +70,15 @@ For a sidebar-based layout with multiple sessions, combine ``ChatView`` with ``S
 - ``ChatInputBar``
 - ``MessageBubbleView``
 
-### Model Management
-
-- ``ModelManagementSheet``
-
 ### Settings
 
 - ``GenerationSettingsView``
-- ``APIConfigurationView``
 
 ### Session Management
 
 - ``SessionListView``
+
+> Important: ``ModelManagementSheet``, ``ModelManagementViewModel``, and
+> ``APIConfigurationView`` moved to the new `BaseChatUIModelManagement`
+> product in v2.0. Add `import BaseChatUIModelManagement` to access them,
+> or run `scripts/migrate-uimm-imports.sh` against your codebase.

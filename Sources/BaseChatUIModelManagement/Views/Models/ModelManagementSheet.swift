@@ -1,6 +1,8 @@
 import SwiftUI
+import SwiftData
 import BaseChatCore
 import BaseChatInference
+import BaseChatUI
 
 /// Unified model management sheet combining model selection, download, and storage.
 public struct ModelManagementSheet: View {

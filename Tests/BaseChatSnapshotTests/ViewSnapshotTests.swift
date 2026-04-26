@@ -2,6 +2,7 @@ import XCTest
 import SnapshotTesting
 import SwiftUI
 @testable import BaseChatUI
+@testable import BaseChatUIModelManagement
 import BaseChatCore
 import BaseChatInference
 

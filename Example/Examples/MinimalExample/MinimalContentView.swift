@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import BaseChatCore
 import BaseChatUI
+import BaseChatUIModelManagement
 
 struct MinimalContentView: View {
     @Environment(ChatViewModel.self) private var viewModel
@@ -12,7 +13,10 @@ struct MinimalContentView: View {
 
     var body: some View {
         NavigationStack {
-            ChatView(showModelManagement: $isModelManagementPresented)
+            ChatView(
+                showModelManagement: $isModelManagementPresented,
+                apiConfiguration: { APIConfigurationView() }
+            )
                 .sheet(isPresented: $isModelManagementPresented) {
                     ModelManagementSheet()
                         .environment(viewModel)

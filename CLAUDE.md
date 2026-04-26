@@ -8,11 +8,12 @@
 | `BaseChatMCP` | Model Context Protocol client surface, descriptors, tool bridge (`MCPClient`, `MCPToolSource`) | None |
 | `BaseChatCore` | SwiftData persistence — schema, `@Model` types, container, provider, export | None |
 | `BaseChatBackends` | MLX, llama.cpp, Foundation, cloud backends (depends on `BaseChatInference`) | MLX, LlamaSwift |
-| `BaseChatUI` | SwiftUI views and view models | None |
+| `BaseChatUI` | SwiftUI chat-runtime views and view models (chat-only consumer stops here) | None |
+| `BaseChatUIModelManagement` | Model browser/download/storage UI + cloud API endpoint editors | None |
 | `BaseChatTestSupport` | Shared mocks and fakes (`MockInferenceBackend`, `CharTokenizer`, etc.) | None |
 | `BaseChatMLXIntegrationTests` | Xcode-only real MLX model E2E tests | MLX |
 
-`BaseChatUI` depends only on `BaseChatCore` and `BaseChatInference` — keep it that way. Never import `BaseChatBackends` from UI. `BaseChatBackends` and `BaseChatMCP` depend on `BaseChatInference` directly (not `BaseChatCore`), so backend and MCP integrations stay free of SwiftData. Apps that only need inference orchestration can depend on `BaseChatInference` alone. `BaseChatCore` does **not** re-export `BaseChatInference` — files that use `InferenceService` or other inference types directly must `import BaseChatInference` explicitly. `MCPCatalog` descriptors are trait-gated behind `MCPBuiltinCatalog`.
+`BaseChatUI` depends only on `BaseChatCore` and `BaseChatInference` — keep it that way. Never import `BaseChatBackends` from UI, and never import `BaseChatUIModelManagement` from `BaseChatUI` (the v2.0 peel deliberately makes this a one-way edge — the back-edge would close a dep cycle, and a CI lint blocks the regression). `BaseChatUIModelManagement` depends on `BaseChatUI` (its views consume `ChatViewModel` via `@Environment`); cycle dissolved by closure-injecting `APIConfigurationView` into `ChatView` and `GenerationSettingsView`. `ChatView` and `GenerationSettingsView` are now generic over an `APIConfig: View` type and require an `apiConfiguration:` `@ViewBuilder` parameter — typically `{ APIConfigurationView() }` from `BaseChatUIModelManagement`. `BaseChatBackends` and `BaseChatMCP` depend on `BaseChatInference` directly (not `BaseChatCore`), so backend and MCP integrations stay free of SwiftData. Apps that only need inference orchestration can depend on `BaseChatInference` alone. `BaseChatCore` does **not** re-export `BaseChatInference` — files that use `InferenceService` or other inference types directly must `import BaseChatInference` explicitly. `MCPCatalog` descriptors are trait-gated behind `MCPBuiltinCatalog`.
 
 ## Running tests
 
@@ -22,6 +23,7 @@ swift test --filter BaseChatCoreTests --disable-default-traits
 swift test --filter BaseChatInferenceTests --disable-default-traits
 swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits
 swift test --filter BaseChatUITests --disable-default-traits
+swift test --filter BaseChatUIModelManagementTests --disable-default-traits
 swift test --filter BaseChatMCPTests --disable-default-traits
 swift test --filter BaseChatBackendsTests --disable-default-traits
 swift test --filter BaseChatTestSupportTests --disable-default-traits
@@ -71,7 +73,7 @@ When writing hardware-gated tests, add `XCTSkipIf` guards at the top of the test
 
 ## Service sharing
 
-`ChatViewModel.inferenceService` is `internal` by design. Apps that need the same `InferenceService` instance in multiple components (e.g., a story engine, character creator) should create it at the app level and inject it:
+`ChatViewModel.inferenceService` is `package`-visible by design — it was widened from `internal` to `package` during the v2.0 `BaseChatUIModelManagement` peel so views in that module (the peeled model-management surface) can read static capability queries off the service. Apps that need the same `InferenceService` instance in multiple components (e.g., a story engine, character creator) should still create it at the app level and inject it via the constructor:
 
 ```swift
 let inference = InferenceService()
@@ -79,7 +81,7 @@ let chatVM = ChatViewModel(inferenceService: inference)
 let storyStore = StoryStore(inferenceService: inference)
 ```
 
-Do not widen `inferenceService` to `public` — it exposes load coordination internals and makes `InferenceService`'s full API part of `ChatViewModel`'s public contract.
+Do **not** widen `inferenceService` to `public`. Exposing the full `InferenceService` API on `ChatViewModel`'s public contract would lock in load-coordination internals that the framework needs the freedom to refactor. `package` lets the sibling `BaseChatUIModelManagement` module see what it needs without leaking the surface to host apps.
 
 ## Coding conventions
 
@@ -121,7 +123,7 @@ When Apple ships a new major OS each September, bump both minimums by one and re
 Before pushing any branch, run all CI-safe test suites locally and confirm zero failures:
 
 ```bash
-swift test --filter BaseChatCoreTests --disable-default-traits && swift test --filter BaseChatInferenceTests --disable-default-traits && swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits && swift test --filter BaseChatUITests --disable-default-traits && swift test --filter BaseChatMCPTests --disable-default-traits && swift test --filter BaseChatBackendsTests --disable-default-traits && swift test --filter BaseChatTestSupportTests --disable-default-traits
+swift test --filter BaseChatCoreTests --disable-default-traits && swift test --filter BaseChatInferenceTests --disable-default-traits && swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits && swift test --filter BaseChatUITests --disable-default-traits && swift test --filter BaseChatUIModelManagementTests --disable-default-traits && swift test --filter BaseChatMCPTests --disable-default-traits && swift test --filter BaseChatBackendsTests --disable-default-traits && swift test --filter BaseChatTestSupportTests --disable-default-traits
 ```
 
 Never push based on a subset passing. After rebasing, always re-run the full suite before pushing — conflicts can silently break tests that compiled fine before.
@@ -220,7 +222,7 @@ All changes go through PRs — direct pushes to `main` are blocked for everyone.
 4. Report the PR URL — the maintainer reviews and merges manually
 5. Do NOT pass `--auto` or `--merge` — merges require human approval
 
-CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatInferenceSwiftTestingTests` + `BaseChatUITests` + `BaseChatMCPTests` + `BaseChatBackendsTests` + `BaseChatTestSupportTests`) before merge is allowed.
+CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatInferenceSwiftTestingTests` + `BaseChatUITests` + `BaseChatUIModelManagementTests` + `BaseChatMCPTests` + `BaseChatBackendsTests` + `BaseChatTestSupportTests`) before merge is allowed.
 
 `BaseChatBackendsTests` runs in CI without hardware traits — only cloud backend and SSE tests execute; MLX and Llama tests are excluded by `#if MLX`/`#if Llama` conditional compilation. Run with `--traits MLX,Llama` locally on Apple Silicon before merging backend changes. `BaseChatE2ETests` requires physical hardware and does not run in CI.
 

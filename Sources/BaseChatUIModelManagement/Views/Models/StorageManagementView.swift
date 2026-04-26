@@ -1,53 +1,53 @@
 import SwiftUI
 import BaseChatCore
 import BaseChatInference
+import BaseChatUI
 
-/// Inline local model storage content used by `ModelManagementSheet`.
-struct LocalModelStorageView: View {
+/// Storage management sheet for viewing and deleting downloaded models.
+///
+/// Shows total storage used, the models directory path, and a list of
+/// downloaded models with their sizes and delete buttons.
+public struct StorageManagementView: View {
 
     @Environment(ChatViewModel.self) private var chatViewModel
     @Environment(ModelManagementViewModel.self) private var managementViewModel
+    @Environment(\.dismiss) private var dismiss
 
     @State private var modelToDelete: ModelInfo?
     @State private var showDeleteConfirmation = false
-    @State private var deleteErrorMessage: String?
 
-    var body: some View {
-        List {
-            storageOverviewSection
-            downloadedModelsSection
-        }
-        #if os(iOS)
-        .listStyle(.insetGrouped)
-        #endif
-        .alert(
-            "Delete Model",
-            isPresented: $showDeleteConfirmation,
-            presenting: modelToDelete
-        ) { model in
-            Button("Delete", role: .destructive) {
-                deleteModel(model)
+    public init() {}
+
+    public var body: some View {
+        NavigationStack {
+            List {
+                storageOverviewSection
+                downloadedModelsSection
             }
-            Button("Cancel", role: .cancel) {
-                modelToDelete = nil
+            .navigationTitle("Storage")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
             }
-        } message: { model in
-            Text("Are you sure you want to delete \"\(model.name)\"? This will free \(model.fileSizeFormatted) of storage. This action cannot be undone.")
-        }
-        .alert(
-            "Delete Failed",
-            isPresented: Binding(
-                get: { deleteErrorMessage != nil },
-                set: { if !$0 { deleteErrorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {
-                deleteErrorMessage = nil
+            .alert(
+                "Delete Model",
+                isPresented: $showDeleteConfirmation,
+                presenting: modelToDelete
+            ) { model in
+                Button("Delete", role: .destructive) {
+                    deleteModel(model)
+                }
+                Button("Cancel", role: .cancel) {
+                    modelToDelete = nil
+                }
+            } message: { model in
+                Text("Are you sure you want to delete \"\(model.name)\"? This will free \(model.fileSizeFormatted) of storage. This action cannot be undone.")
             }
-        } message: {
-            Text(deleteErrorMessage ?? "")
         }
     }
+
+    // MARK: - Storage Overview
 
     private var storageOverviewSection: some View {
         Section("Storage Overview") {
@@ -83,6 +83,8 @@ struct LocalModelStorageView: View {
             }
         }
     }
+
+    // MARK: - Downloaded Models List
 
     private var downloadedModelsSection: some View {
         Section("Downloaded Models") {
@@ -129,13 +131,14 @@ struct LocalModelStorageView: View {
         }
     }
 
+    // MARK: - Actions
+
     private func deleteModel(_ model: ModelInfo) {
         do {
             try managementViewModel.deleteModel(model)
             chatViewModel.refreshModels()
         } catch {
             Log.download.error("Failed to delete model: \(error)")
-            deleteErrorMessage = error.localizedDescription
         }
         modelToDelete = nil
     }
@@ -146,4 +149,12 @@ struct LocalModelStorageView: View {
         NSWorkspace.shared.open(url)
     }
     #endif
+}
+
+// MARK: - Preview
+
+#Preview {
+    StorageManagementView()
+        .environment(ChatViewModel())
+        .environment(ModelManagementViewModel())
 }

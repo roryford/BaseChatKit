@@ -53,7 +53,10 @@ final class ChatViewControlTests: XCTestCase {
         let vm = viewModel ?? makeChatViewModel()
         return ViewHierarchyDumper.dump(
             NavigationStack {
-                ChatView(showModelManagement: .constant(false))
+                ChatView(
+                    showModelManagement: .constant(false),
+                    apiConfiguration: { EmptyView() }
+                )
             }
             .environment(vm)
         )

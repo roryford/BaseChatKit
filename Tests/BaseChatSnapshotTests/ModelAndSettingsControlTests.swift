@@ -1,6 +1,7 @@
 import XCTest
 import SwiftUI
 @testable import BaseChatUI
+@testable import BaseChatUIModelManagement
 @testable import BaseChatCore
 @testable import BaseChatInference
 
@@ -134,7 +135,7 @@ final class ModelAndSettingsControlTests: XCTestCase {
     /// Shared dump for settings tests to avoid repeated view construction.
     private func generationSettingsDump() -> String {
         ViewHierarchyDumper.dump(
-            GenerationSettingsView()
+            GenerationSettingsView { EmptyView() }
                 .environment(makeChatViewModel())
         )
     }
