@@ -61,6 +61,7 @@ final class ErrorDescriptionTests: XCTestCase {
             .memoryInsufficient(required: 8_589_934_592, available: 4_294_967_296),
             .alreadyGenerating,
             .generationError("token limit"),
+            .noBackendSatisfiesRequirements([.toolCalling]),
         ]
 
         for error in cases {
