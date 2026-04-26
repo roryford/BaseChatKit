@@ -102,6 +102,20 @@ jobs:
           fi
           echo "swift-tools-version=$tools_version OK against runner Swift $swift_version"
 
+      - name: Lint — BaseChatUI does not import BaseChatUIModelManagement
+        # The two modules form a one-way edge: BaseChatUIModelManagement depends
+        # on BaseChatUI, never the other way around. A back-edge would close the
+        # cycle the v2.0 peel was designed to break. The cycle is currently
+        # dissolved by closure-injecting `APIConfigurationView` into ChatView and
+        # GenerationSettingsView; this lint guards against accidental regression.
+        run: |
+          set -euo pipefail
+          if grep -RIn --include='*.swift' '^[[:space:]]*import[[:space:]]\+BaseChatUIModelManagement' Sources/BaseChatUI/; then
+            echo "::error::BaseChatUI must not import BaseChatUIModelManagement (would close the dep cycle)."
+            exit 1
+          fi
+          echo "BaseChatUI -> BaseChatUIModelManagement edge is clean."
+
       - name: Verify Package.resolved is up to date
         # Was a separate `resolve-check` job on its own macos-15 runner; folding
         # it into `test` removes one 10×-billed runner per PR and eliminates the
@@ -147,9 +161,9 @@ jobs:
       # ChatViewModelTests.test_autoSelectFirstRunModel_* pair). Serial XCTest
       # execution avoids that and `--parallel` would still need a UI-test-only
       # carve-out, which negates most of the speedup anyway.
-      - name: Test — XCTest suites (Core + UI + MCP + Backends + Inference + TestSupport)
+      - name: Test — XCTest suites (Core + UI + UIModelManagement + MCP + Backends + Inference + TestSupport)
         timeout-minutes: 25
-        run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatMCPTests --filter BaseChatBackendsTests --filter BaseChatInferenceTests --filter BaseChatTestSupportTests --disable-default-traits --skip-update
+        run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatUIModelManagementTests --filter BaseChatMCPTests --filter BaseChatBackendsTests --filter BaseChatInferenceTests --filter BaseChatTestSupportTests --disable-default-traits --skip-update
 
       - name: Test — Inference (Swift Testing, isolated process)
         timeout-minutes: 25

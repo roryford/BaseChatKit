@@ -207,7 +207,7 @@ BaseChatFuzz/Scenarios/ScenarioTestBackend.swift:try? await Task.sleep(for: paus
 
 # Task.sleep cancellation is intentionally ignored;
 # parser/rendering fallbacks are benign optional conversions.
-BaseChatUI/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))
+BaseChatUIModelManagement/ViewModels/ModelManagementViewModel.swift:try? await Task.sleep(for: .milliseconds(500))
 BaseChatUI/Views/Chat/AssistantMarkdownView.swift:if let parsed = try? AttributedString(
 BaseChatUI/Views/Chat/TypingIndicatorView.swift:try? await Task.sleep(for: .milliseconds(400))
 
