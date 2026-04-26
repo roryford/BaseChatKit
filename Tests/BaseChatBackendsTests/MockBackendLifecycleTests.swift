@@ -125,27 +125,31 @@ final class MockBackendLifecycleTests: XCTestCase {
     // MARK: - Re-entry from inside onFinish
 
     /// Calling `makeStream` again from inside the previous stream's
-    /// `onFinish` callback must not deadlock the state lock.
-    func test_reentrantMakeStream_fromOnFinish_doesNotDeadlock() async throws {
+    /// `onFinish` callback must not deadlock the state lock, and the
+    /// re-entrant stream must remain tracked/cancellable — i.e. the first
+    /// stream's `clearTask()` must NOT clobber the new task slot. Sabotage
+    /// check: replacing the identity-aware clear with an unconditional
+    /// `clearTask()` makes the post-onFinish `hasActiveTask` assertion
+    /// fail (the second stream's slot is wiped before its body runs).
+    func test_reentrantMakeStream_fromOnFinish_doesNotDeadlock_andSecondStreamRunsToCompletion() async throws {
         let lifecycle = MockBackendLifecycle()
-        let secondStreamReceived = AtomicCounter()
+        let secondStreamFinished = AtomicCounter()
 
-        // We tightly scope the second stream creation inside onFinish.
-        // To assert "no deadlock", we wrap the whole thing in a timeout.
-        try await withTimeout(.milliseconds(500)) {
-            let firstFinished = AsyncSemaphore()
+        // Channel the re-entrant stream out of the closure so we can drain
+        // it from the test, proving its task wasn't clobbered.
+        let secondStreamHolder = StreamHolder()
 
+        try await withTimeout(.seconds(2)) {
             let stream1 = lifecycle.makeStream(
                 onFinish: { [weak lifecycle] in
-                    // Re-enter: start a new stream from within the finish callback.
                     guard let lifecycle else { return }
-                    _ = lifecycle.makeStream(
-                        onFinish: { secondStreamReceived.increment() },
+                    let s2 = lifecycle.makeStream(
+                        onFinish: { secondStreamFinished.increment() },
                         body: { continuation in
                             continuation.yield(.token("from-reentry"))
                         }
                     )
-                    firstFinished.signal()
+                    secondStreamHolder.set(s2)
                 },
                 body: { continuation in
                     continuation.yield(.token("first"))
@@ -153,22 +157,26 @@ final class MockBackendLifecycleTests: XCTestCase {
             )
 
             for try await _ in stream1.events { }
-            await firstFinished.wait()
+
+            // Drain the re-entrant stream. Its onFinish must fire — proving
+            // the task ran to completion and the slot wasn't clobbered.
+            let s2 = try XCTUnwrap(secondStreamHolder.value)
+            for try await _ in s2.events { }
         }
 
-        XCTAssertGreaterThanOrEqual(
-            secondStreamReceived.value, 0,
-            "If we get here without timing out, no deadlock occurred"
+        XCTAssertEqual(
+            secondStreamFinished.value, 1,
+            "Re-entrant stream's onFinish must fire — proves the task survived the first stream's cleanup"
         )
     }
 
     // MARK: - Back-to-back streams clear the slot
 
     /// After one stream completes naturally, the next call to `makeStream`
-    /// must store its task in a fresh slot. Sabotage check: removing
-    /// `clearTask()` from `MockBackendLifecycle.makeStream` breaks this test
-    /// (the second `cancel()` would have nothing to cancel because the slot
-    /// still holds the dead task — assertion below fails).
+    /// must store its task in a fresh slot. Sabotage check: removing the
+    /// post-`onFinish` `clearTaskIfMatches(t)` from
+    /// `MockBackendLifecycle.makeStream` breaks the `hasActiveTask`
+    /// assertion below (the slot still holds the finished task).
     func test_backToBackMakeStream_clearsTaskBetweenRuns() async throws {
         let lifecycle = MockBackendLifecycle()
 
@@ -181,10 +189,11 @@ final class MockBackendLifecycleTests: XCTestCase {
         )
         for try await _ in stream1.events { }
 
-        // Give the task's completion block a moment to run clearTask().
-        // (`for try await` returns after `continuation.finish()`, but the
-        // task body's last statement — `self?.clearTask()` — runs
-        // immediately after on the same task hop.)
+        // Give the task's completion block a moment to run its
+        // identity-aware clear. (`for try await` returns after
+        // `continuation.finish()`, but the task body's last statement —
+        // `self?.clearTaskIfMatches(t)` — runs immediately after on the
+        // same task hop.)
         let deadline = ContinuousClock().now.advanced(by: .milliseconds(500))
         while lifecycle.hasActiveTask && ContinuousClock().now < deadline {
             try await Task.sleep(for: .milliseconds(5))
@@ -242,36 +251,17 @@ private final class AtomicCounter: @unchecked Sendable {
     }
 }
 
-/// Single-shot semaphore that doesn't depend on any async runtime detail
-/// beyond `withCheckedContinuation`.
-private final class AsyncSemaphore: @unchecked Sendable {
+/// Box that lets the re-entrant stream escape the closure that creates it,
+/// so the test body can drain it after the first stream finishes.
+private final class StreamHolder: @unchecked Sendable {
     private let lock = NSLock()
-    private var signaled = false
-    private var continuation: CheckedContinuation<Void, Never>?
-
-    func signal() {
-        lock.lock()
-        if let c = continuation {
-            continuation = nil
-            lock.unlock()
-            c.resume()
-        } else {
-            signaled = true
-            lock.unlock()
-        }
+    private var _value: GenerationStream?
+    var value: GenerationStream? {
+        lock.lock(); defer { lock.unlock() }
+        return _value
     }
-
-    func wait() async {
-        await withCheckedContinuation { c in
-            lock.lock()
-            if signaled {
-                signaled = false
-                lock.unlock()
-                c.resume()
-            } else {
-                continuation = c
-                lock.unlock()
-            }
-        }
+    func set(_ stream: GenerationStream) {
+        lock.lock(); defer { lock.unlock() }
+        _value = stream
     }
 }

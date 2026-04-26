@@ -16,17 +16,21 @@ import BaseChatInference
 ///   returns, regardless of whether it threw, finished, or was cancelled
 ///
 /// The body closure is responsible for the actual token production. The
-/// `onFinish` closure is the per-backend "I'm done generating" signal — it
-/// runs under the backend's own `NSLock`, so each conformer keeps its own
-/// state-lock discipline.
+/// `onFinish` closure is the per-backend "I'm done generating" signal. The
+/// helper does not hold any lock while invoking it — each conformer is
+/// responsible for acquiring its own `NSLock` (or other state-lock
+/// discipline) inside the closure if it needs one.
 ///
 /// ## Termination ordering
 ///
 /// `body()` runs to completion → `onFinish()` fires → `continuation.finish()`
-/// is called → `clearTask()` clears the slot. `onFinish` runs *before*
-/// `continuation.finish()` so that consumers iterating `events` see the
-/// `isGenerating == false` state before their `for try await` loop exits —
-/// matching the original `defer { finishGeneration() }` ordering.
+/// is called → the slot is cleared (only if it still holds *this* task).
+/// `onFinish` runs *before* `continuation.finish()` so that consumers
+/// iterating `events` see the `isGenerating == false` state before their
+/// `for try await` loop exits — matching the original
+/// `defer { finishGeneration() }` ordering. The identity-aware clear means
+/// a re-entrant `makeStream` call from inside `onFinish` (which sets a new
+/// task in the slot) is not clobbered by the original task's cleanup.
 ///
 /// ## Why a class, not a `@MainActor` protocol
 ///
@@ -61,9 +65,21 @@ package final class MockBackendLifecycle: @unchecked Sendable {
         generationTask = nil
     }
 
+    /// Identity-aware clear: only drops the slot if the recorded task is
+    /// still `task`. Used by `makeStream`'s completion path so a re-entrant
+    /// `makeStream` call from inside `onFinish` (which sets a new task in
+    /// the slot) is not clobbered by the original task's cleanup.
+    private func clearTaskIfMatches(_ task: Task<Void, Never>) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        if generationTask == task {
+            generationTask = nil
+        }
+    }
+
     /// Test-only: reports whether the task slot is currently occupied.
-    /// Used by `MockBackendLifecycleTests` to prove `clearTask()` ran on
-    /// the natural completion path.
+    /// Used by `MockBackendLifecycleTests` to prove the slot is cleared
+    /// on the natural completion path.
     package var hasActiveTask: Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -89,16 +105,24 @@ package final class MockBackendLifecycle: @unchecked Sendable {
     ///     the underlying task on the same hop as `body`'s natural exit,
     ///     and runs *before* the stream's continuation is finished so that
     ///     consumers see the post-generation state on their last awaited
-    ///     iteration. Always fires exactly once, even when `body` throws or
-    ///     returns early.
+    ///     iteration. Always fires exactly once after `body` returns —
+    ///     including when `body` terminates the stream early via
+    ///     `continuation.finish(throwing:)` (as `ChaosBackend` does for its
+    ///     mid-stream failure modes) or when the body returns early after
+    ///     observing `Task.isCancelled`.
     ///   - body: The token-producing closure. It owns yielding events and
-    ///     handling cancellation; it must not call `continuation.finish()`
-    ///     itself — the helper does that after the closure returns.
+    ///     handling cancellation. It may finish the continuation early via
+    ///     `continuation.finish(throwing:)` to surface an error, but must
+    ///     not call `continuation.finish()` (without an error) itself — the
+    ///     helper does that after the closure returns.
     package func makeStream(
         onFinish: @escaping @Sendable () -> Void,
         body: @escaping @Sendable (AsyncThrowingStream<GenerationEvent, Error>.Continuation) async -> Void
     ) -> GenerationStream {
         let stream = AsyncThrowingStream<GenerationEvent, Error> { [weak self] continuation in
+            // Hold the task in a Sendable box so the task body can refer to
+            // its own identity for the identity-aware clear below.
+            let taskBox = TaskBox()
             let task = Task { [weak self] in
                 await body(continuation)
                 // Signal finish *before* closing the stream so the consumer
@@ -106,8 +130,11 @@ package final class MockBackendLifecycle: @unchecked Sendable {
                 // matches the original `defer { finishGeneration() }` order.
                 onFinish()
                 continuation.finish()
-                self?.clearTask()
+                if let t = taskBox.task {
+                    self?.clearTaskIfMatches(t)
+                }
             }
+            taskBox.task = task
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
             }
@@ -115,4 +142,13 @@ package final class MockBackendLifecycle: @unchecked Sendable {
         }
         return GenerationStream(stream)
     }
+}
+
+/// Tiny one-shot box so a Task's body can recover its own `Task` identity
+/// for the identity-aware clear in `makeStream`. Safe under
+/// `@unchecked Sendable` because the only writer is the synchronous
+/// `AsyncThrowingStream` builder closure — by the time the task body reads
+/// `task`, the write has happened-before via task creation.
+private final class TaskBox: @unchecked Sendable {
+    var task: Task<Void, Never>?
 }
