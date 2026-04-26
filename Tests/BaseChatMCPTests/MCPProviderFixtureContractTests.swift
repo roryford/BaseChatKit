@@ -50,7 +50,7 @@ final class MCPProviderFixtureContractTests: XCTestCase {
     func test_toolsListFixtureReplayRefreshesNamespacedTools() async throws {
         for provider in providers {
             let toolsResult = try loadResultFixture(provider: provider, file: "tools.list.result.json")
-            let expectedNames = try extractToolNames(from: toolsResult).map { "\(provider).\($0)" }.sorted()
+            let expectedNames = try extractToolNames(from: toolsResult).map { "\(provider)__\($0)" }.sorted()
 
             let source = MCPToolSource(
                 serverID: UUID(),
