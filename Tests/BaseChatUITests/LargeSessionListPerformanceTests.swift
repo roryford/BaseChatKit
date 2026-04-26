@@ -25,6 +25,11 @@ final class LargeSessionListPerformanceTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        // Slow XCTMeasure baselines (~65s combined). Skipped in main CI to keep
+        // PR feedback fast; nightly job sets RUN_SLOW_TESTS=1. Always runs locally.
+        let env = ProcessInfo.processInfo.environment
+        try XCTSkipIf(env["CI"] == "true" && env["RUN_SLOW_TESTS"] != "1",
+                      "Slow perf baseline — runs in nightly CI only. Set RUN_SLOW_TESTS=1 to force.")
         container = try makeInMemoryContainer()
         context = container.mainContext
         persistence = SwiftDataPersistenceProvider(modelContext: context)

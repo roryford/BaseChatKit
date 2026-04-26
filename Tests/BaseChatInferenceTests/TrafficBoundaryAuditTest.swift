@@ -66,6 +66,16 @@ import XCTest
 /// of where `swift test` is invoked.
 final class TrafficBoundaryAuditTest: XCTestCase {
 
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        // Source-tree walk + regex audit (~50s combined). Skipped in main CI to
+        // keep PR feedback fast; nightly job sets RUN_SLOW_TESTS=1. Always runs
+        // locally so contributors get the boundary-rule signal pre-push.
+        let env = ProcessInfo.processInfo.environment
+        try XCTSkipIf(env["CI"] == "true" && env["RUN_SLOW_TESTS"] != "1",
+                      "Source-tree audit — runs in nightly CI only. Set RUN_SLOW_TESTS=1 to force.")
+    }
+
     // MARK: - Allowlists
 
     /// Files where direct `URLSession`/`URLRequest`/`URLSessionConfiguration`
