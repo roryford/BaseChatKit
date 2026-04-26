@@ -148,6 +148,34 @@ struct WideIntent: AppIntent, Decodable {
     }
 }
 
+/// Date-decoding fixture: one required `Date` parameter so we can verify that
+/// `execute(arguments:)` honours the ISO-8601 contract its synthesised schema
+/// advertises.
+@available(iOS 26, macOS 26, *)
+struct DateIntent: AppIntent, Decodable {
+
+    static let title: LocalizedStringResource = "Date"
+
+    @Parameter(title: "When")
+    var when: Date
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        self.when = try c.decode(Date.self, forKey: .when)
+    }
+
+    private enum CodingKeys: String, CodingKey { case when }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // ISO-8601 round-trip so the test can assert on a stable string.
+        let formatter = ISO8601DateFormatter()
+        return .result(value: formatter.string(from: when))
+    }
+}
+
 // MARK: - Tests
 
 @available(iOS 26, macOS 26, *)
@@ -276,6 +304,32 @@ final class AppIntentToolExecutorTests: XCTestCase {
             "authorisation-domain errors must surface as .permissionDenied"
         )
         XCTAssertTrue(result.content.contains("Authorization required"))
+    }
+
+    func testExecuteDecodesISO8601DateArguments() async throws {
+        let executor = AppIntentToolExecutor(DateIntent.self)
+        // The synthesised schema advertises `Date` as a string with
+        // `format: date-time`, so the executor must treat the argument as
+        // ISO-8601. A vanilla `JSONDecoder` would default to
+        // `secondsSince2001` and reject this string.
+        let iso = "2026-04-26T12:34:56Z"
+        let args = JSONSchemaValue.object([
+            "when": .string(iso),
+        ])
+
+        let result = try await executor.execute(arguments: args)
+
+        XCTAssertNil(
+            result.errorKind,
+            "ISO-8601 date arguments must decode without error, got \(String(describing: result.errorKind)): \(result.content)"
+        )
+        // `perform()` round-trips the date back through the same formatter,
+        // so equality on the input string proves the decode produced the
+        // expected `Date`.
+        XCTAssertTrue(
+            result.content.contains(iso),
+            "expected round-tripped ISO-8601 string in result body, got \(result.content)"
+        )
     }
 
     func testExecutorIsToolExecutorConformant() {

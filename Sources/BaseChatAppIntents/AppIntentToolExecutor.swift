@@ -81,8 +81,17 @@ public struct AppIntentToolExecutor<Intent: AppIntent & Decodable>: ToolExecutor
 
             let intent: Intent
             do {
-                let argsData = try JSONEncoder().encode(arguments)
-                intent = try JSONDecoder().decode(Intent.self, from: argsData)
+                // Encode/decode symmetrically with ISO-8601 dates. The
+                // synthesised JSON Schema advertises `Date` as
+                // `{ "type": "string", "format": "date-time" }`, so models
+                // emit ISO-8601 strings — `JSONDecoder`'s default
+                // `secondsSince2001` strategy would reject every one of them.
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                let argsData = try encoder.encode(arguments)
+                intent = try decoder.decode(Intent.self, from: argsData)
             } catch {
                 return ToolResult(
                     callId: "",
@@ -149,7 +158,12 @@ public struct AppIntentToolExecutor<Intent: AppIntent & Decodable>: ToolExecutor
     static func serialise(_ result: some IntentResult) -> String {
         if let encodable = result as? any Encodable {
             do {
-                let data = try JSONEncoder().encode(EncodableBox(encodable))
+                // Symmetric with the decoder in `execute(arguments:)` — a
+                // result that contains a `Date` should serialise as an
+                // ISO-8601 string so the model sees the same shape it sent.
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                let data = try encoder.encode(EncodableBox(encodable))
                 if let string = String(data: data, encoding: .utf8) {
                     return string
                 }
