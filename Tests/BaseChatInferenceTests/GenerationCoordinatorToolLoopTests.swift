@@ -86,6 +86,60 @@ final class GenerationCoordinatorToolLoopTests: XCTestCase {
         ToolCall(id: id, toolName: name, arguments: arguments)
     }
 
+    // MARK: - Streaming tool-call deltas (#621)
+
+    func test_streamingToolCallDeltas_forwardedThroughCoordinatorStream() async throws {
+        // Backend emits start → delta → delta → toolCall in one turn,
+        // then a quiet final turn. The coordinator must forward the
+        // streaming-delta GenerationEvents verbatim — they are not
+        // reasoning/diagnostic events the coordinator should swallow.
+        let executor = RecordingExecutor(name: "get_weather") { _ in
+            ToolResult(callId: "", content: "sunny", errorKind: nil)
+        }
+        let registry = ToolRegistry()
+        registry.register(executor)
+
+        let call = makeCall(id: "sd-1", name: "get_weather", arguments: #"{"city":"Rome"}"#)
+        provider.backend.scriptedToolCallDeltasPerTurn = [
+            [
+                .start(callId: "sd-1", name: "get_weather"),
+                .delta(callId: "sd-1", textDelta: #"{"city"#),
+                .delta(callId: "sd-1", textDelta: #"":"Rome"}"#),
+                .call(call),
+            ],
+            [],
+        ]
+        provider.backend.tokensToYieldPerTurn = [[], ["bye"]]
+
+        let coordinator = makeCoordinator(registry: registry)
+        let (_, stream) = try coordinator.enqueue(
+            messages: [("user", "weather?")],
+            maxOutputTokens: 32
+        )
+
+        let events = try await collectEvents(stream)
+
+        let starts = events.compactMap { e -> (String, String)? in
+            if case .toolCallStart(let id, let name) = e { return (id, name) }
+            return nil
+        }
+        let deltas = events.compactMap { e -> (String, String)? in
+            if case .toolCallArgumentsDelta(let id, let d) = e { return (id, d) }
+            return nil
+        }
+        XCTAssertEqual(starts.count, 1)
+        XCTAssertEqual(starts.first?.0, "sd-1")
+        XCTAssertEqual(starts.first?.1, "get_weather")
+        XCTAssertEqual(deltas.map(\.1), [#"{"city"#, #"":"Rome"}"#])
+
+        // Authoritative call still lands.
+        let toolCalls = events.compactMap { e -> ToolCall? in
+            if case .toolCall(let c) = e { return c } else { return nil }
+        }
+        XCTAssertEqual(toolCalls.count, 1)
+        XCTAssertEqual(toolCalls.first?.id, "sd-1")
+    }
+
     // MARK: - End-to-end dispatch
 
     func test_toolCall_dispatchesThroughRegistry_andSurfacesResult() async throws {

@@ -83,6 +83,17 @@ public enum ToolLoopEvent: Sendable, Equatable {
     /// forwarded — agentic callers care about the visible output.
     case token(String)
 
+    /// Streaming start of a tool call (forwarded verbatim from
+    /// ``GenerationEvent/toolCallStart(callId:name:)``). Only emitted by
+    /// backends whose
+    /// ``BackendCapabilities/streamsToolCallArguments`` is `true`.
+    case toolCallStart(callId: String, name: String)
+
+    /// Streaming JSON-arguments fragment (forwarded verbatim from
+    /// ``GenerationEvent/toolCallArgumentsDelta(callId:textDelta:)``). The
+    /// authoritative arguments string lands on ``toolCall(_:)``.
+    case toolCallArgumentsDelta(callId: String, textDelta: String)
+
     /// The model has requested a tool call. Emitted *before* dispatch so UIs
     /// can render the call in flight. The orchestrator dispatches the call
     /// itself; the host does not need to act.
@@ -174,6 +185,25 @@ public enum ToolLoopError: Error, Sendable, Equatable {
 /// For multi-tool agents, prefer ``init(backend:registry:policy:)`` — the
 /// orchestrator routes each call through ``ToolRegistry/dispatch(_:)`` which
 /// looks up the right executor by name.
+///
+/// ## Parallel batch dispatch
+///
+/// When a single generation round emits more than one ``ToolCall``, the
+/// orchestrator dispatches the batch in parallel via `withTaskGroup` only
+/// when *every* executor in the batch returns
+/// ``ToolExecutor/supportsConcurrentDispatch`` == `true`. Otherwise it falls
+/// back to the sequential dispatch path that has always been the contract,
+/// preserving ``ToolRegistry``'s reentrancy semantics for tools with shared
+/// state.
+///
+/// Result order in the next-turn prompt is deterministic: results are sorted
+/// by their batch-emission index before being appended, regardless of which
+/// executor finishes first. KV-cache prefix reuse depends on stable
+/// post-tool prompt prefixes, so this ordering is load-bearing.
+///
+/// Cancellation propagates through the task group: a cancelled consumer or
+/// step-timeout drains in-flight executors and stops the backend without
+/// emitting late ``ToolLoopEvent/toolResult(_:)`` events.
 ///
 /// ## Example
 /// ```swift
@@ -359,18 +389,63 @@ public struct ToolCallLoopOrchestrator: Sendable {
                 }
             }
 
-            // Dispatch each call sequentially, forwarding the result before the
-            // next one runs. Sequential dispatch matches GenerationCoordinator's
-            // existing contract — parallel dispatch is a richer feature that
-            // belongs on a future explicit policy knob, not a default.
-            var resultsAppendix = ""
-            for call in outcome.toolCalls {
-                if Task.isCancelled {
+            // Dispatch the batch. Single-call rounds always go through the
+            // sequential path (no behaviour change). Multi-call rounds opt
+            // into `withTaskGroup` parallel dispatch only when every
+            // executor in the batch returns
+            // `ToolExecutor.supportsConcurrentDispatch == true`; otherwise
+            // we fall back to sequential to preserve ToolRegistry's
+            // reentrancy contract for tools with shared state.
+            //
+            // Result order in the next prompt is deterministic and matches
+            // batch-emission order — KV-cache prefix reuse depends on a
+            // stable post-tool prompt prefix.
+            //
+            // TODO(#753): MLX integration test for parallel multi-call output
+            // — exercising tools with `supportsConcurrentDispatch == true`
+            // against a real local model and asserting deterministic result
+            // order.
+            let results: [ToolResult]
+            if outcome.toolCalls.count <= 1 {
+                var sequential: [ToolResult] = []
+                sequential.reserveCapacity(outcome.toolCalls.count)
+                for call in outcome.toolCalls {
+                    if Task.isCancelled {
+                        continuation.finish()
+                        return
+                    }
+                    let result = await dispatcher.dispatch(call)
+                    continuation.yield(.toolResult(result))
+                    sequential.append(result)
+                }
+                results = sequential
+            } else if await dispatcher.canDispatchConcurrently(outcome.toolCalls) {
+                let parallelOutcome = await dispatchParallel(
+                    calls: outcome.toolCalls,
+                    continuation: continuation
+                )
+                if parallelOutcome.cancelled {
                     continuation.finish()
                     return
                 }
-                let result = await dispatcher.dispatch(call)
-                continuation.yield(.toolResult(result))
+                results = parallelOutcome.results
+            } else {
+                var sequential: [ToolResult] = []
+                sequential.reserveCapacity(outcome.toolCalls.count)
+                for call in outcome.toolCalls {
+                    if Task.isCancelled {
+                        continuation.finish()
+                        return
+                    }
+                    let result = await dispatcher.dispatch(call)
+                    continuation.yield(.toolResult(result))
+                    sequential.append(result)
+                }
+                results = sequential
+            }
+
+            var resultsAppendix = ""
+            for (call, result) in zip(outcome.toolCalls, results) {
                 resultsAppendix += "\n\nTool '\(call.toolName)' result: \(result.content)\n"
             }
 
@@ -379,6 +454,58 @@ public struct ToolCallLoopOrchestrator: Sendable {
 
         continuation.yield(.stepLimitReached(steps: step))
         continuation.finish()
+    }
+
+    // MARK: - Parallel dispatch
+
+    private struct ParallelOutcome: Sendable {
+        let results: [ToolResult]
+        let cancelled: Bool
+    }
+
+    /// Dispatches `calls` concurrently via `withTaskGroup`, yields
+    /// ``ToolLoopEvent/toolResult(_:)`` events sorted by batch index, and
+    /// returns the results in batch-emission order.
+    ///
+    /// Determinism note: tasks complete in arbitrary order, but we collect
+    /// `(idx, ToolResult)` pairs and sort by `idx` before yielding so the
+    /// next-turn prompt prefix stays stable. KV-cache prefix reuse depends
+    /// on this — see the type-level "Parallel batch dispatch" section.
+    private func dispatchParallel(
+        calls: [ToolCall],
+        continuation: AsyncThrowingStream<ToolLoopEvent, Error>.Continuation
+    ) async -> ParallelOutcome {
+        let dispatcher = self.dispatcher
+        let collected: [(Int, ToolResult)] = await withTaskGroup(
+            of: (Int, ToolResult).self
+        ) { group in
+            defer { group.cancelAll() }
+            for (idx, call) in calls.enumerated() {
+                group.addTask {
+                    let result = await dispatcher.dispatch(call)
+                    return (idx, result)
+                }
+            }
+            var out: [(Int, ToolResult)] = []
+            out.reserveCapacity(calls.count)
+            for await pair in group {
+                out.append(pair)
+            }
+            return out
+        }
+
+        if Task.isCancelled {
+            return ParallelOutcome(results: [], cancelled: true)
+        }
+
+        let sorted = collected.sorted { $0.0 < $1.0 }
+        var results: [ToolResult] = []
+        results.reserveCapacity(sorted.count)
+        for (_, result) in sorted {
+            continuation.yield(.toolResult(result))
+            results.append(result)
+        }
+        return ParallelOutcome(results: results, cancelled: false)
     }
 
     /// Reads one round of events from the backend stream, optionally bounded
@@ -428,6 +555,10 @@ public struct ToolCallLoopOrchestrator: Sendable {
                 switch event {
                 case .token(let text):
                     continuation.yield(.token(text))
+                case .toolCallStart(let callId, let name):
+                    continuation.yield(.toolCallStart(callId: callId, name: name))
+                case .toolCallArgumentsDelta(let callId, let textDelta):
+                    continuation.yield(.toolCallArgumentsDelta(callId: callId, textDelta: textDelta))
                 case .toolCall(let call):
                     continuation.yield(.toolCall(call))
                     calls.append(call)
@@ -475,6 +606,37 @@ public struct ToolCallLoopOrchestrator: Sendable {
                 return await Self.dispatchSingle(executor: executor, call: call)
             case .registry(let registry):
                 return await registry.dispatch(call)
+            }
+        }
+
+        /// Returns `true` when every executor that would handle one of
+        /// `calls` has opted into concurrent dispatch.
+        ///
+        /// - Single-executor dispatcher: every call routes to the same
+        ///   executor, so the answer is just that executor's flag.
+        /// - Registry dispatcher: each call resolves to a (possibly
+        ///   different) executor by name. The lookup is performed under
+        ///   MainActor since ``ToolRegistry`` is MainActor-isolated.
+        ///   Calls that resolve to no executor (unknown tool) are
+        ///   considered non-concurrent — the dispatch will produce an
+        ///   `unknownTool` error result and we don't want to short-circuit
+        ///   that through a parallel path.
+        func canDispatchConcurrently(_ calls: [ToolCall]) async -> Bool {
+            switch self {
+            case .singleExecutor(let executor):
+                return executor.supportsConcurrentDispatch
+            case .registry(let registry):
+                return await MainActor.run {
+                    for call in calls {
+                        guard let executor = registry.executor(for: call.toolName) else {
+                            return false
+                        }
+                        if !executor.supportsConcurrentDispatch {
+                            return false
+                        }
+                    }
+                    return true
+                }
             }
         }
 

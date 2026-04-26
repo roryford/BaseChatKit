@@ -200,6 +200,18 @@ public protocol JSONSchemaValidating: Sendable {
         return result
     }
 
+    /// Returns the registered executor for `toolName` (case-insensitive),
+    /// or `nil` when no tool is registered under that name.
+    ///
+    /// Used by ``ToolCallLoopOrchestrator`` to read
+    /// ``ToolExecutor/supportsConcurrentDispatch`` on every executor in a
+    /// batch before deciding whether to dispatch the batch in parallel.
+    /// The lookup does not mutate the registry and does not increment the
+    /// in-flight counter.
+    public func executor(for toolName: String) -> (any ToolExecutor)? {
+        tools[toolName.lowercased()]
+    }
+
     /// Returns the registered executor's ``ToolExecutor/requiresApproval``
     /// flag, or `false` when no tool is registered under `toolName`.
     ///

@@ -89,6 +89,10 @@ public struct EventRecorder: Sendable {
                     // fuzz scenarios can pin its presence/absence without
                     // affecting reasoning text accumulation.
                     events.append(.init(t: t, kind: "thinkingSignature", v: signature))
+                case .toolCallStart(let callId, let name):
+                    events.append(.init(t: t, kind: "toolCallStart", v: "\(callId):\(name)"))
+                case .toolCallArgumentsDelta(let callId, let textDelta):
+                    events.append(.init(t: t, kind: "toolCallArgumentsDelta", v: "\(callId):\(textDelta)"))
                 }
                 memoryTick()
             }

@@ -44,6 +44,7 @@ private func categorise(_ event: GenerationEvent) -> EventCategory? {
     case .kvCacheReuse: return nil
     case .diagnosticThrottle: return nil
     case .thinkingSignature: return nil
+    case .toolCallStart, .toolCallArgumentsDelta: return nil
     }
 }
 
