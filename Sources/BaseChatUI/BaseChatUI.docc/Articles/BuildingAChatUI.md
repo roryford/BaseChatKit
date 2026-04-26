@@ -136,5 +136,5 @@ Tasks run sequentially off `@MainActor`. Errors surface in ``ChatViewModel/backg
 ## Next Steps
 
 - See ``GenerationSettingsView`` to give users control over temperature and prompt templates
-- See ``ModelManagementSheet`` for the combined model selection, download, and storage UI
+- See `BaseChatUIModelManagement.ModelManagementSheet` for the combined model selection, download, and storage UI (now in the peeled `BaseChatUIModelManagement` product — `import` it explicitly)
 - See ``BaseChatConfiguration/Features`` to hide UI features that don't apply to your deployment
