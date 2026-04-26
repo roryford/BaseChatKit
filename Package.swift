@@ -20,6 +20,7 @@ let package = Package(
         .executable(name: "fuzz-chat", targets: ["fuzz-chat"]),
         .library(name: "BaseChatTools", targets: ["BaseChatTools"]),
         .executable(name: "bck-tools", targets: ["bck-tools"]),
+        .library(name: "BaseChatAppIntents", targets: ["BaseChatAppIntents"]),
     ],
     traits: [
         .default(enabledTraits: ["MLX", "Llama"]),
@@ -361,6 +362,23 @@ let package = Package(
                 "BaseChatTools",
                 "BaseChatInference",
                 "BaseChatTestSupport",
+            ]
+        ),
+        // BaseChatAppIntents: AppIntent ↔ ToolDefinition bridge.
+        // Lets hosts expose any AppIntent as a model-callable tool by deriving
+        // the JSON-Schema parameters from `@Parameter` reflection. Trait-free
+        // and depends only on BaseChatInference so apps can opt in without
+        // pulling AppIntents on platforms / module graphs that don't need it.
+        .target(
+            name: "BaseChatAppIntents",
+            dependencies: ["BaseChatInference"],
+            path: "Sources/BaseChatAppIntents"
+        ),
+        .testTarget(
+            name: "BaseChatAppIntentsTests",
+            dependencies: [
+                "BaseChatAppIntents",
+                "BaseChatInference",
             ]
         ),
         // Xcode-only: real MLX model inference requiring Metal shader library.
