@@ -28,8 +28,8 @@ final class DemoMCPCoordinator {
         self.catalog = MCPCatalog.all
         self.catalogHelpText = "No built-in entries available."
         #else
-        self.catalog = ConnectedServicesFallbackCatalog.all
-        self.catalogHelpText = "Using fallback demo catalog. Enable the MCPBuiltinCatalog trait to use BaseChatMCP built-ins."
+        self.catalog = []
+        self.catalogHelpText = "Enable the MCPBuiltinCatalog trait or provide custom server descriptors."
         #endif
 
         for descriptor in catalog {

@@ -12,7 +12,7 @@ public enum MCPCatalog {
             id: UUID(uuidString: "5E4A6401-C86D-43DE-847E-AE02A34E89D8")!,
             displayName: "Notion",
             endpointHost: "mcp.notion.com",
-            endpointPath: "/v1/sse",
+            endpointPath: "/mcp",
             toolNamespace: "notion",
             oauthScopes: ["read:content", "write:content"],
             oauthIssuerHost: "notion.com",
@@ -25,7 +25,7 @@ public enum MCPCatalog {
             id: UUID(uuidString: "B146A315-DFA4-4F75-9AF8-7B98CDE569FB")!,
             displayName: "Linear",
             endpointHost: "mcp.linear.app",
-            endpointPath: "/v1/sse",
+            endpointPath: "/mcp",
             toolNamespace: "linear",
             oauthScopes: ["read", "write"],
             oauthIssuerHost: "linear.app",
@@ -37,8 +37,8 @@ public enum MCPCatalog {
         descriptor(
             id: UUID(uuidString: "7B573A8A-C3CB-450D-9EBE-2E7D4C973682")!,
             displayName: "GitHub",
-            endpointHost: "mcp.github.com",
-            endpointPath: "/v1/sse",
+            endpointHost: "api.githubcopilot.com",
+            endpointPath: "/mcp/",
             toolNamespace: "github",
             oauthScopes: ["read:user", "repo"],
             oauthIssuerHost: "github.com",
@@ -70,7 +70,7 @@ public enum MCPCatalog {
         redirect.host = "oauth"
         redirect.path = "/mcp/\(toolNamespace)/callback"
 
-        MCPServerDescriptor(
+        return MCPServerDescriptor(
             id: id,
             displayName: displayName,
             transport: .streamableHTTP(endpoint: endpoint.url!, headers: [:]),
