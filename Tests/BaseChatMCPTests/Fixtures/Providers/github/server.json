@@ -7,7 +7,7 @@
     "dataDisclosure": "Tool calls may send prompt content and selected arguments to GitHub.",
     "transport": {
       "type": "streamable-http",
-      "endpoint": "https://mcp.github.com/v1/sse"
+      "endpoint": "https://api.githubcopilot.com/mcp/"
     },
     "oauth": {
       "issuer": "https://github.com",

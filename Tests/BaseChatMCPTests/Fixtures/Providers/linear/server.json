@@ -7,7 +7,7 @@
     "dataDisclosure": "Tool calls may send prompt content and selected arguments to Linear.",
     "transport": {
       "type": "streamable-http",
-      "endpoint": "https://mcp.linear.app/v1/sse"
+      "endpoint": "https://mcp.linear.app/mcp"
     },
     "oauth": {
       "issuer": "https://linear.app",
