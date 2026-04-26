@@ -49,7 +49,7 @@ public final class ChaosBackend: InferenceBackend, @unchecked Sendable {
     private let stateLock = NSLock()
     private var _isModelLoaded = true
     private var _isGenerating = false
-    private var generationTask: Task<Void, Never>?
+    private let lifecycle = MockBackendLifecycle()
     private var _mode: FailureMode
     private var _tokensToYield: [String]
 
@@ -110,21 +110,18 @@ public final class ChaosBackend: InferenceBackend, @unchecked Sendable {
         }
         withStateLock { _isGenerating = true }
 
-        let stream = AsyncThrowingStream<GenerationEvent, Error> { [weak self] continuation in
-            let task = Task { [weak self] in
+        return lifecycle.makeStream(
+            onFinish: { [weak self] in
+                self?.withStateLock { self?._isGenerating = false }
+            },
+            body: { continuation in
                 await Self.runFailureMode(
                     mode: mode,
                     tokens: tokens,
                     continuation: continuation
                 )
-                self?.finishGeneration()
             }
-            continuation.onTermination = { @Sendable _ in
-                task.cancel()
-            }
-            self?.setGenerationTask(task)
-        }
-        return GenerationStream(stream)
+        )
     }
 
     public func stopGeneration() {
@@ -142,46 +139,45 @@ public final class ChaosBackend: InferenceBackend, @unchecked Sendable {
         tokens: [String],
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
     ) async {
+        // The lifecycle helper calls `continuation.finish()` after this body
+        // returns, so we never need to finish manually except to deliver an
+        // error mid-stream (`networkError`). A failed `Task.isCancelled`
+        // check just exits the body — the helper closes the continuation.
         switch mode {
         case .none:
             for token in tokens {
-                if Task.isCancelled { break }
+                if Task.isCancelled { return }
                 continuation.yield(.token(token))
             }
-            continuation.finish()
 
         case .dropMidStream(let afterTokens):
             for (index, token) in tokens.enumerated() {
-                if Task.isCancelled { break }
-                if index >= afterTokens { break }
+                if Task.isCancelled { return }
+                if index >= afterTokens { return }
                 continuation.yield(.token(token))
             }
-            // Silent drop: no throw, just finish early.
-            continuation.finish()
 
         case .slowFirstToken(let delay):
-            if Task.isCancelled { continuation.finish(); return }
+            if Task.isCancelled { return }
             try? await Task.sleep(for: delay)
             for token in tokens {
-                if Task.isCancelled { break }
+                if Task.isCancelled { return }
                 continuation.yield(.token(token))
             }
-            continuation.finish()
 
         case .burstThenStall(let burstSize, let stallDuration):
             for (index, token) in tokens.enumerated() {
-                if Task.isCancelled { continuation.finish(); return }
+                if Task.isCancelled { return }
                 if index == burstSize {
                     try? await Task.sleep(for: stallDuration)
-                    if Task.isCancelled { continuation.finish(); return }
+                    if Task.isCancelled { return }
                 }
                 continuation.yield(.token(token))
             }
-            continuation.finish()
 
         case .networkError(let afterTokens):
             for (index, token) in tokens.enumerated() {
-                if Task.isCancelled { continuation.finish(); return }
+                if Task.isCancelled { return }
                 if index >= afterTokens { break }
                 continuation.yield(.token(token))
             }
@@ -199,25 +195,11 @@ public final class ChaosBackend: InferenceBackend, @unchecked Sendable {
         return body()
     }
 
-    private func setGenerationTask(_ task: Task<Void, Never>) {
-        withStateLock { generationTask = task }
-    }
-
-    private func finishGeneration() {
-        withStateLock {
-            _isGenerating = false
-            generationTask = nil
-        }
-    }
-
     private func cancelGeneration(markModelUnloaded: Bool) {
-        let task = withStateLock { () -> Task<Void, Never>? in
+        withStateLock {
             if markModelUnloaded { _isModelLoaded = false }
             _isGenerating = false
-            let task = generationTask
-            generationTask = nil
-            return task
         }
-        task?.cancel()
+        lifecycle.cancel()
     }
 }

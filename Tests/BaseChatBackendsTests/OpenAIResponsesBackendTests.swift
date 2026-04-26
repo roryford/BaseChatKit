@@ -315,5 +315,42 @@ final class OpenAIResponsesBackendTests: XCTestCase {
             "maxThinkingTokens == 0 means 'disable thinking'; reasoning block must be omitted"
         )
     }
+
+    /// Stream errors that fire while the parser is still inside a thinking
+    /// block must emit `.thinkingComplete` before rethrowing — otherwise UI
+    /// consumers hang in a thinking-only state. Pins the parser-error path
+    /// through `ThinkingBlockManager.flushIfOpen`.
+    func test_errorMidThinkingBlock_emitsThinkingCompleteBeforeThrow() async throws {
+        let (backend, url) = makeBackend()
+
+        let chunks: [Data] = [
+            sseEvent("response.reasoning_summary_text.delta", data: #"{"delta":"Pondering"}"#),
+            sseEvent("response.error",
+                     data: #"{"error":{"message":"upstream rejected"}}"#),
+        ]
+
+        MockURLProtocol.stub(url: url, response: .sse(chunks: chunks, statusCode: 200))
+
+        try await load(backend)
+        let stream = try backend.generate(
+            prompt: "x",
+            systemPrompt: nil,
+            config: GenerationConfig(maxThinkingTokens: 512)
+        )
+
+        var observed: [EventCategory] = []
+        var threw = false
+        do {
+            for try await event in stream.events {
+                if let cat = categorise(event) { observed.append(cat) }
+            }
+        } catch {
+            threw = true
+        }
+
+        XCTAssertTrue(threw, "expected response.error to throw out of the stream")
+        XCTAssertEqual(observed, [.thinkingToken("Pondering"), .thinkingComplete],
+                       ".thinkingComplete must fire before the throw — got \(observed)")
+    }
 }
 #endif

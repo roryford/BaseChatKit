@@ -141,6 +141,12 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         isGenerating = true
         // Per-turn scripting takes precedence when configured. Pop from the
         // front so successive generate() calls drive different turns.
+        //
+        // When this turn has a non-empty delta sequence it takes precedence
+        // for tool-call emission, so we must NOT also pop
+        // `scriptedToolCallsPerTurn` for this turn — otherwise mixing both
+        // queues silently desyncs future turns. Tokens for the turn still
+        // come from `tokensToYieldPerTurn` at the matching index.
         let toolCalls: [ToolCall]
         let tokens: [String]
         let deltaSequence: [ScriptedToolCallDelta]
@@ -149,7 +155,16 @@ public final class MockInferenceBackend: InferenceBackend, ConversationHistoryRe
         } else {
             deltaSequence = []
         }
-        if !scriptedToolCallsPerTurn.isEmpty {
+        if !deltaSequence.isEmpty {
+            // Delta sequence drives tool calls this turn; leave the
+            // scriptedToolCallsPerTurn queue untouched.
+            toolCalls = []
+            if !tokensToYieldPerTurn.isEmpty {
+                tokens = tokensToYieldPerTurn.removeFirst()
+            } else {
+                tokens = tokensToYield
+            }
+        } else if !scriptedToolCallsPerTurn.isEmpty {
             toolCalls = scriptedToolCallsPerTurn.removeFirst()
             if !tokensToYieldPerTurn.isEmpty {
                 tokens = tokensToYieldPerTurn.removeFirst()

@@ -634,7 +634,11 @@ final class ToolCallLoopOrchestratorTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(streamShape.count, 7, "must forward 5 deltas + 2 .toolCalls verbatim")
+        XCTAssertEqual(
+            streamShape.count,
+            7,
+            "must forward 2 .toolCallStart + 3 .toolCallArgumentsDelta + 2 .toolCall events verbatim"
+        )
         XCTAssertEqual(streamShape[0], .toolCallStart(callId: "c1", name: "first"))
         XCTAssertEqual(streamShape[1], .toolCallArgumentsDelta(callId: "c1", textDelta: #"{"a"#))
         XCTAssertEqual(streamShape[2], .toolCallArgumentsDelta(callId: "c1", textDelta: #"":1}"#))

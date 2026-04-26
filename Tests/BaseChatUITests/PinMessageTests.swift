@@ -8,31 +8,21 @@ import BaseChatTestSupport
 @MainActor
 final class PinMessageTests: XCTestCase {
 
-    private var container: ModelContainer!
-    private var context: ModelContext!
-    private var vm: ChatViewModel!
-    private var mock: MockInferenceBackend!
+    private var harness: TestChatViewModelHarness!
+    private var context: ModelContext { harness.container!.mainContext }
+    private var vm: ChatViewModel { harness.vm }
+    private var mock: MockInferenceBackend { harness.mock! }
 
     override func setUp() async throws {
         try await super.setUp()
-
-        container = try makeInMemoryContainer()
-        context = container.mainContext
-
-        mock = MockInferenceBackend()
-        mock.isModelLoaded = true
-        mock.tokensToYield = ["Reply"]
-
-        let service = InferenceService(backend: mock, name: "MockPin")
-        vm = ChatViewModel(inferenceService: service)
-        vm.configure(persistence: SwiftDataPersistenceProvider(modelContext: context))
+        let backend = MockInferenceBackend()
+        backend.tokensToYield = ["Reply"]
+        harness = try makeTestChatViewModel(mock: backend, configurePersistence: true)
     }
 
     override func tearDown() async throws {
-        vm = nil
-        mock = nil
-        context = nil
-        container = nil
+        harness?.cleanup()
+        harness = nil
         try await super.tearDown()
     }
 

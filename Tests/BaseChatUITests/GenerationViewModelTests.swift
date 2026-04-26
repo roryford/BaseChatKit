@@ -19,19 +19,25 @@ final class ChatViewModelTests: XCTestCase {
 
     /// Per-instance UserDefaults suite — prevents parallel test runs from racing
     /// on the global `hasCompletedFirstLaunch` key in `UserDefaults.standard`.
+    /// Shared across every harness in this test class so tests that seed the
+    /// suite directly (e.g. set `hasCompletedFirstLaunch`) see the value
+    /// when the VM reads it on init.
     private nonisolated(unsafe) var suiteName: String!
     private nonisolated(unsafe) var testDefaults: UserDefaults!
+
+    /// Per-test harnesses — released in `tearDown`.
+    private nonisolated(unsafe) var harnesses: [TestChatViewModelHarness] = []
 
     /// Convenience to build a view model with controllable device memory.
     /// Uses a default InferenceService (no backend loaded).
     private func makeViewModel(ramGB: UInt64 = 16) -> ChatViewModel {
-        ChatViewModel(
-            inferenceService: InferenceService(),
-            deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(baseDirectory: scratchModelsDirectory),
-            memoryPressure: MemoryPressureHandler(),
+        let harness = try! makeTestChatViewModel(
+            ramGB: ramGB,
+            modelsDirectory: scratchModelsDirectory,
             userDefaults: testDefaults
         )
+        harnesses.append(harness)
+        return harness.vm
     }
 
     /// Convenience to build a view model with a mock backend pre-loaded.
@@ -39,18 +45,15 @@ final class ChatViewModelTests: XCTestCase {
         ramGB: UInt64 = 16,
         mock: MockInferenceBackend = MockInferenceBackend()
     ) -> (ChatViewModel, MockInferenceBackend) {
-        mock.isModelLoaded = true
-        let service = InferenceService(backend: mock, name: "Mock")
-        let vm = ChatViewModel(
-            inferenceService: service,
-            deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(baseDirectory: scratchModelsDirectory),
-            memoryPressure: MemoryPressureHandler(),
+        let harness = try! makeTestChatViewModel(
+            mock: mock,
+            ramGB: ramGB,
+            activateSession: true,
+            modelsDirectory: scratchModelsDirectory,
             userDefaults: testDefaults
         )
-        // Set an active session so sendMessage/regenerate/edit don't bail out.
-        vm.activeSession = ChatSessionRecord(title: "Test Session")
-        return (vm, mock)
+        harnesses.append(harness)
+        return (harness.vm, harness.mock!)
     }
 
     /// The scratch directory backing every `ModelStorageService` built in
@@ -96,6 +99,8 @@ final class ChatViewModelTests: XCTestCase {
             removeFile(at: url)
         }
         createdFiles.removeAll()
+        for harness in harnesses { harness.cleanup() }
+        harnesses.removeAll()
         if let dir = scratchModelsDirectory {
             try? FileManager.default.removeItem(at: dir)
         }

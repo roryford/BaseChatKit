@@ -12,30 +12,26 @@ import BaseChatTestSupport
 @MainActor
 final class ChatInputBarLogicTests: XCTestCase {
 
-    private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
+    private nonisolated(unsafe) var harnesses: [TestChatViewModelHarness] = []
+
+    override func tearDown() async throws {
+        for harness in harnesses { harness.cleanup() }
+        harnesses.removeAll()
+        try await super.tearDown()
+    }
 
     private func makeViewModel() -> ChatViewModel {
-        ChatViewModel(
-            inferenceService: InferenceService(),
-            deviceCapability: DeviceCapabilityService(physicalMemory: 16 * oneGB),
-            modelStorage: ModelStorageService(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
-            memoryPressure: MemoryPressureHandler()
-        )
+        let harness = try! makeTestChatViewModel()
+        harnesses.append(harness)
+        return harness.vm
     }
 
     private func makeViewModelWithMock(
         mock: MockInferenceBackend = MockInferenceBackend()
     ) -> (ChatViewModel, MockInferenceBackend) {
-        mock.isModelLoaded = true
-        let service = InferenceService(backend: mock, name: "Mock")
-        let vm = ChatViewModel(
-            inferenceService: service,
-            deviceCapability: DeviceCapabilityService(physicalMemory: 16 * oneGB),
-            modelStorage: ModelStorageService(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),
-            memoryPressure: MemoryPressureHandler()
-        )
-        vm.activeSession = ChatSessionRecord(title: "Test Session")
-        return (vm, mock)
+        let harness = try! makeTestChatViewModel(mock: mock, activateSession: true)
+        harnesses.append(harness)
+        return (harness.vm, harness.mock!)
     }
 
     // MARK: - canSend conditions

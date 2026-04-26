@@ -84,6 +84,35 @@ final class PerceivedLatencyBackendTests: XCTestCase {
         XCTAssertEqual(collected, ["Hello", ", ", "world", "!"])
     }
 
+    /// Back-to-back `generate()` calls must each produce a fresh stream and
+    /// leave `isGenerating == false` between runs. Catches regressions in
+    /// the lifecycle helper's task-slot clearing.
+    func test_backToBackGenerate_eachCallProducesFreshStream() async throws {
+        let backend = PerceivedLatencyBackend(
+            coldStartDelay: .milliseconds(0),
+            timeToFirstToken: .milliseconds(1),
+            interTokenJitter: .milliseconds(0)...(.milliseconds(0)),
+            tokensToYield: ["a", "b"]
+        )
+        try await backend.loadModel(from: modelURL, plan: .testStub(effectiveContextSize: 512))
+
+        var first: [String] = []
+        let stream1 = try backend.generate(prompt: "x", systemPrompt: nil, config: GenerationConfig())
+        for try await event in stream1.events {
+            if case .token(let t) = event { first.append(t) }
+        }
+        XCTAssertEqual(first, ["a", "b"])
+        XCTAssertFalse(backend.isGenerating)
+
+        var second: [String] = []
+        let stream2 = try backend.generate(prompt: "x", systemPrompt: nil, config: GenerationConfig())
+        for try await event in stream2.events {
+            if case .token(let t) = event { second.append(t) }
+        }
+        XCTAssertEqual(second, ["a", "b"], "Second run must yield identical tokens")
+        XCTAssertFalse(backend.isGenerating)
+    }
+
     func test_cancellationStops_generation() async throws {
         let backend = PerceivedLatencyBackend(
             coldStartDelay: .milliseconds(0),

@@ -450,18 +450,17 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     ) async throws {
         let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
 
-        // `thinkingOpen` flips to true the first time we see a thinking_delta.
-        // It flips back to false — and fires .thinkingComplete exactly once —
-        // the first time we see anything that clearly isn't thinking anymore.
-        var thinkingOpen = false
+        // `thinking` flips to open the first time we see a thinking_delta.
+        // It flushes — and fires .thinkingComplete exactly once — the first
+        // time we see anything that clearly isn't thinking anymore.
+        // Signature events bypass open/close entirely.
+        var thinking = ThinkingBlockManager()
 
         // Tool-use content blocks are keyed by `index` (the integer
         // content-block index Anthropic assigns within an assistant turn).
         // The accumulator stores entries keyed by the stringified index;
-        // the public call id (the `content_block.id` Anthropic emitted on
-        // `content_block_start`) lives in `entry.id` so downstream events
-        // expose the call id, not the index. Mirrors worker 2's pattern
-        // for OpenAI's `tool_calls[].index` keying.
+        // the public call id lives in `entry.id` so downstream events
+        // expose the call id, not the index.
         let toolAccumulator = StreamingToolCallAccumulator()
         // Tracks indexes whose `content_block_start` declared `type:"tool_use"`
         // so we can route subsequent `content_block_delta` / `content_block_stop`
@@ -471,7 +470,7 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         // Tracks indexes for which we've emitted at least one
         // `.toolCallArgumentsDelta`. `content_block_stop` falls back to a
         // synthetic `"{}"` delta when the index never received any
-        // `input_json_delta` (rare — the model produced a no-input call).
+        // `input_json_delta`.
         var toolUseEmittedDelta: Set<Int> = []
         // Tracks indexes already finalized via `content_block_stop` so we
         // don't double-emit `.toolCall` from the message_stop fallback.
@@ -481,17 +480,9 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         // `.toolCall` events for incomplete blocks).
         var cancelled = false
 
-        func flushThinkingCompleteIfNeeded() {
-            if thinkingOpen {
-                continuation.yield(.thinkingComplete)
-                thinkingOpen = false
-            }
-        }
-
         // Finalize one tool_use block. Emits a synthetic empty-input delta
         // when no `input_json_delta` was ever observed so the event surface
-        // (start → ≥1 delta → toolCall) stays uniform with worker 2's
-        // OpenAI shape.
+        // (start → ≥1 delta → toolCall) stays uniform with OpenAI's shape.
         func finalizeToolUse(at index: Int) {
             guard toolUseIndexes.contains(index), !toolUseFinalized.contains(index) else { return }
             let key = "\(index)"
@@ -521,147 +512,149 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             }
         }
 
-        for try await payload in tokenStream {
-            if Task.isCancelled {
-                cancelled = true
-                break
-            }
-
-            let eventType = Self.parseEventType(from: payload)
-
-            // tool_use content_block_start — capture id + name and emit
-            // `.toolCallStart`. Anthropic always carries id and name on
-            // the start event itself (unlike OpenAI compat servers where
-            // either field can be deferred), so we don't need the
-            // accumulator's lazy-emit pattern.
-            if eventType == "content_block_start", let toolStart = Self.parseToolUseBlockStart(from: payload) {
-                flushThinkingCompleteIfNeeded()
-                let key = "\(toolStart.index)"
-                toolAccumulator.upsert(
-                    key: key,
-                    id: toolStart.id,
-                    name: toolStart.name,
-                    argumentsDelta: nil
-                )
-                toolUseIndexes.insert(toolStart.index)
-                continuation.yield(.toolCallStart(callId: toolStart.id, name: toolStart.name))
-                toolAccumulator.markStarted(key: key)
-                continue
-            }
-
-            // input_json_delta — append to the accumulator and emit a
-            // streaming `.toolCallArgumentsDelta` under the resolved call id.
-            if eventType == "content_block_delta", let inputDelta = Self.parseInputJSONDelta(from: payload) {
-                let key = "\(inputDelta.index)"
-                toolAccumulator.upsert(
-                    key: key,
-                    id: nil,
-                    name: nil,
-                    argumentsDelta: inputDelta.partialJSON
-                )
-                let resolvedId = toolAccumulator.resolvedId(forKey: key)
-                if !inputDelta.partialJSON.isEmpty {
-                    continuation.yield(.toolCallArgumentsDelta(
-                        callId: resolvedId,
-                        textDelta: inputDelta.partialJSON
-                    ))
-                    toolUseEmittedDelta.insert(inputDelta.index)
+        do {
+            for try await payload in tokenStream {
+                if Task.isCancelled {
+                    cancelled = true
+                    break
                 }
-                continue
-            }
 
-            // content_block_stop on a tool_use index — finalize that one
-            // call now so per-block latency is preserved. (Sibling text /
-            // thinking blocks pass through this branch as a no-op.)
-            if eventType == "content_block_stop", let stopIndex = Self.parseContentBlockIndex(from: payload),
-               toolUseIndexes.contains(stopIndex) {
-                finalizeToolUse(at: stopIndex)
-                continue
-            }
+                let eventType = Self.parseEventType(from: payload)
 
-            // Thinking-block start: opportunistically capture the signature
-            // if Anthropic shipped one inline on the start event. Real
-            // streams more commonly carry the signature on a later
-            // `signature_delta`, but a couple of beta endpoints attach it
-            // here, and the redundant emission is harmless — UI consumers
-            // overwrite stored signatures rather than appending.
-            if eventType == "content_block_start", let signature = Self.parseThinkingBlockStartSignature(from: payload) {
-                continuation.yield(.thinkingSignature(signature))
-                continue
-            }
+                // Thinking-block start: opportunistically capture the signature
+                // if Anthropic shipped one inline on the start event. Real
+                // streams more commonly carry the signature on a later
+                // `signature_delta`, but a couple of beta endpoints attach it
+                // here, and the redundant emission is harmless — UI consumers
+                // overwrite stored signatures rather than appending.
+                if eventType == "content_block_start", let signature = Self.parseThinkingBlockStartSignature(from: payload) {
+                    continuation.yield(.thinkingSignature(signature))
+                    continue
+                }
 
-            // Signature delta inside the thinking block. This is the
-            // primary path Anthropic uses today for extended-thinking
-            // signatures — the field arrives via a `signature_delta`
-            // sub-type of `content_block_delta`. Surface it to the UI so
-            // multi-turn replay can preserve the exact bytes verbatim.
-            if eventType == "content_block_delta", let signature = Self.parseSignatureDelta(from: payload) {
-                continuation.yield(.thinkingSignature(signature))
-                continue
-            }
-
-            // Thinking delta: emit as thinkingToken, keep the block open.
-            if eventType == "content_block_delta", let thinking = Self.parseThinkingDelta(from: payload) {
-                continuation.yield(.thinkingToken(thinking))
-                thinkingOpen = true
-                continue
-            }
-
-            // Non-streaming whole-message tool_use shape. Some callers
-            // (synthesised replay fixtures, future non-streaming endpoint
-            // variants) deliver the entire `content:[]` array on a single
-            // payload. Treat each tool_use block as a uniform start +
-            // single delta + toolCall triple so consumers don't have to
-            // special-case the path.
-            if let wholeCalls = Self.parseWholeMessageToolUseBlocks(from: payload), !wholeCalls.isEmpty {
-                flushThinkingCompleteIfNeeded()
-                for call in wholeCalls {
-                    let key = "whole-\(call.id.isEmpty ? UUID().uuidString : call.id)"
+                // tool_use content_block_start — capture id + name and emit
+                // `.toolCallStart`. Anthropic always carries id and name on
+                // the start event itself, so we don't need the accumulator's
+                // lazy-emit pattern.
+                if eventType == "content_block_start", let toolStart = Self.parseToolUseBlockStart(from: payload) {
+                    thinking.flushIfOpen(into: continuation)
+                    let key = "\(toolStart.index)"
                     toolAccumulator.upsert(
                         key: key,
-                        id: call.id,
-                        name: call.name,
-                        argumentsDelta: call.serializedInput
+                        id: toolStart.id,
+                        name: toolStart.name,
+                        argumentsDelta: nil
+                    )
+                    toolUseIndexes.insert(toolStart.index)
+                    continuation.yield(.toolCallStart(callId: toolStart.id, name: toolStart.name))
+                    toolAccumulator.markStarted(key: key)
+                    continue
+                }
+
+                // input_json_delta — append to the accumulator and emit a
+                // streaming `.toolCallArgumentsDelta` under the resolved call id.
+                if eventType == "content_block_delta", let inputDelta = Self.parseInputJSONDelta(from: payload) {
+                    let key = "\(inputDelta.index)"
+                    toolAccumulator.upsert(
+                        key: key,
+                        id: nil,
+                        name: nil,
+                        argumentsDelta: inputDelta.partialJSON
                     )
                     let resolvedId = toolAccumulator.resolvedId(forKey: key)
-                    continuation.yield(.toolCallStart(callId: resolvedId, name: call.name))
-                    toolAccumulator.markStarted(key: key)
-                    continuation.yield(.toolCallArgumentsDelta(
-                        callId: resolvedId,
-                        textDelta: call.serializedInput
-                    ))
-                    continuation.yield(.toolCall(ToolCall(
-                        id: resolvedId,
-                        toolName: call.name,
-                        arguments: call.serializedInput
-                    )))
+                    if !inputDelta.partialJSON.isEmpty {
+                        continuation.yield(.toolCallArgumentsDelta(
+                            callId: resolvedId,
+                            textDelta: inputDelta.partialJSON
+                        ))
+                        toolUseEmittedDelta.insert(inputDelta.index)
+                    }
+                    continue
                 }
-                continue
-            }
 
-            // Plain text delta: close any open thinking block first, then yield.
-            if let token = extractToken(from: payload) {
-                flushThinkingCompleteIfNeeded()
-                continuation.yield(.token(token))
-            }
+                // content_block_stop on a tool_use index — finalize that one
+                // call now so per-block latency is preserved. (Sibling text /
+                // thinking blocks pass through this branch as a no-op.)
+                if eventType == "content_block_stop", let stopIndex = Self.parseContentBlockIndex(from: payload),
+                   toolUseIndexes.contains(stopIndex) {
+                    finalizeToolUse(at: stopIndex)
+                    continue
+                }
 
-            if let usage = extractUsage(from: payload) {
-                handleUsage(usage)
-                if let prompt = usage.promptTokens,
-                   let completion = usage.completionTokens {
-                    continuation.yield(.usage(prompt: prompt, completion: completion))
+                // Signature delta inside the thinking block. Primary path
+                // Anthropic uses today for extended-thinking signatures.
+                if eventType == "content_block_delta", let signature = Self.parseSignatureDelta(from: payload) {
+                    continuation.yield(.thinkingSignature(signature))
+                    continue
+                }
+
+                // Thinking delta: emit as thinkingToken, keep the block open.
+                if eventType == "content_block_delta", let thinkingDelta = Self.parseThinkingDelta(from: payload) {
+                    continuation.yield(.thinkingToken(thinkingDelta))
+                    thinking.open()
+                    continue
+                }
+
+                // Plain text delta: close any open thinking block first, then yield.
+                if let token = extractToken(from: payload) {
+                    thinking.flushIfOpen(into: continuation)
+                    continuation.yield(.token(token))
+                }
+
+                // Non-streaming whole-message tool_use shape. Some callers
+                // (synthesised replay fixtures, future non-streaming endpoint
+                // variants) deliver the entire `content:[]` array on a single
+                // payload. Treat each tool_use block as a uniform start +
+                // single delta + toolCall triple so consumers don't have to
+                // special-case the path.
+                if let wholeCalls = Self.parseWholeMessageToolUseBlocks(from: payload), !wholeCalls.isEmpty {
+                    thinking.flushIfOpen(into: continuation)
+                    for call in wholeCalls {
+                        let key = "whole-\(call.id.isEmpty ? UUID().uuidString : call.id)"
+                        toolAccumulator.upsert(
+                            key: key,
+                            id: call.id,
+                            name: call.name,
+                            argumentsDelta: call.serializedInput
+                        )
+                        let resolvedId = toolAccumulator.resolvedId(forKey: key)
+                        continuation.yield(.toolCallStart(callId: resolvedId, name: call.name))
+                        toolAccumulator.markStarted(key: key)
+                        continuation.yield(.toolCallArgumentsDelta(
+                            callId: resolvedId,
+                            textDelta: call.serializedInput
+                        ))
+                        continuation.yield(.toolCall(ToolCall(
+                            id: resolvedId,
+                            toolName: call.name,
+                            arguments: call.serializedInput
+                        )))
+                    }
+                    continue
+                }
+
+                if let usage = extractUsage(from: payload) {
+                    handleUsage(usage)
+                    if let prompt = usage.promptTokens,
+                       let completion = usage.completionTokens {
+                        continuation.yield(.usage(prompt: prompt, completion: completion))
+                    }
+                }
+
+                if isStreamEnd(payload) {
+                    thinking.flushIfOpen(into: continuation)
+                    break
+                }
+
+                if let error = extractStreamError(from: payload) {
+                    throw error
                 }
             }
-
-            if isStreamEnd(payload) {
-                flushThinkingCompleteIfNeeded()
-                finalizePendingToolUses()
-                break
-            }
-
-            if let error = extractStreamError(from: payload) {
-                throw error
-            }
+        } catch {
+            // Close any open thinking block before rethrowing so consumers
+            // don't hang in a thinking-only state on parser failure.
+            thinking.flushIfOpen(into: continuation)
+            throw error
         }
 
         if Task.isCancelled {
@@ -671,11 +664,11 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         // Safety net: stream ended without a text block or message_stop while
         // still inside a thinking block (truncated upstream). Close the block
         // so consumers don't hang in a thinking-only state.
-        flushThinkingCompleteIfNeeded()
-        // Stream end fallback: if the upstream closed without
-        // `message_stop` (truncated, server hangup), emit any buffered
-        // tool calls now so the orchestrator can still dispatch them.
-        // Cancellation suppresses this branch — see `cancelled`.
+        thinking.flushIfOpen(into: continuation)
+        // Stream end fallback: if the upstream closed without `message_stop`
+        // (truncated, server hangup), emit any buffered tool calls now so
+        // the orchestrator can still dispatch them. Cancellation suppresses
+        // this branch — see `cancelled`.
         finalizePendingToolUses()
     }
 

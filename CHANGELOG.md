@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.11.6](https://github.com/roryford/BaseChatKit/compare/v0.11.5...v0.11.6) (2026-04-25)
+
+### Highlights
+
+#### Reusable agent-loop orchestrator and tool-output budget
+
+`ToolCallLoopOrchestrator` lands as a public, generic agent-loop driver in `BaseChatInference`. It runs the generate → tool-call → execute → feed-result → generate cycle directly on top of `InferenceBackend` + `ToolExecutor` (or `ToolRegistry`), with cancellation, step budget, per-step timeout, and identical-call loop detection built in. `InferenceService` is unchanged — callers wanting a structured `tool` role still route through `GenerationCoordinator`.
+
+```swift
+let orchestrator = ToolCallLoopOrchestrator(
+    backend: backend,
+    registry: registry,
+    policy: ToolCallLoopPolicy(maxSteps: 8, loopDetectionWindow: 3)
+)
+for try await event in orchestrator.run(initialPrompt: "...", systemPrompt: nil, config: config) {
+    switch event {
+    case .token(let s):       print(s, terminator: "")
+    case .toolCall(let call): print("→", call.toolName)
+    case .toolResult(let r):  print("←", r.content.prefix(64))
+    case .stepLimitReached, .loopDetected, .finished, .usage: break
+    }
+}
+```
+
+Alongside the orchestrator, `ToolRegistry` gains an explicit `ToolOutputPolicy` (default `maxBytes: 32_768`, `.rejectWithError`) applied at dispatch exit, with UTF-8-boundary-safe truncation and a documented reentrancy contract that warns when `unregister` collides with an in-flight dispatch. See [#443], [#628], [#631].
+
+#### Cross-cutting thinking infrastructure — OpenAI Responses, Jinja auto-discovery
+
+A new `OpenAIResponsesBackend` targets `POST /v1/responses` and translates the named-event SSE stream (`response.reasoning_summary_text.delta` / `.done`, `response.output_text.delta`, `response.completed`) into `.thinkingToken` / `.thinkingComplete` / `.token` `GenerationEvent`s. The existing Chat Completions `OpenAIBackend` is untouched; `APIProvider.openAIResponses` is the new switch point because the two wire formats are incompatible enough to warrant separate provider cases.
+
+For local backends, `PromptTemplateDetector.detectThinkingMarkers(from:)` scans Jinja chat templates for `<think>`, `<thinking>`, `<reasoning>`, `<reflection>`, and Gemma-style markers and returns the matching `ThinkingMarkers` preset. `MLXBackend` reads `tokenizer_config.json` at load time and `LlamaBackend` reads `tokenizer.chat_template` via `llama_model_meta_val_str`, both caching the auto-detected preset. The hardcoded `?? .qwen3` fallback is gone — `GenerationConfig.thinkingMarkers = nil` now means "use the backend's auto-detected markers"; non-nil overrides. Existing callers with explicit markers are unaffected. See [#598], [#479], [#551].
+
+#### Session sidebar search and pagination
+
+The session sidebar gains a `.searchable` bar with a Titles / Messages scope picker, 200ms input debounce, and a "No results" empty state. Title search filters the loaded list in memory; Messages mode calls a new `SwiftDataPersistenceProvider.searchMessages(query:limit:)` that runs `localizedStandardContains` directly in-store (capped at 100 hits, with snippet previews highlighted via `AttributedString`). The list itself paginates at 50 sessions per page through a `fetchSessions(offset:limit:)` overload and `SessionManagerViewModel.loadNextPage()`, fetching the next page when the last loaded row appears. Swipe-to-rename and swipe-to-delete are preserved across both filtered and paginated views; baseline performance tests cover 1000 sessions / 50K messages. See [#246].
+
+### Features
+
+- **inference:** `ToolCallLoopOrchestrator` reusable agent-loop primitive with cancellation, step budget, per-step timeout, and identical-call loop detection ([#779])
+- **inference:** explicit `ToolOutputPolicy` on `ToolRegistry` with UTF-8-safe truncation and documented reentrancy contract ([#779])
+- **cloud:** `OpenAIResponsesBackend` for `POST /v1/responses` with reasoning-summary → thinking-event translation ([#780])
+- **inference:** Jinja chat-template auto-discovery of thinking markers across MLX and Llama backends ([#780])
+- **ui:** session list search (titles + message content), 50-per-page pagination, snippet previews ([#778])
+
+### Fixes
+
+- **inference:** `InferenceService` queue auto-drains on stream termination via `defer` in `activeTask` — consumers no longer need to call `generationDidFinish()`, which is now a deprecated no-op for backward compatibility ([#781])
+
 ## [0.11.5](https://github.com/roryford/BaseChatKit/compare/v0.11.4...v0.11.5) (2026-04-25)
 
 ### Highlights

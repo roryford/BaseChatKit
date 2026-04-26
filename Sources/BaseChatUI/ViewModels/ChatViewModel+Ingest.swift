@@ -37,10 +37,7 @@ extension ChatViewModel {
             "ChatViewModel.ingest source=\(String(describing: payload.source), privacy: .public) prompt chars=\(payload.prompt.count, privacy: .public)"
         )
 
-        guard let persistence else {
-            Log.ui.warning("ChatViewModel.ingest called before persistence was configured")
-            return
-        }
+        guard let persistence = persistenceOrLog("ingest") else { return }
 
         // Create and activate a fresh session so the ingested prompt starts
         // its own conversation rather than landing in whichever chat was

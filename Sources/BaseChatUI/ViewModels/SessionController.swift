@@ -66,10 +66,7 @@ final class SessionController {
         session.updatedAt = date
         activeSession = session
 
-        guard let persistence else {
-            Log.persistence.warning("touchActiveSessionUpdatedAt called before persistence was configured")
-            return
-        }
+        guard let persistence = persistenceOrLog("touchActiveSessionUpdatedAt") else { return }
 
         do {
             try persistence.updateSession(session)
@@ -85,10 +82,7 @@ final class SessionController {
         selectedEndpointID: UUID?
     ) throws {
         guard var session = activeSession else { return }
-        guard let persistence else {
-            Log.persistence.warning("saveSettingsToSession called before persistence was configured")
-            throw ChatPersistenceError.providerNotConfigured
-        }
+        let persistence = try requirePersistence("saveSettingsToSession")
         session.temperature = temperature
         session.topP = topP
         session.repeatPenalty = repeatPenalty
@@ -103,10 +97,7 @@ final class SessionController {
     }
 
     func loadMessages() {
-        guard let persistence else {
-            Log.persistence.warning("loadMessages called before persistence was configured — messages will not load")
-            return
-        }
+        guard let persistence = persistenceOrLog("loadMessages") else { return }
         guard let sessionID = activeSessionID else {
             messages = []
             hasOlderMessages = false
@@ -163,10 +154,7 @@ final class SessionController {
     }
 
     func saveMessage(_ message: ChatMessageRecord) throws {
-        guard let persistence else {
-            Log.persistence.warning("saveMessage called before persistence was configured — message will not be persisted")
-            return
-        }
+        guard let persistence = persistenceOrLog("saveMessage") else { return }
         do {
             try persistence.updateMessage(message)
         } catch ChatPersistenceError.messageNotFound {
@@ -175,26 +163,17 @@ final class SessionController {
     }
 
     func updateMessage(_ message: ChatMessageRecord) throws {
-        guard let persistence else {
-            Log.persistence.warning("updateMessage called before persistence was configured — message will not be updated")
-            return
-        }
+        guard let persistence = persistenceOrLog("updateMessage") else { return }
         try persistence.updateMessage(message)
     }
 
     func deleteMessage(_ message: ChatMessageRecord) throws {
-        guard let persistence else {
-            Log.persistence.warning("deleteMessage called before persistence was configured — message will not be deleted")
-            return
-        }
+        guard let persistence = persistenceOrLog("deleteMessage") else { return }
         try persistence.deleteMessage(message.id)
     }
 
     func deleteMessages(for sessionID: UUID) throws {
-        guard let persistence else {
-            Log.persistence.warning("deleteMessages called before persistence was configured — messages will not be deleted")
-            return
-        }
+        guard let persistence = persistenceOrLog("deleteMessages") else { return }
         try persistence.deleteMessages(for: sessionID)
     }
 }
