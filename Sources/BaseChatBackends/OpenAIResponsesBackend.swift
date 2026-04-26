@@ -221,24 +221,15 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
 
     /// Parses the Responses-API named-event SSE stream.
     ///
-    /// The stock ``SSEStreamParser`` discards `event:` lines, but the
-    /// Responses API distinguishes events purely by name (the data payload
-    /// is just `{"delta":"..."}` with no `type` field). We therefore walk
-    /// the byte stream ourselves, pairing each `event:` line with its
-    /// following `data:` line.
+    /// Uses named-event parsing so `event:` and `data:` fields stay paired.
     public override func parseResponseStream(
         bytes: URLSession.AsyncBytes,
         config: GenerationConfig,
         continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation
     ) async throws {
         let limits = effectiveSSEStreamLimits
-
-        var lineBuffer = Data()
-        var totalBytes = 0
         var rateWindowStart = ContinuousClock.now
         var rateWindowCount = 0
-
-        var currentEventName: String?
 
         // Tracks whether any reasoning_summary delta has been emitted on
         // this stream. We flush a single `.thinkingComplete` on the
@@ -397,62 +388,17 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
         }
 
         do {
-            var iterator = bytes.makeAsyncIterator()
-            outer: while let byte = try await iterator.next() {
+            for try await event in SSEStreamParser.parseNamed(bytes: bytes, limits: limits) {
                 if Task.isCancelled { break }
 
-                totalBytes += 1
-                if totalBytes > limits.maxTotalBytes {
-                    throw SSEStreamError.streamTooLarge(totalBytes)
+                // Count each yielded named event against the per-second cap
+                // before we look at the event name — unknown/ignored events
+                // still consume budget.
+                try noteDataLineReceived()
+                guard let name = event.name else { continue }
+                if try handleEvent(name: name, data: event.data) {
+                    break
                 }
-
-                if byte != UInt8(ascii: "\n") {
-                    lineBuffer.append(byte)
-                    if lineBuffer.count > limits.maxEventBytes {
-                        throw SSEStreamError.eventTooLarge(lineBuffer.count)
-                    }
-                    continue
-                }
-
-                let line: String
-                if let decoded = String(data: lineBuffer, encoding: .utf8) {
-                    line = decoded.trimmingCharacters(in: .whitespaces)
-                } else {
-                    Log.network.warning("OpenAIResponsesBackend: skipped \(lineBuffer.count)-byte line with invalid UTF-8")
-                    lineBuffer.removeAll(keepingCapacity: true)
-                    continue
-                }
-                lineBuffer.removeAll(keepingCapacity: true)
-
-                if line.isEmpty {
-                    // Blank line marks event boundary; pending event is
-                    // already paired with its data line by this point.
-                    currentEventName = nil
-                    continue
-                }
-
-                if line.hasPrefix("event:") {
-                    currentEventName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
-                    continue
-                }
-
-                if line.hasPrefix("data:") {
-                    // Count the line against the per-second cap before we look
-                    // at the event name — unknown/ignored events still consume
-                    // budget, otherwise an attacker could spam structural
-                    // events we discard.
-                    try noteDataLineReceived()
-                    let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                    guard let name = currentEventName else {
-                        // `data:` without a preceding `event:` — ignore. The
-                        // Responses API always names its events.
-                        continue
-                    }
-                    if try handleEvent(name: name, data: payload) {
-                        break outer
-                    }
-                }
-                // `id:`, `retry:`, comment lines (`:`) are ignored.
             }
         } catch {
             // Close any open thinking block before rethrowing so consumers

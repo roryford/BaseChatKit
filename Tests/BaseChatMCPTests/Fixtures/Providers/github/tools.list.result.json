@@ -1,0 +1,31 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "search_issues",
+        "description": "Search GitHub issues by query.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string" }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "list_pull_requests",
+        "description": "List pull requests for a repository.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": { "type": "string" },
+            "repo": { "type": "string" }
+          },
+          "required": ["owner", "repo"]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "provider": "github",
+  "catalog": {
+    "id": "7B573A8A-C3CB-450D-9EBE-2E7D4C973682",
+    "displayName": "GitHub",
+    "toolNamespace": "github",
+    "dataDisclosure": "Tool calls may send prompt content and selected arguments to GitHub.",
+    "transport": {
+      "type": "streamable-http",
+      "endpoint": "https://mcp.github.com/v1/sse"
+    },
+    "oauth": {
+      "issuer": "https://github.com",
+      "scopes": ["read:user", "repo"],
+      "redirectURI": "basechat://oauth/mcp/github/callback"
+    }
+  }
+}

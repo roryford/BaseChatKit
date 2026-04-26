@@ -87,6 +87,7 @@ public protocol JSONSchemaValidating: Sendable {
 /// executor; the warning exists so ad-hoc registry juggling is visible
 /// in the inference log.
 @MainActor public final class ToolRegistry {
+    private static let reservedToolPrefixes = ["mcp__", "intent__"]
 
     // MARK: Storage
 
@@ -153,6 +154,12 @@ public protocol JSONSchemaValidating: Sendable {
     /// inference log.
     public func register(_ tool: any ToolExecutor) {
         let key = tool.definition.name.lowercased()
+        if Self.reservedToolPrefixes.contains(where: { key.hasPrefix($0) }) {
+            Log.inference.warning(
+                "ToolRegistry: refusing to register reserved tool prefix for '\(tool.definition.name, privacy: .public)'"
+            )
+            return
+        }
         if tools[key] != nil {
             Log.inference.warning(
                 "ToolRegistry: overriding existing tool '\(tool.definition.name, privacy: .public)'"

@@ -5,13 +5,14 @@
 | Target | Role | ML deps |
 |--------|------|---------|
 | `BaseChatInference` | Inference orchestration — protocols, models, services (no persistence) | None |
+| `BaseChatMCP` | Model Context Protocol client surface, descriptors, tool bridge (`MCPClient`, `MCPToolSource`) | None |
 | `BaseChatCore` | SwiftData persistence — schema, `@Model` types, container, provider, export | None |
 | `BaseChatBackends` | MLX, llama.cpp, Foundation, cloud backends (depends on `BaseChatInference`) | MLX, LlamaSwift |
 | `BaseChatUI` | SwiftUI views and view models | None |
 | `BaseChatTestSupport` | Shared mocks and fakes (`MockInferenceBackend`, `CharTokenizer`, etc.) | None |
 | `BaseChatMLXIntegrationTests` | Xcode-only real MLX model E2E tests | MLX |
 
-`BaseChatUI` depends only on `BaseChatCore` (and transitively `BaseChatInference`) — keep it that way. Never import `BaseChatBackends` from UI. `BaseChatBackends` depends on `BaseChatInference` directly, not `BaseChatCore`, so backend implementations stay free of SwiftData. Apps that only need inference orchestration can depend on `BaseChatInference` alone. `BaseChatCore` does **not** re-export `BaseChatInference` — files that use `InferenceService` or other inference types directly must `import BaseChatInference` explicitly.
+`BaseChatUI` depends only on `BaseChatCore` and `BaseChatInference` — keep it that way. Never import `BaseChatBackends` from UI. `BaseChatBackends` and `BaseChatMCP` depend on `BaseChatInference` directly (not `BaseChatCore`), so backend and MCP integrations stay free of SwiftData. Apps that only need inference orchestration can depend on `BaseChatInference` alone. `BaseChatCore` does **not** re-export `BaseChatInference` — files that use `InferenceService` or other inference types directly must `import BaseChatInference` explicitly. `MCPCatalog` descriptors are trait-gated behind `MCPBuiltinCatalog`.
 
 ## Running tests
 
@@ -21,12 +22,21 @@ swift test --filter BaseChatCoreTests --disable-default-traits
 swift test --filter BaseChatInferenceTests --disable-default-traits
 swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits
 swift test --filter BaseChatUITests --disable-default-traits
+swift test --filter BaseChatMCPTests --disable-default-traits
 swift test --filter BaseChatBackendsTests --disable-default-traits
 swift test --filter BaseChatTestSupportTests --disable-default-traits
 
 # Apple Silicon only — MLX mock tests + llama.cpp
 swift test --filter BaseChatBackendsTests --traits MLX,Llama
+
+# Additional headless E2E coverage (mock backends; no special hardware)
 swift test --filter BaseChatE2ETests --disable-default-traits
+
+# MCP built-in catalog descriptors (trait-gated)
+swift test --filter BaseChatMCPTests --disable-default-traits --traits MCPBuiltinCatalog
+
+# MCP E2E scaffold target (currently skip-only)
+swift test --filter BaseChatMCPE2ETests --disable-default-traits
 
 # Xcode-only — real MLX model inference (metallib required)
 # Cannot run via swift test; MLX Metal shaders are only compiled by Xcode.
@@ -101,17 +111,17 @@ When Apple ships a new major OS each September, bump both minimums by one and re
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/test.sh` | Runs the four CI suites and prints an honest summary. |
+| `scripts/test.sh` | Runs configured Swift test suites and prints an honest summary. |
 | `scripts/example-ui-tests.sh` | `build-for-testing` / `test-without-building` for Example app XCUITests. |
 | `scripts/clean-leaked-test-artifacts.sh` | Removes test fixtures that leaked into `~/Documents/Models/`. |
 | `scripts/fuzz.sh` | Runs the BaseChatFuzz harness (default: 5 min against Ollama). Passes `--traits Fuzz,MLX,Llama` automatically. See [FUZZING.md](FUZZING.md). |
 
 ## Pre-push checklist
 
-Before pushing any branch, run all three CI test suites locally and confirm zero failures:
+Before pushing any branch, run all CI-safe test suites locally and confirm zero failures:
 
 ```bash
-swift test --filter BaseChatCoreTests --disable-default-traits && swift test --filter BaseChatInferenceTests --disable-default-traits && swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits && swift test --filter BaseChatUITests --disable-default-traits && swift test --filter BaseChatBackendsTests --disable-default-traits && swift test --filter BaseChatTestSupportTests --disable-default-traits
+swift test --filter BaseChatCoreTests --disable-default-traits && swift test --filter BaseChatInferenceTests --disable-default-traits && swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits && swift test --filter BaseChatUITests --disable-default-traits && swift test --filter BaseChatMCPTests --disable-default-traits && swift test --filter BaseChatBackendsTests --disable-default-traits && swift test --filter BaseChatTestSupportTests --disable-default-traits
 ```
 
 Never push based on a subset passing. After rebasing, always re-run the full suite before pushing — conflicts can silently break tests that compiled fine before.
@@ -210,7 +220,7 @@ All changes go through PRs — direct pushes to `main` are blocked for everyone.
 4. Report the PR URL — the maintainer reviews and merges manually
 5. Do NOT pass `--auto` or `--merge` — merges require human approval
 
-CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatInferenceSwiftTestingTests` + `BaseChatUITests` + `BaseChatBackendsTests`) before merge is allowed.
+CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatInferenceSwiftTestingTests` + `BaseChatUITests` + `BaseChatMCPTests` + `BaseChatBackendsTests` + `BaseChatTestSupportTests`) before merge is allowed.
 
 `BaseChatBackendsTests` runs in CI without hardware traits — only cloud backend and SSE tests execute; MLX and Llama tests are excluded by `#if MLX`/`#if Llama` conditional compilation. Run with `--traits MLX,Llama` locally on Apple Silicon before merging backend changes. `BaseChatE2ETests` requires physical hardware and does not run in CI.
 

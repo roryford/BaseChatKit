@@ -211,6 +211,11 @@ package final class SSEEventIDTracker: @unchecked Sendable {
 }
 
 package struct SSEStreamParser {
+    package struct NamedEvent: Sendable, Equatable {
+        package let name: String?
+        package let data: String
+        package let id: String?
+    }
 
     /// Parses an `AsyncSequence` of bytes into an `AsyncThrowingStream` of SSE data lines.
     ///
@@ -313,6 +318,147 @@ package struct SSEStreamParser {
                                 throw SSEStreamError.eventTooLarge(byteBuffer.count)
                             }
                         }
+                    }
+                } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        continuation.finish()
+                    } else {
+                        continuation.finish(throwing: error)
+                    }
+                    return
+                }
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    /// Parses SSE into named events by pairing `event:` + `data:` fields and
+    /// emitting on event boundaries (blank line).
+    ///
+    /// - Important: Multiple `data:` lines in a single event are coalesced
+    ///   with `\n` per the SSE specification.
+    package static func parseNamed<S: AsyncSequence & Sendable>(
+        bytes: S,
+        limits: SSEStreamLimits = BaseChatConfiguration.shared.sseStreamLimits,
+        eventIDTracker: SSEEventIDTracker? = nil
+    ) -> AsyncThrowingStream<NamedEvent, Error> where S.Element == UInt8 {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var byteBuffer = Data()
+                var iterator = bytes.makeAsyncIterator()
+
+                var totalBytes = 0
+                var rateWindowStart = ContinuousClock.now
+                var rateWindowCount = 0
+                let maxRate = limits.maxEventsPerSecond
+
+                var currentEventName: String?
+                var currentEventID: String?
+                var dataLines: [String] = []
+
+                func noteEventYielded() -> SSEStreamError? {
+                    let now = ContinuousClock.now
+                    if now - rateWindowStart >= .seconds(1) {
+                        rateWindowStart = now
+                        rateWindowCount = 1
+                        return nil
+                    }
+                    rateWindowCount += 1
+                    if rateWindowCount > maxRate {
+                        return .eventRateExceeded(rateWindowCount)
+                    }
+                    return nil
+                }
+
+                func flushEvent() throws -> Bool {
+                    guard !dataLines.isEmpty else {
+                        currentEventName = nil
+                        return false
+                    }
+                    let payload = dataLines.joined(separator: "\n")
+                    dataLines.removeAll(keepingCapacity: true)
+                    defer { currentEventName = nil }
+
+                    if payload == "[DONE]" {
+                        return true
+                    }
+
+                    if let rateError = noteEventYielded() {
+                        throw rateError
+                    }
+
+                    continuation.yield(NamedEvent(
+                        name: currentEventName,
+                        data: payload,
+                        id: currentEventID
+                    ))
+                    return false
+                }
+
+                do {
+                    while let byte = try await iterator.next() {
+                        if Task.isCancelled { break }
+
+                        totalBytes += 1
+                        if totalBytes > limits.maxTotalBytes {
+                            throw SSEStreamError.streamTooLarge(totalBytes)
+                        }
+
+                        if byte != UInt8(ascii: "\n") {
+                            byteBuffer.append(byte)
+                            if byteBuffer.count > limits.maxEventBytes {
+                                throw SSEStreamError.eventTooLarge(byteBuffer.count)
+                            }
+                            continue
+                        }
+
+                        let line: String
+                        if let decoded = String(data: byteBuffer, encoding: .utf8) {
+                            line = decoded.trimmingCharacters(in: .whitespaces)
+                        } else {
+                            Log.network.warning("SSEStreamParser.parseNamed: skipped \(byteBuffer.count)-byte line with invalid UTF-8")
+                            byteBuffer.removeAll(keepingCapacity: true)
+                            continue
+                        }
+                        byteBuffer.removeAll(keepingCapacity: true)
+
+                        if line.isEmpty {
+                            if try flushEvent() { break }
+                            continue
+                        }
+
+                        if line.hasPrefix("event:") {
+                            let name = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                            currentEventName = name.isEmpty ? nil : name
+                            continue
+                        }
+
+                        if line.hasPrefix("data:") {
+                            let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                            dataLines.append(payload)
+                            continue
+                        }
+
+                        if line.hasPrefix("id:") {
+                            let id = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                            // Empty `id:` resets the last seen event ID.
+                            let normalized = id.isEmpty ? nil : id
+                            currentEventID = normalized
+                            eventIDTracker?.update(normalized)
+                            continue
+                        }
+                        // retry:, comments, and unknown fields are intentionally ignored.
+                    }
+
+                    // Flush terminal event if stream ended without blank separator.
+                    if try flushEvent() {
+                        continuation.finish()
+                        return
                     }
                 } catch {
                     if error is CancellationError || Task.isCancelled {

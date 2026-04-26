@@ -102,7 +102,12 @@ final class LlamaModelLoader: @unchecked Sendable {
         #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0   // Metal not reliable in simulator
         #else
-        modelParams.n_gpu_layers = 99  // Offload all layers to Metal
+        // TEMP for 26B MoE on a 24 GB Mac running other heavy processes: pure
+        // CPU (mmap-paged). The Metal command-buffer cannot allocate ~10 GB of
+        // partial weights when system headroom is < ~6 GB. CPU-only proves the
+        // model decodes; we'll bump back toward 99 once memory pressure eases
+        // and the load-time hw.memsize policy lands.
+        modelParams.n_gpu_layers = 0
         #endif
 
         // Wire up the progress callback when a handler is installed.

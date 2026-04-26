@@ -25,6 +25,15 @@ final class SSEStreamParserTests: XCTestCase {
         return results
     }
 
+    private func collectNamed(_ string: String) async throws -> [SSEStreamParser.NamedEvent] {
+        let stream = SSEStreamParser.parseNamed(bytes: makeByteStream(string))
+        var results: [SSEStreamParser.NamedEvent] = []
+        for try await value in stream {
+            results.append(value)
+        }
+        return results
+    }
+
     // MARK: - Tests
 
     func test_parse_singleDataLine() async throws {
@@ -80,6 +89,35 @@ final class SSEStreamParserTests: XCTestCase {
     func test_parse_emptyInput() async throws {
         let results = try await collect("")
         XCTAssertTrue(results.isEmpty, "Empty input should yield nothing")
+    }
+
+    func test_parseNamed_namedEvent_yieldsNameAndPayload() async throws {
+        let input = "event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\n"
+        let results = try await collectNamed(input)
+        XCTAssertEqual(results, [
+            .init(name: "response.output_text.delta", data: #"{"delta":"hi"}"#, id: nil)
+        ])
+    }
+
+    func test_parseNamed_dataWithoutEventName_yieldsNilName() async throws {
+        let input = "data: payload\n\n"
+        let results = try await collectNamed(input)
+        XCTAssertEqual(results, [
+            .init(name: nil, data: "payload", id: nil)
+        ])
+    }
+
+    func test_parseNamed_multipleDataLines_coalescesWithNewline() async throws {
+        let input = """
+        event: joined
+        data: one
+        data: two
+
+        """
+        let results = try await collectNamed(input)
+        XCTAssertEqual(results, [
+            .init(name: "joined", data: "one\ntwo", id: nil)
+        ])
     }
 
     // MARK: - Limits

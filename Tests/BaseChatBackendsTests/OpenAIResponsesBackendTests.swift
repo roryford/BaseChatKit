@@ -9,8 +9,7 @@ import BaseChatTestSupport
 ///
 /// The Responses API distinguishes events by the `event:` line — the data
 /// payload itself is just a `delta` string with no type field — so the
-/// parser must walk `event:` + `data:` pairs rather than rely on the stock
-/// `SSEStreamParser` (which discards `event:` lines).
+/// backend consumes `SSEStreamParser.parseNamed(...)` and routes by event name.
 final class OpenAIResponsesBackendTests: XCTestCase {
 
     // MARK: - Fixtures

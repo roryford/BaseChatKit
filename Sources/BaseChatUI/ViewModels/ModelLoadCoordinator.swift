@@ -122,7 +122,15 @@ final class ModelLoadCoordinator {
     func loadLocalModel(_ model: ModelInfo, generation: UInt64?) async {
         guard isCurrentLoadIntentGeneration(generation) else { return }
 
-        let requestedContext = model.detectedContextLength ?? 8_192
+        // Clamp the local-model context request. Some headers advertise a huge
+        // native context (e.g. Gemma 4 26B-A4B reports 262_144) and although
+        // ModelLoadPlan further clamps based on system RAM, Metal command-buffer
+        // / one-shot KV-cache allocations on Apple Silicon still fail at high
+        // ctx for large MoE GGUFs. 8192 is a safe ceiling for ~16 GB Q4 MoE on
+        // unified memory; sessions can opt back into longer contexts via
+        // contextSizeOverride once we surface a UI control.
+        let detected = model.detectedContextLength ?? 8_192
+        let requestedContext = min(detected, 8_192)
         let plan: ModelLoadPlan
         switch model.modelType {
         case .foundation:

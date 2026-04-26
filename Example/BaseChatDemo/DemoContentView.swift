@@ -18,6 +18,7 @@ struct DemoContentView: View {
     @State private var preferredCompactColumn: NavigationSplitViewColumn = .detail
     @State private var isModelManagementPresented = false
     @State private var isToolPolicyPresented = false
+    @State private var isConnectedServicesPresented = false
 
     let inferenceService: InferenceService
 
@@ -85,6 +86,9 @@ struct DemoContentView: View {
         .sheet(isPresented: $isToolPolicyPresented) {
             ToolPolicyView()
                 .environment(viewModel)
+        }
+        .sheet(isPresented: $isConnectedServicesPresented) {
+            ConnectedServicesView(toolRegistry: toolRegistry)
         }
         .sheet(isPresented: approvalSheetIsPresented) {
             if let call = viewModel.toolApprovalGate?.pending.first {
@@ -299,6 +303,21 @@ struct DemoContentView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("sidebar-tool-policy-button")
+
+                Button {
+                    isConnectedServicesPresented = true
+                } label: {
+                    HStack {
+                        Label("Connected Services", systemImage: "link.badge.plus")
+                            .font(.caption)
+                        Spacer()
+                        Text("Manage")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("sidebar-connected-services-button")
             }
             .padding()
         }
@@ -395,4 +414,3 @@ struct DemoContentView: View {
         }
     }
 }
-

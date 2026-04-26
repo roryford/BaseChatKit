@@ -1,0 +1,31 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "search_issues",
+        "description": "Search Linear issues.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string" }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "create_comment",
+        "description": "Create a comment on an issue.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issueId": { "type": "string" },
+            "body": { "type": "string" }
+          },
+          "required": ["issueId", "body"]
+        }
+      }
+    ]
+  }
+}
