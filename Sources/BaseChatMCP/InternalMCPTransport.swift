@@ -1,4 +1,6 @@
+import Darwin
 import Foundation
+import Security
 import BaseChatInference
 
 internal protocol MCPTransport: Sendable {
@@ -204,6 +206,13 @@ internal actor MCPStdioTransport: MCPTransport {
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
+
+        // Mark pipe descriptors close-on-exec so they are not inherited by any
+        // additional child processes spawned later in the same process tree.
+        fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETFD, FD_CLOEXEC)
+        fcntl(stdoutPipe.fileHandleForReading.fileDescriptor, F_SETFD, FD_CLOEXEC)
+        fcntl(stderrPipe.fileHandleForReading.fileDescriptor, F_SETFD, FD_CLOEXEC)
+
         process.executableURL = command.executable
         process.arguments = command.arguments
         process.environment = MCPStdioEnvironmentPolicy.sanitizedEnvironment(
@@ -216,6 +225,29 @@ internal actor MCPStdioTransport: MCPTransport {
         if let workingDirectory = command.workingDirectory {
             process.currentDirectoryURL = workingDirectory
         }
+
+        // Verify the executable meets the caller-supplied codesign requirement
+        // before we give it access to our pipes. macOS only; the build condition
+        // matches the outer #if that wraps MCPStdioTransport.
+        #if os(macOS) && !targetEnvironment(macCatalyst)
+        if let requirement = command.codesignRequirement {
+            var staticCode: SecStaticCode?
+            guard SecStaticCodeCreateWithPath(command.executable as CFURL, [], &staticCode) == errSecSuccess,
+                  let code = staticCode else {
+                throw MCPError.transportFailure("codesign check: could not create static code ref")
+            }
+            let req: SecRequirement? = try {
+                var r: SecRequirement?
+                guard SecRequirementCreateWithString(requirement as CFString, [], &r) == errSecSuccess else {
+                    throw MCPError.transportFailure("codesign check: invalid requirement string")
+                }
+                return r
+            }()
+            guard SecStaticCodeCheckValidity(code, [], req) == errSecSuccess else {
+                throw MCPError.transportFailure("codesign requirement not met: \(requirement)")
+            }
+        }
+        #endif
 
         do {
             try process.run()

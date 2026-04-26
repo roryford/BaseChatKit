@@ -49,17 +49,24 @@ public struct MCPStdioCommand: Sendable, Equatable, Hashable, Codable {
     public let arguments: [String]
     public let environment: [String: String]
     public let workingDirectory: URL?
+    /// Optional macOS Security Framework requirement string checked against the
+    /// executable before launch. When `nil` the check is skipped. When non-nil,
+    /// `SecStaticCodeCheckValidity` is called and the launch is aborted if the
+    /// check fails. macOS-only; silently ignored on other platforms.
+    public let codesignRequirement: String?
 
     public init(
         executable: URL,
         arguments: [String] = [],
         environment: [String: String] = [:],
-        workingDirectory: URL? = nil
+        workingDirectory: URL? = nil,
+        codesignRequirement: String? = nil
     ) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.workingDirectory = workingDirectory
+        self.codesignRequirement = codesignRequirement
     }
 
     public static func npx(package: String, args: [String] = []) -> Self {
