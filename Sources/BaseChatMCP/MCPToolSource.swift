@@ -56,6 +56,54 @@ public final class MCPToolSource: @unchecked Sendable {
         await storage.currentToolNames()
     }
 
+    /// Returns the currently-registered tools whose JSON Schemas are compatible
+    /// with Apple's Foundation Models tool surface.
+    ///
+    /// Foundation Models rejects schemas that use `oneOf`, `$ref`, or whose
+    /// nesting exceeds a small depth. This query returns the namespaced names
+    /// of tools whose schemas pass all three checks, sorted alphabetically.
+    ///
+    /// "Deep nesting" is defined as the maximum depth of nested `object`
+    /// (`properties`) or `array` (`items`) descents within the schema.
+    /// `maxDepth: 4` accepts e.g. `{type:object, properties:{x:{type:array,
+    /// items:{type:object, properties:{y:{type:string}}}}}}` (depth 3) but
+    /// rejects schemas that nest one level deeper. Depth is measured from the
+    /// root schema (depth 1 = the root object), so a flat
+    /// `{type:object, properties:{x:{type:string}}}` is depth 2.
+    ///
+    /// - Parameter maxDepth: Maximum allowed schema nesting depth. Defaults to
+    ///   4, which empirically covers most well-formed MCP server tools while
+    ///   rejecting recursive or deeply-nested OpenAPI-style schemas that
+    ///   Foundation Models can't handle.
+    public func foundationModelsCompatibleNames(maxDepth: Int = 4) async -> [String] {
+        let tools = await storage.currentTools()
+        return tools
+            .filter { isFoundationModelsCompatible($0.inputSchema, maxDepth: maxDepth) }
+            .map(\.namespacedName)
+            .sorted()
+    }
+
+    /// Returns the subset of currently-registered tools that should be exposed
+    /// to Apple's Foundation Models backend in a given turn.
+    ///
+    /// Composes ``foundationModelsCompatibleNames(maxDepth:)`` with a hard cap
+    /// (defaulting to ``MCPToolFilter/foundationModelsToolCap``). When more
+    /// compatible tools exist than the cap allows, the lexicographically-first
+    /// `cap` names are returned — deterministic ordering keeps the UI's
+    /// "X of Y enabled" count stable across refreshes.
+    ///
+    /// - Parameters:
+    ///   - maxDepth: Forwarded to the schema-compatibility check.
+    ///   - cap: Maximum number of tools to return. Defaults to 16.
+    public func foundationModelsEnabledNames(
+        maxDepth: Int = 4,
+        cap: Int = MCPToolFilter.foundationModelsToolCap
+    ) async -> [String] {
+        let compatible = await foundationModelsCompatibleNames(maxDepth: maxDepth)
+        guard cap >= 0 else { return [] }
+        return Array(compatible.prefix(cap))
+    }
+
     @MainActor public func register(in registry: ToolRegistry) async {
         if await storage.isEmpty(), listTools != nil {
             do {
@@ -260,6 +308,10 @@ private actor MCPToolSourceStorage {
 
     func currentToolNames() -> [String] {
         executorsByStableKey.values.map(\.definition.name).sorted()
+    }
+
+    func currentTools() -> [MCPRemoteTool] {
+        Array(toolsByStableKey.values)
     }
 
     func replaceTools(
@@ -489,6 +541,91 @@ private func normalizedNamespace(_ namespace: String?) -> String? {
         .filter { !$0.isEmpty }
         .joined(separator: "_")
     return normalized.isEmpty ? nil : normalized
+}
+
+// MARK: - Foundation Models schema compatibility
+
+/// Returns `true` when `schema` contains no `oneOf`, no `$ref`, and no nested
+/// `object`/`array` chain deeper than `maxDepth` levels.
+///
+/// Internal so tests in the same module can exercise edge cases directly.
+internal func isFoundationModelsCompatible(_ schema: JSONSchemaValue, maxDepth: Int) -> Bool {
+    schemaDepthIfCompatible(schema, currentDepth: 1, maxDepth: maxDepth) != nil
+}
+
+/// Recursive walker. Returns `nil` the moment an unsupported construct is
+/// found (rejecting the whole schema); otherwise returns the maximum depth
+/// reached. The depth is "interesting" only as a guard against the recursive
+/// case — callers just look at `nil` vs `non-nil`.
+private func schemaDepthIfCompatible(
+    _ schema: JSONSchemaValue,
+    currentDepth: Int,
+    maxDepth: Int
+) -> Int? {
+    if currentDepth > maxDepth { return nil }
+
+    switch schema {
+    case .object(let object):
+        // Reject the constructs Foundation Models can't decode at any level.
+        if object["oneOf"] != nil { return nil }
+        if object["$ref"] != nil { return nil }
+        // anyOf is also not in Apple's accepted vocabulary; reject it for symmetry
+        // since it's structurally the same hazard as oneOf.
+        if object["anyOf"] != nil { return nil }
+
+        var deepest = currentDepth
+        // Descend into properties (nested objects) and items (nested arrays).
+        // Other keys (`type`, `description`, `required`, `enum`, etc.) are scalar
+        // metadata that can't contain further schema nodes.
+        if case .object(let properties)? = object["properties"] {
+            for (_, child) in properties {
+                guard let childDepth = schemaDepthIfCompatible(
+                    child,
+                    currentDepth: currentDepth + 1,
+                    maxDepth: maxDepth
+                ) else { return nil }
+                deepest = max(deepest, childDepth)
+            }
+        }
+        if let items = object["items"] {
+            // `items` may be a single schema or an array of schemas (tuple form).
+            switch items {
+            case .array(let tupleItems):
+                for child in tupleItems {
+                    guard let childDepth = schemaDepthIfCompatible(
+                        child,
+                        currentDepth: currentDepth + 1,
+                        maxDepth: maxDepth
+                    ) else { return nil }
+                    deepest = max(deepest, childDepth)
+                }
+            default:
+                guard let childDepth = schemaDepthIfCompatible(
+                    items,
+                    currentDepth: currentDepth + 1,
+                    maxDepth: maxDepth
+                ) else { return nil }
+                deepest = max(deepest, childDepth)
+            }
+        }
+        return deepest
+    case .array(let elements):
+        // A bare schema array (rare at the top level but allowed inside e.g.
+        // `prefixItems`) — descend without advancing depth, since we already
+        // counted the array container at the parent.
+        var deepest = currentDepth
+        for element in elements {
+            guard let childDepth = schemaDepthIfCompatible(
+                element,
+                currentDepth: currentDepth,
+                maxDepth: maxDepth
+            ) else { return nil }
+            deepest = max(deepest, childDepth)
+        }
+        return deepest
+    case .string, .number, .bool, .null:
+        return currentDepth
+    }
 }
 
 private extension MCPToolFilter {

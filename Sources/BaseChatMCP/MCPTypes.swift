@@ -132,6 +132,13 @@ public struct MCPToolFilter: Sendable, Equatable, Hashable, Codable {
     }
 
     public static var allowAll: Self { .init(mode: .allowAll) }
+
+    /// Hard cap on the number of tools surfaced to Apple's Foundation Models
+    /// backend. Apple's on-device tool surface degrades sharply once the tool
+    /// list grows large — the model spends more of its context budget reciting
+    /// schemas than reasoning. 16 is the empirically-derived ceiling used by
+    /// ``MCPToolSource/foundationModelsEnabledNames(maxDepth:cap:)``.
+    public static let foundationModelsToolCap: Int = 16
 }
 
 public struct MCPClientConfiguration: Sendable {
