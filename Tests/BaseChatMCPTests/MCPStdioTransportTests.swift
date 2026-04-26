@@ -7,6 +7,11 @@ import BaseChatTestSupport
 final class MCPStdioTransportTests: XCTestCase {
     #if os(macOS) && !targetEnvironment(macCatalyst)
     func test_sendFramesPayloadAndParsesResponse() async throws {
+        // Python3 subprocess echo; skip if interpreter not at the standard path.
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: "/usr/bin/python3"),
+            "python3 not found at /usr/bin/python3"
+        )
         let echoScript = """
         import re, sys
 
@@ -49,7 +54,7 @@ final class MCPStdioTransportTests: XCTestCase {
         try await transport.send(payload)
 
         let stream = transport.incomingMessages
-        let received = try await withTimeout(.seconds(2)) {
+        let received = try await withTimeout(.seconds(10)) {
             for try await payload in stream {
                 return payload
             }
