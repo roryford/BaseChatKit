@@ -51,7 +51,7 @@ import BaseChatInference
 ///     }
 /// }
 /// ```
-public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, CloudBackendURLModelConfigurable, CloudBackendKeychainConfigurable, @unchecked Sendable {
+public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, CloudBackendURLModelConfigurable, CloudBackendKeychainConfigurable, ToolCallingHistoryReceiver, @unchecked Sendable {
 
     // MARK: - Init
 
@@ -92,7 +92,14 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             maxContextTokens: 200_000,
             requiresPromptTemplate: false,
             supportsSystemPrompt: true,
-            supportsToolCalling: false,
+            // Responses API tool calling: function-call arguments stream via
+            // `response.function_call_arguments.delta` (keyed by `item_id`)
+            // after a `response.output_item.added` event for the matching
+            // function_call item. The backend bridges item_id → call_id so
+            // consumers see consistent `.toolCallStart` →
+            // N×`.toolCallArgumentsDelta` → `.toolCall` sequences regardless
+            // of which OpenAI surface produced them.
+            supportsToolCalling: true,
             supportsStructuredOutput: true,
             supportsNativeJSONMode: false,
             cancellationStyle: .cooperative,
@@ -101,8 +108,22 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             maxOutputTokens: 16_384,
             supportsStreaming: true,
             isRemote: true,
-            supportsThinking: true
+            supportsThinking: true,
+            streamsToolCallArguments: true,
+            supportsParallelToolCalls: true
         )
+    }
+
+    // MARK: - Tool-Aware Conversation History
+
+    /// One-shot tool-aware history payload supplied by the orchestrator.
+    /// Consumed and cleared by ``buildRequest(prompt:systemPrompt:config:)``
+    /// so subsequent non-tool generations fall back to the plain string
+    /// history.
+    private var toolAwareHistory: [ToolAwareHistoryEntry]?
+
+    public func setToolAwareHistory(_ messages: [ToolAwareHistoryEntry]) {
+        withStateLock { self.toolAwareHistory = messages }
     }
 
     // MARK: - Model Lifecycle
@@ -130,15 +151,28 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
 
         let responsesURL = baseURL.appendingPathComponent("v1/responses")
 
-        var input: [[String: String]] = []
+        // Snapshot and clear: tool-aware history is one-shot.
+        let snapshotToolHistory: [ToolAwareHistoryEntry]? = withStateLock {
+            let snapshot = self.toolAwareHistory
+            self.toolAwareHistory = nil
+            return snapshot
+        }
+
+        var input: [[String: Any]] = []
         if let systemPrompt, !systemPrompt.isEmpty {
             input.append(["role": "system", "content": systemPrompt])
         }
-        if let history = conversationHistory {
+        if let toolHistory = snapshotToolHistory {
+            // Responses API encodes tool turns as `function_call` /
+            // `function_call_output` items rather than role-tagged messages.
+            for entry in toolHistory {
+                input.append(contentsOf: OpenAIToolEncoding.encodeResponsesEntries(entry))
+            }
+        } else if let history = conversationHistory {
             // The Responses API accepts the same `(role, content)` shape as
             // Chat Completions for plain text turns; reasoning items are
             // server-managed and not replayed by the client.
-            input.append(contentsOf: history.map { ["role": $0.role, "content": $0.content] })
+            input.append(contentsOf: history.map { ["role": $0.role, "content": $0.content] as [String: Any] })
         } else {
             input.append(["role": "user", "content": prompt])
         }
@@ -151,6 +185,13 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             "top_p": config.topP,
             "max_output_tokens": config.maxOutputTokens ?? 2048
         ]
+
+        // Tools — same `[{type:"function", function:{...}}]` envelope as Chat
+        // Completions, plus the matching `tool_choice` policy.
+        if !config.tools.isEmpty {
+            body["tools"] = config.tools.map(OpenAIToolEncoding.encodeToolDefinition)
+            OpenAIToolEncoding.applyToolChoice(config.toolChoice, into: &body)
+        }
 
         // Only request a reasoning summary when the caller asks for thinking
         // output. Sending `reasoning` to non-reasoning models is rejected by
@@ -203,6 +244,26 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
         // this stream. We flush a single `.thinkingComplete` on the
         // transition to visible content so consumers see a clean handoff.
         var thinkingOpen = false
+
+        // Tool-call accumulator keyed by `item_id` (Responses API's stable
+        // identifier across the streamed deltas of a single function_call).
+        // The accumulator stores the call_id under `entry.id` so we always
+        // emit `.toolCallStart` / `.toolCallArgumentsDelta` / `.toolCall`
+        // with the *call_id* downstream tool dispatch will need.
+        let toolAccumulator = StreamingToolCallAccumulator()
+        var finalisedToolCalls = false
+
+        func finaliseToolCalls() {
+            guard !finalisedToolCalls else { return }
+            finalisedToolCalls = true
+            for entry in toolAccumulator.finalizedEntries() {
+                continuation.yield(.toolCall(ToolCall(
+                    id: entry.callId,
+                    toolName: entry.name,
+                    arguments: entry.arguments
+                )))
+            }
+        }
 
         // Rate-limits every `data:` line received from the upstream,
         // regardless of whether we yield a `GenerationEvent` for it. This
@@ -260,8 +321,64 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
                 return false
             }
 
+            // Function-call lifecycle:
+            //   response.output_item.added (item.type == "function_call")
+            //     → carries item.id, item.call_id, item.name; emit .toolCallStart
+            //   response.function_call_arguments.delta
+            //     → carries item_id + delta; emit .toolCallArgumentsDelta
+            //   response.function_call_arguments.done
+            //     → terminal for one call; we wait for response.completed to
+            //       fire all .toolCall events together so they emit in
+            //       insertion order.
+            //   response.output_item.done (item.type == "function_call")
+            //     → some streams use this instead; treat the same.
+            if name == "response.output_item.added" {
+                if let info = Self.parseFunctionCallItem(from: data) {
+                    flushThinkingCompleteIfNeeded()
+                    toolAccumulator.upsert(
+                        key: info.itemId,
+                        id: info.callId,
+                        name: info.name,
+                        argumentsDelta: nil
+                    )
+                    if !info.name.isEmpty {
+                        continuation.yield(.toolCallStart(callId: info.callId, name: info.name))
+                        toolAccumulator.markStarted(key: info.itemId)
+                    }
+                }
+                return false
+            }
+
+            if name == "response.function_call_arguments.delta" {
+                if let info = Self.parseFunctionCallArgumentsDelta(from: data) {
+                    toolAccumulator.upsert(
+                        key: info.itemId,
+                        id: nil,
+                        name: nil,
+                        argumentsDelta: info.delta
+                    )
+                    let resolvedId = toolAccumulator.resolvedId(forKey: info.itemId)
+                    if !info.delta.isEmpty {
+                        continuation.yield(.toolCallArgumentsDelta(
+                            callId: resolvedId,
+                            textDelta: info.delta
+                        ))
+                    }
+                }
+                return false
+            }
+
+            if name == "response.function_call_arguments.done" {
+                // No-op here — we batch-emit `.toolCall` from
+                // `response.completed` so multiple parallel calls emit in
+                // insertion order. If `response.completed` never arrives the
+                // outer loop's stream-end fallback finalises calls.
+                return false
+            }
+
             if name == "response.completed" {
                 flushThinkingCompleteIfNeeded()
+                finaliseToolCalls()
                 if let usage = Self.parseUsage(from: data) {
                     handleUsage(usage)
                     if let prompt = usage.promptTokens,
@@ -342,6 +459,14 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
         }
 
         flushThinkingCompleteIfNeeded()
+        // Stream-end fallback for tool calls. If the upstream closed without
+        // a `response.completed` event (rare, but possible on truncation),
+        // emit any buffered tool calls so the orchestrator can dispatch them.
+        // On cancellation we deliberately skip this: dropping the consumer
+        // mid-stream must not produce phantom `.toolCall` events.
+        if !Task.isCancelled {
+            finaliseToolCalls()
+        }
     }
 
     // MARK: - JSON Parsing
@@ -382,6 +507,56 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
         let completion = usage["output_tokens"] as? Int ?? usage["completion_tokens"] as? Int
         if prompt == nil && completion == nil { return nil }
         return (prompt, completion)
+    }
+
+    // MARK: - Tool-call parsing
+
+    /// Parsed metadata from a `response.output_item.added` event whose item
+    /// is a `function_call`.
+    struct FunctionCallItemInfo {
+        let itemId: String
+        let callId: String
+        let name: String
+    }
+
+    /// Parses a `response.output_item.added` payload, returning the
+    /// function-call metadata when the embedded item carries
+    /// `type == "function_call"`. Returns `nil` for unrelated items
+    /// (e.g. reasoning, message).
+    static func parseFunctionCallItem(from json: String) -> FunctionCallItemInfo? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let item = parsed["item"] as? [String: Any] else {
+            return nil
+        }
+        guard (item["type"] as? String) == "function_call" else { return nil }
+        // item.id is the streaming-internal handle; call_id is the value the
+        // model used to refer to this call (and what we feed back to the
+        // server in `function_call_output.call_id`). Both are required.
+        guard let itemId = item["id"] as? String, !itemId.isEmpty,
+              let callId = item["call_id"] as? String, !callId.isEmpty else {
+            return nil
+        }
+        let name = (item["name"] as? String) ?? ""
+        return FunctionCallItemInfo(itemId: itemId, callId: callId, name: name)
+    }
+
+    /// Parsed `response.function_call_arguments.delta` payload.
+    struct FunctionCallArgumentsDelta {
+        let itemId: String
+        let delta: String
+    }
+
+    static func parseFunctionCallArgumentsDelta(from json: String) -> FunctionCallArgumentsDelta? {
+        guard let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        guard let itemId = parsed["item_id"] as? String, !itemId.isEmpty else {
+            return nil
+        }
+        let delta = (parsed["delta"] as? String) ?? ""
+        return FunctionCallArgumentsDelta(itemId: itemId, delta: delta)
     }
 
     /// Extracts an error message from a `response.error` payload.

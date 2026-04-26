@@ -67,7 +67,8 @@ final class OpenAIResponsesBackendTests: XCTestCase {
         case .token(let t): return .token(t)
         case .usage: return .usage
         case .toolCall, .toolResult, .toolLoopLimitReached, .kvCacheReuse,
-             .diagnosticThrottle, .thinkingSignature:
+             .diagnosticThrottle, .thinkingSignature,
+             .toolCallStart, .toolCallArgumentsDelta:
             return nil
         }
     }
