@@ -35,8 +35,8 @@ swift test --filter BaseChatE2ETests --disable-default-traits
 # MCP built-in catalog descriptors (trait-gated)
 swift test --filter BaseChatMCPTests --disable-default-traits --traits MCPBuiltinCatalog
 
-# MCP E2E scaffold target (currently skip-only)
-swift test --filter BaseChatMCPE2ETests --disable-default-traits
+# MCP E2E — requires npx installed and network access
+RUN_MCP_E2E=1 swift test --filter BaseChatMCPE2ETests --disable-default-traits
 
 # Xcode-only — real MLX model inference (metallib required)
 # Cannot run via swift test; MLX Metal shaders are only compiled by Xcode.

@@ -50,6 +50,8 @@ try await source.refreshTools()
 
 ## Built-in templates
 
+> **Trait requirement:** Built-in catalog entries (`MCPCatalog.notion`, `.linear`, `.github`) require the `MCPBuiltinCatalog` trait. In your `Package.swift` dependency: `.product(name: "BaseChatMCP", package: "BaseChatKit", condition: .when(traits: ["MCPBuiltinCatalog"]))`. Or enable globally: `.trait(name: "MCPBuiltinCatalog")`.
+
 When `MCPBuiltinCatalog` is enabled, start from ``MCPCatalog``:
 
 ```swift
