@@ -183,7 +183,7 @@ final class MCPFoundationModelsCompatibilityTests: XCTestCase {
 
     // MARK: - D21 — query on MCPToolSource
 
-    func test_foundationModelsCompatibleNamesFiltersIncompatibleSchemas() async {
+    func test_foundationModelsCompatibleNamesFiltersIncompatibleSchemas() async throws {
         let source = makeSource(toolSpecs: [
             ("simple", .object([
                 "type": .string("object"),
@@ -207,7 +207,7 @@ final class MCPFoundationModelsCompatibilityTests: XCTestCase {
                 ]),
             ])),
         ])
-        try? await source.refreshTools()
+        try await source.refreshTools()
 
         let compatible = await source.foundationModelsCompatibleNames(maxDepth: 4)
         XCTAssertEqual(compatible, ["flat_array", "simple"])
@@ -215,14 +215,14 @@ final class MCPFoundationModelsCompatibilityTests: XCTestCase {
 
     // MARK: - D18 — cap composition
 
-    func test_foundationModelsEnabledNamesAppliesCap() async {
+    func test_foundationModelsEnabledNamesAppliesCap() async throws {
         let manyNames = (0..<25).map { String(format: "tool_%02d", $0) }
         let source = makeSource(
             toolSpecs: manyNames.map { ($0, .object(["type": .string("object")])) },
             // Loosen the source-level filter cap so the underlying refresh succeeds.
             toolFilter: .init(mode: .allowAll, maxToolCount: 100)
         )
-        try? await source.refreshTools()
+        try await source.refreshTools()
 
         // Default cap = 16.
         let enabled = await source.foundationModelsEnabledNames()
@@ -234,7 +234,7 @@ final class MCPFoundationModelsCompatibilityTests: XCTestCase {
         XCTAssertEqual(small, Array(manyNames.sorted().prefix(3)))
     }
 
-    func test_foundationModelsEnabledNamesIsIntersectedAndCapped() async {
+    func test_foundationModelsEnabledNamesIsIntersectedAndCapped() async throws {
         // Mix of compatible and incompatible — cap chooses from the
         // compatible-and-sorted set, never returning incompatible names.
         var specs: [(String, JSONSchemaValue)] = []
@@ -247,7 +247,7 @@ final class MCPFoundationModelsCompatibilityTests: XCTestCase {
             ])))
         }
         let source = makeSource(toolSpecs: specs, toolFilter: .init(mode: .allowAll, maxToolCount: 100))
-        try? await source.refreshTools()
+        try await source.refreshTools()
 
         let enabled = await source.foundationModelsEnabledNames(cap: 5)
         XCTAssertEqual(enabled.count, 5)
