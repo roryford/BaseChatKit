@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.12.2](https://github.com/roryford/BaseChatKit/compare/v0.12.1...v0.12.2) (2026-04-26)
+
+### Highlights
+
+#### Forward `prefill_progress` SSE events from cooperating upstream servers
+
+Long-context local models can spend 5–30 seconds evaluating a prompt before the first token, and the OpenAI wire protocol has no signal for it — chat UIs are stuck showing nothing until the first content delta. `OpenAIBackend` now forwards `prefill_progress` SSE events from cooperating upstream servers (e.g. the planned `BaseChatServer` proxy in #744), surfaced as a new `GenerationEvent.prefillProgress(nPast:nTotal:tokensPerSecond:)` case so views can show "evaluating prompt 70%" instead of a blank screen.
+
+```swift
+let config = GenerationConfig(streamPrefillProgress: true)
+let stream = try backend.generate(prompt: prompt, systemPrompt: nil, config: config)
+for try await event in stream.events {
+    if case .prefillProgress(let nPast, let nTotal, _) = event {
+        promptProgress = Double(nPast) / Double(nTotal)
+    }
+}
+```
+
+Off by default for OpenAI wire compatibility — opt in with `streamPrefillProgress: true` and the backend adds an `X-BaseChat-Prefill-Progress: true` request header so cooperating servers know to emit the events. Producer wiring for local backends (Llama, MLX, Foundation) is tracked separately under #746.
+
+#### Per-PR CI runtime cut by ~43%
+
+CI on a typical PR went from ~6m26s to ~3m41s by moving two non-correctness suites — `TrafficBoundaryAuditTest` (source-tree regex audit, ~50s) and `LargeSessionListPerformanceTests` (XCTMeasure baselines on a 1000-session SwiftData fixture, ~65s) — to a new `nightly-slow-tests.yml` workflow. Both still run unconditionally on local `swift test` (no env gate) and on the nightly job (`RUN_SLOW_TESTS=1`), so the boundary-rule signal and perf regression detection are preserved without paying ~115s of test-execution time on every PR.
+
+See [#803], [#804].
+
+### Features
+
+- **openai:** forward `prefill_progress` SSE events from compatible upstream servers ([#804](https://github.com/roryford/BaseChatKit/issues/804))
+
+### Fixes
+
+- **tests:** add `.prefillProgress` arm to the Ollama-trait replay switch — was breaking local Ollama E2E and the planned `--traits Ollama` CI tier ([#808](https://github.com/roryford/BaseChatKit/issues/808))
+
+### Performance Improvements
+
+- **ci:** move `TrafficBoundaryAuditTest` + `LargeSessionListPerformanceTests` to a nightly workflow — drops per-PR CI from ~6m26s to ~3m41s ([#803](https://github.com/roryford/BaseChatKit/issues/803))
+
 ## [0.12.1](https://github.com/roryford/BaseChatKit/compare/v0.12.0...v0.12.1) (2026-04-26)
 
 ### Highlights
