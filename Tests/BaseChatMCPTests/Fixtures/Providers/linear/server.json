@@ -1,0 +1,18 @@
+{
+  "provider": "linear",
+  "catalog": {
+    "id": "B146A315-DFA4-4F75-9AF8-7B98CDE569FB",
+    "displayName": "Linear",
+    "toolNamespace": "linear",
+    "dataDisclosure": "Tool calls may send prompt content and selected arguments to Linear.",
+    "transport": {
+      "type": "streamable-http",
+      "endpoint": "https://mcp.linear.app/mcp"
+    },
+    "oauth": {
+      "issuer": "https://linear.app",
+      "scopes": ["read", "write"],
+      "redirectURI": "basechat://oauth/mcp/linear/callback"
+    }
+  }
+}

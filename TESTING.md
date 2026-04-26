@@ -68,8 +68,13 @@ UI automation tests that launch the real Example app in a simulator and drive it
 | Target | Layer | Runs in CI | Hardware needed | Framework |
 |--------|-------|-----------|-----------------|-----------|
 | `BaseChatCoreTests` | Unit, Integration | Yes | None | Mixed (XCTest + Swift Testing) |
+| `BaseChatInferenceTests` | Unit, Integration | Yes | None | XCTest |
+| `BaseChatInferenceSwiftTestingTests` | Unit | Yes | None | Swift Testing |
 | `BaseChatUITests` | Integration | Yes | None | XCTest |
+| `BaseChatMCPTests` | Unit, Integration | Yes | None | XCTest |
+| `BaseChatMCPE2ETests` | E2E (subprocess smoke) | No (requires `RUN_MCP_E2E=1` and `npx`) | npx + network | XCTest |
 | `BaseChatBackendsTests` | Unit, E2E | Partial | MLX/Llama need Apple Silicon | Mixed |
+| `BaseChatTestSupportTests` | Unit | Yes | None | XCTest |
 | `BaseChatE2ETests` | E2E | Yes | None (mock backends) | Swift Testing |
 | `BaseChatMLXIntegrationTests` | E2E | No | Apple Silicon + Metal + local MLX model | XCTest |
 | `BaseChatDemoUITests` | XCUITest | No | Simulator | XCTest (XCUIApplication) |
@@ -78,13 +83,27 @@ UI automation tests that launch the real Example app in a simulator and drive it
 
 ```bash
 # CI-safe (no hardware required)
-swift test --filter BaseChatCoreTests
-swift test --filter BaseChatUITests
-swift test --filter BaseChatBackendsTests   # cloud/SSE tests only
+swift test --filter BaseChatCoreTests --disable-default-traits
+swift test --filter BaseChatInferenceTests --disable-default-traits
+swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits
+swift test --filter BaseChatUITests --disable-default-traits
+swift test --filter BaseChatMCPTests --disable-default-traits
+swift test --filter BaseChatBackendsTests --disable-default-traits   # cloud/SSE tests only
+swift test --filter BaseChatTestSupportTests --disable-default-traits
 
 # Apple Silicon only
 swift test --filter BaseChatBackendsTests --traits MLX,Llama
-swift test --filter BaseChatE2ETests
+
+# Additional headless E2E coverage (mock backends; no special hardware)
+swift test --filter BaseChatE2ETests --disable-default-traits
+
+# MCP built-in catalog descriptors (trait-gated metadata tests)
+swift test --filter BaseChatMCPTests --disable-default-traits --traits MCPBuiltinCatalog
+
+# MCP end-to-end smoke tests against a real subprocess server (explicit opt-in only).
+# Requires npx on PATH and network access to download @modelcontextprotocol/server-everything.
+# The EverythingServerSmokeTests class skips automatically unless RUN_MCP_E2E=1.
+RUN_MCP_E2E=1 swift test --filter BaseChatMCPE2ETests --disable-default-traits
 
 # Xcode-only — real MLX model inference (requires local MLX fixture; see below)
 # Cannot run via swift test; MLX Metal shaders are only compiled by Xcode.

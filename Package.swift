@@ -11,6 +11,7 @@ let package = Package(
     ],
     products: [
         .library(name: "BaseChatInference", targets: ["BaseChatInference"]),
+        .library(name: "BaseChatMCP", targets: ["BaseChatMCP"]),
         .library(name: "BaseChatCore", targets: ["BaseChatCore"]),
         .library(name: "BaseChatBackends", targets: ["BaseChatBackends"]),
         .library(name: "BaseChatUI", targets: ["BaseChatUI"]),
@@ -25,6 +26,8 @@ let package = Package(
         .trait(name: "Llama", description: "Enable the llama.cpp (GGUF) inference backend"),
         .trait(name: "Ollama", description: "Self-hosted / private-datacenter HTTP inference. Moves out of defaults in next major."),
         .trait(name: "CloudSaaS", description: "Third-party SaaS providers (Claude, OpenAI). Off by default."),
+        .trait(name: "MCP", description: "Enable the BaseChatMCP module and MCP client surface."),
+        .trait(name: "MCPBuiltinCatalog", description: "Enable BaseChatMCP's built-in catalog descriptors."),
         // Fuzz is intentionally NOT a default trait. Enabling it adds BaseChatBackends
         // (and transitively LlamaSwift) to fuzz-chat, which conflicts with the MLX
         // integration test targets in the auto-generated Xcode scheme. Run the fuzzer via
@@ -84,6 +87,15 @@ let package = Package(
             swiftSettings: [
                 .define("Ollama", .when(traits: ["Ollama"])),
                 .define("CloudSaaS", .when(traits: ["CloudSaaS"])),
+            ]
+        ),
+        // MCP: Model Context Protocol client surface and tool bridge.
+        .target(
+            name: "BaseChatMCP",
+            dependencies: ["BaseChatInference"],
+            path: "Sources/BaseChatMCP",
+            swiftSettings: [
+                .define("MCPBuiltinCatalog", .when(traits: ["MCPBuiltinCatalog"])),
             ]
         ),
         // Core: SwiftData persistence (schema, @Model types, container, provider)
@@ -178,6 +190,15 @@ let package = Package(
         .testTarget(
             name: "BaseChatInferenceSwiftTestingTests",
             dependencies: ["BaseChatInference", "BaseChatTestSupport"]
+        ),
+        .testTarget(
+            name: "BaseChatMCPTests",
+            dependencies: ["BaseChatMCP", "BaseChatInference", "BaseChatTestSupport"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "BaseChatMCPE2ETests",
+            dependencies: ["BaseChatMCP", "BaseChatInference", "BaseChatTestSupport"]
         ),
         .testTarget(
             name: "BaseChatBackendsTests",

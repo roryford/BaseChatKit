@@ -46,21 +46,26 @@ BCK and AnyLanguageModel occupy adjacent niches. AnyLanguageModel optimizes for 
 
 ## Architecture
 
-BaseChatKit is split into four targets with a clean dependency graph:
+BaseChatKit is split into five primary targets with a clean dependency graph:
 
 ```
 BaseChatUI  ──────────>  BaseChatCore  ──────────>  BaseChatInference
 (Views, ViewModels)      (SwiftData schema,         (Protocols, Models,
                           @Model types,              Services, Inference
                           persistence, export)       orchestration)
-                                                            ↑
-                         BaseChatBackends ──────────────────┘
-                         (MLX, llama.cpp,
-                          Foundation, Cloud)
+                                                             ↑
+                         BaseChatMCP ────────────────────────┤
+                         (MCP descriptors, client,           │
+                          tool bridge)                       │
+                                                             │
+                          BaseChatBackends ──────────────────┘
+                          (MLX, llama.cpp,
+                           Foundation, Cloud)
 ```
 
 - **BaseChatInference** — Inference orchestration. Protocols, models, and services for model loading, generation, context windows, prompt assembly, compression, tokenizers, and capability detection. No SwiftData. No ML dependencies. This is the integration point for custom backends and the minimum target for apps that bring their own persistence and UI.
-- **BaseChatCore** — SwiftData schema, `@Model` types (`ChatMessage`, `ChatSession`, `SamplerPreset`, `APIEndpoint`, `ModelBenchmarkCache`), `ModelContainerFactory`, `ChatPersistenceProvider`, and chat export. Re-exports `BaseChatInference`, so existing apps that `import BaseChatCore` continue to see the full inference surface unchanged.
+- **BaseChatMCP** — Model Context Protocol client surface: descriptors, auth/transport types, connection lifecycle (`MCPClient`), and tool bridge (`MCPToolSource`) for registering MCP tools with `ToolRegistry`.
+- **BaseChatCore** — SwiftData schema, `@Model` types (`ChatMessage`, `ChatSession`, `SamplerPreset`, `APIEndpoint`, `ModelBenchmarkCache`), `ModelContainerFactory`, `ChatPersistenceProvider`, and chat export. Depends on `BaseChatInference` but does not re-export it.
 - **BaseChatBackends** — Concrete inference backend implementations. Depends on `BaseChatInference` (not `BaseChatCore`), so backends stay free of SwiftData. Pulls MLX, llama.cpp, and cloud APIs.
 - **BaseChatUI** — SwiftUI views and view models. Depends on `BaseChatCore` (for persistence) and `BaseChatInference` (for inference orchestration).
 
@@ -109,6 +114,31 @@ Pass the matching set as `traits:` on your `.package(...)` entry to lock the con
 ```
 
 `CloudSaaS` is opt-in today. **`Ollama` is in the default trait set for the current minor release but moves to opt-in in the next major** — call sites that construct `OllamaBackend()` directly emit a deprecation warning pointing at this table. Route through `DefaultBackends.register(_:)` (which gates Ollama on the trait) or add `Ollama` explicitly to your manifest to silence it. See [#714](https://github.com/roryford/BaseChatKit/issues/714).
+
+### 2.1 Optional MCP traits
+
+`BaseChatMCP` ships as its own module (`import BaseChatMCP`). Package traits expose MCP-specific configuration:
+
+- `MCP` — explicit MCP opt-in marker for consumer manifests.
+- `MCPBuiltinCatalog` — enables built-in `MCPCatalog` descriptors (`notion`, `linear`, `github`).
+
+```swift
+.package(
+    url: "https://github.com/roryford/BaseChatKit.git",
+    from: "1.0.0",
+    traits: [
+        .trait(name: "MCP"),
+        .trait(name: "MCPBuiltinCatalog"), // optional: only if you use MCPCatalog
+    ]
+)
+```
+
+Quick checks:
+
+```bash
+swift test --filter BaseChatMCPTests --disable-default-traits
+swift test --filter BaseChatMCPTests --disable-default-traits --traits MCPBuiltinCatalog
+```
 
 ### 3. Configure at app startup
 
@@ -269,6 +299,19 @@ let (_, stream) = try inferenceService.enqueue(
 ```
 
 **Local backend tool ceiling:** Local instruct models (3B–8B) degrade sharply when given more than ~5 tool definitions per request — the model may ignore later tools, hallucinate names, or misroute calls. For cloud backends (OpenAI, Anthropic, large Ollama models) 20+ tools is fine. When targeting a local backend, curate tools per request via `GenerationConfig.tools` and keep definitions at or below 5 per call.
+
+## MCP Quick Start
+
+```swift
+import BaseChatInference
+import BaseChatMCP
+
+let client = MCPClient()
+let source = try await client.connect(descriptor)
+await source.register(in: registry)
+```
+
+For a complete walkthrough (descriptor setup, lifecycle, and built-in catalog), see `Sources/BaseChatMCP/BaseChatMCP.docc/Articles/MCPGettingStarted.md`.
 
 ## Custom Backends
 

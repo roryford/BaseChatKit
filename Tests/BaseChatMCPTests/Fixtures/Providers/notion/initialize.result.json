@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2025-03-26",
+    "serverInfo": {
+      "name": "Notion MCP",
+      "version": "fixture-2025-10-01"
+    },
+    "capabilities": {
+      "tools": {
+        "listChanged": true
+      },
+      "prompts": {}
+    }
+  }
+}

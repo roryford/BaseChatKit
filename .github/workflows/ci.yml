@@ -117,7 +117,7 @@ jobs:
 
       # CI smoke profile (GitHub macOS Apple Silicon runners):
       # - Runs BaseChatCoreTests + BaseChatInferenceTests + BaseChatInferenceSwiftTestingTests
-      #   + BaseChatUITests + BaseChatBackendsTests.
+      #   + BaseChatMCPTests + BaseChatUITests + BaseChatBackendsTests + BaseChatTestSupportTests.
       # - BaseChatInferenceTests contains XCTest suites only; Swift Testing suites live in
       #   BaseChatInferenceSwiftTestingTests to prevent a libmalloc SIGABRT from mixed harnesses.
       # - --disable-default-traits skips MLX (default-enabled) to avoid metallib
@@ -147,9 +147,9 @@ jobs:
       # ChatViewModelTests.test_autoSelectFirstRunModel_* pair). Serial XCTest
       # execution avoids that and `--parallel` would still need a UI-test-only
       # carve-out, which negates most of the speedup anyway.
-      - name: Test — XCTest suites (Core + UI + Backends + Inference + TestSupport)
+      - name: Test — XCTest suites (Core + UI + MCP + Backends + Inference + TestSupport)
         timeout-minutes: 25
-        run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatBackendsTests --filter BaseChatInferenceTests --filter BaseChatTestSupportTests --disable-default-traits --skip-update
+        run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatMCPTests --filter BaseChatBackendsTests --filter BaseChatInferenceTests --filter BaseChatTestSupportTests --disable-default-traits --skip-update
 
       - name: Test — Inference (Swift Testing, isolated process)
         timeout-minutes: 25

@@ -1,0 +1,18 @@
+{
+  "provider": "notion",
+  "catalog": {
+    "id": "5E4A6401-C86D-43DE-847E-AE02A34E89D8",
+    "displayName": "Notion",
+    "toolNamespace": "notion",
+    "dataDisclosure": "Tool calls may send prompt content and selected arguments to Notion.",
+    "transport": {
+      "type": "streamable-http",
+      "endpoint": "https://mcp.notion.com/mcp"
+    },
+    "oauth": {
+      "issuer": "https://notion.com",
+      "scopes": ["read:content", "write:content"],
+      "redirectURI": "basechat://oauth/mcp/notion/callback"
+    }
+  }
+}

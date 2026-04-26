@@ -1,0 +1,31 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "search",
+        "description": "Search pages in Notion.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string" }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "create_page",
+        "description": "Create a Notion page.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "parentId": { "type": "string" },
+            "title": { "type": "string" }
+          },
+          "required": ["parentId", "title"]
+        }
+      }
+    ]
+  }
+}

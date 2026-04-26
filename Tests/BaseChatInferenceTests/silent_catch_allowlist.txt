@@ -273,3 +273,30 @@ BaseChatTools/ReferenceTools/SampleRepoSearchTool.swift:guard let contents = try
 # as a debounce — the surrounding `if Task.isCancelled` guard short-circuits
 # the work that would otherwise execute on a stale query.
 BaseChatUI/Views/Sidebar/SessionListView.swift:try? await Task.sleep(nanoseconds: 200_000_000)
+
+# ---------------------------------------------------------------------------
+# BaseChatMCP
+# ---------------------------------------------------------------------------
+
+# sendNotificationIgnoringErrors is the fire-and-forget helper used to send
+# notifications/cancelled from a Task cancellation handler. The handler runs
+# synchronously on cancel and must not throw (doing so would suppress the
+# CancellationError the caller is expecting). Both the encode and the send
+# are explicitly best-effort: if either fails the notification is simply
+# not sent — acceptable because the MCP spec treats cancellation notifications
+# as advisory.
+BaseChatMCP/InternalMCPSession.swift:guard let payload = try? codec.encode(message) else { return }
+BaseChatMCP/InternalMCPSession.swift:try? await transport.send(payload)
+
+# Optional decode of a non-mandatory OAuth AS metadata field. The field is
+# absent from older authorization server metadata documents (pre-RFC 9207).
+# Falling back to `false` (no iss parameter supported) is the spec-correct
+# behaviour for a missing field — treating a decode failure as `false` is
+# semantically identical to the field being absent.
+BaseChatMCP/MCPOAuth.swift:(try? container.decodeIfPresent(Bool.self, forKey: .authorizationResponseIssParameterSupported)) ?? false
+
+# Best-effort JSON parse of a raw token-endpoint HTTP response body. The
+# body is not guaranteed to be valid JSON (the request may have failed at the
+# HTTP layer); falling back to an empty dictionary is correct because all
+# the downstream field reads return nil for missing keys.
+BaseChatMCP/MCPOAuth.swift:let rawJSON = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
