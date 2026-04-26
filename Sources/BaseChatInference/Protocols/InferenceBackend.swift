@@ -94,6 +94,14 @@ public struct GenerationConfig: Sendable, Codable {
     /// have not implemented JSON-mode wiring yet, silently ignore this flag.
     public var jsonMode: Bool
 
+    /// Opt-in for backend-specific prefill-progress streaming extensions.
+    ///
+    /// When `true`, OpenAI-compatible backends add
+    /// `X-BaseChat-Prefill-Progress: true` so compatible servers can emit
+    /// `prefill_progress` SSE updates before the first content token.
+    /// Defaults to `false` for OpenAI wire compatibility.
+    public var streamPrefillProgress: Bool
+
     /// Raw GBNF grammar string to constrain sampling.
     ///
     /// Honored by backends reporting `BackendCapabilities.supportsGrammarConstrainedSampling == true`.
@@ -148,7 +156,7 @@ public struct GenerationConfig: Sendable, Codable {
     /// - Only honoured by `MLXBackend`; other backends ignore this field.
     public var yieldEveryNTokens: Int = 8
 
-    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:minP:repetitionPenalty:seed:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:thinkingMarkers:maxToolIterations:grammar:yieldEveryNTokens:) instead.")
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:minP:repetitionPenalty:seed:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:streamPrefillProgress:thinkingMarkers:maxToolIterations:grammar:yieldEveryNTokens:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -164,6 +172,7 @@ public struct GenerationConfig: Sendable, Codable {
         toolChoice: ToolChoice = .auto,
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
+        streamPrefillProgress: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil,
         maxToolIterations: Int = 10,
         grammar: String? = nil,
@@ -183,6 +192,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.toolChoice = toolChoice
         self.maxThinkingTokens = maxThinkingTokens
         self.jsonMode = jsonMode
+        self.streamPrefillProgress = streamPrefillProgress
         self.thinkingMarkers = thinkingMarkers
         self.maxToolIterations = max(1, maxToolIterations)
         self.grammar = grammar
@@ -203,6 +213,7 @@ public struct GenerationConfig: Sendable, Codable {
         toolChoice: ToolChoice = .auto,
         maxThinkingTokens: Int? = nil,
         jsonMode: Bool = false,
+        streamPrefillProgress: Bool = false,
         thinkingMarkers: ThinkingMarkers? = nil,
         maxToolIterations: Int = 10,
         grammar: String? = nil,
@@ -221,6 +232,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.toolChoice = toolChoice
         self.maxThinkingTokens = maxThinkingTokens
         self.jsonMode = jsonMode
+        self.streamPrefillProgress = streamPrefillProgress
         self.thinkingMarkers = thinkingMarkers
         self.maxToolIterations = max(1, maxToolIterations)
         self.grammar = grammar
@@ -233,6 +245,7 @@ public struct GenerationConfig: Sendable, Codable {
         case temperature, topP, repeatPenalty, maxTokens, topK, typicalP, maxOutputTokens
         case tools, toolChoice, maxThinkingTokens, jsonMode, maxToolIterations, grammar
         case yieldEveryNTokens
+        case streamPrefillProgress
         case minP, repetitionPenalty, seed
     }
 
@@ -252,6 +265,7 @@ public struct GenerationConfig: Sendable, Codable {
         toolChoice = (try c.decodeIfPresent(ToolChoice.self, forKey: .toolChoice)) ?? .auto
         maxThinkingTokens = try c.decodeIfPresent(Int.self, forKey: .maxThinkingTokens)
         jsonMode = (try c.decodeIfPresent(Bool.self, forKey: .jsonMode)) ?? false
+        streamPrefillProgress = (try c.decodeIfPresent(Bool.self, forKey: .streamPrefillProgress)) ?? false
         // maxToolIterations landed after the original shape; default to 10 when absent and
         // clamp any persisted zero/negative value to the minimum of 1.
         let decodedIterations = (try c.decodeIfPresent(Int.self, forKey: .maxToolIterations)) ?? 10
@@ -282,6 +296,7 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encode(toolChoice, forKey: .toolChoice)
         try c.encodeIfPresent(maxThinkingTokens, forKey: .maxThinkingTokens)
         try c.encode(jsonMode, forKey: .jsonMode)
+        try c.encode(streamPrefillProgress, forKey: .streamPrefillProgress)
         try c.encode(maxToolIterations, forKey: .maxToolIterations)
         try c.encodeIfPresent(grammar, forKey: .grammar)
         try c.encode(yieldEveryNTokens, forKey: .yieldEveryNTokens)

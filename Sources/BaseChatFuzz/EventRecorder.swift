@@ -53,6 +53,12 @@ public struct EventRecorder: Sendable {
             for try await event in stream.events {
                 let t = start.duration(to: ContinuousClock.now).seconds
                 switch event {
+                case .prefillProgress(let nPast, let nTotal, let tokensPerSecond):
+                    events.append(.init(
+                        t: t,
+                        kind: "prefillProgress",
+                        v: "\(nPast)/\(nTotal)@\(tokensPerSecond)"
+                    ))
                 case .token(let text):
                     if firstTokenAt == nil { firstTokenAt = ContinuousClock.now }
                     raw += text

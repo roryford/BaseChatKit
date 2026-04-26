@@ -200,6 +200,7 @@ final class ToolCallContractTests: XCTestCase {
         var toolCalls: [ToolCall] = []
         for try await event in stream.events {
             switch event {
+            case .prefillProgress: break
             case .token(let text): tokens.append(text)
             case .toolCall(let call): toolCalls.append(call)
             case .usage: break
@@ -271,6 +272,7 @@ final class ToolCallContractTests: XCTestCase {
         var toolCalls: [ToolCall] = []
         for try await event in stream.events {
             switch event {
+            case .prefillProgress: break
             case .token(let t): tokens.append(t)
             case .toolCall(let c): toolCalls.append(c)
             case .usage: break

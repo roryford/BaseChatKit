@@ -45,6 +45,7 @@ private func categorise(_ event: GenerationEvent) -> EventCategory? {
     case .diagnosticThrottle: return nil
     case .thinkingSignature: return nil
     case .toolCallStart, .toolCallArgumentsDelta: return nil
+    case .prefillProgress: return nil
     }
 }
 

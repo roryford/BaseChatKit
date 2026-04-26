@@ -16,6 +16,9 @@ public struct GenerationStreamConsumer: Sendable {
     /// Processes a single generation event and returns the action the caller should take.
     public mutating func handle(_ event: GenerationEvent) -> StreamAction {
         switch event {
+        case .prefillProgress:
+            return .ignore
+
         case .token(let text):
             return .appendText(text)
 
