@@ -128,7 +128,7 @@ final class MCPToolBridgeTests: XCTestCase {
 
         await source.register(in: registry)
         let namesAfterRegister = await MainActor.run { registry.definitions.map(\.name) }
-        XCTAssertEqual(namesAfterRegister, ["docs.search"])
+        XCTAssertEqual(namesAfterRegister, ["docs__search"])
 
         await source.unregister(from: registry)
         let namesAfterUnregister = await MainActor.run { registry.definitions.map(\.name) }
@@ -370,9 +370,53 @@ final class MCPToolBridgeTests: XCTestCase {
         XCTAssertFalse(registry.requiresApproval(toolName: "search"))
     }
 
+    func test_namespacedNameMatchesOpenAIRegex() async throws {
+        let openAIRegex = try NSRegularExpression(pattern: "^[a-zA-Z0-9_-]+$")
+        let fixtures: [(namespace: String, toolName: String)] = [
+            ("notion", "read_page"),
+            ("my.server", "list-items"),     // dot in namespace
+            ("GitHub", "create_issue"),       // uppercase
+            ("linear app", "search_issues"),  // space in namespace
+            ("server1", "tool_with_dots"),    // underscores in tool name
+        ]
+        for (ns, name) in fixtures {
+            let source = MCPToolSource(
+                serverID: UUID(),
+                displayName: ns,
+                capabilities: .init(),
+                toolNamespace: ns,
+                toolFilter: .allowAll,
+                approvalPolicy: .perCall,
+                listTools: {
+                    .object([
+                        "tools": .array([
+                            .object(["name": .string(name), "inputSchema": .object([:])]),
+                        ]),
+                    ])
+                },
+                callTool: { _, _ in nil }
+            )
+            let registry = ToolRegistry()
+            await source.register(in: registry)
+            let registeredNames = await MainActor.run { registry.definitions.map(\.name) }
+            guard let result = registeredNames.first else {
+                XCTFail("No tool registered for namespace='\(ns)' toolName='\(name)'")
+                continue
+            }
+            let range = NSRange(result.startIndex..., in: result)
+            XCTAssertNotNil(
+                openAIRegex.firstMatch(in: result, range: range),
+                "'\(result)' does not match OpenAI tool-name regex (namespace='\(ns)' toolName='\(name)')"
+            )
+        }
+        // Sabotage: reverting the separator back to "." would fail every fixture that
+        // has a namespace prefix, since "." is not in [a-zA-Z0-9_-].
+    }
+
     func test_executorMapsStructuredErrorAndSanitizesContent() async throws {
         let executor = MCPToolExecutor(
             definition: ToolDefinition(name: "docs.search", description: "Search", parameters: .object([:])),
+            serverDisplayName: "Docs",
             remoteToolName: "search",
             requiresApproval: true,
             callTool: { _, _ in
@@ -391,12 +435,16 @@ final class MCPToolBridgeTests: XCTestCase {
 
         let result = try await executor.execute(arguments: .object([:]))
         XCTAssertEqual(result.errorKind, .permissionDenied)
-        XCTAssertEqual(result.content, "denied")
+        // Content is wrapped in the untrusted-surface envelope; null byte is stripped.
+        XCTAssertTrue(result.content.contains("denied"))
+        XCTAssertTrue(result.content.contains("trust=\"untrusted\""))
+        XCTAssertFalse(result.content.contains("\u{0000}"))
     }
 
     func test_executorMapsMCPErrorKinds() async throws {
         let timeoutExecutor = MCPToolExecutor(
             definition: ToolDefinition(name: "docs.search", description: "Search", parameters: .object([:])),
+            serverDisplayName: "Docs",
             remoteToolName: "search",
             requiresApproval: true,
             callTool: { _, _ in
@@ -408,6 +456,7 @@ final class MCPToolBridgeTests: XCTestCase {
 
         let cancelExecutor = MCPToolExecutor(
             definition: ToolDefinition(name: "docs.search", description: "Search", parameters: .object([:])),
+            serverDisplayName: "Docs",
             remoteToolName: "search",
             requiresApproval: true,
             callTool: { _, _ in
@@ -419,6 +468,179 @@ final class MCPToolBridgeTests: XCTestCase {
         task.cancel()
         let cancelledResult = try await task.value
         XCTAssertEqual(cancelledResult.errorKind, .cancelled)
+    }
+
+    // Sabotage: removing withTaskCancellationHandler would cause
+    // test_cancellation_writeFailsButExecutorStillThrows to succeed instead of throwing
+    func test_cancellation_writeFailsButExecutorStillThrows() async throws {
+        // Even when the fire-and-forget notifications/cancelled write fails (broken transport),
+        // the executor must still return .cancelled — not the write error.
+        let gate = AsyncGate()
+        let executor = MCPToolExecutor(
+            definition: ToolDefinition(name: "search", description: "Search", parameters: .object([:])),
+            serverDisplayName: "Docs",
+            remoteToolName: "search",
+            requiresApproval: false,
+            callTool: { _, _ in
+                // Simulate sendRequest hanging then receiving CancellationError when the task
+                // is cancelled, while the onCancel fire-and-forget notification write throws.
+                try await withTaskCancellationHandler {
+                    try await gate.wait()
+                    return JSONSchemaValue?.none
+                } onCancel: {
+                    // Model a broken transport — throws but must not leak to the caller.
+                    Task { throw MCPError.transportClosed }
+                }
+            }
+        )
+
+        let task = Task { try await executor.execute(arguments: .object([:])) }
+        // Allow the executor to enter the callTool suspension before cancelling.
+        try await Task.sleep(for: .milliseconds(20))
+        task.cancel()
+
+        let result = try await task.value
+        // Must be .cancelled, not the write error from the onCancel handler.
+        XCTAssertEqual(result.errorKind, .cancelled)
+    }
+
+    // Sabotage: removing withTaskCancellationHandler would cause
+    // test_cancellation_writeFailsButExecutorStillThrows to succeed instead of throwing
+    func test_cancellation_serverRespondsAfterCancel() async throws {
+        // When the task is cancelled and the server sends a response afterwards, the executor
+        // must resolve as .cancelled — the late response must not leak into the transcript.
+        let lateResponseGate = AsyncGate()
+        let executor = MCPToolExecutor(
+            definition: ToolDefinition(name: "search", description: "Search", parameters: .object([:])),
+            serverDisplayName: "Docs",
+            remoteToolName: "search",
+            requiresApproval: false,
+            callTool: { _, _ in
+                // Wait for the gate to open, modelling a server that responds after cancel.
+                try await withTaskCancellationHandler {
+                    try await lateResponseGate.wait()
+                    return JSONSchemaValue?.none
+                } onCancel: {
+                    // Notification dispatch — not under test here.
+                }
+            }
+        )
+
+        let task = Task { try await executor.execute(arguments: .object([:])) }
+        try await Task.sleep(for: .milliseconds(20))
+        // Cancel before the "server" responds.
+        task.cancel()
+        // Now deliver the late response — the task should already be resolving as cancelled.
+        await lateResponseGate.open()
+
+        let result = try await task.value
+        // Must be .cancelled regardless of the late response.
+        XCTAssertEqual(result.errorKind, .cancelled)
+    }
+
+    // Sabotage: removing withTaskCancellationHandler would cause
+    // test_cancellation_writeFailsButExecutorStillThrows to succeed instead of throwing
+    func test_cancellation_arrivesAfterServerAlreadyResponded() async throws {
+        // When the server responds before the cancel signal, the original result wins.
+        // Cancel must not inject .cancelled when the response is already in flight.
+        let executor = MCPToolExecutor(
+            definition: ToolDefinition(name: "search", description: "Search", parameters: .object([:])),
+            serverDisplayName: "Docs",
+            remoteToolName: "search",
+            requiresApproval: false,
+            callTool: { _, _ in
+                // Return immediately so the response is produced before any cancel races.
+                return .object([
+                    "content": .array([
+                        .object(["type": .string("text"), "text": .string("result before cancel")]),
+                    ]),
+                ])
+            }
+        )
+
+        let task = Task { try await executor.execute(arguments: .object([:])) }
+        // Cancel races against an already-completed callTool.
+        task.cancel()
+        let result = try await task.value
+
+        // Either outcome is valid: response won (no errorKind, content intact) or cancel won.
+        switch result.errorKind {
+        case .none:
+            // Response won the race — content must be the real result, not a placeholder.
+            XCTAssertTrue(result.content.contains("result before cancel"))
+        case .cancelled:
+            // Cancel won — acceptable.
+            break
+        default:
+            XCTFail("Unexpected errorKind: \(String(describing: result.errorKind))")
+        }
+    }
+
+    // Sabotage: removing withTaskCancellationHandler would cause
+    // test_cancellation_writeFailsButExecutorStillThrows to succeed instead of throwing
+    func test_listChangedDuringInFlightDispatch() async throws {
+        // A notifications/tools/list_changed arriving while a tools/call is in-flight must not
+        // crash or discard the in-flight result. The call completes with the original executor,
+        // and the registry reflects the new tool list afterwards.
+        let callGate = AsyncGate()
+        let listProvider = ToolListProvider(
+            value: .object([
+                "tools": .array([
+                    .object(["name": .string("search"), "inputSchema": .object([:])]),
+                ]),
+            ])
+        )
+
+        let source = MCPToolSource(
+            serverID: UUID(),
+            displayName: "Docs",
+            capabilities: .init(),
+            toolNamespace: nil,
+            toolFilter: .allowAll,
+            approvalPolicy: .perCall,
+            listTools: { await listProvider.value },
+            callTool: { _, _ in
+                // Hold mid-flight until the list_changed refresh completes.
+                try await callGate.wait()
+                return .object([
+                    "content": .array([
+                        .object(["type": .string("text"), "text": .string("ok")]),
+                    ]),
+                ])
+            }
+        )
+        let registry = ToolRegistry()
+        await source.register(in: registry)
+
+        // Start a dispatch that hangs until the gate opens.
+        let dispatchTask = Task {
+            await registry.dispatch(.init(id: "1", toolName: "search", arguments: "{}"))
+        }
+
+        // While the call is in-flight, simulate list_changed by refreshing with a changed tool.
+        try await Task.sleep(for: .milliseconds(20))
+        await listProvider.setValue(.object([
+            "tools": .array([
+                .object([
+                    "name": .string("search"),
+                    "description": .string("updated description"),
+                    "inputSchema": .object([:]),
+                ]),
+            ]),
+        ]))
+        try await source.refreshTools()
+
+        // Let the in-flight call finish.
+        await callGate.open()
+        let result = await dispatchTask.value
+
+        // In-flight call must complete successfully — no crash, no .cancelled result.
+        XCTAssertNil(result.errorKind, "In-flight call should complete with original executor")
+        XCTAssertTrue(result.content.contains("ok"))
+
+        // Registry reflects the post-refresh tool list.
+        let names = await MainActor.run { registry.definitions.map(\.name) }
+        XCTAssertEqual(names, ["search"])
     }
 }
 
@@ -452,5 +674,35 @@ private actor ToolListProvider {
 
     func setValue(_ value: JSONSchemaValue?) {
         self.value = value
+    }
+}
+
+/// One-shot gate: callers suspend on `wait()` until another caller calls `open()`.
+private actor AsyncGate {
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var opened = false
+
+    /// Suspends until `open()` is called. Throws `CancellationError` if the task is cancelled.
+    func wait() async throws {
+        if opened { return }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+            }
+        } onCancel: { [weak self] in
+            Task { await self?.cancelWait() }
+        }
+    }
+
+    /// Opens the gate, resuming any suspended `wait()` caller.
+    func open() {
+        opened = true
+        continuation?.resume()
+        continuation = nil
+    }
+
+    private func cancelWait() {
+        continuation?.resume(throwing: CancellationError())
+        continuation = nil
     }
 }

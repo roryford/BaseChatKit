@@ -89,16 +89,33 @@ internal actor MCPSession {
         let request = MCPJSONRPCMessage.request(id: id, method: method, params: params)
         let payload = try codec.encode(request)
 
-        return try await withTimeout(requestTimeout) { [self] in
-            try await withCheckedThrowingContinuation { continuation in
-                Task {
-                    await registerPendingAndSend(
-                        id: id,
-                        request: request,
-                        payload: payload,
-                        continuation: continuation
-                    )
+        // Capture a reference for the cancellation notification. The onCancel closure runs
+        // synchronously and cannot be async, so we spawn a detached Task to deliver
+        // notifications/cancelled before the server wastes work on an abandoned call.
+        return try await withTaskCancellationHandler {
+            try await withTimeout(requestTimeout) { [self] in
+                try await withCheckedThrowingContinuation { continuation in
+                    Task {
+                        await registerPendingAndSend(
+                            id: id,
+                            request: request,
+                            payload: payload,
+                            continuation: continuation
+                        )
+                    }
                 }
+            }
+        } onCancel: { [weak self] in
+            guard let session = self else { return }
+            let cancelParams: JSONSchemaValue = .object([
+                "requestId": .string(id.description),
+                "reason": .string("Cancelled by client"),
+            ])
+            Task {
+                await session.sendNotificationIgnoringErrors(
+                    method: "notifications/cancelled",
+                    params: cancelParams
+                )
             }
         }
     }
@@ -109,6 +126,14 @@ internal actor MCPSession {
         let payload = try codec.encode(message)
         try await transport.send(payload)
         await stateHook.sessionDidSend(message)
+    }
+
+    /// Fire-and-forget notification — errors are swallowed so callers can use this from a
+    /// cancellation handler without preventing `CancellationError` from propagating.
+    func sendNotificationIgnoringErrors(method: String, params: JSONSchemaValue?) async {
+        let message = MCPJSONRPCMessage.notification(method: method, params: params)
+        guard let payload = try? codec.encode(message) else { return }
+        try? await transport.send(payload)
     }
 
     func close(reason: MCPDisconnectReason = .requested) async {

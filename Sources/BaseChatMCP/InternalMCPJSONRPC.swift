@@ -1,9 +1,16 @@
 import Foundation
 import BaseChatInference
 
-internal enum MCPRequestID: Hashable, Sendable {
+internal enum MCPRequestID: Hashable, Sendable, CustomStringConvertible {
     case int(Int)
     case string(String)
+
+    var description: String {
+        switch self {
+        case .int(let value): return "\(value)"
+        case .string(let value): return value
+        }
+    }
 }
 
 internal struct MCPJSONRPCErrorObject: Sendable, Equatable {
