@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.12.1](https://github.com/roryford/BaseChatKit/compare/v0.12.0...v0.12.1) (2026-04-26)
+
+### Highlights
+
+#### Bridge any `AppIntent` into the tool-calling pipeline
+
+Hosts that wanted to expose `AppIntent`s — Shortcuts actions, Siri-callable verbs, Spotlight commands — as model-callable tools previously had to hand-write a `ToolExecutor` per intent and re-encode every `@Parameter` declaration into JSON Schema by hand. v0.12.1 ships a new optional `BaseChatAppIntents` module that wraps any `AppIntent & Decodable` in an `AppIntentToolExecutor`, derives the tool's JSON Schema from `@Parameter` reflection, decodes the model's argument payload into a fresh intent instance, runs `perform()`, and surfaces the result through the standard `ToolResult` shape.
+
+```swift
+import BaseChatAppIntents
+
+let registry = ToolRegistry()
+registry.register(AppIntentToolExecutor(SetReminderIntent.self))
+inferenceService.toolRegistry = registry
+```
+
+Schema synthesis covers `String`, `Int`/`Int32`/`Int64`, `Double`/`Float`/`CGFloat`, `Bool`, `Date` (decoded as ISO-8601 to match the advertised `format: date-time`), `URL`, optionals (recursive, marked non-required), and `IntentEnumParameter`-conforming enums (rendered as `enum: [...]`). Authorisation failures classify as `.permissionDenied`, decode failures as `.invalidArguments`. The module depends only on `BaseChatInference` and is gated `@available(iOS 26, macOS 26, *)`, so apps with older deployment floors can opt in behind `if #available`.
+
+See [#798](https://github.com/roryford/BaseChatKit/pull/798).
+
+#### Narrow the MCP tool surface when Apple's Foundation Models backend is active
+
+Apple's on-device Foundation Models tool-calling surface rejects schemas that use `oneOf`, `anyOf`, `$ref`, or deeply nested objects/arrays — and caps the visible tool set per generation. Apps wiring `BaseChatMCP` against an MCP server that exposes 50+ tools (Notion, Linear, GitHub) would silently fail when Foundation Models was the active backend. v0.12.1 adds two cooperating filters: a schema-compatibility walker that visits every JSON Schema sub-keyword (`allOf`, `not`, `additionalProperties`, `$defs`, `prefixItems`, …) and a public 16-tool cap.
+
+```swift
+let names = await source.foundationModelsEnabledNames()  // schema-compatible + capped to 16
+let filter = MCPToolFilter(allowedNames: Set(names))
+await source.register(in: registry, filter: filter)
+```
+
+The cap (`MCPToolFilter.foundationModelsToolCap = 16`) is public so apps can reuse the constant in their own UI. The demo's Connected Services sheet now shows "Connected · X of Y tools enabled" with a footnote whenever the cap is biting, so users see *why* a tool went missing.
+
+See [#797](https://github.com/roryford/BaseChatKit/pull/797).
+
+### Features
+
+- **appintents:** new optional `BaseChatAppIntents` module — `AppIntentToolExecutor` bridges any `AppIntent` into the tool-calling pipeline with auto-synthesised JSON Schema, ISO-8601 date handling, and `IntentEnumParameter`-driven enum support ([#798](https://github.com/roryford/BaseChatKit/pull/798))
+- **mcp:** `MCPToolSource.foundationModelsCompatibleNames(maxDepth:)` rejects `oneOf`/`anyOf`/`$ref` and any object/array nesting beyond `maxDepth` (default 4); recursion now traverses every JSON Schema sub-keyword instead of just `properties`/`items` ([#797](https://github.com/roryford/BaseChatKit/pull/797))
+- **mcp:** `MCPToolFilter.foundationModelsToolCap = 16` and `MCPToolSource.foundationModelsEnabledNames(maxDepth:cap:)` compose the schema filter with the Foundation Models tool-count cap, sorted lexicographically for stable UI counts ([#797](https://github.com/roryford/BaseChatKit/pull/797))
+- **example:** demo app registers `basechatdemo://` so production AppIntent invocations from Shortcuts / Siri / Spotlight actually reach `.onOpenURL` instead of dying silently at the URL-scheme dispatch ([#799](https://github.com/roryford/BaseChatKit/pull/799))
+- **example:** `InboundPayload.attachments` now survives the App Group envelope round trip end-to-end, so future inbound surfaces (Share / Action Extensions) can carry `MessagePart` payloads — images, tool calls, tool results — without losing them ([#799](https://github.com/roryford/BaseChatKit/pull/799))
+
 ## [0.12.0](https://github.com/roryford/BaseChatKit/compare/v0.11.8...v0.12.0) (2026-04-26)
 
 ### Highlights
