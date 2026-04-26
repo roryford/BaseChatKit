@@ -176,53 +176,53 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     ) async throws {
         let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
 
-        var thinkingOpen = false
+        var thinking = ThinkingBlockManager()
 
-        func flushThinkingCompleteIfNeeded() {
-            if thinkingOpen {
-                continuation.yield(.thinkingComplete)
-                thinkingOpen = false
-            }
-        }
+        do {
+            for try await payload in tokenStream {
+                if Task.isCancelled { break }
 
-        for try await payload in tokenStream {
-            if Task.isCancelled { break }
+                // Reasoning delta: emit as thinkingToken, keep the block open.
+                if let reasoning = Self.parseReasoningDelta(from: payload) {
+                    continuation.yield(.thinkingToken(reasoning))
+                    thinking.open()
+                    // Fall through — a single chunk may legally carry both
+                    // reasoning and content (edge case on some providers), and
+                    // usage may still need emitting.
+                }
 
-            // Reasoning delta: emit as thinkingToken, keep the block open.
-            if let thinking = Self.parseReasoningDelta(from: payload) {
-                continuation.yield(.thinkingToken(thinking))
-                thinkingOpen = true
-                // Fall through — a single chunk may legally carry both
-                // reasoning and content (edge case on some providers), and
-                // usage may still need emitting.
-            }
+                // Visible content delta: close thinking first so consumers see a
+                // clean handoff before the first visible token.
+                if let token = extractToken(from: payload) {
+                    thinking.flushIfOpen(into: continuation)
+                    continuation.yield(.token(token))
+                }
 
-            // Visible content delta: close thinking first so consumers see a
-            // clean handoff before the first visible token.
-            if let token = extractToken(from: payload) {
-                flushThinkingCompleteIfNeeded()
-                continuation.yield(.token(token))
-            }
+                if let usage = extractUsage(from: payload) {
+                    handleUsage(usage)
+                    if let prompt = usage.promptTokens,
+                       let completion = usage.completionTokens {
+                        continuation.yield(.usage(prompt: prompt, completion: completion))
+                    }
+                }
 
-            if let usage = extractUsage(from: payload) {
-                handleUsage(usage)
-                if let prompt = usage.promptTokens,
-                   let completion = usage.completionTokens {
-                    continuation.yield(.usage(prompt: prompt, completion: completion))
+                if isStreamEnd(payload) {
+                    thinking.flushIfOpen(into: continuation)
+                    break
+                }
+
+                if let error = extractStreamError(from: payload) {
+                    throw error
                 }
             }
-
-            if isStreamEnd(payload) {
-                flushThinkingCompleteIfNeeded()
-                break
-            }
-
-            if let error = extractStreamError(from: payload) {
-                throw error
-            }
+        } catch {
+            // Close any open thinking block before rethrowing so consumers
+            // see a clean handoff and don't hang in a thinking-only state.
+            thinking.flushIfOpen(into: continuation)
+            throw error
         }
 
-        flushThinkingCompleteIfNeeded()
+        thinking.flushIfOpen(into: continuation)
     }
 
     // MARK: - SSE Payload Handler

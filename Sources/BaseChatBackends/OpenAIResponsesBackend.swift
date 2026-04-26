@@ -202,7 +202,7 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
         // Tracks whether any reasoning_summary delta has been emitted on
         // this stream. We flush a single `.thinkingComplete` on the
         // transition to visible content so consumers see a clean handoff.
-        var thinkingOpen = false
+        var thinking = ThinkingBlockManager()
 
         // Rate-limits every `data:` line received from the upstream,
         // regardless of whether we yield a `GenerationEvent` for it. This
@@ -222,13 +222,6 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             }
         }
 
-        func flushThinkingCompleteIfNeeded() {
-            if thinkingOpen {
-                continuation.yield(.thinkingComplete)
-                thinkingOpen = false
-            }
-        }
-
         // Returns `true` if the caller should break out of the byte loop
         // (terminal event observed).
         func handleEvent(name: String, data: String) throws -> Bool {
@@ -242,26 +235,26 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             if isReasoningDelta {
                 if let delta = Self.parseDelta(from: data), !delta.isEmpty {
                     continuation.yield(.thinkingToken(delta))
-                    thinkingOpen = true
+                    thinking.open()
                 }
                 return false
             }
 
             if isReasoningDone {
-                flushThinkingCompleteIfNeeded()
+                thinking.flushIfOpen(into: continuation)
                 return false
             }
 
             if name == "response.output_text.delta" {
                 if let delta = Self.parseDelta(from: data), !delta.isEmpty {
-                    flushThinkingCompleteIfNeeded()
+                    thinking.flushIfOpen(into: continuation)
                     continuation.yield(.token(delta))
                 }
                 return false
             }
 
             if name == "response.completed" {
-                flushThinkingCompleteIfNeeded()
+                thinking.flushIfOpen(into: continuation)
                 if let usage = Self.parseUsage(from: data) {
                     handleUsage(usage)
                     if let prompt = usage.promptTokens,
@@ -283,65 +276,72 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             return false
         }
 
-        var iterator = bytes.makeAsyncIterator()
-        outer: while let byte = try await iterator.next() {
-            if Task.isCancelled { break }
+        do {
+            var iterator = bytes.makeAsyncIterator()
+            outer: while let byte = try await iterator.next() {
+                if Task.isCancelled { break }
 
-            totalBytes += 1
-            if totalBytes > limits.maxTotalBytes {
-                throw SSEStreamError.streamTooLarge(totalBytes)
-            }
-
-            if byte != UInt8(ascii: "\n") {
-                lineBuffer.append(byte)
-                if lineBuffer.count > limits.maxEventBytes {
-                    throw SSEStreamError.eventTooLarge(lineBuffer.count)
+                totalBytes += 1
+                if totalBytes > limits.maxTotalBytes {
+                    throw SSEStreamError.streamTooLarge(totalBytes)
                 }
-                continue
-            }
 
-            let line: String
-            if let decoded = String(data: lineBuffer, encoding: .utf8) {
-                line = decoded.trimmingCharacters(in: .whitespaces)
-            } else {
-                Log.network.warning("OpenAIResponsesBackend: skipped \(lineBuffer.count)-byte line with invalid UTF-8")
-                lineBuffer.removeAll(keepingCapacity: true)
-                continue
-            }
-            lineBuffer.removeAll(keepingCapacity: true)
-
-            if line.isEmpty {
-                // Blank line marks event boundary; pending event is
-                // already paired with its data line by this point.
-                currentEventName = nil
-                continue
-            }
-
-            if line.hasPrefix("event:") {
-                currentEventName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
-                continue
-            }
-
-            if line.hasPrefix("data:") {
-                // Count the line against the per-second cap before we look
-                // at the event name — unknown/ignored events still consume
-                // budget, otherwise an attacker could spam structural
-                // events we discard.
-                try noteDataLineReceived()
-                let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                guard let name = currentEventName else {
-                    // `data:` without a preceding `event:` — ignore. The
-                    // Responses API always names its events.
+                if byte != UInt8(ascii: "\n") {
+                    lineBuffer.append(byte)
+                    if lineBuffer.count > limits.maxEventBytes {
+                        throw SSEStreamError.eventTooLarge(lineBuffer.count)
+                    }
                     continue
                 }
-                if try handleEvent(name: name, data: payload) {
-                    break outer
+
+                let line: String
+                if let decoded = String(data: lineBuffer, encoding: .utf8) {
+                    line = decoded.trimmingCharacters(in: .whitespaces)
+                } else {
+                    Log.network.warning("OpenAIResponsesBackend: skipped \(lineBuffer.count)-byte line with invalid UTF-8")
+                    lineBuffer.removeAll(keepingCapacity: true)
+                    continue
                 }
+                lineBuffer.removeAll(keepingCapacity: true)
+
+                if line.isEmpty {
+                    // Blank line marks event boundary; pending event is
+                    // already paired with its data line by this point.
+                    currentEventName = nil
+                    continue
+                }
+
+                if line.hasPrefix("event:") {
+                    currentEventName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                    continue
+                }
+
+                if line.hasPrefix("data:") {
+                    // Count the line against the per-second cap before we look
+                    // at the event name — unknown/ignored events still consume
+                    // budget, otherwise an attacker could spam structural
+                    // events we discard.
+                    try noteDataLineReceived()
+                    let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                    guard let name = currentEventName else {
+                        // `data:` without a preceding `event:` — ignore. The
+                        // Responses API always names its events.
+                        continue
+                    }
+                    if try handleEvent(name: name, data: payload) {
+                        break outer
+                    }
+                }
+                // `id:`, `retry:`, comment lines (`:`) are ignored.
             }
-            // `id:`, `retry:`, comment lines (`:`) are ignored.
+        } catch {
+            // Close any open thinking block before rethrowing so consumers
+            // don't hang in a thinking-only state on parser failure.
+            thinking.flushIfOpen(into: continuation)
+            throw error
         }
 
-        flushThinkingCompleteIfNeeded()
+        thinking.flushIfOpen(into: continuation)
     }
 
     // MARK: - JSON Parsing

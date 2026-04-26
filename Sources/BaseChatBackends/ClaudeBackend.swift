@@ -278,79 +278,80 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     ) async throws {
         let tokenStream = SSEStreamParser.parse(bytes: bytes, limits: effectiveSSEStreamLimits)
 
-        // `thinkingOpen` flips to true the first time we see a thinking_delta.
-        // It flips back to false — and fires .thinkingComplete exactly once —
-        // the first time we see anything that clearly isn't thinking anymore.
-        var thinkingOpen = false
+        // `thinking` flips to open the first time we see a thinking_delta.
+        // It flushes — and fires .thinkingComplete exactly once — the first
+        // time we see anything that clearly isn't thinking anymore.
+        // Signature events bypass open/close entirely.
+        var thinking = ThinkingBlockManager()
 
-        func flushThinkingCompleteIfNeeded() {
-            if thinkingOpen {
-                continuation.yield(.thinkingComplete)
-                thinkingOpen = false
-            }
-        }
+        do {
+            for try await payload in tokenStream {
+                if Task.isCancelled { break }
 
-        for try await payload in tokenStream {
-            if Task.isCancelled { break }
+                let eventType = Self.parseEventType(from: payload)
 
-            let eventType = Self.parseEventType(from: payload)
+                // Thinking-block start: opportunistically capture the signature
+                // if Anthropic shipped one inline on the start event. Real
+                // streams more commonly carry the signature on a later
+                // `signature_delta`, but a couple of beta endpoints attach it
+                // here, and the redundant emission is harmless — UI consumers
+                // overwrite stored signatures rather than appending.
+                if eventType == "content_block_start", let signature = Self.parseThinkingBlockStartSignature(from: payload) {
+                    continuation.yield(.thinkingSignature(signature))
+                    continue
+                }
 
-            // Thinking-block start: opportunistically capture the signature
-            // if Anthropic shipped one inline on the start event. Real
-            // streams more commonly carry the signature on a later
-            // `signature_delta`, but a couple of beta endpoints attach it
-            // here, and the redundant emission is harmless — UI consumers
-            // overwrite stored signatures rather than appending.
-            if eventType == "content_block_start", let signature = Self.parseThinkingBlockStartSignature(from: payload) {
-                continuation.yield(.thinkingSignature(signature))
-                continue
-            }
+                // Signature delta inside the thinking block. This is the
+                // primary path Anthropic uses today for extended-thinking
+                // signatures — the field arrives via a `signature_delta`
+                // sub-type of `content_block_delta`. Surface it to the UI so
+                // multi-turn replay can preserve the exact bytes verbatim.
+                if eventType == "content_block_delta", let signature = Self.parseSignatureDelta(from: payload) {
+                    continuation.yield(.thinkingSignature(signature))
+                    continue
+                }
 
-            // Signature delta inside the thinking block. This is the
-            // primary path Anthropic uses today for extended-thinking
-            // signatures — the field arrives via a `signature_delta`
-            // sub-type of `content_block_delta`. Surface it to the UI so
-            // multi-turn replay can preserve the exact bytes verbatim.
-            if eventType == "content_block_delta", let signature = Self.parseSignatureDelta(from: payload) {
-                continuation.yield(.thinkingSignature(signature))
-                continue
-            }
+                // Thinking delta: emit as thinkingToken, keep the block open.
+                if eventType == "content_block_delta", let thinkingDelta = Self.parseThinkingDelta(from: payload) {
+                    continuation.yield(.thinkingToken(thinkingDelta))
+                    thinking.open()
+                    continue
+                }
 
-            // Thinking delta: emit as thinkingToken, keep the block open.
-            if eventType == "content_block_delta", let thinking = Self.parseThinkingDelta(from: payload) {
-                continuation.yield(.thinkingToken(thinking))
-                thinkingOpen = true
-                continue
-            }
+                // Plain text delta: close any open thinking block first, then yield.
+                if let token = extractToken(from: payload) {
+                    thinking.flushIfOpen(into: continuation)
+                    continuation.yield(.token(token))
+                }
 
-            // Plain text delta: close any open thinking block first, then yield.
-            if let token = extractToken(from: payload) {
-                flushThinkingCompleteIfNeeded()
-                continuation.yield(.token(token))
-            }
+                if let usage = extractUsage(from: payload) {
+                    handleUsage(usage)
+                    if let prompt = usage.promptTokens,
+                       let completion = usage.completionTokens {
+                        continuation.yield(.usage(prompt: prompt, completion: completion))
+                    }
+                }
 
-            if let usage = extractUsage(from: payload) {
-                handleUsage(usage)
-                if let prompt = usage.promptTokens,
-                   let completion = usage.completionTokens {
-                    continuation.yield(.usage(prompt: prompt, completion: completion))
+                if isStreamEnd(payload) {
+                    thinking.flushIfOpen(into: continuation)
+                    break
+                }
+
+                if let error = extractStreamError(from: payload) {
+                    throw error
                 }
             }
-
-            if isStreamEnd(payload) {
-                flushThinkingCompleteIfNeeded()
-                break
-            }
-
-            if let error = extractStreamError(from: payload) {
-                throw error
-            }
+        } catch {
+            // Close any open thinking block before rethrowing so consumers
+            // don't hang in a thinking-only state on parser failure.
+            thinking.flushIfOpen(into: continuation)
+            throw error
         }
 
         // Safety net: stream ended without a text block or message_stop while
         // still inside a thinking block (truncated upstream). Close the block
         // so consumers don't hang in a thinking-only state.
-        flushThinkingCompleteIfNeeded()
+        thinking.flushIfOpen(into: continuation)
     }
 
     // MARK: - HTTP Status Validation
