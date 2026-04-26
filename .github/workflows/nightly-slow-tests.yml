@@ -13,6 +13,13 @@ on:
     - cron: "30 4 * * *"
   workflow_dispatch:
 
+# A `workflow_dispatch` triggered while a scheduled run is still in flight
+# would race on the SwiftPM cache key and double-bill the macos-15 runner.
+# Cancel the in-flight run so only one is ever active.
+concurrency:
+  group: nightly-slow-tests
+  cancel-in-progress: true
+
 jobs:
   slow:
     runs-on: macos-15
@@ -46,3 +53,24 @@ jobs:
 
       - name: Test — TrafficBoundaryAuditTest
         run: scripts/test.sh --filter "BaseChatInferenceTests.TrafficBoundaryAuditTest" --disable-default-traits --skip-update
+
+      - name: Stage test diagnostics
+        # Mirrors ci.yml: scripts/test.sh writes captured stdout/stderr to
+        # $TMPDIR/test_output.txt, but $TMPDIR on macOS runners is a per-process
+        # /var/folders path that actions/upload-artifact cannot reliably address.
+        # Copy into the workspace so the upload step can find it.
+        if: failure()
+        run: |
+          mkdir -p test-diagnostics
+          if [ -n "${TMPDIR:-}" ] && [ -f "${TMPDIR}/test_output.txt" ]; then
+            cp "${TMPDIR}/test_output.txt" test-diagnostics/test_output.txt
+          fi
+
+      - name: Upload test diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-slow-tests-diagnostics-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: test-diagnostics/
