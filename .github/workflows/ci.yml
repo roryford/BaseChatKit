@@ -163,7 +163,7 @@ jobs:
       # carve-out, which negates most of the speedup anyway.
       - name: Test — XCTest suites (Core + UI + UIModelManagement + MCP + Backends + Inference + TestSupport)
         timeout-minutes: 25
-        run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatUIModelManagementTests --filter BaseChatMCPTests --filter BaseChatBackendsTests --filter BaseChatInferenceTests --filter BaseChatTestSupportTests --disable-default-traits --skip-update
+        run: scripts/test.sh --filter BaseChatCoreTests --filter BaseChatUITests --filter BaseChatUIModelManagementTests --filter BaseChatMCPTests --filter BaseChatBackendsTests --filter BaseChatInferenceTests --filter BaseChatTestSupportTests --filter BaseChatAppIntentsTests --disable-default-traits --skip-update
 
       - name: Test — Inference (Swift Testing, isolated process)
         timeout-minutes: 25

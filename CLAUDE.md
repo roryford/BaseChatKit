@@ -27,18 +27,23 @@ swift test --filter BaseChatUIModelManagementTests --disable-default-traits
 swift test --filter BaseChatMCPTests --disable-default-traits
 swift test --filter BaseChatBackendsTests --disable-default-traits
 swift test --filter BaseChatTestSupportTests --disable-default-traits
+swift test --filter BaseChatAppIntentsTests --disable-default-traits
 
 # Apple Silicon only — MLX mock tests + llama.cpp
 swift test --filter BaseChatBackendsTests --traits MLX,Llama
 
-# Additional headless E2E coverage (mock backends; no special hardware)
-swift test --filter BaseChatE2ETests --disable-default-traits
+# Additional headless E2E coverage (mock backends; no special hardware).
+# The trailing `\.` anchor is required — bare `BaseChatE2ETests` matches no class names.
+swift test --filter "BaseChatE2ETests\." --disable-default-traits
 
 # MCP built-in catalog descriptors (trait-gated)
 swift test --filter BaseChatMCPTests --disable-default-traits --traits MCPBuiltinCatalog
 
-# MCP E2E — requires npx installed and network access
-RUN_MCP_E2E=1 swift test --filter BaseChatMCPE2ETests --disable-default-traits
+# MCP E2E — requires npx installed and network access.
+# The streamable-HTTP smoke is fast and stable; the everything-server smoke
+# (`EverythingServerSmokeTests`) has hung for 28+ minutes on `mcp-server-everything`
+# in past runs — filter to the streamable suite to avoid that path.
+RUN_MCP_E2E=1 swift test --filter BaseChatMCPE2ESmokeTests --disable-default-traits
 
 # Xcode-only — real MLX model inference (metallib required)
 # Cannot run via swift test; MLX Metal shaders are only compiled by Xcode.
@@ -48,8 +53,10 @@ xcodebuild test -scheme BaseChatKit-Package -only-testing BaseChatMLXIntegration
 scripts/example-ui-tests.sh build-for-testing
 scripts/example-ui-tests.sh test-without-building -only-testing:BaseChatDemoUITests/ChatFlowUITests/testEmptyStateShowsWelcome
 
-# Real Ollama server E2E (requires Ollama running at localhost:11434)
-swift test --filter OllamaE2ETests --disable-default-traits
+# Real Ollama server E2E (requires Ollama running at localhost:11434).
+# `--traits Ollama` is required — Ollama was dropped from default traits in v2.0,
+# so the bare `--disable-default-traits` invocation runs zero tests.
+swift test --filter OllamaE2ETests --disable-default-traits --traits Ollama
 
 # Fuzz harness — requires Ollama running at localhost:11434
 # The Fuzz trait gates real inference backends; without it, fuzz-chat builds mock-only.
@@ -123,7 +130,7 @@ When Apple ships a new major OS each September, bump both minimums by one and re
 Before pushing any branch, run all CI-safe test suites locally and confirm zero failures:
 
 ```bash
-swift test --filter BaseChatCoreTests --disable-default-traits && swift test --filter BaseChatInferenceTests --disable-default-traits && swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits && swift test --filter BaseChatUITests --disable-default-traits && swift test --filter BaseChatUIModelManagementTests --disable-default-traits && swift test --filter BaseChatMCPTests --disable-default-traits && swift test --filter BaseChatBackendsTests --disable-default-traits && swift test --filter BaseChatTestSupportTests --disable-default-traits
+swift test --filter BaseChatCoreTests --disable-default-traits && swift test --filter BaseChatInferenceTests --disable-default-traits && swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits && swift test --filter BaseChatUITests --disable-default-traits && swift test --filter BaseChatUIModelManagementTests --disable-default-traits && swift test --filter BaseChatMCPTests --disable-default-traits && swift test --filter BaseChatBackendsTests --disable-default-traits && swift test --filter BaseChatTestSupportTests --disable-default-traits && swift test --filter BaseChatAppIntentsTests --disable-default-traits
 ```
 
 Never push based on a subset passing. After rebasing, always re-run the full suite before pushing — conflicts can silently break tests that compiled fine before.
@@ -222,7 +229,7 @@ All changes go through PRs — direct pushes to `main` are blocked for everyone.
 4. Report the PR URL — the maintainer reviews and merges manually
 5. Do NOT pass `--auto` or `--merge` — merges require human approval
 
-CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatInferenceSwiftTestingTests` + `BaseChatUITests` + `BaseChatUIModelManagementTests` + `BaseChatMCPTests` + `BaseChatBackendsTests` + `BaseChatTestSupportTests`) before merge is allowed.
+CI must pass (`BaseChatCoreTests` + `BaseChatInferenceTests` + `BaseChatInferenceSwiftTestingTests` + `BaseChatUITests` + `BaseChatUIModelManagementTests` + `BaseChatMCPTests` + `BaseChatBackendsTests` + `BaseChatTestSupportTests` + `BaseChatAppIntentsTests`) before merge is allowed.
 
 `BaseChatBackendsTests` runs in CI without hardware traits — only cloud backend and SSE tests execute; MLX and Llama tests are excluded by `#if MLX`/`#if Llama` conditional compilation. Run with `--traits MLX,Llama` locally on Apple Silicon before merging backend changes. `BaseChatE2ETests` requires physical hardware and does not run in CI.
 
