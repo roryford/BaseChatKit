@@ -557,6 +557,22 @@ internal func isFoundationModelsCompatible(_ schema: JSONSchemaValue, maxDepth: 
 /// found (rejecting the whole schema); otherwise returns the maximum depth
 /// reached. The depth is "interesting" only as a guard against the recursive
 /// case — callers just look at `nil` vs `non-nil`.
+///
+/// **Strategy** (PR #797 review fix): the walker visits *every* JSON Schema
+/// keyword that can carry a subschema, not just `properties`/`items`, so the
+/// rejection rules (`oneOf`, `anyOf`, `$ref`) are evaluated at every nesting
+/// level the author can construct — including those hidden inside composition
+/// keywords like `allOf`, `not`, `additionalProperties`, or `$defs`.
+///
+/// Two flavours of recursion:
+/// - **Depth-advancing** edges (`properties`, `items`, `prefixItems`,
+///   `additionalProperties`, `patternProperties`, `unevaluatedProperties`,
+///   `unevaluatedItems`, `contains`, `propertyNames`): each edge counts as one
+///   level of user-facing object/array nesting and contributes to `maxDepth`.
+/// - **Transparent** composition edges (`allOf`, `not`, `if`/`then`/`else`,
+///   `$defs`, `definitions`, `dependentSchemas`): these compose constraints
+///   over the *current* node, so they don't add user-facing depth — but we
+///   still recurse so a nested `oneOf` can't smuggle past the filter.
 private func schemaDepthIfCompatible(
     _ schema: JSONSchemaValue,
     currentDepth: Int,
@@ -574,56 +590,107 @@ private func schemaDepthIfCompatible(
         if object["anyOf"] != nil { return nil }
 
         var deepest = currentDepth
-        // Descend into properties (nested objects) and items (nested arrays).
-        // Other keys (`type`, `description`, `required`, `enum`, etc.) are scalar
-        // metadata that can't contain further schema nodes.
+
+        // --- Depth-advancing edges ----------------------------------------
+        // `properties: { name: schema, ... }` — each property is one level deeper.
         if case .object(let properties)? = object["properties"] {
             for (_, child) in properties {
-                guard let childDepth = schemaDepthIfCompatible(
-                    child,
-                    currentDepth: currentDepth + 1,
-                    maxDepth: maxDepth
-                ) else { return nil }
-                deepest = max(deepest, childDepth)
+                guard let d = schemaDepthIfCompatible(child, currentDepth: currentDepth + 1, maxDepth: maxDepth)
+                else { return nil }
+                deepest = max(deepest, d)
             }
         }
+        // `patternProperties: { regex: schema }` — same shape as properties.
+        if case .object(let patterns)? = object["patternProperties"] {
+            for (_, child) in patterns {
+                guard let d = schemaDepthIfCompatible(child, currentDepth: currentDepth + 1, maxDepth: maxDepth)
+                else { return nil }
+                deepest = max(deepest, d)
+            }
+        }
+        // `additionalProperties` / `unevaluatedProperties`: bool form is a
+        // permissive flag (nothing to inspect); schema (object) form is a single
+        // nested schema, one level deeper.
+        for key in ["additionalProperties", "unevaluatedProperties"] {
+            if let value = object[key], case .object = value {
+                guard let d = schemaDepthIfCompatible(value, currentDepth: currentDepth + 1, maxDepth: maxDepth)
+                else { return nil }
+                deepest = max(deepest, d)
+            }
+        }
+        // `items` may be a single schema or an array of schemas (legacy tuple form).
         if let items = object["items"] {
-            // `items` may be a single schema or an array of schemas (tuple form).
-            switch items {
-            case .array(let tupleItems):
-                for child in tupleItems {
-                    guard let childDepth = schemaDepthIfCompatible(
-                        child,
-                        currentDepth: currentDepth + 1,
-                        maxDepth: maxDepth
-                    ) else { return nil }
-                    deepest = max(deepest, childDepth)
+            if case .array(let tuple) = items {
+                for child in tuple {
+                    guard let d = schemaDepthIfCompatible(child, currentDepth: currentDepth + 1, maxDepth: maxDepth)
+                    else { return nil }
+                    deepest = max(deepest, d)
                 }
-            default:
-                guard let childDepth = schemaDepthIfCompatible(
-                    items,
-                    currentDepth: currentDepth + 1,
-                    maxDepth: maxDepth
-                ) else { return nil }
-                deepest = max(deepest, childDepth)
+            } else if case .object = items {
+                guard let d = schemaDepthIfCompatible(items, currentDepth: currentDepth + 1, maxDepth: maxDepth)
+                else { return nil }
+                deepest = max(deepest, d)
             }
         }
+        // `prefixItems: [schema, ...]` — modern tuple form.
+        if case .array(let prefix)? = object["prefixItems"] {
+            for child in prefix {
+                guard let d = schemaDepthIfCompatible(child, currentDepth: currentDepth + 1, maxDepth: maxDepth)
+                else { return nil }
+                deepest = max(deepest, d)
+            }
+        }
+        // `contains` / `unevaluatedItems` / `propertyNames`: single nested schema, one level deeper.
+        for key in ["contains", "unevaluatedItems", "propertyNames"] {
+            if let value = object[key], case .object = value {
+                guard let d = schemaDepthIfCompatible(value, currentDepth: currentDepth + 1, maxDepth: maxDepth)
+                else { return nil }
+                deepest = max(deepest, d)
+            }
+        }
+
+        // --- Transparent composition edges --------------------------------
+        // `allOf: [schema, ...]` — composes constraints over THIS node, no depth bump.
+        if case .array(let allOf)? = object["allOf"] {
+            for child in allOf {
+                guard let d = schemaDepthIfCompatible(child, currentDepth: currentDepth, maxDepth: maxDepth)
+                else { return nil }
+                deepest = max(deepest, d)
+            }
+        }
+        // `not: schema`, `if`/`then`/`else: schema` — single composition schemas.
+        for key in ["not", "if", "then", "else"] {
+            if let value = object[key], case .object = value {
+                guard let d = schemaDepthIfCompatible(value, currentDepth: currentDepth, maxDepth: maxDepth)
+                else { return nil }
+                deepest = max(deepest, d)
+            }
+        }
+        // `$defs` / `definitions` / `dependentSchemas: { name: schema }` — named maps, no depth bump.
+        for key in ["$defs", "definitions", "dependentSchemas"] {
+            if case .object(let defs)? = object[key] {
+                for (_, child) in defs {
+                    guard let d = schemaDepthIfCompatible(child, currentDepth: currentDepth, maxDepth: maxDepth)
+                    else { return nil }
+                    deepest = max(deepest, d)
+                }
+            }
+        }
+
         return deepest
     case .array(let elements):
-        // A bare schema array (rare at the top level but allowed inside e.g.
-        // `prefixItems`) — descend without advancing depth, since we already
-        // counted the array container at the parent.
+        // A bare schema array — descend without advancing depth (the array
+        // container was already counted at the parent edge).
         var deepest = currentDepth
         for element in elements {
-            guard let childDepth = schemaDepthIfCompatible(
-                element,
-                currentDepth: currentDepth,
-                maxDepth: maxDepth
-            ) else { return nil }
-            deepest = max(deepest, childDepth)
+            guard let d = schemaDepthIfCompatible(element, currentDepth: currentDepth, maxDepth: maxDepth)
+            else { return nil }
+            deepest = max(deepest, d)
         }
         return deepest
     case .string, .number, .bool, .null:
+        // Includes `additionalProperties: true`/`false` (the bool form) — a
+        // permissive flag, not a nested schema.
         return currentDepth
     }
 }

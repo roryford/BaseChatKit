@@ -78,6 +78,96 @@ final class MCPFoundationModelsCompatibilityTests: XCTestCase {
         // would let depth5 slip through.
     }
 
+    // MARK: - D21 — composition keyword traversal (PR #797 review fix)
+    //
+    // Before the walker rewrite, these schemas slipped past the filter because
+    // it only descended into `properties` and `items`. Each test below would
+    // have returned `true` (compatible) under the old walker.
+
+    func test_oneOfHiddenInsideAllOfIsRejected() {
+        let schema = JSONSchemaValue.object([
+            "type": .string("object"),
+            "allOf": .array([
+                .object([
+                    "oneOf": .array([
+                        .object(["type": .string("string")]),
+                        .object(["type": .string("number")]),
+                    ]),
+                ]),
+            ]),
+        ])
+        XCTAssertFalse(isFoundationModelsCompatible(schema, maxDepth: 4))
+        // Sabotage check: removing the `allOf` traversal in the walker would
+        // let this slip through.
+    }
+
+    func test_refHiddenInsideAdditionalPropertiesIsRejected() {
+        let schema = JSONSchemaValue.object([
+            "type": .string("object"),
+            "additionalProperties": .object([
+                "$ref": .string("#/definitions/Foo"),
+            ]),
+        ])
+        XCTAssertFalse(isFoundationModelsCompatible(schema, maxDepth: 4))
+        // Sabotage check: removing the `additionalProperties` traversal would
+        // let this slip through.
+    }
+
+    func test_anyOfHiddenInsideNotIsRejected() {
+        let schema = JSONSchemaValue.object([
+            "type": .string("object"),
+            "not": .object([
+                "anyOf": .array([
+                    .object(["type": .string("string")]),
+                ]),
+            ]),
+        ])
+        XCTAssertFalse(isFoundationModelsCompatible(schema, maxDepth: 4))
+        // Sabotage check: removing the `not` traversal would let this slip through.
+    }
+
+    func test_oneOfHiddenInsidePrefixItemsIsRejected() {
+        let schema = JSONSchemaValue.object([
+            "type": .string("array"),
+            "prefixItems": .array([
+                .object([
+                    "oneOf": .array([
+                        .object(["type": .string("string")]),
+                    ]),
+                ]),
+            ]),
+        ])
+        XCTAssertFalse(isFoundationModelsCompatible(schema, maxDepth: 4))
+        // Sabotage check: removing the `prefixItems` traversal would let this slip through.
+    }
+
+    func test_refHiddenInsideDefsIsRejected() {
+        // `$defs` is the modern definitions container; a `$ref` inside should
+        // still be flagged even though `$defs` itself isn't user-facing nesting.
+        let schema = JSONSchemaValue.object([
+            "type": .string("object"),
+            "$defs": .object([
+                "User": .object([
+                    "$ref": .string("#/definitions/Foo"),
+                ]),
+            ]),
+        ])
+        XCTAssertFalse(isFoundationModelsCompatible(schema, maxDepth: 4))
+    }
+
+    func test_additionalPropertiesAsBoolIsAccepted() {
+        // The bool form is a permissive flag, not a schema. A flat object that
+        // also says `additionalProperties: true` should still pass — don't over-reject.
+        let schema = JSONSchemaValue.object([
+            "type": .string("object"),
+            "properties": .object([
+                "name": .object(["type": .string("string")]),
+            ]),
+            "additionalProperties": .bool(true),
+        ])
+        XCTAssertTrue(isFoundationModelsCompatible(schema, maxDepth: 4))
+    }
+
     func test_deeplyNestedArrayIsRejected() {
         // Array of array of array of array of array of object — depth 6.
         func arr(_ inner: JSONSchemaValue) -> JSONSchemaValue {
