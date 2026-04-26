@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.11.8](https://github.com/roryford/BaseChatKit/compare/v0.11.7...v0.11.8) (2026-04-26)
+
+### Highlights
+
+#### BCK apps can now call tools on any MCP server
+
+Before this release, BCK apps required hand-written `ToolExecutor` implementations for every external integration. `BaseChatMCP` plugs the framework into the entire Model Context Protocol ecosystem — any server that speaks MCP (Notion, Linear, GitHub, local filesystem tools, and hundreds of community servers) becomes available to the model in one `connect` call.
+
+```swift
+let client = MCPClient()
+let source = try await client.connect(MCPCatalog.notion)
+await source.register(in: toolRegistry)
+// Notion tools (namespaced notion__*) are now available to the model.
+```
+
+OAuth 2.1 with PKCE and Dynamic Client Registration is built in; providers like Notion, Linear, and GitHub authenticate without custom auth code. Approval is a first-class `MCPApprovalPolicy` (per-call, per-turn, session, or persistent), routed through the same `ToolApprovalGate` as hand-written tools.
+
+Enable with the `MCP` trait in your package manifest. Built-in provider descriptors (Notion, Linear, GitHub) require the additional `MCPBuiltinCatalog` trait.
+
+Not in v1: MCP Resources, Prompts, Sampling, image/audio content passthrough, partial-progress notifications. Tracked in [#792].
+
+See [#625], [#790].
+
+### Features
+
+- **mcp:** `BaseChatMCP` module — MCP server tools consumed as `ToolDefinition`s ([#790])
+- **mcp:** OAuth 2.1 + PKCE + Dynamic Client Registration + RFC 8414 metadata + RFC 9207 `iss` validation ([#790])
+- **mcp:** Stdio transport (macOS) and Streamable HTTP transport (iOS + macOS) ([#790])
+- **mcp:** Built-in catalog for Notion, Linear, GitHub behind `MCPBuiltinCatalog` trait ([#790])
+- **inference:** `SSEStreamParser` named-event mode, also adopted by `OpenAIResponsesBackend` ([#790])
+
 ## [0.11.7](https://github.com/roryford/BaseChatKit/compare/v0.11.6...v0.11.7) (2026-04-26)
 
 ### Highlights
