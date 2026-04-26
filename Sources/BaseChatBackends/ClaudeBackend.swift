@@ -376,21 +376,29 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
     /// `input` to be a JSON object (not a stringified blob), unlike
     /// OpenAI Chat Completions where `arguments` is a string.
     ///
-    /// On parse failure we fall back to an empty object — the same
-    /// behaviour MLX uses for replay of corrupted tool-call history.
-    /// Logging the failure makes it visible without breaking the request.
-    private static func decodeArgumentsForReplay(_ arguments: String) -> Any {
+    /// On parse failure — or if the parsed value is not a JSON object
+    /// (e.g. an array, string, or number snuck into the stored
+    /// arguments) — we fall back to an empty object so we never send a
+    /// `tool_use.input` shape Anthropic will 400 on. Mirrors the MLX
+    /// replay fallback for corrupted tool-call history.
+    private static func decodeArgumentsForReplay(_ arguments: String) -> [String: Any] {
         guard let data = arguments.data(using: .utf8) else {
-            return [String: Any]()
+            return [:]
         }
         do {
             let decoded = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-            return decoded
+            if let object = decoded as? [String: Any] {
+                return object
+            }
+            Log.inference.warning(
+                "ClaudeBackend: tool_use input parsed but is not a JSON object — substituting empty object to satisfy Anthropic schema."
+            )
+            return [:]
         } catch {
             Log.inference.warning(
                 "ClaudeBackend: tool_use input could not be re-parsed for replay — substituting empty object. error=\(error.localizedDescription, privacy: .public)"
             )
-            return [String: Any]()
+            return [:]
         }
     }
 

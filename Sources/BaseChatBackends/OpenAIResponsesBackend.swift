@@ -331,7 +331,10 @@ public final class OpenAIResponsesBackend: SSECloudBackend, TokenUsageProvider, 
             //       fire all .toolCall events together so they emit in
             //       insertion order.
             //   response.output_item.done (item.type == "function_call")
-            //     → some streams use this instead; treat the same.
+            //     → not currently parsed — `response.completed` is the
+            //       authoritative finaliser. If a server stops emitting
+            //       `response.completed`, the stream-end fallback in the
+            //       outer loop still flushes accumulated tool calls.
             if name == "response.output_item.added" {
                 if let info = Self.parseFunctionCallItem(from: data) {
                     flushThinkingCompleteIfNeeded()

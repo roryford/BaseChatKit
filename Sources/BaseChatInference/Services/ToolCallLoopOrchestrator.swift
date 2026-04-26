@@ -502,6 +502,13 @@ public struct ToolCallLoopOrchestrator: Sendable {
         var results: [ToolResult] = []
         results.reserveCapacity(sorted.count)
         for (_, result) in sorted {
+            // Re-check between yields: cancellation can land after the
+            // task group returns but before/during the yield loop, and
+            // the "no late results after cancellation" contract (mirrored
+            // by the sequential path above) requires us to stop yielding.
+            if Task.isCancelled {
+                return ParallelOutcome(results: results, cancelled: true)
+            }
             continuation.yield(.toolResult(result))
             results.append(result)
         }
