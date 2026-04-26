@@ -290,10 +290,14 @@ final class CloudBackendsPinLoadingTests: XCTestCase {
         let service = InferenceService()
         CloudBackends.register(with: service)
 
-        XCTAssertEqual(PinnedSessionDelegate.pinnedHosts["api.anthropic.com"]?.count, 2,
-                       "CloudBackends.register must populate Anthropic pins (intermediate + root)")
-        XCTAssertEqual(PinnedSessionDelegate.pinnedHosts["api.openai.com"]?.count, 2,
-                       "CloudBackends.register must populate OpenAI pins (intermediate + root)")
+        // At-least-2 instead of exactly-2: pin rotation procedures legitimately
+        // add backup pins (temporarily during a swap, or permanently). The
+        // invariant we're asserting is "the registrar populated pins for these
+        // hosts before any URLSession could fire", not the bundled pin count.
+        XCTAssertGreaterThanOrEqual(PinnedSessionDelegate.pinnedHosts["api.anthropic.com"]?.count ?? 0, 2,
+                                    "CloudBackends.register must populate Anthropic pins (at minimum: intermediate + root)")
+        XCTAssertGreaterThanOrEqual(PinnedSessionDelegate.pinnedHosts["api.openai.com"]?.count ?? 0, 2,
+                                    "CloudBackends.register must populate OpenAI pins (at minimum: intermediate + root)")
     }
 }
 #endif

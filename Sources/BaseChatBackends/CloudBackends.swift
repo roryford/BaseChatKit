@@ -3,6 +3,11 @@ import BaseChatInference
 public enum CloudBackends: BackendRegistrar {
     @MainActor
     public static func register(with service: InferenceService) {
+        // Honour the BackendRegistrar contract: registration is a no-op when
+        // every trait this registrar covers is disabled. Without this gate
+        // we'd attach an always-nil factory and contradict the protocol
+        // docstring.
+        #if CloudSaaS || Ollama
         #if CloudSaaS
         PinnedSessionDelegate.loadDefaultPins()
         #endif
@@ -31,5 +36,6 @@ public enum CloudBackends: BackendRegistrar {
         for provider in APIProvider.availableInBuild {
             service.declareSupport(for: provider)
         }
+        #endif
     }
 }
