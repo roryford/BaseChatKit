@@ -34,6 +34,8 @@ final class MCPStreamableHTTPTransportTests: XCTestCase {
         let first = try await iterator.next()
 
         XCTAssertEqual(first, Data("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}".utf8))
+        // Sabotage: removing the SSE "data:" line parser in MCPStreamableHTTPTransport.start() so it never yields data frames to incomingMessages would leave the iterator await hanging and time out the test
+
         await transport.close()
     }
 
@@ -62,6 +64,7 @@ final class MCPStreamableHTTPTransportTests: XCTestCase {
         XCTAssertEqual(post.value(forHTTPHeaderField: "Content-Type"), "application/json")
         XCTAssertEqual(post.value(forHTTPHeaderField: "X-Client"), "BaseChat")
         XCTAssertEqual(post.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+        // Sabotage: removing the MCPStreamableHTTPTransport.send() call to MCPAuthorization.authorizationHeader() and never setting the Authorization header would fail the XCTAssertEqual on "Bearer test-token"
 
         await transport.close()
     }
@@ -96,6 +99,8 @@ final class MCPStreamableHTTPTransportTests: XCTestCase {
         XCTAssertEqual(first, Data("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}".utf8))
         let unauthorizedCount = await authorization.unauthorizedCount
         XCTAssertEqual(unauthorizedCount, 1)
+        // Sabotage: removing the 401-response branch in MCPStreamableHTTPTransport.start() that calls MCPAuthorization.handleUnauthorized() and retries the GET would leave unauthorizedCount at 0 and fail the XCTAssertEqual(unauthorizedCount, 1)
+
         await transport.close()
     }
 
@@ -123,6 +128,8 @@ final class MCPStreamableHTTPTransportTests: XCTestCase {
         XCTAssertEqual(first, response)
         let unauthorizedCount = await authorization.unauthorizedCount
         XCTAssertEqual(unauthorizedCount, 1)
+        // Sabotage: removing the 401-response branch in MCPStreamableHTTPTransport.send() that calls MCPAuthorization.handleUnauthorized() and retries the POST would leave unauthorizedCount at 0 and fail the XCTAssertEqual(unauthorizedCount, 1)
+
         await transport.close()
     }
 

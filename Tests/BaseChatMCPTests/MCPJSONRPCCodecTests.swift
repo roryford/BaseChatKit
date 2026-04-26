@@ -16,6 +16,8 @@ final class MCPJSONRPCCodecTests: XCTestCase {
         let decoded = try codec.decode(encoded)
 
         XCTAssertEqual(decoded, message)
+        // Sabotage: removing the "jsonrpc":"2.0" field from MCPJSONRPCCodec.encode() would produce invalid JSON-RPC, causing decode() to fail or produce a non-equal message and fail XCTAssertEqual(decoded, message)
+
     }
 
     func test_decodeRejectsOversizedMessage() throws {
@@ -25,6 +27,8 @@ final class MCPJSONRPCCodecTests: XCTestCase {
         XCTAssertThrowsError(try codec.decode(payload)) { error in
             XCTAssertEqual(error as? MCPError, .oversizeMessage(payload.count))
         }
+        // Sabotage: removing the byte-count guard in MCPJSONRPCCodec.decode() that compares data.count against maxMessageBytes would allow oversized payloads through without throwing, causing XCTAssertThrowsError to fail
+
     }
 
     func test_decodeRejectsExcessiveNestingDepth() throws {
@@ -34,5 +38,6 @@ final class MCPJSONRPCCodecTests: XCTestCase {
         XCTAssertThrowsError(try codec.decode(payload)) { error in
             XCTAssertEqual(error as? MCPError, .malformedMetadata("JSON depth exceeded max of 3"))
         }
+        // Sabotage: removing the JSON nesting-depth counter in MCPJSONRPCCodec.decode() so it never enforces maxJSONNestingDepth would allow the deeply nested payload through without throwing, causing XCTAssertThrowsError to fail
     }
 }

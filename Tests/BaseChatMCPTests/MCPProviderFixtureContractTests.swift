@@ -12,6 +12,7 @@ final class MCPProviderFixtureContractTests: XCTestCase {
             _ = try fixtureURL(provider: provider, file: "initialize.result.json")
             _ = try fixtureURL(provider: provider, file: "tools.list.result.json")
         }
+        // Sabotage: deleting any one of the Fixtures/Providers/<provider>/*.json files from the bundle resources would cause fixtureURL(provider:file:) to throw FixtureError.missingFixture, failing this test
     }
 
     func test_initializeFixtureReplayStartsSessionForEachProvider() async throws {
@@ -42,6 +43,7 @@ final class MCPProviderFixtureContractTests: XCTestCase {
                 continue
             }
             XCTAssertFalse(tools.isEmpty, "tools/list fixture has no tools for \(provider)")
+            // Sabotage: stripping the "tools" key from any provider's tools.list.result.json fixture would make the guard-case pattern fail and reach XCTFail("tools/list replay did not return tools array for \(provider)")
 
             await session.close()
         }
@@ -66,6 +68,7 @@ final class MCPProviderFixtureContractTests: XCTestCase {
             let delta = try await source.refreshToolsAndReturnDelta()
             XCTAssertEqual(delta.allNames.sorted(), expectedNames, "namespaced tool list drift for \(provider)")
             XCTAssertEqual(delta.removedNames, [], "Unexpected removed tools for \(provider)")
+            // Sabotage: changing MCPToolSource.refreshToolsAndReturnDelta() to use "." as the namespace separator instead of "__" would produce names like "github.search" instead of "github__search", failing the delta.allNames equality check
         }
     }
 
@@ -95,6 +98,7 @@ final class MCPProviderFixtureContractTests: XCTestCase {
             XCTAssertEqual(fixture.catalog.oauth.issuer, oauth.authorizationServerIssuer?.absoluteString, "oauth issuer drift for \(provider)")
             XCTAssertEqual(fixture.catalog.oauth.scopes, oauth.scopes, "oauth scopes drift for \(provider)")
             XCTAssertEqual(fixture.catalog.oauth.redirectURI, oauth.redirectURI.absoluteString, "oauth redirectURI drift for \(provider)")
+            // Sabotage: changing the UUID or endpoint URL in MCPCatalog.github/linear/notion without updating the corresponding server.json fixture would cause the catalog.id or catalog.transport.endpoint equality checks to fail
         }
     }
     #endif

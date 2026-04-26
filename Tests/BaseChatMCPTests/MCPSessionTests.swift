@@ -56,6 +56,7 @@ final class MCPSessionTests: XCTestCase {
             }
             return false
         })
+        // Sabotage: removing the MCPSession.start() call that sends "notifications/initialized" after receiving the initialize result would cause the sent.contains notification check to fail
 
         await session.close()
     }
@@ -104,6 +105,8 @@ final class MCPSessionTests: XCTestCase {
         }
 
         XCTAssertEqual(tools.count, 1)
+        // Sabotage: changing MCPSession.handleIncoming() to never remove the pending-request continuation from pendingRequests would leave the response undelivered and hang this await, timing out the test
+
         await session.close()
     }
 
@@ -156,6 +159,7 @@ final class MCPSessionTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+        // Sabotage: changing MCPSession.handleIncoming() to resume the pending continuation with .success instead of .failure when a JSON-RPC error response is received would skip the catch block and hit XCTFail("Expected protocolError")
 
         await session.close()
     }
@@ -194,6 +198,7 @@ final class MCPSessionTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+        // Sabotage: removing the protocolVersion equality check in MCPSession.start() that compares the server's reported version against "2025-03-26" would allow the unsupported "2024-11-05" version through without throwing, reaching XCTFail("Expected unsupportedProtocolVersion")
 
         await session.close()
     }
@@ -244,6 +249,7 @@ final class MCPSessionTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+        // Sabotage: removing the concurrency semaphore guard in MCPSession.sendRequest() so it never checks maxConcurrentRequests would allow the second request to proceed instead of throwing .transportFailure("Exceeded max concurrent MCP requests"), reaching XCTFail("Expected max-concurrency transport failure")
 
         firstRequest.cancel()
         await session.close()

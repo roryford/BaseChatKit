@@ -10,6 +10,8 @@ final class BaseChatMCPScaffoldTests: XCTestCase {
             dataDisclosure: "Test disclosure."
         )
         XCTAssertEqual(descriptor.displayName, "Test")
+        // Sabotage: removing the BaseChatMCP target from Package.swift would prevent `@testable import BaseChatMCP` from compiling, failing the test at build time; alternatively, removing the `displayName` property from MCPServerDescriptor would fail this XCTAssertEqual
+
     }
 
     func test_fixtureScaffoldExists() {
@@ -28,6 +30,7 @@ final class BaseChatMCPScaffoldTests: XCTestCase {
                 XCTAssertTrue(FileManager.default.fileExists(atPath: path), "Missing fixture \(provider)/\(file)")
             }
         }
+        // Sabotage: removing any provider subdirectory (e.g. Fixtures/Providers/github/) or any of the three required JSON files inside it would fail the corresponding FileManager.fileExists XCTAssertTrue
     }
 
     #if MCPBuiltinCatalog
@@ -43,6 +46,7 @@ final class BaseChatMCPScaffoldTests: XCTestCase {
             }
             XCTAssertEqual(endpoint.scheme?.lowercased(), "https")
             XCTAssertFalse(descriptor.dataDisclosure.isEmpty)
+            // Sabotage: changing any MCPCatalog descriptor's transport endpoint from https:// to http:// would fail the XCTAssertEqual(endpoint.scheme?.lowercased(), "https") check for that descriptor
         }
     }
     #endif
