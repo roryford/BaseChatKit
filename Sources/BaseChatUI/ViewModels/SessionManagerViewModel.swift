@@ -63,7 +63,7 @@ public final class SessionManagerViewModel {
     /// their most recent matching message.
     public private(set) var messageMatchSessions: [ChatSessionRecord] = []
 
-    var persistence: ChatPersistenceProvider?
+    private(set) var persistence: ChatPersistenceProvider?
 
     /// Optional diagnostics sink for non-fatal operational failures
     /// (e.g., auto-rename inference errors). Inject via `configure` so
