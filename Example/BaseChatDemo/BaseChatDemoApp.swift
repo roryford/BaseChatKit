@@ -270,6 +270,7 @@ struct BaseChatDemoApp: App {
 
         let payload = InboundPayload(
             prompt: envelope.prompt,
+            attachments: envelope.attachments,
             source: decodeSource(envelope.source)
         )
 
