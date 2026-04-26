@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.11.7](https://github.com/roryford/BaseChatKit/compare/v0.11.6...v0.11.7) (2026-04-26)
+
+### Highlights
+
+#### Tool calling on every cloud backend
+
+OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, and Ollama now implement the framework `ToolCall` contract that `ToolCallLoopOrchestrator` already consumes (see #779 in 0.11.6). Each backend speaks its own wire dialect — `tools` + `tool_choice` for the OpenAI family, `content_block_start{tool_use}` + `input_json_delta` indexed by content-block index for Anthropic, NDJSON whole-call envelopes for Ollama — but every backend produces the same `GenerationEvent.toolCall` stream. Streaming-argument deltas (`.toolCallStart`, `.toolCallArgumentsDelta`) ride the same shape on backends that opt in via the new `BackendCapabilities.streamsToolCallArguments`.
+
+```swift
+let backend = ClaudeBackend(apiKey: ...)
+let registry = ToolRegistry(policy: ToolOutputPolicy())
+registry.register(WeatherTool())
+let orchestrator = ToolCallLoopOrchestrator(backend: backend, registry: registry)
+for try await event in orchestrator.run(initialPrompt: "what's it like in Tokyo?", systemPrompt: nil, config: config) {
+    switch event {
+    case .toolCallStart(let id, let name): print("→", name, id)
+    case .toolCallArgumentsDelta(_, let frag): print(frag, terminator: "")
+    case .toolResult(let r): print("✓", r.content.prefix(64))
+    default: break
+    }
+}
+```
+
+Three wire-format caveats worth knowing: Anthropic's `tool_use.input` arrives as a parsed JSON object (not a stringified blob like OpenAI), so `ClaudeBackend.decodeArgumentsForReplay` round-trips it through `JSONSerialization` with `{}` fallback. `tool_choice:none` does not exist on the Anthropic wire; the framework drops the `tools` field entirely. Per-block `.toolCall` finalization timing differs across backends — Claude fires per-block on `content_block_stop`, both OpenAI variants batch at end-of-stream — all three are compatible with the orchestrator's collect-and-dispatch contract, but consumers reading the raw event stream should not assume strictly-batched semantics. See [#783], [#789].
+
+#### Parallel tool dispatch, opt-in per executor
+
+`ToolCallLoopOrchestrator` dispatches multi-call rounds via `withTaskGroup` when every executor in the round opts in via the new `ToolExecutor.supportsConcurrentDispatch` (default `false` — sequential semantics preserved). Result order in the next-turn prompt is determined by batch-index sort regardless of completion order, so prefix-cache reuse stays stable across runs. Cancellation drops late results: any task that returns after cancellation is observed must not produce phantom `.toolResult` events — both the sequential and parallel paths re-check `Task.isCancelled` between yields. See [#783].
+
+### Features
+
+- **inference:** streaming tool-call delta events (`.toolCallStart`, `.toolCallArgumentsDelta`) and `BackendCapabilities.streamsToolCallArguments` ([#783])
+- **inference:** `ToolExecutor.supportsConcurrentDispatch` for opt-in parallel dispatch with batch-order result preservation ([#783])
+- **cloud:** OpenAI Chat Completions tool calling — `tools` + `tool_choice` request encoding, sticky-id buffering for compat servers (Together, Groq) that drop `id` after the first delta, streaming + non-streaming whole-message paths ([#789])
+- **cloud:** OpenAI Responses tool calling — `function_call` items keyed by `item_id` with `call_id` exposed downstream; finalises on `response.completed` ([#789])
+- **cloud:** Anthropic Messages tool calling — `tool_use` content blocks indexed by content-block index, per-block `.toolCall` finalization on `content_block_stop`, tool-result-as-user-role history ([#789])
+- **cloud:** Ollama `/api/chat` tool calling — `tools` request envelope, whole-call NDJSON streaming, synthesized stable `callId` matching the convention from `MLXToolCallParser` ([#789])
+
+### Fixes
+
+- **test:** declare `BaseChatTools` dependency on `BaseChatE2ETests` — `xcodebuild test` was failing the link step for `BaseChatMLXIntegrationTests` because `swift test` resolved the missing import via a transitive path ([#784])
+
 ## [0.11.6](https://github.com/roryford/BaseChatKit/compare/v0.11.5...v0.11.6) (2026-04-25)
 
 ### Highlights
