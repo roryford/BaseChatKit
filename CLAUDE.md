@@ -73,7 +73,7 @@ When writing hardware-gated tests, add `XCTSkipIf` guards at the top of the test
 
 ## Service sharing
 
-`ChatViewModel.inferenceService` is `internal` by design. Apps that need the same `InferenceService` instance in multiple components (e.g., a story engine, character creator) should create it at the app level and inject it:
+`ChatViewModel.inferenceService` is `package`-visible by design — it was widened from `internal` to `package` during the v2.0 `BaseChatUIModelManagement` peel so views in that module (the peeled model-management surface) can read static capability queries off the service. Apps that need the same `InferenceService` instance in multiple components (e.g., a story engine, character creator) should still create it at the app level and inject it via the constructor:
 
 ```swift
 let inference = InferenceService()
@@ -81,7 +81,7 @@ let chatVM = ChatViewModel(inferenceService: inference)
 let storyStore = StoryStore(inferenceService: inference)
 ```
 
-Do not widen `inferenceService` to `public` — it exposes load coordination internals and makes `InferenceService`'s full API part of `ChatViewModel`'s public contract.
+Do **not** widen `inferenceService` to `public`. Exposing the full `InferenceService` API on `ChatViewModel`'s public contract would lock in load-coordination internals that the framework needs the freedom to refactor. `package` lets the sibling `BaseChatUIModelManagement` module see what it needs without leaking the surface to host apps.
 
 ## Coding conventions
 
