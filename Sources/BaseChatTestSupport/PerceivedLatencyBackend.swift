@@ -25,7 +25,7 @@ public final class PerceivedLatencyBackend: InferenceBackend, @unchecked Sendabl
     private var _isModelLoaded = false
     private var _isGenerating = false
     private var _hasPaidColdStart = false
-    private var generationTask: Task<Void, Never>?
+    private let lifecycle = MockBackendLifecycle()
 
     // Configuration — immutable after init to keep the double simple.
     private let coldStartDelay: Duration
@@ -107,13 +107,11 @@ public final class PerceivedLatencyBackend: InferenceBackend, @unchecked Sendabl
 
         withStateLock { _isGenerating = true }
 
-        let stream = AsyncThrowingStream<GenerationEvent, Error> { [weak self] continuation in
-            let task = Task { [weak self] in
-                defer {
-                    self?.finishGeneration()
-                    continuation.finish()
-                }
-
+        return lifecycle.makeStream(
+            onFinish: { [weak self] in
+                self?.withStateLock { self?._isGenerating = false }
+            },
+            body: { continuation in
                 // TTFT — the pause the user sees after hitting "send".
                 if Task.isCancelled { return }
                 try? await Task.sleep(for: ttft)
@@ -129,12 +127,7 @@ public final class PerceivedLatencyBackend: InferenceBackend, @unchecked Sendabl
                     continuation.yield(.token(token))
                 }
             }
-            continuation.onTermination = { @Sendable _ in
-                task.cancel()
-            }
-            self?.setGenerationTask(task)
-        }
-        return GenerationStream(stream)
+        )
     }
 
     public func stopGeneration() {
@@ -153,26 +146,12 @@ public final class PerceivedLatencyBackend: InferenceBackend, @unchecked Sendabl
         return body()
     }
 
-    private func setGenerationTask(_ task: Task<Void, Never>) {
-        withStateLock { generationTask = task }
-    }
-
-    private func finishGeneration() {
-        withStateLock {
-            _isGenerating = false
-            generationTask = nil
-        }
-    }
-
     private func cancelGeneration(markModelUnloaded: Bool) {
-        let task = withStateLock { () -> Task<Void, Never>? in
+        withStateLock {
             if markModelUnloaded { _isModelLoaded = false }
             _isGenerating = false
-            let task = generationTask
-            generationTask = nil
-            return task
         }
-        task?.cancel()
+        lifecycle.cancel()
     }
 
     /// Uniformly samples a Duration from an inclusive range.

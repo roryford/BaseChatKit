@@ -12,28 +12,21 @@ final class ViewModelEdgeCaseTests: XCTestCase {
 
     private let oneGB: UInt64 = 1_024 * 1_024 * 1_024
 
+    private nonisolated(unsafe) var harnesses: [TestChatViewModelHarness] = []
+
     private func makeViewModel(ramGB: UInt64 = 16) -> ChatViewModel {
-        ChatViewModel(
-            inferenceService: InferenceService(),
-            deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(),
-            memoryPressure: MemoryPressureHandler()
-        )
+        let harness = try! makeTestChatViewModel(ramGB: ramGB)
+        harnesses.append(harness)
+        return harness.vm
     }
 
     private func makeViewModelWithMock(
         ramGB: UInt64 = 16,
         mock: MockInferenceBackend = MockInferenceBackend()
     ) -> (ChatViewModel, MockInferenceBackend) {
-        mock.isModelLoaded = true
-        let service = InferenceService(backend: mock, name: "Mock")
-        let vm = ChatViewModel(
-            inferenceService: service,
-            deviceCapability: DeviceCapabilityService(physicalMemory: ramGB * oneGB),
-            modelStorage: ModelStorageService(),
-            memoryPressure: MemoryPressureHandler()
-        )
-        return (vm, mock)
+        let harness = try! makeTestChatViewModel(mock: mock, ramGB: ramGB)
+        harnesses.append(harness)
+        return (harness.vm, harness.mock!)
     }
 
     /// Retains the persistence stack across the test's lifetime. Without this,
@@ -43,6 +36,8 @@ final class ViewModelEdgeCaseTests: XCTestCase {
     private var persistenceStack: InMemoryPersistenceHarness.Stack?
 
     override func tearDown() async throws {
+        for harness in harnesses { harness.cleanup() }
+        harnesses.removeAll()
         persistenceStack = nil
         try await super.tearDown()
     }
