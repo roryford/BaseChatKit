@@ -39,6 +39,10 @@
 		BF0019000000000000000000 /* DemoScenarioCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10017000000000000000000 /* DemoScenarioCard.swift */; };
 		BF0021000000000000000000 /* ConnectedServicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10018000000000000000000 /* ConnectedServicesView.swift */; };
 		BF0022000000000000000000 /* DemoMCPCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10019000000000000000000 /* DemoMCPCoordinator.swift */; };
+		BF0023000000000000000000 /* InboundPayloadEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10020000000000000000000 /* InboundPayloadEnvelope.swift */; };
+		BF1010000000000000000000 /* InboundPayloadEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10020000000000000000000 /* InboundPayloadEnvelope.swift */; };
+		BF1011000000000000000000 /* InboundPayloadEnvelopeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11011000000000000000000 /* InboundPayloadEnvelopeTests.swift */; };
+		BF1012000000000000000000 /* BaseChatInference in Frameworks */ = {isa = PBXBuildFile; productRef = F30007000000000000000000 /* BaseChatInference */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -80,7 +84,9 @@
 		F10016000000000000000000 /* DemoScenarioRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenarioRunner.swift; sourceTree = "<group>"; };
 		F10017000000000000000000 /* DemoScenarioCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenarioCard.swift; sourceTree = "<group>"; };
 		F10018000000000000000000 /* ConnectedServicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectedServicesView.swift; sourceTree = "<group>"; };
-		F10019000000000000000000 /* DemoMCPCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMCPCoordinator.swift; sourceTree = "<group>"; };
+		F10019000000000000000000 /* DemoMCPCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCP/DemoMCPCoordinator.swift; sourceTree = "<group>"; };
+		F10020000000000000000000 /* InboundPayloadEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents/InboundPayloadEnvelope.swift; sourceTree = "<group>"; };
+		F11011000000000000000000 /* InboundPayloadEnvelopeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboundPayloadEnvelopeTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,6 +107,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BF1012000000000000000000 /* BaseChatInference in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,6 +145,7 @@
 				F10017000000000000000000 /* DemoScenarioCard.swift */,
 				F10018000000000000000000 /* ConnectedServicesView.swift */,
 				F10019000000000000000000 /* DemoMCPCoordinator.swift */,
+				F10020000000000000000000 /* InboundPayloadEnvelope.swift */,
 			);
 			path = BaseChatDemo;
 			sourceTree = "<group>";
@@ -170,6 +178,7 @@
 				F11008000000000000000000 /* ToolApprovalUITests.swift */,
 				F11009000000000000000000 /* AppIntentUITests.swift */,
 				F11010000000000000000000 /* DemoScenarioUITests.swift */,
+				F11011000000000000000000 /* InboundPayloadEnvelopeTests.swift */,
 			);
 			path = BaseChatDemoUITests;
 			sourceTree = "<group>";
@@ -214,6 +223,9 @@
 				D21001000000000000000000 /* PBXTargetDependency */,
 			);
 			name = BaseChatDemoUITests;
+			packageProductDependencies = (
+				F30007000000000000000000 /* BaseChatInference */,
+			);
 			productName = BaseChatDemoUITests;
 			productReference = F11002000000000000000000 /* BaseChatDemoUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -272,6 +284,7 @@
 				BF0019000000000000000000 /* DemoScenarioCard.swift in Sources */,
 				BF0021000000000000000000 /* ConnectedServicesView.swift in Sources */,
 				BF0022000000000000000000 /* DemoMCPCoordinator.swift in Sources */,
+				BF0023000000000000000000 /* InboundPayloadEnvelope.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -288,6 +301,8 @@
 				BF1007000000000000000000 /* ToolApprovalUITests.swift in Sources */,
 				BF1008000000000000000000 /* AppIntentUITests.swift in Sources */,
 				BF1009000000000000000000 /* DemoScenarioUITests.swift in Sources */,
+				BF1010000000000000000000 /* InboundPayloadEnvelope.swift in Sources */,
+				BF1011000000000000000000 /* InboundPayloadEnvelopeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -429,6 +444,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BaseChatDemo/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -463,6 +479,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BaseChatDemo/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -597,6 +614,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F20001000000000000000000 /* XCLocalSwiftPackageReference ".." */;
 			productName = BaseChatUIModelManagement;
+		};
+		F30007000000000000000000 /* BaseChatInference */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F20001000000000000000000 /* XCLocalSwiftPackageReference ".." */;
+			productName = BaseChatInference;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

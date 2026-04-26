@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import BaseChatInference
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -48,17 +49,23 @@ public struct AskBaseChatDemoIntent: AppIntent {
     @MainActor
     public func perform() async throws -> some IntentResult {
         // Serialize to App Group storage so the main app can retrieve the
-        // payload after the scheme-deep-link hits. We encode a minimal
-        // envelope rather than the full `InboundPayload` struct because
-        // `InboundPayload` is not `Codable` — attachments carry
-        // `MessagePart` values that already have their own
-        // persistence-oriented codable story we don't need here.
+        // payload after the scheme-deep-link hits. The envelope carries
+        // both the prompt and the attachments array so that future
+        // intents (or Share / Action Extensions on #440 / #441) can
+        // propagate `MessagePart` payloads (images, files, tool results)
+        // end-to-end on the same code path. `MessagePart` is `Codable`,
+        // so we round-trip attachments verbatim rather than introducing
+        // a wire-format-specific shape.
         //
-        // TODO(#440, #441): Share / Action Extensions need attachments.
-        // When those land, extend `InboundPayloadEnvelope` with an
-        // `attachments: [MessagePart]` field (or an envelope-specific
-        // codable shape) so images and files ride alongside the prompt.
-        let envelope = InboundPayloadEnvelope(prompt: prompt, source: "appIntent")
+        // The `prompt`-only intent shipped here keeps `attachments`
+        // empty; the envelope contract is in place so a follow-up
+        // surface that produces attachments doesn't need a second
+        // App Group key.
+        let envelope = InboundPayloadEnvelope(
+            prompt: prompt,
+            attachments: [],
+            source: "appIntent"
+        )
         if let defaults = UserDefaults(suiteName: DemoAppGroup.identifier) {
             if let encoded = try? JSONEncoder().encode(envelope) {
                 defaults.set(encoded, forKey: DemoAppGroup.inboundKey)
@@ -69,20 +76,13 @@ public struct AskBaseChatDemoIntent: AppIntent {
         // is responsible for actually draining the App Group defaults —
         // this intent only signals that a payload is waiting.
         //
-        // NOTE: The `basechatdemo` scheme is **not** registered in the
-        // demo's auto-generated Info.plist. In production the
-        // `open(URL)` call below silently fails and the app never
-        // receives `.onOpenURL`. The intent still opens the app via
-        // `openAppWhenRun = true`, but without the URL delivery the
-        // payload sits unread in App Group defaults.
-        //
-        // UI-test runs bypass this gap by seeding the pending buffer
-        // with `--uitesting-ingest-prompt` launch args (see
-        // `BaseChatDemoApp.uiTestingSeededPayload()`). Hosts wanting
-        // real AppIntent delivery must add `CFBundleURLTypes` to the
-        // app's Info.plist (requires dropping `GENERATE_INFOPLIST_FILE`
-        // or overriding via build settings that support structured
-        // plist values).
+        // The `basechatdemo` scheme is registered in the demo's
+        // `Info.plist` via the `CFBundleURLTypes` key, merged into the
+        // auto-generated plist. The merge is driven by setting both
+        // `GENERATE_INFOPLIST_FILE = YES` and `INFOPLIST_FILE =
+        // BaseChatDemo/Info.plist` in the target's build settings —
+        // Xcode unions the two so scene-manifest auto-generation keeps
+        // working alongside the explicit URL types.
         let url = URL(string: "basechatdemo://ingest")!
         #if canImport(UIKit)
         await UIApplication.shared.open(url, options: [:])
@@ -94,23 +94,7 @@ public struct AskBaseChatDemoIntent: AppIntent {
     }
 }
 
-/// JSON envelope written to App Group defaults.
-///
-/// Defined alongside the intent so both the write (here) and the read
-/// (in `BaseChatDemoApp.onOpenURL`) share one shape. Codable rather than
-/// piggybacking on `InboundPayload` because the struct carries
-/// non-Codable attachments — we keep this envelope text-only today and
-/// can add an `attachments: [MessagePart]` field later when a richer
-/// source starts using it.
-struct InboundPayloadEnvelope: Codable, Sendable {
-    var prompt: String
-    var source: String
-}
-
-/// App Group identifier shared between the intent (writer) and the
-/// app's `.onOpenURL` handler (reader). Centralised so renaming stays
-/// in one place.
-enum DemoAppGroup {
-    static let identifier = "group.com.basechatkit.demo"
-    static let inboundKey = "bck.inbound"
-}
+// `InboundPayloadEnvelope` and `DemoAppGroup` live in
+// `InboundPayloadEnvelope.swift` so the UITest target can compile the
+// envelope's wire-format contract test without pulling the rest of
+// this file (which depends on `AppIntents`/`UIKit`/`AppKit`).

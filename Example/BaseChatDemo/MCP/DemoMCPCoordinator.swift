@@ -1,3 +1,4 @@
+import Foundation
 import BaseChatInference
 
 #if canImport(BaseChatMCP)
