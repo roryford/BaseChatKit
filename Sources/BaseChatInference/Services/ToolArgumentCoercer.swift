@@ -66,7 +66,9 @@ enum ToolArgumentCoercer {
             return .string(s)
         }
         switch typeName {
-        case "integer", "number":
+        case "integer":
+            return tryCoerceInteger(s)
+        case "number":
             return tryCoerceNumber(s)
         case "boolean":
             return tryCoerceBoolean(s)
@@ -75,15 +77,26 @@ enum ToolArgumentCoercer {
         }
     }
 
-    /// Parses `s` as a JSON number. Whole-valued floats within the Int64
-    /// range collapse to `.number(Int)` so downstream `integer` checks
-    /// succeed; non-integer values keep their fractional component.
+    /// Parses `s` as a JSON number. `JSONSchemaValue` represents all numbers
+    /// as `Double`; the validator's `integer` check accepts a `.number(n)`
+    /// when `n.rounded() == n`, so whole-valued floats round-trip correctly.
+    /// Non-finite values fall through unchanged.
     private static func tryCoerceNumber(_ s: String) -> JSONSchemaValue {
         let trimmed = s.trimmingCharacters(in: .whitespaces)
         guard let n = Double(trimmed), n.isFinite else { return .string(s) }
-        // JSONSchemaValue stores all numbers as Double; `n.fract == 0`
-        // round-trips losslessly for the integer case, which is what the
-        // validator's `integer` check looks for.
+        return .number(n)
+    }
+
+    /// Parses `s` as an integer-valued JSON number. Strings like `"3.14"`
+    /// fall through unchanged so the validator surfaces a precise
+    /// "expected integer got string" error rather than a confusing
+    /// "expected integer got number" one — and so executors that skip
+    /// validation never receive a fractional value for an `integer` field.
+    private static func tryCoerceInteger(_ s: String) -> JSONSchemaValue {
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        guard let n = Double(trimmed), n.isFinite, n.rounded() == n else {
+            return .string(s)
+        }
         return .number(n)
     }
 

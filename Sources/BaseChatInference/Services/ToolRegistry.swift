@@ -114,7 +114,8 @@ public protocol JSONSchemaValidating: Sendable {
     public var validator: (any JSONSchemaValidating)? = nil
 
     /// When `true`, top-level string arguments are coerced to the primitive
-    /// type declared in the tool's `properties` schema before validation.
+    /// type declared in the tool's `properties` schema before validation —
+    /// **and the coerced value is what the executor receives**.
     ///
     /// Smaller open-weight models routinely emit `"42"` for an `integer`
     /// property or `"true"` for a `boolean`. Without coercion, the schema
@@ -122,6 +123,9 @@ public protocol JSONSchemaValidating: Sendable {
     /// pure serialisation quirk. See ``ToolArgumentCoercer`` for the exact
     /// rules — coercion only runs at the top level and unparseable strings
     /// fall through unchanged so genuine type errors still surface.
+    ///
+    /// Tools that want to inspect the raw model output themselves can opt
+    /// out by setting this to `false`.
     public var coercesArguments: Bool = true
 
     /// Size policy applied to tool results before they are returned from
@@ -326,17 +330,21 @@ public protocol JSONSchemaValidating: Sendable {
 
         // 3. Optional argument coercion — runs before validation so a
         // string "42" for an integer property reaches the validator as
-        // .number(42), not .string("42").
-        let argumentsForValidation: JSONSchemaValue
+        // .number(42), not .string("42"). The coerced value is then passed
+        // through to the executor as well: the whole point of coercion is
+        // that small models emit `"42"` and the tool wants `42`, so the
+        // executor must see the coerced form. Tools that need the raw
+        // string can opt out by clearing ``coercesArguments``.
+        let dispatchArguments: JSONSchemaValue
         if coercesArguments {
-            argumentsForValidation = ToolArgumentCoercer.coerce(parsedArguments, against: executor.definition.parameters)
+            dispatchArguments = ToolArgumentCoercer.coerce(parsedArguments, against: executor.definition.parameters)
         } else {
-            argumentsForValidation = parsedArguments
+            dispatchArguments = parsedArguments
         }
 
         // 4. Optional schema validation (wave 2 wiring).
         if let activeValidator,
-           let message = activeValidator.validateAgainst(executor.definition.parameters, value: argumentsForValidation) {
+           let message = activeValidator.validateAgainst(executor.definition.parameters, value: dispatchArguments) {
             return ToolResult(
                 callId: call.id,
                 content: "arguments failed schema validation: \(message)",
@@ -347,7 +355,7 @@ public protocol JSONSchemaValidating: Sendable {
         // 5. Execute, stamp callId, and apply the size policy.
         let outcome: ToolResult
         do {
-            let raw = try await executor.execute(arguments: argumentsForValidation)
+            let raw = try await executor.execute(arguments: dispatchArguments)
             // If the surrounding task was cancelled but the executor returned
             // a value anyway (didn't observe cancellation), still treat the
             // outcome as cancelled so the orchestrator's transcript records

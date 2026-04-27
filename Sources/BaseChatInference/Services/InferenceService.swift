@@ -475,7 +475,7 @@ public final class InferenceService {
     ///     case.
     /// - Returns: A ``GenerationStream`` from whichever backend served the call.
     /// - Throws: The primary backend's error if the primary path also fails.
-    func runFastOrPrimary(
+    public func runFastOrPrimary(
         prompt: String,
         systemPrompt: String?,
         config: GenerationConfig,

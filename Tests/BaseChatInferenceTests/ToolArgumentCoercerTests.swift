@@ -72,6 +72,31 @@ final class ToolArgumentCoercerTests: XCTestCase {
         XCTAssertEqual(result, .object(["age": .string("not-a-number")]))
     }
 
+    /// A fractional string against an `integer` schema must fall through
+    /// unchanged so the validator surfaces "expected integer got string"
+    /// rather than the misleading "expected integer got number" — and so
+    /// executors that bypass validation never see a non-integer value
+    /// in an `integer` field.
+    func test_fractionalString_fallsThroughForIntegerSchema() {
+        let s = schema(["age": intProp()])
+        let args: JSONSchemaValue = .object(["age": .string("3.14")])
+
+        let result = ToolArgumentCoercer.coerce(args, against: s)
+
+        XCTAssertEqual(result, .object(["age": .string("3.14")]))
+    }
+
+    /// A fractional string against a `number` schema is still coerced —
+    /// only the `integer` path is integral-only.
+    func test_fractionalString_coercesForNumberSchema() {
+        let s = schema(["pi": numProp()])
+        let args: JSONSchemaValue = .object(["pi": .string("3.14")])
+
+        let result = ToolArgumentCoercer.coerce(args, against: s)
+
+        XCTAssertEqual(result, .object(["pi": .number(3.14)]))
+    }
+
     // MARK: - boolean
 
     func test_coercesLowercaseTrueAndFalse() {
