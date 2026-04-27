@@ -179,6 +179,9 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         var request = URLRequest(url: completionsURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if config.streamPrefillProgress {
+            request.setValue("true", forHTTPHeaderField: "X-BaseChat-Prefill-Progress")
+        }
 
         if let apiKey = resolveAPIKey(), !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -239,6 +242,15 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         do {
             for try await payload in tokenStream {
                 if Task.isCancelled { break }
+
+                if let progress = Self.parsePrefillProgress(from: payload) {
+                    continuation.yield(.prefillProgress(
+                        nPast: progress.nPast,
+                        nTotal: progress.nTotal,
+                        tokensPerSecond: progress.tokensPerSecond
+                    ))
+                    continue
+                }
 
                 // Reasoning delta: emit as thinkingToken, keep the block open.
                 if let reasoning = Self.parseReasoningDelta(from: payload) {
@@ -530,6 +542,43 @@ public final class OpenAIBackend: SSECloudBackend, TokenUsageProvider, CloudBack
         return (prompt, completion)
     }
 
+    struct PrefillProgress {
+        let nPast: Int
+        let nTotal: Int
+        let tokensPerSecond: Double
+    }
+
+    static func parsePrefillProgress(from json: String) -> PrefillProgress? {
+        guard let data = json.data(using: .utf8) else {
+            return nil
+        }
+        let parsed: [String: Any]
+        do {
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            parsed = object
+        } catch {
+            return nil
+        }
+        guard let nPast = parsed["n_past"] as? Int,
+              let nTotal = parsed["n_total"] as? Int else {
+            return nil
+        }
+        let tokensPerSecond: Double
+        if let value = parsed["tokens_per_second"] as? Double {
+            tokensPerSecond = value
+        } else if let value = parsed["tokens_per_second"] as? Int {
+            tokensPerSecond = Double(value)
+        } else {
+            return nil
+        }
+        return PrefillProgress(
+            nPast: nPast,
+            nTotal: nTotal,
+            tokensPerSecond: tokensPerSecond
+        )
+    }
+
 }
 #endif
-

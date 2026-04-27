@@ -571,7 +571,7 @@ public struct ToolCallLoopOrchestrator: Sendable {
                     calls.append(call)
                 case .usage(let p, let c):
                     continuation.yield(.usage(prompt: p, completion: c))
-                case .thinkingToken, .thinkingComplete, .thinkingSignature,
+                case .prefillProgress, .thinkingToken, .thinkingComplete, .thinkingSignature,
                      .toolLoopLimitReached, .toolResult, .kvCacheReuse,
                      .diagnosticThrottle:
                     // Reasoning, KV-cache hints, and diagnostic events are

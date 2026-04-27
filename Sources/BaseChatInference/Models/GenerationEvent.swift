@@ -4,6 +4,14 @@
 /// future structured output without breaking the `InferenceBackend`
 /// contract again.
 public enum GenerationEvent: Sendable, Equatable {
+    /// Progress update while the backend is evaluating prompt tokens before the
+    /// first generated content token is available.
+    ///
+    /// `nPast` is how many prompt tokens have been evaluated so far, `nTotal`
+    /// is the total prompt-token count for this request, and
+    /// `tokensPerSecond` is the backend-reported prompt-eval throughput.
+    case prefillProgress(nPast: Int, nTotal: Int, tokensPerSecond: Double)
+
     /// A fragment of generated text (typically one token).
     case token(String)
 

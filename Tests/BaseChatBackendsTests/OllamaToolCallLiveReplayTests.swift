@@ -193,6 +193,8 @@ final class OllamaToolCallLiveReplayTests: XCTestCase {
                     // backends that opt into `streamsToolCallArguments`;
                     // the live Ollama replay parses whole calls.
                     break
+                case .prefillProgress:
+                    break
                 }
             }
 
