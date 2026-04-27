@@ -229,6 +229,7 @@ public struct ToolCallLoopOrchestrator: Sendable {
     private let backend: any InferenceBackend
     private let dispatcher: Dispatcher
     private let policy: ToolCallLoopPolicy
+    private let compressor: any TurnHistoryCompressor
 
     /// Creates an orchestrator driven by a single ``ToolExecutor``.
     ///
@@ -241,14 +242,19 @@ public struct ToolCallLoopOrchestrator: Sendable {
     ///   - backend: The backend that produces tokens and tool calls.
     ///   - executor: Receives every dispatched call.
     ///   - policy: Loop bounds. Defaults to ``ToolCallLoopPolicy/init(maxSteps:perStepTimeout:loopDetectionWindow:)``.
+    ///   - compressor: ``TurnHistoryCompressor`` invoked before each new
+    ///     generate round. Defaults to ``NoOpTurnHistoryCompressor`` when
+    ///     omitted, so existing callers see no behaviour change.
     public init(
         backend: any InferenceBackend,
         executor: any ToolExecutor,
-        policy: ToolCallLoopPolicy = .init()
+        policy: ToolCallLoopPolicy = .init(),
+        compressor: any TurnHistoryCompressor = NoOpTurnHistoryCompressor()
     ) {
         self.backend = backend
         self.dispatcher = .singleExecutor(executor)
         self.policy = policy
+        self.compressor = compressor
     }
 
     /// Creates an orchestrator driven by a ``ToolRegistry``.
@@ -261,14 +267,19 @@ public struct ToolCallLoopOrchestrator: Sendable {
     ///   - backend: The backend that produces tokens and tool calls.
     ///   - registry: Multi-tool registry the orchestrator dispatches through.
     ///   - policy: Loop bounds. Defaults to ``ToolCallLoopPolicy/init(maxSteps:perStepTimeout:loopDetectionWindow:)``.
+    ///   - compressor: ``TurnHistoryCompressor`` invoked before each new
+    ///     generate round. Defaults to ``NoOpTurnHistoryCompressor`` when
+    ///     omitted, so existing callers see no behaviour change.
     public init(
         backend: any InferenceBackend,
         registry: ToolRegistry,
-        policy: ToolCallLoopPolicy = .init()
+        policy: ToolCallLoopPolicy = .init(),
+        compressor: any TurnHistoryCompressor = NoOpTurnHistoryCompressor()
     ) {
         self.backend = backend
         self.dispatcher = .registry(registry)
         self.policy = policy
+        self.compressor = compressor
     }
 
     // MARK: - run
@@ -328,6 +339,19 @@ public struct ToolCallLoopOrchestrator: Sendable {
         var prompt = initialPrompt
         var step = 0
         var recentCalls: [CallSignature] = []
+        // Per-round transcript record. Built as the loop runs and handed to
+        // the configured ``TurnHistoryCompressor`` before each new generate
+        // round so older rounds can be folded into a summary while the most
+        // recent ones stay verbatim. The prompt is rebuilt from this list
+        // (plus any compressor summary) every iteration so KV-cache prefix
+        // reuse stays well-defined regardless of whether compression fired.
+        var records: [TurnHistoryRecord] = []
+        // Carry-over summary text for rounds that have already been folded
+        // in earlier iterations. Each new compress() call may fold more of
+        // the still-verbatim suffix; its summary is concatenated onto this
+        // accumulator so we never lose older facts when records are
+        // discarded from the running list.
+        var carryOverSummary = ""
 
         while step < policy.maxSteps {
             if Task.isCancelled {
@@ -444,16 +468,78 @@ public struct ToolCallLoopOrchestrator: Sendable {
                 results = sequential
             }
 
-            var resultsAppendix = ""
-            for (call, result) in zip(outcome.toolCalls, results) {
-                resultsAppendix += "\n\nTool '\(call.toolName)' result: \(result.content)\n"
+            // Record the round and rebuild the next-turn prompt from the
+            // record list (after compression). This is a no-op for the
+            // default ``NoOpTurnHistoryCompressor`` — `prompt` ends up
+            // identical to the legacy `prompt + appendix` behaviour because
+            // the rebuilt prompt preserves the same `\n\nTool '<name>'
+            // result: <content>\n` shape that callers depend on.
+            records.append(TurnHistoryRecord(
+                step: step,
+                intermediateTokens: outcome.tokens,
+                toolCalls: outcome.toolCalls,
+                toolResults: results
+            ))
+
+            let compressed = compressor.compress(records: records)
+            // Persist the compressor's view back into `records`: keep the
+            // preserved suffix so the next iteration's compress() input is
+            // already the suffix. Once a record is folded, it does not
+            // re-enter the loop's accounting — repeated compress() calls
+            // on a stable suffix are idempotent under the protocol contract.
+            //
+            // The compressor's summary covers only what *this* call folded;
+            // append it to `carryOverSummary` so older facts survive across
+            // iterations even after their records have been dropped.
+            records = compressed.preservedRecords
+            if !compressed.summary.isEmpty {
+                if carryOverSummary.isEmpty {
+                    carryOverSummary = compressed.summary
+                } else {
+                    carryOverSummary += "\n" + compressed.summary
+                }
             }
 
-            prompt = prompt + resultsAppendix
+            prompt = Self.rebuildPrompt(
+                initialPrompt: initialPrompt,
+                summary: carryOverSummary,
+                records: compressed.preservedRecords
+            )
         }
 
         continuation.yield(.stepLimitReached(steps: step))
         continuation.finish()
+    }
+
+    /// Rebuilds the next-turn prompt from the initial prompt, an optional
+    /// compressor summary, and the preserved-record list.
+    ///
+    /// Layout:
+    /// ```
+    /// <initialPrompt>
+    ///
+    /// <summary if non-empty>
+    /// <appendix lines for each preserved record>
+    /// ```
+    ///
+    /// Each appendix line uses the legacy `"\n\nTool '<name>' result: <content>\n"`
+    /// shape so backends and existing tests see no wire-format change when
+    /// compression is off.
+    private static func rebuildPrompt(
+        initialPrompt: String,
+        summary: String,
+        records: [TurnHistoryRecord]
+    ) -> String {
+        var out = initialPrompt
+        if !summary.isEmpty {
+            out += "\n\n" + summary
+        }
+        for record in records {
+            for (call, result) in zip(record.toolCalls, record.toolResults) {
+                out += "\n\nTool '\(call.toolName)' result: \(result.content)\n"
+            }
+        }
+        return out
     }
 
     // MARK: - Parallel dispatch
@@ -540,9 +626,9 @@ public struct ToolCallLoopOrchestrator: Sendable {
                 }
                 defer { group.cancelAll() }
                 guard let first = try await group.next() else {
-                    return RoundOutcome(toolCalls: [], cancelled: true)
+                    return RoundOutcome(toolCalls: [], tokens: [], cancelled: true)
                 }
-                return first ?? RoundOutcome(toolCalls: [], cancelled: true)
+                return first ?? RoundOutcome(toolCalls: [], tokens: [], cancelled: true)
             }
         } else {
             return try await Self.consumeOnce(stream: stream, continuation: continuation)
@@ -554,13 +640,15 @@ public struct ToolCallLoopOrchestrator: Sendable {
         continuation: AsyncThrowingStream<ToolLoopEvent, Error>.Continuation
     ) async throws -> RoundOutcome {
         var calls: [ToolCall] = []
+        var tokens: [String] = []
         do {
             for try await event in stream.events {
                 if Task.isCancelled {
-                    return RoundOutcome(toolCalls: [], cancelled: true)
+                    return RoundOutcome(toolCalls: [], tokens: [], cancelled: true)
                 }
                 switch event {
                 case .token(let text):
+                    tokens.append(text)
                     continuation.yield(.token(text))
                 case .toolCallStart(let callId, let name):
                     continuation.yield(.toolCallStart(callId: callId, name: name))
@@ -583,9 +671,9 @@ public struct ToolCallLoopOrchestrator: Sendable {
                 }
             }
         } catch is CancellationError {
-            return RoundOutcome(toolCalls: [], cancelled: true)
+            return RoundOutcome(toolCalls: [], tokens: [], cancelled: true)
         }
-        return RoundOutcome(toolCalls: calls, cancelled: false)
+        return RoundOutcome(toolCalls: calls, tokens: tokens, cancelled: false)
     }
 
     // MARK: - Internals
@@ -597,6 +685,7 @@ public struct ToolCallLoopOrchestrator: Sendable {
 
     private struct RoundOutcome: Sendable {
         let toolCalls: [ToolCall]
+        let tokens: [String]
         let cancelled: Bool
     }
 
