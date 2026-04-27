@@ -32,7 +32,7 @@ import BaseChatInference
 /// }
 /// for event in parser.finalize() { … }
 /// ```
-public struct MLXToolCallParser: Sendable {
+package struct MLXToolCallParser: Sendable {
 
     // MARK: - Tag constants (Qwen 2.5 / Qwen 3 format)
 
@@ -50,7 +50,7 @@ public struct MLXToolCallParser: Sendable {
     /// JSON bytes buffered since the last open tag.
     private var jsonBuffer = ""
 
-    public init() {}
+    package init() {}
 
     // MARK: - Processing
 
@@ -60,7 +60,7 @@ public struct MLXToolCallParser: Sendable {
     /// - Returns: A (possibly empty) array of `GenerationEvent` values derived
     ///   from the chunk. Outside tool-call blocks these are `.token` events;
     ///   on a complete `</tool_call>` they include a `.toolCall` event.
-    public mutating func process(_ chunk: String) -> [GenerationEvent] {
+    package mutating func process(_ chunk: String) -> [GenerationEvent] {
         buffer += chunk
         var events: [GenerationEvent] = []
 
@@ -127,7 +127,7 @@ public struct MLXToolCallParser: Sendable {
     ///
     /// - Returns: Any remaining `.token` events, or an empty array when the
     ///   buffer is empty or only contains a dangling tool-call fragment.
-    public mutating func finalize() -> [GenerationEvent] {
+    package mutating func finalize() -> [GenerationEvent] {
         guard !buffer.isEmpty || !jsonBuffer.isEmpty else { return [] }
         var events: [GenerationEvent] = []
         if !insideToolCall && !buffer.isEmpty {
