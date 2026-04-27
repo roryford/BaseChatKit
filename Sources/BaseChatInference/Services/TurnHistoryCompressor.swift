@@ -1,5 +1,27 @@
 import Foundation
 
+// MARK: - CompactionTrigger
+
+/// Why a transcript compaction happened. Used by trigger-aware compressors
+/// (notably ``BudgetTurnHistoryCompressor``) to append a context-appropriate
+/// continuation prompt so the model resumes naturally instead of acknowledging
+/// the summary out loud.
+///
+/// Mirrors Goose AI's three triggers (`crates/goose/src/context_mgmt/mod.rs`):
+/// automatic budget overflow, in-loop tool compaction, and explicit user
+/// request.
+public enum CompactionTrigger: Sendable {
+    /// Budget exceeded mid-conversation. The compaction was not user-driven
+    /// and is not happening inside an active tool-calling loop.
+    case automatic
+    /// Compaction fired during a tool-calling loop. The continuation prompt
+    /// asks the model to keep calling tools as needed rather than narrating.
+    case toolLoop
+    /// User explicitly requested compaction. The continuation acknowledges
+    /// the user's request without asking the model to mention it.
+    case manual
+}
+
 // MARK: - TurnHistoryRecord
 
 /// One round of an agent loop captured for potential compression.
@@ -137,6 +159,24 @@ public protocol TurnHistoryCompressor: Sendable {
     /// - Be deterministic. The same input must always produce the same
     ///   output — KV-cache prefix reuse depends on stable prompt prefixes.
     func compress(records: [TurnHistoryRecord]) -> CompressedTranscript
+
+    /// Trigger-aware variant. Implementations may use the trigger to tailor
+    /// the produced summary (e.g. append a continuation prompt that nudges
+    /// the model to resume in the right register).
+    ///
+    /// Has a default implementation that ignores `trigger` and calls
+    /// ``compress(records:)`` — existing conformers compile unchanged.
+    func compress(records: [TurnHistoryRecord], trigger: CompactionTrigger) -> CompressedTranscript
+}
+
+public extension TurnHistoryCompressor {
+    /// Default implementation forwards to the trigger-agnostic method so
+    /// that adopters which were written before ``CompactionTrigger`` keep
+    /// working. New implementations should override this to consume the
+    /// trigger.
+    func compress(records: [TurnHistoryRecord], trigger: CompactionTrigger) -> CompressedTranscript {
+        compress(records: records)
+    }
 }
 
 // MARK: - BudgetTurnHistoryCompressor
@@ -201,6 +241,13 @@ public struct BudgetTurnHistoryCompressor: TurnHistoryCompressor {
     }
 
     public func compress(records: [TurnHistoryRecord]) -> CompressedTranscript {
+        compress(records: records, trigger: .automatic)
+    }
+
+    public func compress(
+        records: [TurnHistoryRecord],
+        trigger: CompactionTrigger
+    ) -> CompressedTranscript {
         if records.isEmpty {
             return .unchanged(records)
         }
@@ -233,12 +280,37 @@ public struct BudgetTurnHistoryCompressor: TurnHistoryCompressor {
 
         let folded = Array(records.prefix(foldedCount))
         let preserved = Array(records.suffix(records.count - foldedCount))
-        let summary = renderSummary(for: folded)
+        let summary = renderSummary(for: folded) + "\n\n" + Self.continuationText(for: trigger)
         return CompressedTranscript(
             summary: summary,
             foldedRecords: folded,
             preservedRecords: preserved
         )
+    }
+
+    // MARK: - Continuation prompts (ported from Goose AI)
+    //
+    // Goose appends one of these strings to the summary block before handing
+    // it back to the model. The intent is to keep the model from breaking
+    // immersion ("based on the earlier turns I see…") while making sure it
+    // resumes in the right register: prose chat, in-loop tool calling, or
+    // a user-initiated reset. Source: `crates/goose/src/context_mgmt/mod.rs`.
+
+    static let conversationContinuationText: String =
+        "Your context was compacted. The previous message contains a summary of the conversation so far.\nDo not mention that you read a summary or that conversation summarization occurred.\nJust continue the conversation naturally based on the summarized context."
+
+    static let toolLoopContinuationText: String =
+        "Your context was compacted. The previous message contains a summary of the conversation so far.\nDo not mention that you read a summary or that conversation summarization occurred.\nContinue calling tools as necessary to complete the task."
+
+    static let manualCompactContinuationText: String =
+        "Your context was compacted at the user's request. The previous message contains a summary of the conversation so far.\nDo not mention that you read a summary or that conversation summarization occurred.\nJust continue the conversation naturally based on the summarized context."
+
+    private static func continuationText(for trigger: CompactionTrigger) -> String {
+        switch trigger {
+        case .automatic: return conversationContinuationText
+        case .toolLoop: return toolLoopContinuationText
+        case .manual: return manualCompactContinuationText
+        }
     }
 
     private func renderSummary(for folded: [TurnHistoryRecord]) -> String {
