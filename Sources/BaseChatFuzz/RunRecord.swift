@@ -53,8 +53,9 @@ public struct RunRecord: Codable, Sendable, Equatable {
     /// Snapshot of the tool definitions made available to the model for this run.
     /// Empty when the run did not configure tools. Schema validation in
     /// `ToolCallValidityDetector.schema-violation` matches `ToolCall.toolName` against
-    /// this array; orphan calls (call name not in this list) are recorded by
-    /// `unknown-tool-name` rather than misattributed as malformed JSON.
+    /// this array; calls naming an unknown tool currently skip the schema
+    /// check silently — adding a dedicated `unknown-tool-name` sub-check is
+    /// tracked as a follow-up to #627.
     public var toolDefinitions: [ToolDefinition]
 
     public init(

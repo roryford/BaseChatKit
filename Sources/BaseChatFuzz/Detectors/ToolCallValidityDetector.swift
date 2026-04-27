@@ -16,9 +16,16 @@ import BaseChatInference
 /// - `toolchoice-violation` — `toolChoice: .required` produced ≥1 call;
 ///   `.none` produced zero; `.tool(name:)` produced only that name.
 ///
-/// All sub-checks ship at severity `flaky` pending calibration corpus work
-/// tracked under #488. Promotion to `confirmed` happens once the corpus proves
-/// FP < 2% across the supported backends.
+/// Severity policy:
+///
+/// - `id-reuse` and `orphan-result` ship at `.confirmed`. Both are deterministic
+///   transcript invariants — duplicate call IDs and results-for-unknown-calls
+///   are zero-FP-by-construction (any honest backend respects them) so they
+///   need no calibration corpus to graduate.
+/// - `malformed-json-args`, `schema-violation`, and `toolchoice-violation`
+///   ship at `.flaky` pending calibration corpus work tracked under #488 —
+///   model decoding ambiguity and toolchoice-prompt drift can produce
+///   defensible-but-noisy positives until the corpus settles FP < 2%.
 public struct ToolCallValidityDetector: Detector {
     public let id = "tool-call-validity"
     public let humanName = "Tool-call invariant violations"
@@ -70,10 +77,12 @@ public struct ToolCallValidityDetector: Detector {
             }
 
             if seenIds.contains(call.id) {
+                // Zero-FP-by-construction: a single conversation can never
+                // legitimately reuse a call ID. .confirmed.
                 findings.append(.init(
                     detectorId: id,
                     subCheck: "id-reuse",
-                    severity: .flaky,
+                    severity: .confirmed,
                     trigger: "duplicate id \(call.id) for \(call.toolName)",
                     modelId: r.model.id
                 ))
@@ -83,10 +92,13 @@ public struct ToolCallValidityDetector: Detector {
 
         let callIds = Set(r.toolCalls.map(\.id))
         for result in r.toolResults where !callIds.contains(result.callId) {
+            // Zero-FP-by-construction: a result whose callId references no
+            // preceding call is a recorder/orchestrator bug, not a model
+            // judgement call. .confirmed.
             findings.append(.init(
                 detectorId: id,
                 subCheck: "orphan-result",
-                severity: .flaky,
+                severity: .confirmed,
                 trigger: "result for unknown call \(result.callId)",
                 modelId: r.model.id
             ))

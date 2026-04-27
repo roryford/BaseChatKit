@@ -158,9 +158,14 @@ final class ToolCallValidityDetectorTests: XCTestCase {
 
     // MARK: - severity
 
-    func test_allSubChecks_shipAtFlakySeverity() {
-        // Severity promotion is tracked under #488; this test pins the day-one
-        // contract so a future change can't silently bump to confirmed.
+    func test_subCheckSeverityPolicy_pinsConfirmedAndFlakySplit() {
+        // Pins the day-one severity policy:
+        //   confirmed — id-reuse, orphan-result (zero-FP-by-construction)
+        //   flaky    — malformed-json-args, schema-violation,
+        //              toolchoice-violation (decode/prompt-drift; calibration
+        //              tracked under #488)
+        // Bumping or downgrading either bucket without updating the policy is
+        // a real product change and should land deliberately, not silently.
         let r = makeRecord(
             toolCalls: [
                 ToolCall(id: "c1", toolName: "get_weather", arguments: "not json"),
@@ -173,8 +178,23 @@ final class ToolCallValidityDetectorTests: XCTestCase {
         )
         let findings = ToolCallValidityDetector().inspect(r)
         XCTAssertFalse(findings.isEmpty)
+
+        let confirmedSubChecks: Set<String> = ["id-reuse", "orphan-result"]
+        let flakySubChecks: Set<String> = [
+            "malformed-json-args",
+            "schema-violation",
+            "toolchoice-violation",
+        ]
         for f in findings {
-            XCTAssertEqual(f.severity, .flaky, "sub-check \(f.subCheck) should ship at .flaky")
+            if confirmedSubChecks.contains(f.subCheck) {
+                XCTAssertEqual(f.severity, .confirmed,
+                               "deterministic invariant \(f.subCheck) must ship .confirmed")
+            } else if flakySubChecks.contains(f.subCheck) {
+                XCTAssertEqual(f.severity, .flaky,
+                               "calibration-pending \(f.subCheck) must ship .flaky until #488 settles")
+            } else {
+                XCTFail("unknown sub-check \(f.subCheck) — severity policy un-pinned")
+            }
         }
     }
 
