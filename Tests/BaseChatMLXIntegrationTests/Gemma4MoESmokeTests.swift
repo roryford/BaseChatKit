@@ -56,6 +56,14 @@ final class Gemma4MoESmokeTests: XCTestCase {
     }
 
     func test_loadAndGenerate_producesNonEmptyResponse() async throws {
+        // FIXME: https://github.com/roryford/BaseChatKit/issues/802
+        // Upstream mlx-swift-lm 3.31.3 crashes with a fatal C++ broadcast-shape
+        // error ([broadcast_shapes] Shapes (20) and (39) cannot be broadcast)
+        // on the first generate call for this MoE model. The abort fires inside
+        // MLX's C++ runtime and cannot be caught by XCTExpectFailure, so we
+        // skip the inference step until the upstream fix lands.
+        throw XCTSkip("Skipped pending upstream mlx-swift-lm fix for Gemma4 MoE broadcast crash (issue #802)")
+
         let config = GenerationConfig(temperature: 0.3, maxOutputTokens: 32)
         let stream = try backend.generate(
             prompt: "Reply with exactly one word.",
