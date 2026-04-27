@@ -61,20 +61,27 @@ public enum BaseChatBackgroundTaskIdentifiers {
 
 // MARK: - Scheduler Protocol
 
-/// Schedules background work that survives the app being suspended on iOS.
+/// Schedules in-process background work with a memory-budget watchdog.
 ///
-/// The default implementation is ``DefaultBackgroundTaskScheduler``. On iOS
-/// it bridges to `BGTaskScheduler`; on macOS, where there is no equivalent
-/// foreground/background life-cycle, it runs the closure inline on a detached
-/// task. Both paths enforce the configured ``MemoryBudget`` — work whose
-/// process footprint breaches the ceiling has its `Task` cancelled, and the
-/// closure observes the cancellation through the standard `Task.isCancelled`
-/// / `try Task.checkCancellation()` channel. The host can re-schedule from
+/// The default implementation is ``DefaultBackgroundTaskScheduler``. It runs
+/// the closure on a detached `Task` on both iOS and macOS, and on iOS also
+/// submits a best-effort `BGProcessingTaskRequest` so a host app that wires
+/// up its own `BGTaskScheduler.register(...)` launch handler can pick up
+/// queued work after the process is relaunched. The default implementation
+/// itself does **not** install a launch handler and does **not** persist
+/// `work` across launches — treat the protocol as an in-process scheduler
+/// with budget enforcement, not as a guaranteed background-execution bridge.
+///
+/// Both paths enforce the configured ``MemoryBudget`` — work whose process
+/// footprint breaches the ceiling has its `Task` cancelled, and the closure
+/// observes the cancellation through the standard `Task.isCancelled` /
+/// `try Task.checkCancellation()` channel. The host can re-schedule from
 /// there.
 ///
 /// `identifier` is a free-form string. On iOS it must match an entry in
-/// `BGTaskSchedulerPermittedIdentifiers` (see ``BaseChatBackgroundTaskIdentifiers``);
-/// on macOS it is used purely as a cancellation key.
+/// `BGTaskSchedulerPermittedIdentifiers` (see ``BaseChatBackgroundTaskIdentifiers``)
+/// for the best-effort BG request submission to succeed; on macOS it is
+/// used purely as a cancellation key.
 public protocol BackgroundTaskScheduler: Sendable {
 
     /// Schedules `work` to run in the background, enforcing `budget`.

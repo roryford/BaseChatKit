@@ -6,10 +6,17 @@ import BackgroundTasks
 
 /// Default ``BackgroundTaskScheduler`` implementation.
 ///
-/// On iOS the scheduler submits a `BGProcessingTaskRequest` to
-/// `BGTaskScheduler` and runs the caller's closure on a detached task whose
-/// lifetime tracks the request. On macOS — where there is no equivalent
-/// suspended-app life-cycle — the closure runs inline on a detached task.
+/// The scheduler runs the caller's closure on a detached `Task` whose
+/// lifetime is bookkept against `identifier`. Both iOS and macOS execute
+/// the closure in-process — there is no `BGTaskScheduler.register(...)`
+/// launch handler, so the closure does **not** survive process termination
+/// and will not be relaunched by the OS later. On iOS the scheduler also
+/// submits a best-effort `BGProcessingTaskRequest` so that, if a host app
+/// later registers a launch handler under the same identifier, the OS has
+/// the request queued. Until that handler exists, treat this type as an
+/// in-process scheduler with a memory-budget watchdog, not as a true
+/// background-execution bridge.
+///
 /// Both paths enforce the configured ``MemoryBudget``: a watchdog samples
 /// the process footprint on the budget's `sampleInterval` and cancels the
 /// running task when the ceiling is breached. The closure observes the
@@ -19,7 +26,7 @@ import BackgroundTasks
 /// app's `Info.plist`; see ``BaseChatBackgroundTaskIdentifiers`` for the
 /// recommended strings. Apps that have not registered the identifier they
 /// schedule under will see the iOS submission silently fail; the inline
-/// fallback path still runs the closure so behaviour stays identical to
+/// run path still executes the closure so behaviour stays identical to
 /// macOS in development builds.
 ///
 /// The implementation is `@unchecked Sendable` because it serialises
@@ -54,14 +61,10 @@ public final class DefaultBackgroundTaskScheduler: BackgroundTaskScheduler, @unc
         budget: MemoryBudget,
         work: @Sendable @escaping () async throws -> Void
     ) async {
-        // Cancel any prior run under this identifier so callers can use
-        // `schedule` as a "replace if newer" primitive without first
-        // calling `cancel`.
-        cancel(identifier: identifier)
-
         let sampler = memorySampler
         let task = Task.detached { [weak self] in
             await Self.runWithBudget(
+                identifier: identifier,
                 budget: budget,
                 memorySampler: sampler,
                 work: work
@@ -69,7 +72,15 @@ public final class DefaultBackgroundTaskScheduler: BackgroundTaskScheduler, @unc
             self?.clear(identifier: identifier)
         }
 
-        lock.withLock { inFlight[identifier] = task }
+        // `schedule` as a "replace if newer" primitive: swap the new task
+        // into the table atomically so two overlapping calls can't
+        // interleave their cancel/insert and leave the older task winning.
+        let prior = lock.withLock { () -> Task<Void, Never>? in
+            let prior = inFlight[identifier]
+            inFlight[identifier] = task
+            return prior
+        }
+        prior?.cancel()
 
         #if os(iOS)
         submitBGTaskRequest(identifier: identifier)
@@ -89,20 +100,26 @@ public final class DefaultBackgroundTaskScheduler: BackgroundTaskScheduler, @unc
     // MARK: - Watchdog
 
     private static func runWithBudget(
+        identifier: String,
         budget: MemoryBudget,
         memorySampler: @escaping MemorySampler,
         work: @Sendable @escaping () async throws -> Void
     ) async {
         await withTaskGroup(of: Void.self) { group in
 
-            // Worker: the caller's closure. Throws are swallowed at this
-            // boundary — surfacing them is the caller's responsibility.
+            // Worker: the caller's closure. Cancellation is part of the
+            // contract (watchdog + explicit cancel both deliver it as a
+            // `CancellationError`); surface anything else through the
+            // logging channel so it doesn't disappear.
             group.addTask {
                 do {
                     try await work()
+                } catch is CancellationError {
+                    // Expected on watchdog or explicit cancel.
                 } catch {
-                    // Closures are expected to handle their own errors or
-                    // surface them via app-level state.
+                    Log.persistence.error(
+                        "BackgroundTaskScheduler work for \(identifier, privacy: .public) threw: \(error.localizedDescription, privacy: .public)"
+                    )
                 }
             }
 
