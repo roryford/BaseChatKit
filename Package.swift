@@ -169,6 +169,7 @@ let package = Package(
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
             ],
             path: "Sources/BaseChatTestSupport",
+            exclude: ["FuzzCalibrationCorpus"],
             swiftSettings: [
                 .define("MLX", .when(traits: ["MLX"])),
                 .define("Llama", .when(traits: ["Llama"])),
