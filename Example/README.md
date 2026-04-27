@@ -28,6 +28,18 @@ The helper auto-selects an available simulator destination. If you need to pin o
 - Cloud API endpoint management
 - Multi-session chat with auto-rename
 - Model download and storage management
+- Share Extension + Action Extension handoff via App Group (see `Extensions/`)
+
+### Share & Action Extensions
+
+The demo includes two iOS app extensions that hand content into a new chat session:
+
+- **BaseChatDemoShareExtension** — activated from the system Share sheet. Accepts text, URLs, and images.
+- **BaseChatDemoActionExtension** — activated from the system action row. Accepts text and URLs.
+
+Both extensions write a `PendingSharePayload` to an App Group `UserDefaults` key. The host app drains it on the next foreground transition and calls `ChatViewModel.ingestPendingPayload(_:intent:)` to open a pre-filled session.
+
+See `docs/share-action-extension-recipe.md` for the full integration guide.
 
 ## Focused Examples
 

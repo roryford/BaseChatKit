@@ -40,7 +40,16 @@ struct InboundPayloadEnvelope: Codable, Sendable {
 /// App Group identifier shared between the intent (writer) and the
 /// app's `.onOpenURL` handler (reader). Centralised so renaming stays
 /// in one place.
+///
+/// The literal values here intentionally mirror ``DemoSharedAppGroup``
+/// (in `Extensions/PendingSharePayload.swift`). They're duplicated rather
+/// than re-exported because this file is also compiled into the
+/// `BaseChatDemoUITests` target, which doesn't link the extension-shared
+/// `PendingSharePayload.swift`. If you rename either constant, update
+/// the other.
 enum DemoAppGroup {
     static let identifier = "group.com.basechatkit.demo"
     static let inboundKey = "bck.inbound"
+    /// Key written by the Share Extension and Action Extension.
+    static let pendingShareKey = "bck.pending-share"
 }
