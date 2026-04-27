@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.13.0](https://github.com/roryford/BaseChatKit/compare/v0.12.5...v0.13.0) (2026-04-27)
+
+### Highlights
+
+#### Goose Tier 1 patterns — argument coercion, structured loop findings, fast-backend slot
+
+Ports four self-contained patterns from Goose AI's agent runtime. Three harden BCK's tool-calling path; one opens the door to multi-model dispatch. `ToolRegistry` now coerces top-level string arguments to the schema-declared primitive type before validation, so models that emit `"42"` (string) when the schema declares `integer`, or `"true"` when the schema declares `boolean`, no longer fail validation. Coercion only applies at the top level — nested objects and arrays pass through unchanged. Default ON; opt out with `registry.coercesArguments = false`.
+
+`TurnHistoryCompressor` gains a `CompactionTrigger` (`.automatic`, `.toolLoop`, `.manual`); the default budget compressor appends a context-appropriate continuation prompt so models do not acknowledge that summarization happened. Existing custom compressors keep working unchanged via a default protocol extension.
+
+`ToolLoopEvent.loopDetected` now carries a `ToolLoopFinding` payload with a stable `findingID` (`"REP-001"`), `toolName`, `reason`, and `repetitionCount`. **Breaking** — pattern matches must extract from the finding instead of binding the bare name:
+
+```swift
+case .loopDetected(let finding) where finding.findingID == "REP-001":
+    print("loop on \(finding.toolName) ×\(finding.repetitionCount): \(finding.reason)")
+```
+
+`InferenceService` gains an optional `fastBackend` slot for routing lightweight subtasks (future LLM-driven summarization, session naming) to a smaller model first, with primary-backend fallback on failure. Additive and opt-in — hosts that don't set `fastBackend` see no change. The deferred file-spilling pattern from Goose is tracked in [#846](https://github.com/roryford/BaseChatKit/issues/846).
+
+See [#852](https://github.com/roryford/BaseChatKit/pull/852).
+
+#### Cross-backend tool-call unification — typed lifecycle + MCP error taxonomy
+
+`GenerationEvent` gains typed lifecycle phases for tool dispatch so consumers can drive UI spinners and throbbers without string-matching streaming text. The new cases cover approval gating, registry execution, and synthesized non-dispatch outcomes (denial, identical-call short-circuit, byte-budget exhaustion). Duration is measured against the monotonic `DispatchTime` clock so wall-clock jumps don't skew it.
+
+`MCPError` now maps exhaustively to `ToolResult.ErrorKind` via a package-scoped mapper. MCP tool failures surface alongside native tool failures using the same nine `ErrorKind` cases the orchestrator already distinguishes — cross-backend tool-calling code (Wave 1 of [#753](https://github.com/roryford/BaseChatKit/issues/753)) no longer needs a parallel error path for MCP.
+
+```swift
+for try await event in stream.events {
+    switch event {
+    case .toolDispatchStarted(let dispatch):
+        spinner.start(toolName: dispatch.toolName)
+    case .toolDispatchCompleted(let outcome):
+        spinner.stop(durationMs: outcome.durationMs)
+    default: break
+    }
+}
+```
+
+See [#849](https://github.com/roryford/BaseChatKit/pull/849), [#848](https://github.com/roryford/BaseChatKit/pull/848).
+
+### Features
+
+- **inference:** Goose Tier 1 patterns — `ToolArgumentCoercer`, `CompactionTrigger`, `ToolLoopFinding` (REP-001), optional `fastBackend` slot ([#852](https://github.com/roryford/BaseChatKit/pull/852))
+- **inference:** typed tool-dispatch lifecycle events on `GenerationEvent` with monotonic duration measurement ([#849](https://github.com/roryford/BaseChatKit/pull/849))
+- **mcp:** exhaustive `MCPError` → `ToolResult.ErrorKind` mapping via `MCPErrorMapping.swift`, replacing the executor-local mapping path ([#848](https://github.com/roryford/BaseChatKit/pull/848))
+- **demo:** tool-call error scenarios — invalid args, rate-limit retry, MCP failure — with scripted-backend turn sequences for UITests ([#850](https://github.com/roryford/BaseChatKit/pull/850))
+
+### Fixes
+
+- **fuzz:** Ollama trait gap + empty-arg expansion + thinking-loop guard ([#844](https://github.com/roryford/BaseChatKit/pull/844))
+
+### Internal
+
+- **core:** SwiftData round-trip coverage for `ChatMessage.contentParts` containing `.text`/`.toolCall`/`.toolResult`, plus pinned discriminator strings + legacy `isError` decode regression ([#847](https://github.com/roryford/BaseChatKit/pull/847))
+- **backends:** demote `MLXToolCallParser` from `public` to `package` — never intended as a public API ([#851](https://github.com/roryford/BaseChatKit/pull/851))
+
 ## [0.12.5](https://github.com/roryford/BaseChatKit/compare/v0.12.4...v0.12.5) (2026-04-27)
 
 ### Highlights
