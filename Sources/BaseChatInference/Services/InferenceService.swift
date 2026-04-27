@@ -92,6 +92,25 @@ public final class InferenceService {
         didSet { lifecycle.denyPolicy = denyPolicy }
     }
 
+    // MARK: - Fast-Backend Routing
+
+    /// Optional secondary backend used for lightweight subtasks
+    /// (turn summarization, session naming, etc).
+    ///
+    /// When set, callers using ``runFastOrPrimary(prompt:systemPrompt:config:preferFast:)``
+    /// (or future internal opt-in subtask paths) dispatch here first and fall
+    /// back to the primary backend on failure. Hosts typically configure a
+    /// small, fast model (1B–3B) here while the primary handles user chat.
+    ///
+    /// Additive and opt-in: leaving this `nil` (the default) preserves all
+    /// existing behaviour — every call goes to the primary backend.
+    ///
+    /// The fast backend is **not** registered through the load-coordinator;
+    /// hosts pre-load it themselves (typically at app start) and assign the
+    /// already-loaded instance here. ``InferenceService`` does not unload,
+    /// reset, or otherwise manage the lifecycle of this backend.
+    public var fastBackend: (any InferenceBackend)?
+
     // MARK: - Backend Registration
 
     public func registerBackendFactory(_ factory: @escaping BackendFactory) {
@@ -422,6 +441,72 @@ public final class InferenceService {
         generation.provider = self
     }
     #endif
+
+    // MARK: - Fast-Backend Dispatch
+
+    /// Dispatches a backend-level generation request through the optional
+    /// ``fastBackend`` first, falling back to the primary backend on failure.
+    ///
+    /// Goose-style fast/primary routing for lightweight subtasks. Behaviour:
+    ///
+    /// - When ``fastBackend`` is set **and** `preferFast == true`: tries the
+    ///   fast backend first. If `generate(...)` throws synchronously, logs a
+    ///   warning and retries on the primary backend.
+    /// - When ``fastBackend`` is `nil` **or** `preferFast == false`:
+    ///   dispatches directly to the primary backend.
+    ///
+    /// Stream-internal errors (errors thrown into the returned
+    /// ``GenerationStream``) are **not** intercepted — they surface to the
+    /// caller. This matches Goose's coarse-grained "fall back if the call
+    /// fails" semantic and keeps the helper a thin primitive.
+    ///
+    /// This is the low-level primitive. Higher-level subtask paths (e.g.
+    /// future LLM-driven session naming or summarisation) can opt in by
+    /// passing `preferFast: true`. Public chat generation continues to use
+    /// the queued ``enqueue(messages:...)`` path against the primary backend
+    /// only.
+    ///
+    /// - Parameters:
+    ///   - prompt: Assembled prompt string passed verbatim to the chosen backend.
+    ///   - systemPrompt: Optional system prompt forwarded to the backend.
+    ///   - config: Sampling/generation configuration for the call.
+    ///   - preferFast: When `true` and ``fastBackend`` is set, the fast backend
+    ///     is tried first. Defaults to `true` since the helper exists for that
+    ///     case.
+    /// - Returns: A ``GenerationStream`` from whichever backend served the call.
+    /// - Throws: The primary backend's error if the primary path also fails.
+    func runFastOrPrimary(
+        prompt: String,
+        systemPrompt: String?,
+        config: GenerationConfig,
+        preferFast: Bool = true
+    ) throws -> GenerationStream {
+        ensureProviderWired()
+
+        if preferFast, let fast = fastBackend {
+            do {
+                return try fast.generate(
+                    prompt: prompt,
+                    systemPrompt: systemPrompt,
+                    config: config
+                )
+            } catch {
+                Log.inference.warning(
+                    "fast backend failed, falling back to primary: \(String(describing: error), privacy: .public)"
+                )
+                // Fall through to primary dispatch below.
+            }
+        }
+
+        guard let primary = lifecycle.backend else {
+            throw InferenceError.inferenceFailure("No model loaded")
+        }
+        return try primary.generate(
+            prompt: prompt,
+            systemPrompt: systemPrompt,
+            config: config
+        )
+    }
 
     /// Ensures the generation coordinator has a reference to this service.
     ///
