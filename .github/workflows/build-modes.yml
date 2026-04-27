@@ -1,0 +1,112 @@
+name: Build modes + binary symbol audit
+
+# Phase 3 of #714. Proves all four documented build modes (offline / ollama /
+# saas / full) compile, plus a per-mode binary symbol audit that becomes the
+# procurement-evidence artifact.
+#
+# Cost discipline (per CLAUDE.md "Issue & PR hygiene"):
+#  - This workflow runs on the **nightly** cadence. Per-PR CI (ci.yml) already
+#    burns macos-15 at 10x billing once per push; cloning that for four modes
+#    would 5x it. The `paths:` filter on pull_request below adds a *narrow*
+#    on-demand trigger — it only fires when a PR actually edits trait-gated
+#    source, Package.swift, or this workflow's own configuration. Doc-only
+#    PRs and unrelated source edits don't trigger it.
+#  - All four modes run on `macos-15` (10x billing): the package depends on
+#    `os` (Apple-only) and SwiftUI throughout `BaseChatUI`/
+#    `BaseChatUIModelManagement`, so a Linux compile leg is structurally
+#    unviable. The audit relies on Darwin-only `nm -gU` / `otool -L` flags
+#    anyway, so a heterogeneous matrix would have produced silently
+#    no-op artifacts on Linux even if the build worked.
+#
+# Symbol audit limitations: defense in depth, not authoritative proof.
+# String obfuscation (URLComponents builders, base64, hex bytes, UTF-16 splits)
+# defeats the strings pass. SECURITY.md (Phase 4 of #714) documents this.
+
+on:
+  schedule:
+    # 05:30 UTC daily — after nightly-slow-tests (04:30) and fuzz-nightly (05:00).
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Package.swift"
+      - "Package.resolved"
+      - "Sources/BaseChatBackends/**"
+      - "Sources/BaseChatUI/Views/Settings/**"
+      - "Sources/BaseChatUIModelManagement/Views/Settings/**"
+      - "Sources/BaseChatInference/Models/APIProvider.swift"
+      - "Sources/bck-tools/main.swift"
+      - ".github/workflows/build-modes.yml"
+      - "scripts/build-modes.sh"
+
+# Cancel earlier in-flight runs of this workflow on the same ref. Scheduled
+# runs and PR runs share the bucket so a workflow_dispatch retry doesn't
+# double-bill macos-15.
+concurrency:
+  group: build-modes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-build-and-audit:
+    name: ${{ matrix.mode }} (macOS build + audit)
+    runs-on: macos-15
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [offline, ollama, saas, full]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.3"
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v5
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+          key: ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-spm-${{ matrix.mode }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-spm-${{ matrix.mode }}-
+            ${{ runner.os }}-${{ runner.arch }}-xcode-26.3-spm-
+
+      # The saas leg additionally runs the CloudSaaS-only test slice — the
+      # other two legs are build+audit only. Splitting this out keeps the
+      # matrix readable and avoids running tests on `full` (already covered
+      # by the per-PR ci.yml suite once MLX/Llama traits are present).
+      # `--skip-update` was previously passed here but produced
+      # `unable to read tree <sha>` failures when the SwiftPM cache was
+      # restored against a stale repository pack (upstream `mattt/llama.swift`
+      # retags between releases — `from: 2.8772.0` legitimately resolves to
+      # whatever tip of >=2.8772.0 currently exists, and the cached repo
+      # doesn't always have the new revision pack). The flag is also
+      # deprecated in current SwiftPM. Dropping it costs ~1s of `git fetch`
+      # and is the documented escape hatch.
+      - name: Test [saas] — BaseChatBackends with CloudSaaS only
+        if: matrix.mode == 'saas'
+        run: scripts/test.sh --filter BaseChatBackendsTests --disable-default-traits --traits CloudSaaS
+
+      - name: Build + audit [${{ matrix.mode }}]
+        env:
+          BUILD_MODES_ARTIFACT_DIR: build-modes-audit
+        run: scripts/build-modes.sh ${{ matrix.mode }} --audit
+
+      - name: Upload audit artifacts (${{ matrix.mode }})
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-modes-audit-${{ matrix.mode }}-${{ github.run_id }}
+          # 90-day retention is the procurement-evidence requirement called
+          # out in the issue. Each artifact is a few MB of nm/strings/otool
+          # text snapshots, so retention cost is trivial.
+          retention-days: 90
+          if-no-files-found: warn
+          path: build-modes-audit/
