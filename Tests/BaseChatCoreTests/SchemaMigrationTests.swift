@@ -1,6 +1,7 @@
 import XCTest
 import SwiftData
 @testable import BaseChatCore
+import BaseChatInference
 import BaseChatTestSupport
 
 /// Tests for the SwiftData schema and ModelContainerFactory infrastructure.
@@ -228,5 +229,118 @@ final class SchemaMigrationTests: XCTestCase {
         let message = ChatMessage(role: .assistant, content: "Test", sessionID: sessionID)
         context.insert(message)
         XCTAssertNoThrow(try context.save())
+    }
+
+    // MARK: - Tool-call message round-trip
+
+    /// Persists a `ChatMessage` whose `contentParts` mix `.text`, `.toolCall`,
+    /// and `.toolResult`, then fetches it back and asserts that every payload
+    /// field round-trips through SwiftData via `contentPartsJSON`. Guards
+    /// against silent corruption of the tool-calling wire format — a renamed
+    /// discriminator or coding key would strand persisted history.
+    func test_chatMessage_toolCallRoundTrip() throws {
+        let container = try ModelContainerFactory.makeInMemoryContainer()
+        let context = ModelContext(container)
+
+        let sessionID = UUID()
+        let call = ToolCall(
+            id: "call_abc123",
+            toolName: "get_weather",
+            arguments: #"{"city":"Dublin","units":"metric"}"#
+        )
+        let result = ToolResult(
+            callId: "call_abc123",
+            content: #"{"temperature":11,"conditions":"rain"}"#,
+            errorKind: nil
+        )
+        let parts: [MessagePart] = [
+            .text("Looking that up for you."),
+            .toolCall(call),
+            .toolResult(result),
+        ]
+
+        let message = ChatMessage(role: .assistant, contentParts: parts, sessionID: sessionID)
+        context.insert(message)
+        try context.save()
+
+        let messageID = message.id
+        let fetched = try context.fetch(FetchDescriptor<ChatMessage>(
+            predicate: #Predicate { $0.id == messageID }
+        ))
+        XCTAssertEqual(fetched.count, 1)
+        let fetched0 = try XCTUnwrap(fetched.first)
+
+        let roundTripped = fetched0.contentParts
+        XCTAssertEqual(roundTripped, parts)
+        XCTAssertEqual(roundTripped.count, 3)
+
+        guard case .text(let text) = roundTripped[0] else {
+            return XCTFail("Expected .text at index 0, got \(roundTripped[0])")
+        }
+        XCTAssertEqual(text, "Looking that up for you.")
+
+        let roundTrippedCall = try XCTUnwrap(roundTripped[1].toolCallContent)
+        XCTAssertEqual(roundTrippedCall.id, "call_abc123")
+        XCTAssertEqual(roundTrippedCall.toolName, "get_weather")
+        XCTAssertEqual(roundTrippedCall.arguments, #"{"city":"Dublin","units":"metric"}"#)
+
+        let roundTrippedResult = try XCTUnwrap(roundTripped[2].toolResultContent)
+        XCTAssertEqual(roundTrippedResult.callId, "call_abc123")
+        XCTAssertEqual(roundTrippedResult.content, #"{"temperature":11,"conditions":"rain"}"#)
+        XCTAssertNil(roundTrippedResult.errorKind)
+        XCTAssertFalse(roundTrippedResult.isError)
+    }
+
+    /// Pre-v4 persisted `ToolResult` rows used a bare `isError: true` flag with
+    /// no `errorKind`. The custom decoder in `ToolTypes.swift` migrates those
+    /// to `ErrorKind.permanent`. Lock the migration in so future refactors of
+    /// the codable shape can't silently drop legacy history on the floor.
+    func test_chatMessage_legacyIsErrorDecodesToErrorKindPermanent() throws {
+        let legacyJSON = #"{"callId":"call_legacy","content":"failed","isError":true}"#
+        let data = try XCTUnwrap(legacyJSON.data(using: .utf8))
+
+        let decoded = try JSONDecoder().decode(ToolResult.self, from: data)
+
+        XCTAssertEqual(decoded.callId, "call_legacy")
+        XCTAssertEqual(decoded.content, "failed")
+        XCTAssertEqual(decoded.errorKind, .permanent)
+        XCTAssertTrue(decoded.isError)
+
+        // The success-shaped legacy row (`isError: false`) must decode to nil
+        // errorKind — otherwise we'd misclassify successful tool runs as
+        // failures on the wire.
+        let successLegacyJSON = #"{"callId":"call_ok","content":"ok","isError":false}"#
+        let successData = try XCTUnwrap(successLegacyJSON.data(using: .utf8))
+        let successDecoded = try JSONDecoder().decode(ToolResult.self, from: successData)
+        XCTAssertNil(successDecoded.errorKind)
+        XCTAssertFalse(successDecoded.isError)
+    }
+
+    /// `ToolResult.encode(to:)` is the migration's other half: it must NOT
+    /// emit `isError` because that field is derived from `errorKind` and
+    /// shipping both would put two sources of truth on the wire. Re-encoding
+    /// must preserve `errorKind` exactly when decoded back.
+    func test_chatMessage_reEncodingDoesNotEmitIsError() throws {
+        let original = ToolResult(
+            callId: "call_xyz",
+            content: "request timed out",
+            errorKind: .timeout
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(original)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertFalse(
+            json.contains("\"isError\""),
+            "Encoded ToolResult must not emit the legacy isError key (got: \(json))"
+        )
+
+        let decoded = try JSONDecoder().decode(ToolResult.self, from: data)
+        XCTAssertEqual(decoded.callId, original.callId)
+        XCTAssertEqual(decoded.content, original.content)
+        XCTAssertEqual(decoded.errorKind, .timeout)
+        XCTAssertEqual(decoded, original)
     }
 }
