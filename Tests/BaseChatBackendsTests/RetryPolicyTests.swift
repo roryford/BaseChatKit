@@ -204,4 +204,68 @@ final class RetryPolicyTests: XCTestCase {
 
         XCTAssertTrue(recorder.recordedSleeps.isEmpty, "Non-retryable error must not trigger any sleep")
     }
+
+    // MARK: - Cancellation propagates through the sleeper
+
+    /// A sleeper that throws `CancellationError` must surface from `withRetry` unchanged,
+    /// so cancelled retry waits short-circuit instead of swallowing the cancel.
+    func test_cancellingSleeperPropagatesCancellationError() async {
+        struct CancellingSleeper {
+            static let asSleeper: @Sendable (Duration) async throws -> Void = { _ in
+                throw CancellationError()
+            }
+        }
+        let strategy = ExponentialBackoffStrategy(
+            maxRetries: 3,
+            baseDelay: 1.0,
+            maxTotalDelay: 60.0,
+            jitterProvider: { _ in 0 }
+        )
+        let networkError = CloudBackendError.networkError(underlying: URLError(.timedOut))
+
+        do {
+            try await withRetry(strategy: strategy, sleeper: CancellingSleeper.asSleeper) {
+                throw networkError
+            }
+            XCTFail("Expected CancellationError to propagate from the sleeper")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Expected CancellationError, got \(error)")
+        }
+    }
+
+    // MARK: - Jitter clamping
+
+    /// A jitterProvider that returns a value greater than its ceiling must be clamped
+    /// so the delay never exceeds `exponentialDelay * 1.25`.
+    func test_jitterAboveCeilingIsClamped() {
+        let strategy = ExponentialBackoffStrategy(
+            maxRetries: 3,
+            baseDelay: 1.0,
+            maxTotalDelay: 60.0,
+            jitterProvider: { $0 * 10.0 }    // misbehaving — returns 10x the ceiling
+        )
+        let error = CloudBackendError.networkError(underlying: URLError(.timedOut))
+
+        // attempt 0: exponential = 1.0, max jitter = 0.25 → clamped delay = 1.25
+        XCTAssertEqual(strategy.delay(for: error, attempt: 0, totalDelayed: 0)!, 1.25, accuracy: 1e-9)
+    }
+
+    /// A negative or NaN jitter must collapse to 0 — never produce a delay below the
+    /// exponential base.
+    func test_negativeOrNaNJitterIsClamped() {
+        let negativeStrategy = ExponentialBackoffStrategy(
+            maxRetries: 3, baseDelay: 1.0, maxTotalDelay: 60.0,
+            jitterProvider: { _ in -5.0 }
+        )
+        let nanStrategy = ExponentialBackoffStrategy(
+            maxRetries: 3, baseDelay: 1.0, maxTotalDelay: 60.0,
+            jitterProvider: { _ in .nan }
+        )
+        let error = CloudBackendError.networkError(underlying: URLError(.timedOut))
+
+        XCTAssertEqual(negativeStrategy.delay(for: error, attempt: 0, totalDelayed: 0)!, 1.0, accuracy: 1e-9)
+        XCTAssertEqual(nanStrategy.delay(for: error, attempt: 0, totalDelayed: 0)!, 1.0, accuracy: 1e-9)
+    }
 }

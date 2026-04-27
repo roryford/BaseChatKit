@@ -68,7 +68,11 @@ public struct ExponentialBackoffStrategy: RetryStrategy, Sendable {
         }
 
         let exponentialDelay = baseDelay * pow(2.0, Double(attempt))
-        let jitter = jitterProvider(exponentialDelay * 0.25)
+        let maxJitter = exponentialDelay * 0.25
+        // Clamp the injected jitter to [0, maxJitter] and reject NaN. This keeps
+        // a misbehaving jitterProvider from producing negative or >max delays.
+        let rawJitter = jitterProvider(maxJitter)
+        let jitter = rawJitter.isFinite ? min(max(rawJitter, 0.0), maxJitter) : 0.0
         let delay = retryAfter ?? (exponentialDelay + jitter)
 
         guard totalDelayed + delay <= maxTotalDelay else { return nil }
@@ -136,7 +140,9 @@ public func withRetry<T>(
 
             Log.network.info("Retryable error (attempt \(attempt + 1), \(error)). Retrying in \(String(format: "%.1f", delay))s")
 
-            try await sleeper(.milliseconds(Int(delay * 1000)))
+            // Round (not truncate) to milliseconds so sub-millisecond Retry-After
+            // values like 0.0005s don't collapse to a zero-duration sleep.
+            try await sleeper(.milliseconds(Int((delay * 1000).rounded())))
             totalDelayed += delay
 
             if Task.isCancelled {
