@@ -168,14 +168,93 @@ final class ToolCallLoopOrchestratorTests: XCTestCase {
             config: GenerationConfig()
         ))
 
-        guard case .loopDetected(let toolName) = events.last else {
+        guard case .loopDetected(let finding) = events.last else {
             return XCTFail("last event must be .loopDetected, got \(events)")
         }
-        XCTAssertEqual(toolName, "spin")
+        XCTAssertEqual(finding.toolName, "spin")
+        XCTAssertEqual(finding.findingID, "REP-001")
+        XCTAssertEqual(finding.repetitionCount, 3)
+        XCTAssertTrue(
+            finding.reason.contains("spin"),
+            "reason should mention the offending tool, got \(finding.reason)"
+        )
+        XCTAssertTrue(
+            finding.reason.contains("identical arguments"),
+            "reason should describe the heuristic, got \(finding.reason)"
+        )
         // Loop must have fired on the third identical call — the third
         // generate() round produced the third identical signature, so the
         // backend was invoked exactly three times.
         XCTAssertEqual(backend.generateCallCount, 3)
+    }
+
+    func test_loopDetected_findingID_isStable_REP001() async throws {
+        // The findingID is a public contract for downstream consumers
+        // (fuzz harness, telemetry). Lock it to "REP-001" so a typo in the
+        // emission site is caught here rather than by a downstream switch
+        // that silently routes through a default branch.
+        let backend = makeBackend()
+        let identical = ToolCall(id: "c", toolName: "spin", arguments: #"{"k":1}"#)
+        backend.scriptedToolCallsPerTurn = [
+            [identical], [identical], [identical],
+        ]
+        backend.tokensToYieldPerTurn = Array(repeating: [], count: 3)
+
+        let executor = ScriptedExecutor(name: "spin") { _ in
+            ToolResult(callId: "", content: "ok", errorKind: nil)
+        }
+
+        let orchestrator = ToolCallLoopOrchestrator(
+            backend: backend,
+            executor: executor,
+            policy: ToolCallLoopPolicy(maxSteps: 10, loopDetectionWindow: 3)
+        )
+
+        let events = try await collect(orchestrator.run(
+            initialPrompt: "go",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+
+        guard case .loopDetected(let finding) = events.last else {
+            return XCTFail("expected .loopDetected, got \(events)")
+        }
+        XCTAssertEqual(finding.findingID, "REP-001")
+    }
+
+    func test_loopDetected_repetitionCount_matchesPolicyWindow() async throws {
+        // repetitionCount must equal the configured window at the moment
+        // the heuristic fires. Drive a window of 4 to prove the value is
+        // policy-driven, not a hardcoded 3.
+        let backend = makeBackend()
+        let identical = ToolCall(id: "c", toolName: "spin", arguments: #"{"k":1}"#)
+        backend.scriptedToolCallsPerTurn = Array(repeating: [identical], count: 5)
+        backend.tokensToYieldPerTurn = Array(repeating: [], count: 5)
+
+        let executor = ScriptedExecutor(name: "spin") { _ in
+            ToolResult(callId: "", content: "ok", errorKind: nil)
+        }
+
+        let orchestrator = ToolCallLoopOrchestrator(
+            backend: backend,
+            executor: executor,
+            policy: ToolCallLoopPolicy(maxSteps: 10, loopDetectionWindow: 4)
+        )
+
+        let events = try await collect(orchestrator.run(
+            initialPrompt: "go",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+
+        guard case .loopDetected(let finding) = events.last else {
+            return XCTFail("expected .loopDetected, got \(events)")
+        }
+        XCTAssertEqual(finding.repetitionCount, 4)
+        XCTAssertTrue(
+            finding.reason.contains("window of 4"),
+            "reason should reflect the configured window, got \(finding.reason)"
+        )
     }
 
     // MARK: - Cancellation
