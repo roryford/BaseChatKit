@@ -963,24 +963,11 @@ public final class OllamaBackend: SSECloudBackend, CloudBackendURLModelConfigura
     /// Encode a ``JSONSchemaValue`` into the primitive graph
     /// `JSONSerialization` accepts. Returns `nil` if encoding fails — callers
     /// are expected to substitute a conservative default.
+    ///
+    /// Delegates to `encodeJSONSchemaToFoundation(_:)` in `BaseChatInference`
+    /// so all backends share one implementation.
     static func foundationJSON(from value: JSONSchemaValue) -> Any? {
-        let data: Data
-        do {
-            data = try JSONEncoder().encode(value)
-        } catch {
-            Log.inference.warning(
-                "OllamaBackend: failed to encode JSONSchemaValue for tools payload — substituting empty object. error=\(error.localizedDescription, privacy: .public)"
-            )
-            return nil
-        }
-        do {
-            return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-        } catch {
-            Log.inference.warning(
-                "OllamaBackend: failed to re-parse encoded schema for tools payload — substituting empty object. error=\(error.localizedDescription, privacy: .public)"
-            )
-            return nil
-        }
+        encodeJSONSchemaToFoundation(value)
     }
 
     /// Serialise an already-parsed arguments dictionary to a JSON string,

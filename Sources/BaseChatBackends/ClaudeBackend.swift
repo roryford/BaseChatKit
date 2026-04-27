@@ -308,7 +308,7 @@ public final class ClaudeBackend: SSECloudBackend, TokenUsageProvider, CloudBack
             "name": tool.name,
             "description": tool.description,
         ]
-        if let schema = OpenAIToolEncoding.foundationJSON(from: tool.parameters) {
+        if let schema = encodeJSONSchemaToFoundation(tool.parameters) {
             entry["input_schema"] = schema
         } else {
             entry["input_schema"] = ["type": "object", "properties": [String: Any]()]
