@@ -77,7 +77,12 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         maxContextTokens: 4096,
         requiresPromptTemplate: false,
         supportsSystemPrompt: true,
-        supportsToolCalling: false,
+        // Tool calling is synthesized on top of GuidedGeneration: when
+        // `config.tools` is non-empty we ask the SDK to constrain the output to
+        // a sum-type schema (`text` or `tool_call`) and emit `.toolCall(...)`
+        // when the model picks the tool branch. The orchestrator drives the
+        // round trip exactly as it does for cloud and MLX backends.
+        supportsToolCalling: true,
         supportsStructuredOutput: false,
         supportsNativeJSONMode: false,
         cancellationStyle: .cooperative,
@@ -85,7 +90,11 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         memoryStrategy: .external,
         maxOutputTokens: 4096,
         supportsStreaming: true,
-        isRemote: false
+        isRemote: false,
+        // Whole-call emission only — Apple's GuidedGeneration streams the
+        // partially-decoded structure but we do not surface name/argument
+        // deltas as separate events (parity with MLXBackend's inline parser).
+        streamsToolCallArguments: false
     )
 
     // MARK: - Private
@@ -235,6 +244,49 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> GenerationStream {
+        // Tool calling is synthesized via GuidedGeneration. The structured
+        // schema is built up-front so a build failure (an unsupported
+        // JSON-Schema construct in a registered tool) trips before we mutate
+        // any session state — we fall back to plain generation in that case.
+        let toolEnvelope: GenerationSchema?
+        let toolsForRound: [ToolDefinition]
+        let useToolPath = !config.tools.isEmpty && config.toolChoice != .none
+        if useToolPath {
+            do {
+                toolEnvelope = try FoundationToolSchema.makeEnvelope(tools: config.tools)
+                toolsForRound = config.tools
+            } catch {
+                // Most `Error`s do not carry a meaningful `localizedDescription`
+                // unless they conform to `LocalizedError`. `String(describing:)`
+                // preserves the keyword/type detail the schema builder embeds
+                // in `FoundationToolSchemaError.description`.
+                Self.logger.warning("FoundationBackend tool schema build failed; falling back to text-only: \(String(describing: error), privacy: .public)")
+                toolEnvelope = nil
+                toolsForRound = []
+            }
+        } else {
+            toolEnvelope = nil
+            toolsForRound = []
+        }
+
+        // The tool envelope contract is taught to the model via instructions.
+        // `LanguageModelSession(instructions:)` bakes the prompt into the
+        // session; we therefore need a session whose instructions reflect
+        // both the host's system prompt AND (for the tooled path) the tool
+        // catalogue. The two halves are concatenated so a session-cache hit
+        // requires both halves to match what's already loaded.
+        let effectiveInstructions: String? = {
+            let suffix = toolsForRound.isEmpty
+                ? nil
+                : FoundationToolSchema.instructions(tools: toolsForRound)
+            switch (systemPrompt, suffix) {
+            case (nil, nil): return nil
+            case (let s?, nil): return s
+            case (nil, let t?): return t
+            case (let s?, let t?): return s + "\n\n" + t
+            }
+        }()
+
         let activeSession: LanguageModelSession = try withStateLock {
             guard _isModelLoaded else {
                 throw InferenceError.inferenceFailure("No model loaded")
@@ -251,22 +303,22 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
             // asserts (SIGTRAP) if streamResponse() is called on a session whose
             // previous ResponseStream iterator was dropped before returning nil.
             let needsNewSession = session == nil
-                || systemPrompt != currentSystemPrompt
+                || effectiveInstructions != currentSystemPrompt
                 || !_sessionIsClean
             if needsNewSession {
-                if let systemPrompt, !systemPrompt.isEmpty {
-                    session = LanguageModelSession(instructions: systemPrompt)
+                if let effectiveInstructions, !effectiveInstructions.isEmpty {
+                    session = LanguageModelSession(instructions: effectiveInstructions)
                 } else {
                     session = LanguageModelSession()
                 }
-                currentSystemPrompt = systemPrompt
+                currentSystemPrompt = effectiveInstructions
                 _sessionIsClean = true  // fresh session always starts clean
             }
 
             return session!
         }
 
-        Self.logger.debug("Foundation generate started")
+        Self.logger.debug("Foundation generate started (tools=\(toolsForRound.count, privacy: .public))")
 
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: GenerationEvent.self)
         let generationStream = GenerationStream(stream)
@@ -289,11 +341,6 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                 var options = GenerationOptions()
                 options.temperature = Double(config.temperature)
 
-                let responseStream = activeSession.streamResponse(
-                    to: prompt,
-                    options: options
-                )
-
                 // Mark the session as dirty before iterating.  If the Task is
                 // cancelled or the loop breaks early (e.g. output token limit) before
                 // the ResponseStream is fully consumed, the session will be considered
@@ -303,40 +350,25 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                 // iterator was dropped before returning nil.
                 backend.withStateLock { backend._sessionIsClean = false }
 
-                let outputLimit = config.maxOutputTokens
-                var outputTokenCount = 0
-                var previousCount = 0
-                var isFirstToken = true
-                // Tracks whether the loop ran to natural completion (iterator returned
-                // nil) rather than exiting via break or CancellationError.
-                var streamExhausted = true
-                for try await partial in responseStream {
-                    if Task.isCancelled {
-                        streamExhausted = false
-                        break
-                    }
-
-                    let currentText = partial.content
-                    if currentText.count > previousCount {
-                        let newContent = String(currentText.dropFirst(previousCount))
-                        if isFirstToken {
-                            await MainActor.run { generationStream.setPhase(.streaming) }
-                            isFirstToken = false
-                        }
-                        continuation.yield(.token(newContent))
-                        previousCount = currentText.count
-
-                        // Approximate token count using the conservative 3-char heuristic.
-                        // Stops runaway generation for open-ended prompts.
-                        if let limit = outputLimit {
-                            outputTokenCount += max(1, newContent.count / 3)
-                            if outputTokenCount >= limit {
-                                Self.logger.info("Output token limit (\(limit)) reached")
-                                streamExhausted = false
-                                break
-                            }
-                        }
-                    }
+                let streamExhausted: Bool
+                if let toolEnvelope {
+                    streamExhausted = try await backend.runToolAwareStream(
+                        session: activeSession,
+                        prompt: prompt,
+                        schema: toolEnvelope,
+                        options: options,
+                        continuation: continuation,
+                        generationStream: generationStream
+                    )
+                } else {
+                    streamExhausted = try await backend.runTextOnlyStream(
+                        session: activeSession,
+                        prompt: prompt,
+                        options: options,
+                        outputLimit: config.maxOutputTokens,
+                        continuation: continuation,
+                        generationStream: generationStream
+                    )
                 }
 
                 // Only mark the session clean when the ResponseStream was fully
@@ -370,6 +402,162 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         }
 
         return generationStream
+    }
+
+    // MARK: - Streaming helpers
+
+    /// Default text-only streaming path. Returns `true` iff the response
+    /// stream was fully consumed (iterator returned `nil`).
+    private func runTextOnlyStream(
+        session: LanguageModelSession,
+        prompt: String,
+        options: GenerationOptions,
+        outputLimit: Int?,
+        continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation,
+        generationStream: GenerationStream
+    ) async throws -> Bool {
+        let responseStream = session.streamResponse(to: prompt, options: options)
+
+        var outputTokenCount = 0
+        var previousCount = 0
+        var isFirstToken = true
+        var streamExhausted = true
+        for try await partial in responseStream {
+            if Task.isCancelled {
+                streamExhausted = false
+                break
+            }
+
+            let currentText = partial.content
+            if currentText.count > previousCount {
+                let newContent = String(currentText.dropFirst(previousCount))
+                if isFirstToken {
+                    await MainActor.run { generationStream.setPhase(.streaming) }
+                    isFirstToken = false
+                }
+                continuation.yield(.token(newContent))
+                previousCount = currentText.count
+
+                // Approximate token count using the conservative 3-char heuristic.
+                // Stops runaway generation for open-ended prompts.
+                if let outputLimit {
+                    outputTokenCount += max(1, newContent.count / 3)
+                    if outputTokenCount >= outputLimit {
+                        Self.logger.info("Output token limit (\(outputLimit)) reached")
+                        streamExhausted = false
+                        break
+                    }
+                }
+            }
+        }
+        return streamExhausted
+    }
+
+    /// Tool-aware streaming path. Drives generation against the
+    /// `(text|tool_call)` envelope schema. While the partially-generated
+    /// envelope's `kind` is `"text"` we forward the growing `text` field as
+    /// `.token` deltas so existing UI streams smoothly. On stream completion
+    /// we inspect the final `GeneratedContent` and emit either a single
+    /// `.toolCall(...)` event (tool branch) or nothing more (text branch —
+    /// already streamed). Returns `true` iff the response stream was fully
+    /// consumed.
+    private func runToolAwareStream(
+        session: LanguageModelSession,
+        prompt: String,
+        schema: GenerationSchema,
+        options: GenerationOptions,
+        continuation: AsyncThrowingStream<GenerationEvent, Error>.Continuation,
+        generationStream: GenerationStream
+    ) async throws -> Bool {
+        let responseStream = session.streamResponse(
+            to: prompt,
+            schema: schema,
+            includeSchemaInPrompt: true,
+            options: options
+        )
+
+        var lastTextLength = 0
+        var streamedAsText = false
+        var isFirstToken = true
+        var finalRaw: GeneratedContent?
+        var streamExhausted = true
+
+        for try await snapshot in responseStream {
+            if Task.isCancelled {
+                streamExhausted = false
+                break
+            }
+            finalRaw = snapshot.rawContent
+
+            // Try to extract the streaming text branch progressively. The
+            // structured generator emits the JSON envelope token-by-token, so
+            // partial snapshots may carry an incomplete `text` field — that's
+            // fine, we forward whatever new suffix is present.
+            if case .structure(let props, _) = snapshot.rawContent.kind,
+               case .string(let kindStr)? = props["kind"]?.kind,
+               kindStr == "text",
+               case .string(let textSoFar)? = props["text"]?.kind {
+                if textSoFar.count > lastTextLength {
+                    let delta = String(textSoFar.dropFirst(lastTextLength))
+                    if isFirstToken {
+                        await MainActor.run { generationStream.setPhase(.streaming) }
+                        isFirstToken = false
+                    }
+                    continuation.yield(.token(delta))
+                    lastTextLength = textSoFar.count
+                    streamedAsText = true
+                }
+            }
+        }
+
+        guard streamExhausted, let finalRaw else {
+            return streamExhausted
+        }
+
+        // Decode the final envelope and dispatch on the branch the model picked.
+        guard let envelope = FoundationEnvelope.decode(finalRaw) else {
+            // Best-effort fallback: surface the raw JSON as text rather than
+            // dropping the round on the floor. The orchestrator will treat
+            // this as a finished text reply. Phase must transition before the
+            // first event is yielded so observers don't briefly see tokens
+            // arriving while still in `.connecting`.
+            if !streamedAsText {
+                await MainActor.run { generationStream.setPhase(.streaming) }
+                continuation.yield(.token(finalRaw.jsonString))
+            }
+            Self.logger.warning("FoundationBackend: envelope decode failed; surfaced raw JSON as text")
+            return streamExhausted
+        }
+
+        switch envelope {
+        case .text(let final):
+            // If we never streamed (e.g. the structured generator delivered
+            // the whole envelope in one snapshot), emit the full text now.
+            if !streamedAsText {
+                if isFirstToken {
+                    await MainActor.run { generationStream.setPhase(.streaming) }
+                }
+                continuation.yield(.token(final))
+            }
+        case .toolCall(let name, let argumentsJSON):
+            // The tool branch can produce zero `.token` events when the model
+            // commits to a tool call straight away. Transition to `.streaming`
+            // before the `.toolCall` event so observers don't stay stuck in
+            // `.connecting` until `.done` — mirrors MLXBackend, which treats
+            // `.toolCall` as a streaming event.
+            if isFirstToken {
+                await MainActor.run { generationStream.setPhase(.streaming) }
+                isFirstToken = false
+            }
+            let call = ToolCall(
+                id: "fm-\(UUID().uuidString)",
+                toolName: name,
+                arguments: argumentsJSON
+            )
+            continuation.yield(.toolCall(call))
+        }
+
+        return streamExhausted
     }
 
     // MARK: - Conversation Reset

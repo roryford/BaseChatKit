@@ -154,9 +154,15 @@ final class BackendCapabilitiesContractTests: XCTestCase {
     }
 
     @available(iOS 26, macOS 26, *)
-    func test_foundationBackend_doesNotSupportToolCalling() {
-        XCTAssertFalse(FoundationBackend().capabilities.supportsToolCalling,
-                       "FoundationBackend does not expose tool calling in this version")
+    func test_foundationBackend_supportsToolCalling_viaGuidedGeneration() {
+        // Tool calling is synthesized on top of GuidedGeneration (#434): the
+        // backend constrains the on-device model to a (text|tool_call) sum-type
+        // schema and emits .toolCall events when the model picks the tool branch.
+        let caps = FoundationBackend().capabilities
+        XCTAssertTrue(caps.supportsToolCalling,
+                      "FoundationBackend exposes tool calling via GuidedGeneration on iOS 26 / macOS 26 (#434)")
+        XCTAssertFalse(caps.streamsToolCallArguments,
+                       "FoundationBackend emits whole .toolCall events; no streaming start/delta")
     }
 
     @available(iOS 26, macOS 26, *)

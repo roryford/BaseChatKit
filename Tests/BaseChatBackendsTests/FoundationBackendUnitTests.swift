@@ -617,10 +617,17 @@ final class FoundationBackendUnitTests: XCTestCase {
             + "Enabling structured output requires rewriting the diff loop to handle "
             + "shrinking payloads — see #526."
         )
-        XCTAssertFalse(
+        // Tool calling is now synthesized via GuidedGeneration (#434). The
+        // tool-aware streaming path uses a separate code path that reads the
+        // structured `rawContent.kind` rather than the cumulative-string
+        // diff, so the monotonic-diff caveat above does not apply to it.
+        XCTAssertTrue(
             caps.supportsToolCalling,
-            "Tool calling would also produce non-monotonic content-part rewrites — "
-            + "same diff-loop caveat as structured output. See #526."
+            "FoundationBackend exposes tool calling via GuidedGeneration on iOS 26 / macOS 26 (#434)."
+        )
+        XCTAssertFalse(
+            caps.streamsToolCallArguments,
+            "FoundationBackend emits whole .toolCall(...) events (no name/argument deltas)."
         )
     }
 
