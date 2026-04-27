@@ -32,9 +32,9 @@ public struct MarkdownExportFormat: ConversationExportFormat {
 
     public var fileExtension: String { "md" }
 
-    // .text is the closest stable UTType — UTType.markdown only exists from
-    // macOS 26 / iOS 18, but we still target macOS 15 / iOS 18 (n-1). When
-    // macOS 27 lands and the floor moves, swap to `.markdown`.
+    // .plainText is the closest stable UTType — UTType.markdown only exists
+    // from macOS 26 / iOS 18, but we still target macOS 15 / iOS 18 (n-1).
+    // When macOS 27 lands and the floor moves, swap to `.markdown`.
     public var contentType: UTType { .plainText }
 
     public func export(session: ChatSessionRecord, messages: [ChatMessageRecord]) throws -> Data {
@@ -52,7 +52,12 @@ public struct MarkdownExportFormat: ConversationExportFormat {
         lines.append("---")
         lines.append("")
 
-        for message in messages where message.role != .system {
+        // Skip system prompts (privacy) and messages whose only parts are
+        // `.thinking` / `.toolCall` / non-text — `ChatMessageRecord.content`
+        // joins text parts only, so without the `hasVisibleContent` filter
+        // a thinking-only assistant turn would render as an empty
+        // `**Assistant:**` block.
+        for message in messages where message.role != .system && message.hasVisibleContent {
             let role = message.role == .user ? "User" : "Assistant"
             lines.append("**\(role):**")
             lines.append("")

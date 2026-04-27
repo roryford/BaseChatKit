@@ -22,8 +22,11 @@ public protocol ConversationExportFormat: Sendable {
     ///
     /// - Parameters:
     ///   - session: Storage-agnostic snapshot of the chat session.
-    ///   - messages: Messages in chronological order. The exporter is
-    ///     responsible for sorting; formats should not re-sort.
+    ///   - messages: Messages in chronological order. Callers are responsible
+    ///     for providing them in that order; formats should not re-sort.
+    ///     ``ConversationExporter``'s SwiftData overload relies on
+    ///     ``ChatPersistenceProvider/fetchMessages(for:)`` to sort, and the
+    ///     pure overload trusts whatever the caller passes.
     /// - Returns: Encoded file contents.
     /// - Throws: Implementations only throw at serialization boundaries
     ///   (e.g. JSON encoder failures). Format-internal invariants should not

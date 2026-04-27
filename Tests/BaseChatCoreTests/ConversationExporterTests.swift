@@ -95,9 +95,38 @@ final class ConversationExporterTests: XCTestCase {
         XCTAssertEqual(ConversationExporter.sanitiseStem("   \n\t  "), "chat")
     }
 
-    func test_sanitiseStem_capsLength() {
-        let long = String(repeating: "x", count: 500)
-        XCTAssertEqual(ConversationExporter.sanitiseStem(long).count, 80)
+    func test_sanitiseStem_capsByUTF8ByteLength() {
+        // ASCII: byte-count == grapheme-count, capped at 200 bytes.
+        let asciiLong = String(repeating: "x", count: 500)
+        XCTAssertEqual(ConversationExporter.sanitiseStem(asciiLong).utf8.count, 200)
+
+        // Multi-byte: 4-byte emoji must stay below the 200-byte ceiling and
+        // never split mid-scalar. 100 raccoons is 400 UTF-8 bytes raw.
+        let emojiLong = String(repeating: "🦊", count: 100)
+        let stem = ConversationExporter.sanitiseStem(emojiLong)
+        XCTAssertLessThanOrEqual(stem.utf8.count, 200)
+        // Re-decoding from UTF-8 must succeed — no truncation in the middle of a scalar.
+        let bytes = Data(stem.utf8)
+        XCTAssertEqual(String(data: bytes, encoding: .utf8), stem)
+    }
+
+    func test_sanitiseFileExtension_stripsPathTraversal() {
+        XCTAssertEqual(ConversationExporter.sanitiseFileExtension("../etc"), "etc")
+        XCTAssertEqual(ConversationExporter.sanitiseFileExtension("md/secret"), "mdsecret")
+        XCTAssertEqual(ConversationExporter.sanitiseFileExtension(".hidden"), "hidden")
+    }
+
+    func test_sanitiseFileExtension_fallsBackOnEmpty() {
+        XCTAssertEqual(ConversationExporter.sanitiseFileExtension(""), "txt")
+        XCTAssertEqual(ConversationExporter.sanitiseFileExtension("///"), "txt")
+        XCTAssertEqual(ConversationExporter.sanitiseFileExtension("..."), "txt")
+    }
+
+    func test_sanitisedFilename_doesNotEscapeDirectory() {
+        let session = ChatSessionRecord(title: "demo")
+        let name = ConversationExporter.sanitisedFilename(for: session, fileExtension: "../evil")
+        XCTAssertFalse(name.contains("/"))
+        XCTAssertFalse(name.contains(".."))
     }
 
     func test_sanitisedFilename_appendsExtension() {

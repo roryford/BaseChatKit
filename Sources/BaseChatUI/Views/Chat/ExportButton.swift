@@ -15,10 +15,10 @@ import BaseChatInference
 /// }
 /// ```
 ///
-/// The export runs synchronously when the user taps; for large sessions
-/// (>10k messages) a `Task` and a progress indicator may be more appropriate.
-/// We keep this synchronous because the dominant cost is `ShareLink`'s own
-/// sheet presentation, not the few-millisecond serialization.
+/// File generation is deferred to a user tap and the result is cached in
+/// `@State`; the toolbar `body` does no disk I/O. Apps that want richer error
+/// UX (banners, retry) should call ``ConversationExporter`` directly from a
+/// custom button action instead of using this convenience.
 public struct ExportButton<Format: ConversationExportFormat>: View {
 
     @Environment(ChatViewModel.self) private var viewModel
@@ -26,6 +26,11 @@ public struct ExportButton<Format: ConversationExportFormat>: View {
     private let format: Format
     private let label: String
     private let systemImage: String
+
+    /// Cached export — populated by a tap, cleared after sharing.
+    /// Keeping this in `@State` (not recomputed in `body`) is what prevents
+    /// the export pipeline from running on every SwiftUI invalidation.
+    @State private var pendingFile: PendingFile?
 
     /// - Parameters:
     ///   - format: The serializer. Use ``MarkdownExportFormat`` or
@@ -44,44 +49,61 @@ public struct ExportButton<Format: ConversationExportFormat>: View {
     }
 
     public var body: some View {
-        if let file = makeShareableFile() {
+        Button {
+            generate()
+        } label: {
+            Label(label, systemImage: systemImage)
+        }
+        .disabled(!hasExportableSession)
+        // `.sheet(item:)` only fires when `pendingFile` becomes non-nil — the
+        // file is written exactly once per tap. Auto-dismiss clears the
+        // state so the next tap regenerates with current messages.
+        .sheet(item: $pendingFile, onDismiss: cleanupPendingFile) { file in
             ShareLink(
-                item: file.url,
+                item: file.shareable.url,
                 subject: Text(viewModel.activeSession?.title ?? "Chat"),
                 message: Text("Exported from \(BaseChatConfiguration.shared.appName)"),
-                preview: SharePreview(file.suggestedFilename)
+                preview: SharePreview(file.shareable.suggestedFilename)
             ) {
-                Label(label, systemImage: systemImage)
+                Label("Share \(file.shareable.suggestedFilename)", systemImage: systemImage)
             }
-        } else {
-            // Disabled placeholder when there's nothing to export — keeps
-            // the toolbar layout stable across session switches.
-            Button {
-                // No-op
-            } label: {
-                Label(label, systemImage: systemImage)
-            }
-            .disabled(true)
+            .padding()
         }
     }
 
-    private func makeShareableFile() -> ShareableFile? {
-        guard let session = viewModel.activeSession else { return nil }
+    private var hasExportableSession: Bool {
+        viewModel.activeSession != nil && !viewModel.messages.isEmpty
+    }
+
+    private func generate() {
+        guard let session = viewModel.activeSession else { return }
         let messages = viewModel.messages
-        guard !messages.isEmpty else { return nil }
+        guard !messages.isEmpty else { return }
         do {
-            return try ConversationExporter.export(
+            let file = try ConversationExporter.export(
                 session: session,
                 messages: messages,
                 format: format
             )
+            pendingFile = PendingFile(shareable: file)
         } catch {
-            // Surfacing a banner from a SwiftUI computed body would loop
-            // through `@State`; log and fall back to a disabled button.
-            // Apps wanting richer error UX should call ``ConversationExporter``
-            // directly from a button action instead of using this convenience.
             Log.ui.error("Conversation export failed: \(error.localizedDescription)")
-            return nil
         }
+    }
+
+    private func cleanupPendingFile() {
+        // The exporter writes into a unique subdirectory of `tmp`; remove the
+        // whole directory so we don't leak the file once the share sheet
+        // closes. Best-effort: filesystem cleanup never blocks the user.
+        if let url = pendingFile?.shareable.url {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        }
+        pendingFile = nil
+    }
+
+    /// Wraps ``ShareableFile`` with `Identifiable` so it drives `.sheet(item:)`.
+    private struct PendingFile: Identifiable {
+        let id = UUID()
+        let shareable: ShareableFile
     }
 }

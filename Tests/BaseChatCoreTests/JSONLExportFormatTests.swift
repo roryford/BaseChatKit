@@ -122,6 +122,28 @@ final class JSONLExportFormatTests: XCTestCase {
         XCTAssertEqual(data.last, 0x0A, "JSONL convention: every record (including the last) ends with \\n")
     }
 
+    func test_export_skipsMessagesWithoutVisibleContent() throws {
+        // A thinking-only or tool-only message has empty `.content`. Emitting
+        // `"content":""` would mislead training-data pipelines, so the JSONL
+        // export must drop these rows entirely.
+        let format = JSONLExportFormat()
+        let thinkingOnly = ChatMessageRecord(
+            role: .assistant,
+            contentParts: [.thinking("internal monologue")],
+            timestamp: Date(timeIntervalSinceReferenceDate: 0),
+            sessionID: sessionID
+        )
+        let visible = makeMessage(role: .user, content: "hi", offset: 1)
+
+        let data = try format.export(session: makeRecord(), messages: [thinkingOnly, visible])
+        let lines = try self.lines(of: data)
+        XCTAssertEqual(lines.count, 1, "Empty-content rows must be skipped, not encoded as content:\"\"")
+
+        let dict = try XCTUnwrap(JSONSerialization.jsonObject(with: lines[0].data(using: .utf8)!) as? [String: Any])
+        XCTAssertEqual(dict["role"] as? String, "user")
+        XCTAssertEqual(dict["content"] as? String, "hi")
+    }
+
     func test_format_metadata() {
         let format = JSONLExportFormat()
         XCTAssertEqual(format.fileExtension, "jsonl")

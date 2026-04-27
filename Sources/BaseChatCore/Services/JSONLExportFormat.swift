@@ -46,7 +46,12 @@ public struct JSONLExportFormat: ConversationExportFormat {
         iso.formatOptions = [.withInternetDateTime]
 
         var data = Data()
-        for message in messages {
+        // `ChatMessageRecord.content` only joins `.text` parts — thinking-only
+        // and tool-call-only messages would otherwise serialise as
+        // `"content":""`, which is misleading for downstream JSONL consumers
+        // (training pipelines especially). Skip them; expanding the wire
+        // shape to encode non-text parts is a follow-up.
+        for message in messages where message.hasVisibleContent {
             let line = Line(
                 role: message.role.rawValue,
                 content: message.content,

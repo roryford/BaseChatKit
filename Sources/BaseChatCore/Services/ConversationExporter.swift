@@ -106,11 +106,21 @@ public enum ConversationExporter {
 
     /// Strips characters that don't survive `FileManager` round-trips on any
     /// supported platform. Falls back to "chat" when the title is entirely
-    /// whitespace or filtered out.
+    /// whitespace or filtered out. The `fileExtension` is sanitised
+    /// independently — custom ``ConversationExportFormat`` adopters can return
+    /// arbitrary strings, so we never trust the value verbatim in a path
+    /// component.
     static func sanitisedFilename(for session: ChatSessionRecord, fileExtension: String) -> String {
         let stem = sanitiseStem(session.title)
-        return "\(stem).\(fileExtension)"
+        let ext = sanitiseFileExtension(fileExtension)
+        return "\(stem).\(ext)"
     }
+
+    /// Maximum stem length, measured in UTF-8 bytes. APFS allows 255 bytes per
+    /// path component; we leave headroom for the dot + extension and to keep
+    /// share-sheet previews readable. A scalar-by-scalar prefix below ensures
+    /// emoji and CJK characters never split mid-sequence.
+    private static let stemUTF8ByteLimit = 200
 
     static func sanitiseStem(_ raw: String) -> String {
         // Trim first so whitespace-only input (including \n/\t which would
@@ -137,13 +147,44 @@ public enum ConversationExporter {
             stem = "chat"
         }
 
-        // Cap length — APFS allows 255 UTF-8 bytes per path component, but
-        // share sheets truncate ugly long names. 80 chars is room enough for
-        // a meaningful title without dominating the preview.
-        if stem.count > 80 {
-            stem = String(stem.prefix(80))
-        }
+        // Cap by UTF-8 byte length, not grapheme count — an 80-emoji title is
+        // 320+ bytes and would blow past APFS's 255-byte path-component limit.
+        // Truncate Character-wise so we never split a multi-byte scalar.
+        stem = truncateToUTF8Bytes(stem, limit: stemUTF8ByteLimit)
         return stem
+    }
+
+    /// Restricts the extension to a conservative ASCII alphanumeric set so a
+    /// custom ``ConversationExportFormat`` can't slip `..`, a leading `.`, or
+    /// a path separator into the filename. Falls back to `"txt"` when the
+    /// caller's extension is empty or entirely outside the allowed set.
+    static func sanitiseFileExtension(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = trimmed.unicodeScalars.filter { scalar in
+            (scalar.value >= 0x30 && scalar.value <= 0x39) || // 0-9
+                (scalar.value >= 0x41 && scalar.value <= 0x5A) || // A-Z
+                (scalar.value >= 0x61 && scalar.value <= 0x7A) // a-z
+        }
+        if allowed.isEmpty { return "txt" }
+        // Cap at 10 chars — `jsonl` is the longest built-in; leaving generous
+        // headroom for hypothetical custom formats without inviting abuse.
+        let capped = String(String.UnicodeScalarView(allowed.prefix(10)))
+        return capped
+    }
+
+    private static func truncateToUTF8Bytes(_ input: String, limit: Int) -> String {
+        if input.utf8.count <= limit { return input }
+        var out = ""
+        out.reserveCapacity(limit)
+        var bytes = 0
+        for character in input {
+            let charBytes = character.utf8.count
+            if bytes + charBytes > limit { break }
+            out.append(character)
+            bytes += charBytes
+        }
+        // Trim trailing whitespace introduced by truncation.
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func resolveDirectory(_ override: URL?) throws -> URL {

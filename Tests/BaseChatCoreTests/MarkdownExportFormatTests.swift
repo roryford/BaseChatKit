@@ -124,6 +124,29 @@ final class MarkdownExportFormatTests: XCTestCase {
         XCTAssertLessThan(secondRange.lowerBound, thirdRange.lowerBound)
     }
 
+    func test_export_skipsMessagesWithoutVisibleContent() throws {
+        // Thinking-only / tool-only messages have empty `.content` even
+        // though they're not "empty" semantically. The Markdown export must
+        // not emit a hollow `**Assistant:**` block for them.
+        let format = MarkdownExportFormat()
+        let thinkingOnly = ChatMessageRecord(
+            role: .assistant,
+            contentParts: [.thinking("internal monologue")],
+            timestamp: Date(timeIntervalSinceReferenceDate: 0),
+            sessionID: sessionID
+        )
+        let visible = makeMessage(role: .user, content: "Hi", offset: 1)
+
+        let data = try format.export(session: makeRecord(), messages: [thinkingOnly, visible])
+        let text = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        // Exactly one role block — the user one. No empty assistant block.
+        let assistantBlocks = text.components(separatedBy: "**Assistant:**").count - 1
+        XCTAssertEqual(assistantBlocks, 0, "Thinking-only assistant turn must not render an empty block")
+        XCTAssertTrue(text.contains("**User:**"))
+        XCTAssertFalse(text.contains("internal monologue"), "Thinking content must not leak into Markdown export")
+    }
+
     func test_format_metadata() {
         let format = MarkdownExportFormat()
         XCTAssertEqual(format.fileExtension, "md")
