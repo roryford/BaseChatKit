@@ -534,18 +534,19 @@ final class GenerationCoordinator {
             throw InferenceError.inferenceFailure("Generation queue is full")
         }
 
-        // Capability gate for tool calling. Mirrors the jsonMode warning at the
-        // top of `generate(messages:)`: tools passed to a backend that reports
-        // `supportsToolCalling == false` are silently dropped on the wire,
-        // and the model loops on "I cannot access tools" while the host's
-        // registry never sees the call. Warn once at enqueue time so the
-        // signal is loud and the failure mode is diagnosable.
+        // Capability gate for tool calling. A backend that reports
+        // `supportsToolCalling == false` has no wire path for tool definitions
+        // — they are silently dropped, and the model loops on "I cannot access
+        // tools" while the host's registry never sees the call. Reject the
+        // request up front with a clear error so the failure is diagnosable
+        // at the call site rather than manifesting as a silent no-op.
         if !tools.isEmpty && !backend.capabilities.supportsToolCalling {
             let backendType = String(describing: type(of: backend))
             let toolWord = tools.count == 1 ? "tool" : "tools"
             let message = "GenerationCoordinator: \(tools.count) \(toolWord) passed to enqueue() but \(backendType) reports capabilities.supportsToolCalling == false; tools will be ignored on the wire and tool calls will never be dispatched. Check `backend.capabilities.supportsToolCalling` before passing tools, or load a tool-capable backend."
             Log.inference.warning("\(message, privacy: .public)")
             Self.toolsUnsupportedWarningHook?(backendType, message)
+            throw InferenceError.inferenceFailure("Tools passed to a backend that does not support tool calling (\(backendType)); set capabilities.supportsToolCalling = true or remove tools from the request.")
         }
 
         let token = GenerationRequestToken(rawValue: nextGenerationToken.rawValue + 1)

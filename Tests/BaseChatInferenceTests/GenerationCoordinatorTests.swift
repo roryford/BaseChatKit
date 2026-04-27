@@ -163,13 +163,13 @@ final class GenerationCoordinatorTests: XCTestCase {
     // MARK: - Tool-capability silent-ignore warning
 
     /// When `tools` are passed to `enqueue` and the active backend reports
-    /// `supportsToolCalling == false`, the coordinator must emit a warning so
-    /// callers have a signal that the registry will never see a dispatch.
-    /// Mirrors the jsonMode silent-ignore warning above.
+    /// `supportsToolCalling == false`, the coordinator must emit a warning and
+    /// then throw `InferenceError.inferenceFailure` so callers have a clear
+    /// signal that the registry will never see a dispatch.
     ///
     /// Sabotage check: deleting the warning branch in `GenerationCoordinator.enqueue`
-    /// leaves `captured` empty and this assertion fails.
-    func test_enqueue_toolsOnUnsupportedBackend_emitsWarning() async throws {
+    /// leaves `captured` empty and the warning assertion fails.
+    func test_enqueue_toolsOnUnsupportedBackend_emitsWarningAndThrows() async throws {
         // MockInferenceBackend defaults to supportsToolCalling == false.
         let captured = WarningCapture()
         GenerationCoordinator.toolsUnsupportedWarningHook = { backendType, message in
@@ -181,11 +181,22 @@ final class GenerationCoordinatorTests: XCTestCase {
             name: "get_weather",
             description: "Lookup the weather for a city"
         )
-        let (_, stream) = try coordinator.enqueue(
-            messages: [("user", "What's the weather?")],
-            tools: [tool]
-        )
-        for try await _ in stream.events {}
+
+        // The coordinator must reject the request with a clear error before
+        // any stream is created — the warning fires, then the throw follows.
+        XCTAssertThrowsError(
+            try coordinator.enqueue(
+                messages: [("user", "What's the weather?")],
+                tools: [tool]
+            )
+        ) { error in
+            guard case InferenceError.inferenceFailure(let msg) = error else {
+                XCTFail("expected InferenceError.inferenceFailure, got \(error)")
+                return
+            }
+            XCTAssertTrue(msg.contains("does not support tool calling"),
+                          "error message must describe the capability gap: \(msg)")
+        }
 
         let entries = captured.snapshot()
         XCTAssertEqual(entries.count, 1, "warning must fire exactly once per enqueue")
