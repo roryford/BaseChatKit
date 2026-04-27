@@ -274,6 +274,24 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertEqual(roundTripped, parts)
         XCTAssertEqual(roundTripped.count, 3)
 
+        // Pin the on-disk discriminator strings. The encode→decode round-trip
+        // above would still pass if both keys were renamed in lockstep, so
+        // assert against the raw persisted JSON to lock the wire format
+        // independently of the in-process Codable pair.
+        let persistedJSON = fetched0.contentPartsJSON
+        XCTAssertTrue(
+            persistedJSON.contains("\"toolCall\""),
+            "Expected pinned discriminator \"toolCall\" in persisted JSON, got: \(persistedJSON)"
+        )
+        XCTAssertTrue(
+            persistedJSON.contains("\"toolResult\""),
+            "Expected pinned discriminator \"toolResult\" in persisted JSON, got: \(persistedJSON)"
+        )
+        XCTAssertTrue(
+            persistedJSON.contains("\"text\""),
+            "Expected pinned discriminator \"text\" in persisted JSON, got: \(persistedJSON)"
+        )
+
         guard case .text(let text) = roundTripped[0] else {
             return XCTFail("Expected .text at index 0, got \(roundTripped[0])")
         }
@@ -295,7 +313,7 @@ final class SchemaMigrationTests: XCTestCase {
     /// no `errorKind`. The custom decoder in `ToolTypes.swift` migrates those
     /// to `ErrorKind.permanent`. Lock the migration in so future refactors of
     /// the codable shape can't silently drop legacy history on the floor.
-    func test_chatMessage_legacyIsErrorDecodesToErrorKindPermanent() throws {
+    func test_toolResult_legacyIsErrorDecodesToErrorKindPermanent() throws {
         let legacyJSON = #"{"callId":"call_legacy","content":"failed","isError":true}"#
         let data = try XCTUnwrap(legacyJSON.data(using: .utf8))
 
@@ -320,7 +338,7 @@ final class SchemaMigrationTests: XCTestCase {
     /// emit `isError` because that field is derived from `errorKind` and
     /// shipping both would put two sources of truth on the wire. Re-encoding
     /// must preserve `errorKind` exactly when decoded back.
-    func test_chatMessage_reEncodingDoesNotEmitIsError() throws {
+    func test_toolResult_encodingDoesNotEmitIsError() throws {
         let original = ToolResult(
             callId: "call_xyz",
             content: "request timed out",
