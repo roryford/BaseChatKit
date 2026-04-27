@@ -116,6 +116,32 @@ jobs:
           fi
           echo "BaseChatUI -> BaseChatUIModelManagement edge is clean."
 
+      - name: Lint — Macro plugin builds inside the SwiftPM sandbox
+        # SwiftPM compiles macro plugins (`BaseChatMacrosPlugin`) inside a
+        # sandbox-exec jail by default on macOS. The jail blocks network
+        # access and most filesystem writes, which is the only thing
+        # standing between a compromised swift-syntax dependency and
+        # exfiltrating local secrets at compile time (see #726).
+        #
+        # `Package.swift` can opt out of the jail via `unsafeFlags`. This
+        # lint refuses to merge any change that introduces such an opt-out
+        # in the macro plugin target or globally.
+        run: |
+          set -euo pipefail
+          if grep -nE 'unsafeFlags|--disable-sandbox|SWIFTPM_DISABLE_SANDBOX' Package.swift; then
+            echo "::error::Package.swift must not disable the SwiftPM macro/build sandbox."
+            echo "::error::Macro plugins (BaseChatMacrosPlugin) must run sandboxed — see issue #726."
+            exit 1
+          fi
+          # Defensive: guard against anyone wiring --disable-sandbox into a
+          # workflow's swift build/test invocation. Excluded paths are this
+          # file's own commentary and the threat-model docs that quote the flag.
+          if grep -RIn --include='*.yml' --exclude='ci.yml' -- '--disable-sandbox' .github/workflows/; then
+            echo "::error::Workflow scripts must not pass --disable-sandbox to swift build/test."
+            exit 1
+          fi
+          echo "Macro plugin sandbox posture OK."
+
       - name: Verify Package.resolved is up to date
         # Was a separate `resolve-check` job on its own macos-15 runner; folding
         # it into `test` removes one 10×-billed runner per PR and eliminates the
