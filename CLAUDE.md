@@ -165,7 +165,7 @@ docs: clarify TokenizerProvider fallback behaviour
 - Everything else → no release
 - `BREAKING CHANGE:` in the commit footer → MAJOR bump
 
-PR titles must follow the same format (enforced by CI).
+**Enforced surface: PR titles.** All PRs squash-merge, so Release Please reads the *PR title*, not the individual commit messages on the branch. CI lints the PR title via `amannn/action-semantic-pull-request`. Individual commit messages on a feature branch should follow the same format as a matter of habit, but they are not linted and can be rewritten freely during review.
 
 ## Release workflow
 
