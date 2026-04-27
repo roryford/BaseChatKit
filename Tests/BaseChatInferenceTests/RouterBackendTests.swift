@@ -131,6 +131,27 @@ final class RouterBackendTests: XCTestCase {
         XCTAssertNil(router.selectBackend(for: [.toolCalling]))
     }
 
+    func test_selectBackend_prefersLoadedChildOverUnloadedSatisfier() {
+        // Unloaded large is listed first; the loaded second-place child should
+        // win so callers don't get routed to a backend that will immediately
+        // fail with "no model loaded".
+        let unloadedLarge = MockInferenceBackend(capabilities: capableCaps())
+        unloadedLarge.isModelLoaded = false
+        let loadedLarge = loaded(capableCaps())
+        let router = RouterBackend(children: [unloadedLarge, loadedLarge])
+        XCTAssertTrue(router.selectBackend(for: [.toolCalling]) === loadedLarge)
+    }
+
+    func test_selectBackend_fallsBackToUnloadedWhenNoLoadedChildSatisfies() {
+        // Only an unloaded child can satisfy — pick it so the failure surfaces
+        // as a load-time error from the backend rather than an opaque routing nil.
+        let loadedSmall = loaded(minimalCaps())
+        let unloadedLarge = MockInferenceBackend(capabilities: capableCaps())
+        unloadedLarge.isModelLoaded = false
+        let router = RouterBackend(children: [loadedSmall, unloadedLarge])
+        XCTAssertTrue(router.selectBackend(for: [.toolCalling]) === unloadedLarge)
+    }
+
     // MARK: - RouterBackend.generate dispatch
 
     func test_generate_dispatchesToFirstSatisfyingChild() async throws {

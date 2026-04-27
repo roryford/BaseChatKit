@@ -71,6 +71,15 @@ final class ErrorDescriptionTests: XCTestCase {
         }
     }
 
+    func test_noBackendSatisfiesRequirements_emptyPayload_hasGenericMessage() {
+        // Empty payload must not produce a dangling colon. Constructed defensively
+        // even though `RouterBackend` always sends at least one requirement.
+        let error = InferenceError.noBackendSatisfiesRequirements([])
+        let desc = error.errorDescription!
+        XCTAssertFalse(desc.contains(":"), "Empty payload should not produce dangling colon: \(desc)")
+        XCTAssertFalse(desc.isEmpty)
+    }
+
     func test_memoryInsufficient_calculatesMB() {
         let required: UInt64 = 8 * 1024 * 1024   // 8 MB
         let available: UInt64 = 4 * 1024 * 1024   // 4 MB

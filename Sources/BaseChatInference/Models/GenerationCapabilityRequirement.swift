@@ -44,6 +44,25 @@ public enum GenerationCapabilityRequirement: Sendable, Hashable, Codable {
 
     /// The backend's effective context window must be at least `tokens` wide.
     case minContextTokens(Int)
+
+    /// Stable sort key for diagnostic ordering. Logged error payloads need a
+    /// deterministic order so test assertions and log diffs stay stable across
+    /// runs — the underlying `Set` storage iterates in insertion-dependent
+    /// order. Not part of the public API contract; the case names happen to
+    /// match `String(describing:)` today but callers should not rely on that.
+    var sortKey: String {
+        switch self {
+        case .toolCalling:                return "1.toolCalling"
+        case .structuredOutput:           return "2.structuredOutput"
+        case .jsonMode:                   return "3.jsonMode"
+        case .thinking:                   return "4.thinking"
+        case .grammarConstrainedSampling: return "5.grammarConstrainedSampling"
+        case .parallelToolCalls:          return "6.parallelToolCalls"
+        case .streamingToolCalls:         return "7.streamingToolCalls"
+        case .kvCachePersistence:         return "8.kvCachePersistence"
+        case .minContextTokens(let n):    return "9.minContextTokens.\(n)"
+        }
+    }
 }
 
 extension BackendCapabilities {

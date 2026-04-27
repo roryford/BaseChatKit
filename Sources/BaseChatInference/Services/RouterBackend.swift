@@ -11,11 +11,11 @@ import Foundation
 /// Lifecycle delegation is intentionally narrow:
 ///
 /// - `loadModel(from:plan:)` is **not** routed by capability — picking a
-///   model is the host's job. ``RouterBackend`` itself does not advertise a
-///   loaded model. Use ``InferenceService`` (which holds one backend per
-///   model type) for load orchestration; reach for ``RouterBackend`` only
-///   when a single conceptual session multiplexes across already-loaded
-///   children.
+///   model is the host's job. ``RouterBackend`` itself does not load or
+///   identify a single model; `isModelLoaded` reflects whether any child is
+///   loaded. Use ``InferenceService`` (which holds one backend per model
+///   type) for load orchestration; reach for ``RouterBackend`` only when a
+///   single conceptual session multiplexes across already-loaded children.
 /// - `stopGeneration()` and `unloadModel()` fan out to every child — a
 ///   request may be in flight on the most recently picked child, but other
 ///   children may also have state from previous calls.
@@ -32,6 +32,14 @@ public final class RouterBackend: InferenceBackend, @unchecked Sendable {
     public let children: [any InferenceBackend]
 
     public init(children: [any InferenceBackend]) {
+        // An empty router would produce a `.noBackendSatisfiesRequirements([])`
+        // error on every `generate(...)` call — surfacing that at the wiring
+        // site (host code that built the router) is far easier to debug than
+        // having every request fail later with an empty diagnostic payload.
+        precondition(
+            !children.isEmpty,
+            "RouterBackend requires at least one child backend"
+        )
         self.children = children
     }
 
@@ -122,14 +130,22 @@ public final class RouterBackend: InferenceBackend, @unchecked Sendable {
     }
 
     /// Picks the first child whose capabilities satisfy `requirements`.
+    ///
+    /// Loaded children are preferred — if any loaded child satisfies, that
+    /// one wins. Only when no loaded child can serve does the router fall
+    /// back to an unloaded child that satisfies (so the error surfaces as
+    /// "no model loaded" from the chosen backend, not as a routing failure).
     /// Public so hosts can do a dry-run check before issuing a request.
     public func selectBackend(
         for requirements: Set<GenerationCapabilityRequirement>
     ) -> (any InferenceBackend)? {
-        guard !requirements.isEmpty else {
-            return children.first
+        let predicate: (any InferenceBackend) -> Bool = requirements.isEmpty
+            ? { _ in true }
+            : { $0.capabilities.satisfies(requirements) }
+        if let loaded = children.first(where: { $0.isModelLoaded && predicate($0) }) {
+            return loaded
         }
-        return children.first { $0.capabilities.satisfies(requirements) }
+        return children.first(where: predicate)
     }
 
     public func loadModel(from url: URL, plan: ModelLoadPlan) async throws {
@@ -157,7 +173,9 @@ public final class RouterBackend: InferenceBackend, @unchecked Sendable {
             // partial coverage (every child fails some requirement, but no single
             // requirement is unmet by every child) — rare, but guards against
             // returning an empty diagnostic.
-            let payload = unmet.isEmpty ? Array(requirements) : Array(unmet)
+            let unsorted = unmet.isEmpty ? Array(requirements) : Array(unmet)
+            // Sort for deterministic logs/diffs — `Set` iteration order is unstable.
+            let payload = unsorted.sorted { $0.sortKey < $1.sortKey }
             throw InferenceError.noBackendSatisfiesRequirements(payload)
         }
         return try chosen.generate(

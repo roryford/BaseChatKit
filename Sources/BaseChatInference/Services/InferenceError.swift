@@ -53,6 +53,9 @@ public enum InferenceError: LocalizedError {
         case .unsupportedGrammar(let reason):
             return "Grammar-constrained sampling not supported: \(reason)"
         case .noBackendSatisfiesRequirements(let unmet):
+            if unmet.isEmpty {
+                return "No wired backend satisfies the request's required capabilities."
+            }
             let names = unmet.map { String(describing: $0) }.joined(separator: ", ")
             return "No wired backend satisfies the request's required capabilities: \(names)."
         }
