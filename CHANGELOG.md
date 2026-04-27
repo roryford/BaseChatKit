@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.12.4](https://github.com/roryford/BaseChatKit/compare/v0.12.3...v0.12.4) (2026-04-27)
+
+### Highlights
+
+#### `FoundationBackend` learns tool calling
+
+Apple's on-device Foundation Models SDK (Xcode 26.4) doesn't expose a function-calling surface, but it does expose `GuidedGeneration` over `Generable` / `GenerationSchema`. `FoundationBackend` now synthesizes tool calling on top of that channel: registered `ToolDefinition`s compile into a `(text | tool_call)` sum-type schema via `DynamicGenerationSchema`, the on-device model produces a constrained envelope, and the existing `ToolCallLoopOrchestrator` drives the round trip — same loop the cloud and MLX backends use. The wire shape (`ToolCall(id:toolName:arguments:)`) matches MLX/Ollama/Claude/OpenAI exactly, and the tool surface respects the v0.12.1 `MCPToolFilter` 16-tool cap.
+
+```swift
+let backend = FoundationBackend()
+try await backend.loadModel(from: url, plan: plan)
+
+var config = GenerationConfig()
+config.tools = [getWeatherTool]   // ToolDefinition with JSON-Schema parameters
+
+let stream = try backend.generate(
+    prompt: "What's the weather in Paris?",
+    systemPrompt: "You are a helpful assistant.",
+    config: config
+)
+for try await event in stream.events {
+    if case .toolCall(let call) = event { /* dispatch */ }
+}
+```
+
+Apps with no tools registered are unaffected — the existing text-only path is unchanged. Schema-build failures (unsupported JSON-Schema construct in a registered tool) log a warning and fall back to plain generation rather than crashing. See [#812](https://github.com/roryford/BaseChatKit/pull/812), [#434](https://github.com/roryford/BaseChatKit/issues/434).
+
+#### Capability-aware backend routing
+
+When an app holds two or more loaded backends — say a small local model plus a more capable cloud one — `RouterBackend` now dispatches each request to the first child whose `BackendCapabilities` satisfies the request's `requiredCapabilities`. The new `GenerationConfig.requiredCapabilities` field is open by default (empty set), so existing call sites are unaffected; opt in per request when you need a specific guarantee like tool calling or a minimum context window.
+
+```swift
+let router = RouterBackend(children: [smallLocal, capableCloud])
+
+let config = GenerationConfig(
+    requiredCapabilities: [.toolCalling, .minContextTokens(8_000)]
+)
+let stream = try router.generate(prompt: prompt, systemPrompt: nil, config: config)
+```
+
+If no child satisfies the requirements `RouterBackend` throws `InferenceError.noBackendSatisfiesRequirements` listing the missing capabilities — picking a model is the host's job, not the router's. Single-child dispatch per request: no fan-out, retry, or load-balancing. Lifecycle ops (`stopGeneration`, `unloadModel`, `resetConversation`) fan out to every child; `loadModel` is rejected on the router. See [#810](https://github.com/roryford/BaseChatKit/pull/810), [#438](https://github.com/roryford/BaseChatKit/issues/438), [#439](https://github.com/roryford/BaseChatKit/issues/439).
+
+#### MLX KV cache reuse across turns
+
+Local MLX models now reuse the longest-common-prefix KV cache across turns, so a multi-turn conversation no longer re-prefills the system prompt + history on every send. After a successful generate, `MLXBackend` snapshots the prompt-only KV state on the main actor; the next turn restores the snapshot if the new prompt's token-id prefix matches and continues from there. Cache invalidation covers `loadModel`, `unloadModel`, `resetConversation`, prefix mismatch, and direct `_inject` writes; the snapshot is `@MainActor`-pinned to avoid racing the GPU scheduler.
+
+```swift
+// First turn: full prefill.
+let s1 = try backend.generate(prompt: p1, systemPrompt: sys, config: config)
+for try await _ in s1.events {}
+
+// Second turn: shared prefix → KV restored, only the delta is prefilled.
+let s2 = try backend.generate(prompt: p1 + " Tell me more.", systemPrompt: sys, config: config)
+```
+
+Token-id-level matching (not string-level), single-snapshot cap (no LRU memory growth). See [#814](https://github.com/roryford/BaseChatKit/pull/814), [#749](https://github.com/roryford/BaseChatKit/issues/749).
+
+### Features
+
+- **inference:** `RouterBackend` + `GenerationConfig.requiredCapabilities` for capability-aware multi-backend dispatch ([#810](https://github.com/roryford/BaseChatKit/pull/810))
+- **inference:** opt-in `TurnHistoryCompressor` on `ToolCallLoopOrchestrator` folds older agent-loop rounds into a `step N: tool(args) → result` summary while keeping the most recent N verbatim — `BudgetTurnHistoryCompressor` ships in-tree, default is no-op so existing callers are unaffected ([#811](https://github.com/roryford/BaseChatKit/pull/811))
+- **foundation:** tool calling on `FoundationBackend` via `Generable` / `GuidedGeneration` ([#812](https://github.com/roryford/BaseChatKit/pull/812))
+- **fuzz:** `ToolCallValidityDetector` with five sub-checks (`malformed-json-args`, `schema-violation`, `id-reuse`, `orphan-result`, `toolchoice-violation`) — `id-reuse` and `orphan-result` ship at `.confirmed` (zero-FP-by-construction transcript invariants), the others at `.flaky` pending the calibration corpus in [#488](https://github.com/roryford/BaseChatKit/issues/488); `RunRecord` now carries `toolCalls`/`toolResults`/`toolDefinitions` for replay; `--tools` flag on `fuzz-chat` injects a `SyntheticToolset` ([#813](https://github.com/roryford/BaseChatKit/pull/813))
+- **backends:** MLX KV cache prefix reuse across turns ([#814](https://github.com/roryford/BaseChatKit/pull/814))
+
+### Fixes
+
+- **mlx:** skip the inference step in `Gemma4MoESmokeTests` so the C++ broadcast-shape abort (`MLX/ErrorHandler.swift:343 Fatal error: [broadcast_shapes] Shapes (20) and (39) cannot be broadcast`) no longer kills the whole test process — `setUp()` still validates VLM-factory routing on hardware, only `generate()` is `XCTSkip`-ped, with a `FIXME` pointing at [#802](https://github.com/roryford/BaseChatKit/issues/802) so the skip is lifted when upstream `mlx-swift-lm` ships the fix ([#835](https://github.com/roryford/BaseChatKit/pull/835))
+
 ## [0.12.3](https://github.com/roryford/BaseChatKit/compare/v0.12.2...v0.12.3) (2026-04-27)
 
 ### Highlights
