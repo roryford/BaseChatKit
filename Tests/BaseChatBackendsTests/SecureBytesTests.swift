@@ -34,6 +34,46 @@ struct SecureBytesTests {
         let secure = try #require(SecureBytes(key))
         #expect(secure.stringValue == key)
     }
+
+    #if DEBUG
+    /// Verifies that `deinit` actually wipes the backing buffer via `memset_s`.
+    /// Uses the `#if DEBUG` `_testingOnZeroed` seam to inspect the buffer
+    /// while it is still valid memory but after `memset_s` has run, immediately
+    /// before `deallocate`. If a future change accidentally drops `memset_s`
+    /// (or a compiler ever elides it), the snapshot will retain the original
+    /// plaintext and this assertion will fail.
+    @Test("deinit zeroes the backing buffer before deallocation")
+    func deinitZeroesBuffer() throws {
+        let key = "sk-secret-zeroing-probe-XYZ"
+        let expectedCount = key.utf8.count
+
+        // Captured by the deinit-fired probe; wrapped in a class so the
+        // closure can mutate it without violating Sendable/escaping rules.
+        final class Snapshot {
+            var bytes: [UInt8] = []
+            var fired = false
+        }
+        let snapshot = Snapshot()
+
+        // Scope the SecureBytes so it deinits at the end of the do-block.
+        do {
+            let secure = try #require(SecureBytes(key))
+            #expect(secure.stringValue == key)
+            secure._testingOnZeroed = { buffer in
+                snapshot.fired = true
+                snapshot.bytes = Array(buffer)
+            }
+        }
+
+        #expect(snapshot.fired, "deinit probe should have fired")
+        #expect(snapshot.bytes.count == expectedCount)
+        #expect(snapshot.bytes.allSatisfy { $0 == 0 }, "buffer must be zeroed by memset_s before deallocate")
+
+        // Belt-and-suspenders: the original plaintext must not survive.
+        let recovered = String(decoding: snapshot.bytes, as: UTF8.self)
+        #expect(recovered != key)
+    }
+    #endif
 }
 
 #if Ollama || CloudSaaS

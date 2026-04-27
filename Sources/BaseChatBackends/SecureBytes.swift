@@ -29,8 +29,23 @@ final class SecureBytes: @unchecked Sendable {
         String(decoding: buffer, as: UTF8.self)
     }
 
+    #if DEBUG
+    /// Test-only inspection seam fired from `deinit` *after* `memset_s` has
+    /// run but *before* `deallocate`, so a test can observe whether the
+    /// buffer was actually zeroed. The closure receives an immutable view
+    /// of the still-valid backing buffer; capturing the pointer past the
+    /// closure's return is undefined behaviour. Compiled out of release
+    /// builds — production code paths are unchanged.
+    var _testingOnZeroed: ((UnsafeBufferPointer<UInt8>) -> Void)?
+    #endif
+
     deinit {
         _ = memset_s(buffer.baseAddress, buffer.count, 0, buffer.count)
+        #if DEBUG
+        if let probe = _testingOnZeroed {
+            probe(UnsafeBufferPointer(buffer))
+        }
+        #endif
         buffer.deallocate()
     }
 }
