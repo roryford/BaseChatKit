@@ -62,7 +62,9 @@ jobs:
           fi
 
       - name: Set up Swift
-        uses: SwiftyLab/setup-swift@latest
+        # Pinned to a tagged release (not @latest or @main) — supply-chain
+        # hygiene matters extra here since this workflow signs artifacts.
+        uses: SwiftyLab/setup-swift@v1.13.0
         with:
           swift-version: "6.0"
 
