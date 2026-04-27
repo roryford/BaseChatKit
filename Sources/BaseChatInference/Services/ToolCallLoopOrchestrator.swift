@@ -481,7 +481,7 @@ public struct ToolCallLoopOrchestrator: Sendable {
                 toolResults: results
             ))
 
-            let compressed = compressor.compress(records: records)
+            let compressed = compressor.compress(records: records, trigger: .toolLoop)
             // Persist the compressor's view back into `records`: keep the
             // preserved suffix so the next iteration's compress() input is
             // already the suffix. Once a record is folded, it does not
