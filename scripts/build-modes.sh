@@ -100,6 +100,15 @@ audit_mode() {
   local traits
   traits=$(traits_for_mode "$mode")
 
+  # The audit relies on Darwin-only flags (`nm -gU`, `otool -L`, `strings -e l`)
+  # against Mach-O object files. Refuse to run on non-macOS rather than emit
+  # a silently-empty "clean" report that could be mistaken for procurement
+  # evidence. SwiftPM on Linux produces ELF objects which `nm -gU` rejects.
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "::error::build-modes audit requires macOS (Darwin nm/otool/strings); got $(uname -s)" >&2
+    return 2
+  fi
+
   echo ""
   echo "=== build-modes: auditing [$mode] (release) ==="
   echo "    swift build -c release $traits"
@@ -121,12 +130,20 @@ audit_mode() {
     echo "    BaseChatBackends.build at: $backends_dir"
 
     # Snapshot per-mode artifacts for the procurement evidence archive.
+    # `nm.txt` is the *gating* file: every line in it must be a real symbol
+    # (no per-object path headers) so that grepping for `ClaudeBackend` etc.
+    # cannot match an object filename like `### .../ClaudeBackend.swift.o`
+    # and trigger a false positive. The strings/otool files keep their
+    # `### path` headers because they're informational — the offline-mode
+    # gate against them is hostname-string matching, which is unaffected.
     local nm_out="$ARTIFACT_DIR/$mode/nm.txt"
+    local nm_headers_out="$ARTIFACT_DIR/$mode/nm-by-object.txt"
     local strings_ascii_out="$ARTIFACT_DIR/$mode/strings-ascii.txt"
     local strings_utf16_out="$ARTIFACT_DIR/$mode/strings-utf16.txt"
     local otool_out="$ARTIFACT_DIR/$mode/otool.txt"
 
     : > "$nm_out"
+    : > "$nm_headers_out"
     : > "$strings_ascii_out"
     : > "$strings_utf16_out"
     : > "$otool_out"
@@ -134,10 +151,14 @@ audit_mode() {
     # Iterate object files. nm/strings on the directory itself doesn't recurse,
     # and SwiftPM produces one .o per source file plus a master .swiftmodule.
     while IFS= read -r -d '' obj; do
+      # Symbols only — no path header — into the gating file.
+      nm -gU "$obj" 2>/dev/null >> "$nm_out" || true
+
+      # Per-object grouped view kept as a separate artifact for humans.
       {
         echo "### $obj"
         nm -gU "$obj" 2>/dev/null || true
-      } >> "$nm_out"
+      } >> "$nm_headers_out"
 
       {
         echo "### $obj"
@@ -166,13 +187,16 @@ audit_mode() {
     fi
 
     # Audit gate: in modes WITHOUT CloudSaaS, no cloud symbols must appear.
+    # `grep -F` (fixed strings) avoids regex surprises if a symbol name ever
+    # contains a metacharacter; it also avoids matching the per-object-path
+    # `### …` headers because we wrote a header-free `$nm_out`.
     if [[ "$mode" == "offline" || "$mode" == "ollama" ]]; then
       echo ""
       echo "    asserting NO cloud symbols in [$mode]"
       for sym in "${CLOUD_SYMBOLS[@]}"; do
-        if grep -q "$sym" "$nm_out"; then
+        if grep -Fq "$sym" "$nm_out"; then
           echo "::error::build-modes audit [$mode]: cloud symbol '$sym' present in BaseChatBackends release objects"
-          grep "$sym" "$nm_out" | head -n 5 >&2 || true
+          grep -F "$sym" "$nm_out" | head -n 5 >&2 || true
           audit_failures=$((audit_failures + 1))
         fi
       done
@@ -183,7 +207,9 @@ audit_mode() {
       if [[ "$mode" == "offline" ]]; then
         echo "    asserting NO cloud hostname literals in [$mode]"
         for host in "${CLOUD_HOSTS[@]}"; do
-          if grep -q "$host" "$strings_ascii_out" || grep -q "$host" "$strings_utf16_out"; then
+          # `grep -F` (fixed strings) is required — `$host` contains dots,
+          # which would otherwise match arbitrary characters in default BRE.
+          if grep -Fq "$host" "$strings_ascii_out" || grep -Fq "$host" "$strings_utf16_out"; then
             echo "::error::build-modes audit [$mode]: hostname literal '$host' present in BaseChatBackends release objects"
             audit_failures=$((audit_failures + 1))
           fi
@@ -193,7 +219,7 @@ audit_mode() {
         # adding entries to OFFLINE_BANNED_DYLIBS later doesn't need code
         # changes here.
         for dylib in "${OFFLINE_BANNED_DYLIBS[@]}"; do
-          if grep -q "$dylib" "$otool_out"; then
+          if grep -Fq "$dylib" "$otool_out"; then
             echo "::error::build-modes audit [offline]: banned dylib '$dylib' linked"
             audit_failures=$((audit_failures + 1))
           fi

@@ -11,10 +11,12 @@ name: Build modes + binary symbol audit
 #    on-demand trigger — it only fires when a PR actually edits trait-gated
 #    source, Package.swift, or this workflow's own configuration. Doc-only
 #    PRs and unrelated source edits don't trigger it.
-#  - offline + ollama run on `ubuntu-latest` (1x billing) — they don't need
-#    Apple frameworks for compile-only verification.
-#  - saas + full run on `macos-15` because CloudSaaS pulls in CommonCrypto
-#    and full layers MLX/Llama which need Metal + the macOS SDK.
+#  - All four modes run on `macos-15` (10x billing): the package depends on
+#    `os` (Apple-only) and SwiftUI throughout `BaseChatUI`/
+#    `BaseChatUIModelManagement`, so a Linux compile leg is structurally
+#    unviable. The audit relies on Darwin-only `nm -gU` / `otool -L` flags
+#    anyway, so a heterogeneous matrix would have produced silently
+#    no-op artifacts on Linux even if the build worked.
 #
 # Symbol audit limitations: defense in depth, not authoritative proof.
 # String obfuscation (URLComponents builders, base64, hex bytes, UTF-16 splits)
@@ -32,7 +34,9 @@ on:
       - "Package.resolved"
       - "Sources/BaseChatBackends/**"
       - "Sources/BaseChatUI/Views/Settings/**"
+      - "Sources/BaseChatUIModelManagement/Views/Settings/**"
       - "Sources/BaseChatInference/Models/APIProvider.swift"
+      - "Sources/bck-tools/main.swift"
       - ".github/workflows/build-modes.yml"
       - "scripts/build-modes.sh"
 
@@ -44,39 +48,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-compile:
-    name: ${{ matrix.mode }} (Linux compile-only)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [offline, ollama]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.1"
-
-      - name: Cache SwiftPM
-        uses: actions/cache@v5
-        with:
-          path: |
-            .build/artifacts
-            .build/checkouts
-            .build/repositories
-          key: ${{ runner.os }}-${{ runner.arch }}-spm-${{ matrix.mode }}-${{ hashFiles('Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-spm-${{ matrix.mode }}-
-            ${{ runner.os }}-${{ runner.arch }}-spm-
-
-      - name: Build [${{ matrix.mode }}]
-        run: scripts/build-modes.sh ${{ matrix.mode }} --build-only
-
   macos-build-and-audit:
     name: ${{ matrix.mode }} (macOS build + audit)
     runs-on: macos-15
@@ -84,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [saas, full, offline]
+        mode: [offline, ollama, saas, full]
 
     steps:
       - name: Checkout

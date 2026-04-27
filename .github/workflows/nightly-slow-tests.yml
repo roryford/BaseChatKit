@@ -56,6 +56,10 @@ jobs:
         run: scripts/test.sh --filter "BaseChatInferenceTests.TrafficBoundaryAuditTest" --disable-default-traits --skip-update
 
       - name: Test — IntegratedStreamingPerformanceTests
+        # The test target lands in a follow-up PR (#243). Gate on its file
+        # existing so the nightly job doesn't fail with "no tests matched
+        # filter" between this workflow shipping and #243 merging.
+        if: ${{ hashFiles('**/IntegratedStreamingPerformanceTests*.swift') != '' }}
         run: scripts/test.sh --filter "BaseChatUITests.IntegratedStreamingPerformanceTests" --disable-default-traits --skip-update
 
       - name: Stage test diagnostics
