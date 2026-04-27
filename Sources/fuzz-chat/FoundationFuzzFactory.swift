@@ -17,6 +17,12 @@ import BaseChatInference
 public struct FoundationFuzzFactory: FuzzBackendFactory {
     public init() {}
 
+    /// Apple Intelligence runs on-device and produces identical output for
+    /// identical inputs, so findings are replayable. Stated explicitly per
+    /// the #561 spec rather than relying on the protocol-extension default,
+    /// to make intent obvious to readers comparing factories side-by-side.
+    public var supportsDeterministicReplay: Bool { true }
+
     public func makeHandle() async throws -> FuzzRunner.BackendHandle {
         guard FoundationBackend.isAvailable else {
             throw CLIError(
