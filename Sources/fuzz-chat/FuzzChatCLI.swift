@@ -110,14 +110,14 @@ struct FuzzChatCLI {
         let factory: any FuzzBackendFactory
         switch backend {
         case .ollama:
-            #if Fuzz
+            #if Fuzz && Ollama
             do {
                 factory = try Self.makeOllamaFactory(modelHint: modelHint)
             } catch {
                 fail(String(describing: error))
             }
             #else
-            fail("Ollama backend requires the Fuzz build trait. Run via: scripts/fuzz.sh")
+            fail("Ollama backend requires the Fuzz and Ollama build traits. Run via: scripts/fuzz.sh")
             #endif
         case .mock:
             factory = MockFuzzFactory()
@@ -206,7 +206,7 @@ struct FuzzChatCLI {
         await factory.teardown()
     }
 
-    #if Fuzz
+    #if Fuzz && Ollama
     /// Builds the Ollama-backed factory for the runner.
     ///
     /// - When `modelHint` is `nil` or `"all"`: enumerates every installed Ollama

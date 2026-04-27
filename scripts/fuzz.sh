@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/fuzz.sh — Run the BaseChatFuzz harness with a friendly preflight.
 #
-# Default behaviour (no args): runs `swift run --traits Fuzz,MLX,Llama fuzz-chat --minutes 5` against
+# Default behaviour (no args): runs `swift run --traits Fuzz,MLX,Llama,Ollama fuzz-chat --minutes 5` against
 # Ollama. Discovers which backends are usable and prints a one-line summary
 # before kicking off the harness. Forwards all CLI args straight through to
 # `fuzz-chat`, with one local extension:
@@ -22,15 +22,15 @@ for arg in "$@"; do
         --with-mlx) WITH_MLX=1 ;;
         -h|--help)
             cd "$PACKAGE_DIR"
-            echo "scripts/fuzz.sh — wrapper around \`swift run --traits Fuzz,MLX,Llama fuzz-chat\`"
+            echo "scripts/fuzz.sh — wrapper around \`swift run --traits Fuzz,MLX,Llama,Ollama fuzz-chat\`"
             echo ""
             echo "Local flags:"
             echo "  --with-mlx   Also run the MLX XCTest fuzz suite via xcodebuild"
             echo "  -h, --help   Show this help and forward to fuzz-chat -h"
             echo ""
-            echo "Forwarding to: swift run --traits Fuzz,MLX,Llama fuzz-chat -h"
+            echo "Forwarding to: swift run --traits Fuzz,MLX,Llama,Ollama fuzz-chat -h"
             echo "─────────────────────────────────────────────────────────────"
-            swift run --traits Fuzz,MLX,Llama fuzz-chat -h || true
+            swift run --traits Fuzz,MLX,Llama,Ollama fuzz-chat -h || true
             exit 0
             ;;
         *) FORWARDED_ARGS+=("$arg") ;;
@@ -81,7 +81,7 @@ fi
 
 # ── Default budget: 5 minutes if the caller passed no time/iteration flag. ───
 HAS_BUDGET=0
-for arg in "${FORWARDED_ARGS[@]:-}"; do
+for arg in "${FORWARDED_ARGS[@]+"${FORWARDED_ARGS[@]}"}"; do
     case "$arg" in
         --minutes|--minutes=*|--iterations|--iterations=*|--single)
             HAS_BUDGET=1 ;;
@@ -89,17 +89,17 @@ for arg in "${FORWARDED_ARGS[@]:-}"; do
 done
 
 if [[ $HAS_BUDGET -eq 0 ]]; then
-    FORWARDED_ARGS=("--minutes" "5" "${FORWARDED_ARGS[@]:-}")
+    FORWARDED_ARGS=("--minutes" "5" "${FORWARDED_ARGS[@]+"${FORWARDED_ARGS[@]}"}")
 fi
 
 cd "$PACKAGE_DIR"
 
 echo ""
-echo "Running: swift run --traits Fuzz,MLX,Llama fuzz-chat ${FORWARDED_ARGS[*]:-}"
+echo "Running: swift run --traits Fuzz,MLX,Llama,Ollama fuzz-chat ${FORWARDED_ARGS[*]+"${FORWARDED_ARGS[*]}"}"
 echo ""
 
 set +e
-swift run --traits Fuzz,MLX,Llama fuzz-chat "${FORWARDED_ARGS[@]:-}"
+swift run --traits Fuzz,MLX,Llama,Ollama fuzz-chat "${FORWARDED_ARGS[@]+"${FORWARDED_ARGS[@]}"}"
 SWIFT_EXIT=$?
 set -e
 
