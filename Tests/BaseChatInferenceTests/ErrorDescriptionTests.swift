@@ -61,6 +61,7 @@ final class ErrorDescriptionTests: XCTestCase {
             .memoryInsufficient(required: 8_589_934_592, available: 4_294_967_296),
             .alreadyGenerating,
             .generationError("token limit"),
+            .noBackendSatisfiesRequirements([.toolCalling]),
         ]
 
         for error in cases {
@@ -68,6 +69,15 @@ final class ErrorDescriptionTests: XCTestCase {
             XCTAssertNotNil(desc, "errorDescription should not be nil for \(error)")
             XCTAssertFalse(desc!.isEmpty, "errorDescription should not be empty for \(error)")
         }
+    }
+
+    func test_noBackendSatisfiesRequirements_emptyPayload_hasGenericMessage() {
+        // Empty payload must not produce a dangling colon. Constructed defensively
+        // even though `RouterBackend` always sends at least one requirement.
+        let error = InferenceError.noBackendSatisfiesRequirements([])
+        let desc = error.errorDescription!
+        XCTAssertFalse(desc.contains(":"), "Empty payload should not produce dangling colon: \(desc)")
+        XCTAssertFalse(desc.isEmpty)
     }
 
     func test_memoryInsufficient_calculatesMB() {

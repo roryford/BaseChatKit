@@ -24,6 +24,11 @@ public enum InferenceError: LocalizedError {
     /// Thrown by backends when `config.grammar != nil` but the backend does not support
     /// grammar-constrained sampling. `isRetryable` is `false`.
     case unsupportedGrammar(reason: String)
+    /// Thrown by ``RouterBackend`` when no wired child backend satisfies every
+    /// requirement in ``GenerationConfig/requiredCapabilities``. The associated
+    /// value lists the unsatisfied requirements (across all children — i.e. the
+    /// requirements no child could meet) so the host can surface a fix-it message.
+    case noBackendSatisfiesRequirements([GenerationCapabilityRequirement])
 
     public var errorDescription: String? {
         switch self {
@@ -47,6 +52,12 @@ public enum InferenceError: LocalizedError {
             return "Unsupported model architecture: \(arch). This backend only supports chat/instruct language models."
         case .unsupportedGrammar(let reason):
             return "Grammar-constrained sampling not supported: \(reason)"
+        case .noBackendSatisfiesRequirements(let unmet):
+            if unmet.isEmpty {
+                return "No wired backend satisfies the request's required capabilities."
+            }
+            let names = unmet.map { String(describing: $0) }.joined(separator: ", ")
+            return "No wired backend satisfies the request's required capabilities: \(names)."
         }
     }
 
@@ -61,7 +72,8 @@ public enum InferenceError: LocalizedError {
             return true
         case .modelNotFound, .modelLoadFailed, .inferenceFailure,
              .memoryInsufficient, .generationError, .contextExhausted,
-             .unsupportedModelArchitecture, .unsupportedGrammar:
+             .unsupportedModelArchitecture, .unsupportedGrammar,
+             .noBackendSatisfiesRequirements:
             return false
         }
     }

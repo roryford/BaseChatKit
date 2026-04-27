@@ -156,7 +156,17 @@ public struct GenerationConfig: Sendable, Codable {
     /// - Only honoured by `MLXBackend`; other backends ignore this field.
     public var yieldEveryNTokens: Int = 8
 
-    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:minP:repetitionPenalty:seed:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:streamPrefillProgress:thinkingMarkers:maxToolIterations:grammar:yieldEveryNTokens:) instead.")
+    /// Capabilities the backend serving this request must provide.
+    ///
+    /// Empty (the default) means any wired backend may serve the request —
+    /// preserves the existing zero-config behaviour. When non-empty, ``RouterBackend``
+    /// dispatches to the first child whose ``BackendCapabilities`` satisfy every
+    /// requirement; backends used directly may use this for fail-fast validation.
+    /// Independent of ``tools`` / ``grammar`` / ``jsonMode`` — those are
+    /// per-request payloads; this is a per-request *contract*.
+    public var requiredCapabilities: Set<GenerationCapabilityRequirement> = []
+
+    @available(*, deprecated, message: "Use init(temperature:topP:repeatPenalty:topK:typicalP:minP:repetitionPenalty:seed:maxOutputTokens:tools:toolChoice:maxThinkingTokens:jsonMode:streamPrefillProgress:thinkingMarkers:maxToolIterations:grammar:yieldEveryNTokens:requiredCapabilities:) instead.")
     public init(
         temperature: Float = 0.7,
         topP: Float = 0.9,
@@ -217,7 +227,8 @@ public struct GenerationConfig: Sendable, Codable {
         thinkingMarkers: ThinkingMarkers? = nil,
         maxToolIterations: Int = 10,
         grammar: String? = nil,
-        yieldEveryNTokens: Int = 8
+        yieldEveryNTokens: Int = 8,
+        requiredCapabilities: Set<GenerationCapabilityRequirement> = []
     ) {
         self.temperature = temperature
         self.topP = topP
@@ -237,6 +248,7 @@ public struct GenerationConfig: Sendable, Codable {
         self.maxToolIterations = max(1, maxToolIterations)
         self.grammar = grammar
         self.yieldEveryNTokens = yieldEveryNTokens
+        self.requiredCapabilities = requiredCapabilities
     }
 
     // MARK: Codable
@@ -247,6 +259,7 @@ public struct GenerationConfig: Sendable, Codable {
         case yieldEveryNTokens
         case streamPrefillProgress
         case minP, repetitionPenalty, seed
+        case requiredCapabilities
     }
 
     public init(from decoder: Decoder) throws {
@@ -280,6 +293,12 @@ public struct GenerationConfig: Sendable, Codable {
         minP = try c.decodeIfPresent(Float.self, forKey: .minP)
         repetitionPenalty = try c.decodeIfPresent(Float.self, forKey: .repetitionPenalty)
         seed = try c.decodeIfPresent(UInt64.self, forKey: .seed)
+        // requiredCapabilities is a per-request runtime contract; landed after
+        // the original shape, so older payloads decode to an empty set.
+        requiredCapabilities = (try c.decodeIfPresent(
+            Set<GenerationCapabilityRequirement>.self,
+            forKey: .requiredCapabilities
+        )) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -303,6 +322,9 @@ public struct GenerationConfig: Sendable, Codable {
         try c.encodeIfPresent(minP, forKey: .minP)
         try c.encodeIfPresent(repetitionPenalty, forKey: .repetitionPenalty)
         try c.encodeIfPresent(seed, forKey: .seed)
+        if !requiredCapabilities.isEmpty {
+            try c.encode(requiredCapabilities, forKey: .requiredCapabilities)
+        }
     }
 }
 
