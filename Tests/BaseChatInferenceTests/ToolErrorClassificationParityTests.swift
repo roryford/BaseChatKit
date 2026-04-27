@@ -212,18 +212,15 @@ final class ToolErrorClassificationParityTests: XCTestCase {
     /// Drives every row in the matrix: configures a fresh registry, dispatches
     /// a call, and asserts `result.errorKind == row.expectedKind`.
     ///
+    /// Backend labels in this matrix are simulated via mock executors —
+    /// including "mlx" — so the entire matrix runs on every platform without
+    /// hardware gating. The behavior under test is the registry's
+    /// classification seam, not real backend code.
+    ///
     /// Foundation row: skipped — blocked on #713. When #713 lands, add
     /// "foundation" to `backends` above and remove this skip comment.
-    func test_parityMatrix_allErrorKinds_allBackends() async throws {
+    func test_parityMatrix_allErrorKinds_allBackends() async {
         for row in Self.matrix {
-            // MLX requires Apple Silicon. Skip on x86 / Intel Mac / Linux CI.
-            if row.backend == "mlx" {
-                try XCTSkipUnless(
-                    HardwareRequirements.isAppleSilicon,
-                    "MLX backend tests require Apple Silicon (\(row.backend)/\(row.fault))"
-                )
-            }
-
             let registry = ToolRegistry()
             // Disable the default 32 KB output-size guard so it never
             // interferes with the error-kind assertion. The matrix is testing
@@ -233,7 +230,7 @@ final class ToolErrorClassificationParityTests: XCTestCase {
             // aren't re-classified by validation before reaching the executor.
             registry.validator = nil
 
-            await row.configure(registry)
+            row.configure(registry)
 
             let call = ToolCall(
                 id: "matrix-\(row.backend)-\(row.fault)",
