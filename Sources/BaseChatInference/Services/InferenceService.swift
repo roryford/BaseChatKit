@@ -370,6 +370,7 @@ public final class InferenceService {
         self.generation = GenerationCoordinator()
         // Provider wiring happens lazily via ensureProviderWired() on first use,
         // since `self` is not available inside a nonisolated init.
+        Self.scheduleToolSpillReap()
     }
 
     /// Creates the service with a pre-populated ``ToolRegistry``.
@@ -388,6 +389,7 @@ public final class InferenceService {
     public nonisolated init(toolRegistry: ToolRegistry) {
         self.lifecycle = ModelLifecycleCoordinator()
         self.generation = GenerationCoordinator(toolRegistry: toolRegistry)
+        Self.scheduleToolSpillReap()
     }
 
     /// Creates the service with a pre-populated ``ToolRegistry`` and a
@@ -404,6 +406,7 @@ public final class InferenceService {
             toolRegistry: toolRegistry,
             toolApprovalGate: toolApprovalGate
         )
+        Self.scheduleToolSpillReap()
     }
 
     /// The ``ToolRegistry`` this service dispatches through, or `nil` when
@@ -439,8 +442,19 @@ public final class InferenceService {
             toolApprovalGate: toolApprovalGate
         )
         generation.provider = self
+        Self.scheduleToolSpillReap()
     }
     #endif
+
+    /// Fire-and-forget detached sweep of stale tool-spill files, scheduled
+    /// from every public `init`. Detached so it never blocks instantiation
+    /// — disk IO on `~/Library/Caches` is otherwise fast but the OS can
+    /// stall under pressure, and a chat client should never spin on that.
+    private nonisolated static func scheduleToolSpillReap() {
+        Task.detached(priority: .background) {
+            ToolSpillReaper.cleanOldSpills()
+        }
+    }
 
     // MARK: - Fast-Backend Dispatch
 

@@ -189,4 +189,72 @@ final class ToolOutputPolicyTests: XCTestCase {
         policy.maxBytes = -100
         XCTAssertEqual(policy.maxBytes, 0)
     }
+
+    // MARK: - spillToFile
+
+    func test_spillToFile_writesToDisk_andReturnsTemplatedPointer() async throws {
+        let tempDir = makeTempSpillDirectory()
+        ToolSpillReaper.setDefaultDirectoryOverride(tempDir)
+        defer {
+            ToolSpillReaper.setDefaultDirectoryOverride(nil)
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        let registry = ToolRegistry()
+        let payload = String(repeating: "S", count: 4_096)
+        registry.outputPolicy = ToolOutputPolicy(
+            maxBytes: 64,
+            onOversize: .spillToFile(threshold: 64) { bytes, url in
+                "SPILL[\(bytes)]@\(url.path)"
+            }
+        )
+        registry.register(FixedContentExecutor(content: payload))
+
+        let result = await registry.dispatch(makeCall())
+
+        XCTAssertNil(result.errorKind)
+        XCTAssertTrue(result.content.hasPrefix("SPILL[\(payload.utf8.count)]@"),
+                      "got: \(result.content)")
+
+        let atIndex = try XCTUnwrap(result.content.firstIndex(of: "@"))
+        let path = String(result.content[result.content.index(after: atIndex)...])
+        XCTAssertFalse(path.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path), "expected spill file at \(path)")
+        XCTAssertTrue(path.contains("tool-spill-"))
+        XCTAssertTrue(path.hasSuffix(".txt"))
+
+        let written = try String(contentsOfFile: path, encoding: .utf8)
+        XCTAssertEqual(written, payload)
+    }
+
+    func test_spillToFile_belowThreshold_fallsBackToTruncate() async throws {
+        let tempDir = makeTempSpillDirectory()
+        ToolSpillReaper.setDefaultDirectoryOverride(tempDir)
+        defer {
+            ToolSpillReaper.setDefaultDirectoryOverride(nil)
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        let registry = ToolRegistry()
+        // maxBytes < threshold: result is oversize per maxBytes but smaller
+        // than threshold, so we truncate rather than spill.
+        registry.outputPolicy = ToolOutputPolicy(
+            maxBytes: 32,
+            onOversize: .spillToFile(threshold: 4_096) { _, _ in "SHOULD_NOT_FIRE" }
+        )
+        let payload = String(repeating: "p", count: 200)
+        registry.register(FixedContentExecutor(content: payload))
+
+        let result = await registry.dispatch(makeCall())
+
+        XCTAssertNil(result.errorKind)
+        XCTAssertFalse(result.content.contains("SHOULD_NOT_FIRE"))
+        XCTAssertLessThanOrEqual(result.content.utf8.count, 32)
+        XCTAssertTrue(result.content.hasSuffix("... [truncated]"))
+    }
+
+    private func makeTempSpillDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("ToolSpillTests-\(UUID().uuidString)", isDirectory: true)
+    }
 }

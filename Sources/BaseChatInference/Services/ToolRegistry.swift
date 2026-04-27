@@ -451,25 +451,58 @@ public protocol JSONSchemaValidating: Sendable {
             )
 
         case .truncate(let suffix):
-            let suffixBytes = suffix.utf8.count
-            // Degenerate: suffix alone overflows the budget. Fall back to a
-            // best-effort truncation of the suffix itself so we still emit
-            // something within the byte limit.
-            if suffixBytes >= policy.maxBytes {
+            return truncateOversize(result: result, byteLength: byteLength, maxBytes: policy.maxBytes, suffix: suffix)
+
+        case .spillToFile(let threshold, let message):
+            // Below threshold: still oversize per maxBytes, but small
+            // enough that a file round-trip is unwarranted. Fall back to
+            // a generic truncation rather than silently passing through.
+            if byteLength < threshold {
+                return truncateOversize(result: result, byteLength: byteLength, maxBytes: policy.maxBytes, suffix: "... [truncated]")
+            }
+            do {
+                let url = try ToolSpillReaper.spill(content: result.content)
                 return ToolResult(
                     callId: result.callId,
-                    content: truncateUTF8(suffix, toByteLimit: policy.maxBytes),
+                    content: message(byteLength, url),
                     errorKind: nil
                 )
+            } catch {
+                // IO failure during spill must not crash the chat loop.
+                // Degrade gracefully to truncation so the model still gets
+                // a partial answer it can act on.
+                Log.inference.warning(
+                    "tool-spill write failed (\(String(describing: error), privacy: .public)); falling back to truncation"
+                )
+                return truncateOversize(result: result, byteLength: byteLength, maxBytes: policy.maxBytes, suffix: "... [truncated; spill failed]")
             }
-            let bodyBudget = policy.maxBytes - suffixBytes
-            let trimmed = truncateUTF8(result.content, toByteLimit: bodyBudget)
+        }
+    }
+
+    /// Shared truncation helper used by both ``OversizeAction/truncate`` and
+    /// the ``OversizeAction/spillToFile`` fallback paths. Guarantees the
+    /// returned content's UTF-8 byte length is `<= maxBytes`.
+    private static func truncateOversize(
+        result: ToolResult,
+        byteLength: Int,
+        maxBytes: Int,
+        suffix: String
+    ) -> ToolResult {
+        let suffixBytes = suffix.utf8.count
+        if suffixBytes >= maxBytes {
             return ToolResult(
                 callId: result.callId,
-                content: trimmed + suffix,
+                content: truncateUTF8(suffix, toByteLimit: maxBytes),
                 errorKind: nil
             )
         }
+        let bodyBudget = maxBytes - suffixBytes
+        let trimmed = truncateUTF8(result.content, toByteLimit: bodyBudget)
+        return ToolResult(
+            callId: result.callId,
+            content: trimmed + suffix,
+            errorKind: nil
+        )
     }
 
     /// Trims `string` so its UTF-8 byte length is `<= byteLimit` without
