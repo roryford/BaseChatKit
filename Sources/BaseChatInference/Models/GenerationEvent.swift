@@ -95,4 +95,26 @@ public enum GenerationEvent: Sendable, Equatable {
     /// throttling — paused" hint while the loop blocks between tokens.
     /// `reason` is a short, human-readable string the UI may display verbatim.
     case diagnosticThrottle(reason: String)
+
+    /// Emitted by the orchestrator immediately before a model-emitted
+    /// ``ToolCall`` is dispatched through the registered ``ToolRegistry``.
+    ///
+    /// Fires after the corresponding ``toolCall(_:)`` event and before the
+    /// matching ``toolResult(_:)``, giving UI surfaces a precise "running"
+    /// boundary they can pin a spinner / start timer to without scraping
+    /// logs. `callId` matches ``ToolCall/id``; `name` is the tool name;
+    /// `attempt` is the 1-based dispatch attempt for this call (always `1`
+    /// today — reserved for future retry semantics).
+    case toolDispatchStarted(callId: String, name: String, attempt: Int)
+
+    /// Emitted by the orchestrator after a tool dispatch settles, regardless
+    /// of outcome.
+    ///
+    /// Fires after the matching ``toolResult(_:)`` event. `durationMs` is the
+    /// wall-clock dispatch latency in milliseconds (>= 0). `errorKind`
+    /// carries the failure classification when the dispatch produced an
+    /// error result and `nil` on success — its value matches the
+    /// ``ToolResult/errorKind`` of the `.toolResult` event with the same
+    /// `callId`.
+    case toolDispatchCompleted(callId: String, durationMs: Int, errorKind: ToolResult.ErrorKind?)
 }

@@ -83,6 +83,16 @@ final class GenerationCoordinator {
     /// its registry is never invoked. Tests must reset this in `tearDown`.
     nonisolated(unsafe) static var toolsUnsupportedWarningHook: (@Sendable (String, String) -> Void)?
 
+    /// Test-only hook invoked alongside `Log.inference.info` for each tool
+    /// dispatch lifecycle log line (`tool_dispatch_started` /
+    /// `tool_dispatch_completed`). Receives `(eventName, fields)` where
+    /// `fields` mirrors the structured fields of the OSLog message.
+    ///
+    /// Production callers never set this; it exists so unit tests can verify
+    /// the structured log output without standing up an OSLogStore reader.
+    /// Tests must reset it in `tearDown` to avoid cross-test leakage.
+    nonisolated(unsafe) static var toolDispatchLogHook: (@Sendable (String, [String: String]) -> Void)?
+
     // MARK: - Queue Types (Private)
 
     private struct QueuedRequest {
@@ -817,6 +827,27 @@ final class GenerationCoordinator {
                     // alongside the pending result.
                     self.continuations[request.token]?.yield(.toolCall(call))
 
+                    // Lifecycle: announce dispatch start so UI surfaces can
+                    // start a per-call timer / spinner without scraping the
+                    // log. `attempt` is reserved for future retry semantics
+                    // and pinned to 1 today (no per-call retry path exists).
+                    let dispatchAttempt = 1
+                    let dispatchStart = Date()
+                    self.continuations[request.token]?.yield(
+                        .toolDispatchStarted(callId: call.id, name: call.toolName, attempt: dispatchAttempt)
+                    )
+                    Log.inference.info(
+                        "tool_dispatch_started call_id=\(call.id, privacy: .public) name=\(call.toolName, privacy: .public) attempt=\(dispatchAttempt, privacy: .public)"
+                    )
+                    Self.toolDispatchLogHook?(
+                        "tool_dispatch_started",
+                        [
+                            "call_id": call.id,
+                            "name": call.toolName,
+                            "attempt": "\(dispatchAttempt)"
+                        ]
+                    )
+
                     let result: ToolResult
                     if let prev = lastCallSignature,
                        prev.toolName == call.toolName,
@@ -888,6 +919,31 @@ final class GenerationCoordinator {
                     // consumers thread `.toolResult` into the current
                     // assistant bubble before the next turn begins.
                     self.continuations[request.token]?.yield(.toolResult(result))
+
+                    // Lifecycle: announce dispatch completion. Fires after
+                    // `.toolResult` so consumers that switch on the lifecycle
+                    // pair see exactly one `.toolDispatchStarted` →
+                    // `.toolDispatchCompleted` per call. `errorKind` mirrors
+                    // the result's classification (nil on success).
+                    let dispatchDurationMs = max(0, Int(Date().timeIntervalSince(dispatchStart) * 1000))
+                    self.continuations[request.token]?.yield(
+                        .toolDispatchCompleted(
+                            callId: call.id,
+                            durationMs: dispatchDurationMs,
+                            errorKind: result.errorKind
+                        )
+                    )
+                    Log.inference.info(
+                        "tool_dispatch_completed call_id=\(call.id, privacy: .public) duration_ms=\(dispatchDurationMs, privacy: .public) error_kind=\(result.errorKind?.rawValue ?? "none", privacy: .public)"
+                    )
+                    Self.toolDispatchLogHook?(
+                        "tool_dispatch_completed",
+                        [
+                            "call_id": call.id,
+                            "duration_ms": "\(dispatchDurationMs)",
+                            "error_kind": result.errorKind?.rawValue ?? "none"
+                        ]
+                    )
 
                     // Cancellation contract (issue #622): when the user hits
                     // stop while a tool is in flight the dispatch path returns
