@@ -120,6 +120,39 @@ final class TurnHistoryCompressorTests: XCTestCase {
         XCTAssertTrue(out.summary.isEmpty)
     }
 
+    /// Folding operates at record granularity — a record with multiple
+    /// (call, result) pairs is always either kept verbatim or folded as a
+    /// unit. The orchestrator's loop never splits a call from its result,
+    /// because `TurnHistoryRecord` carries them in parallel arrays appended
+    /// atomically per round. This guards against regressing into a
+    /// per-call fold that would corrupt agent-loop tool pairing.
+    func test_multiCallRecord_callsAndResultsStayPaired() {
+        let multi = TurnHistoryRecord(
+            step: 1,
+            intermediateTokens: [],
+            toolCalls: [
+                ToolCall(id: "a", toolName: "weather", arguments: #"{"city":"Rome"}"#),
+                ToolCall(id: "b", toolName: "search", arguments: #"{"q":"swift"}"#),
+            ],
+            toolResults: [
+                ToolResult(callId: "a", content: String(repeating: "x", count: 200), errorKind: nil),
+                ToolResult(callId: "b", content: String(repeating: "y", count: 200), errorKind: nil),
+            ]
+        )
+        let tail = (2...3).map { record(step: $0, toolName: "t", args: "{}", result: "ok") }
+        let c = BudgetTurnHistoryCompressor(characterBudget: 50, preserveRecentTurns: 2)
+        let out = c.compress(records: [multi] + tail)
+
+        // The multi-call record was folded; both its calls are accounted for
+        // in the summary (totalCalls == 2) and neither leaked into the
+        // preserved suffix without its sibling.
+        XCTAssertEqual(out.foldedRecords.count, 1)
+        XCTAssertEqual(out.foldedRecords.first?.toolCalls.count, 2)
+        XCTAssertEqual(out.foldedRecords.first?.toolResults.count, 2)
+        XCTAssertTrue(out.summary.contains("2 tool calls"), "summary must report all calls in the folded round; got: \(out.summary)")
+        XCTAssertEqual(out.preservedRecords.count, 2)
+    }
+
     // MARK: - Orchestrator integration
 
     private struct ScriptedExecutor: ToolExecutor {

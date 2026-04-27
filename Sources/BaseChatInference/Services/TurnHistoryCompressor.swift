@@ -121,8 +121,8 @@ public struct CompressedTranscript: Sendable, Equatable {
 /// Implementations are ``Sendable`` so the orchestrator can hold one across
 /// async boundaries. The default in-tree implementation is
 /// ``BudgetTurnHistoryCompressor``; ``ToolCallLoopOrchestrator`` defaults to
-/// no compression (a `nil` policy) so existing callers see no behaviour
-/// change.
+/// ``NoOpTurnHistoryCompressor()`` for no compression so existing callers
+/// see no behaviour change.
 public protocol TurnHistoryCompressor: Sendable {
 
     /// Decides whether (and how) to fold older rounds.
@@ -292,7 +292,7 @@ public struct BudgetTurnHistoryCompressor: TurnHistoryCompressor {
 
 /// A compressor that never folds anything. Useful as a sentinel and as the
 /// implicit default when ``ToolCallLoopOrchestrator`` is constructed without
-/// a policy — existing callers see no behaviour change.
+/// a `compressor` argument — existing callers see no behaviour change.
 public struct NoOpTurnHistoryCompressor: TurnHistoryCompressor {
     public init() {}
     public func compress(records: [TurnHistoryRecord]) -> CompressedTranscript {

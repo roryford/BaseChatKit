@@ -242,9 +242,9 @@ public struct ToolCallLoopOrchestrator: Sendable {
     ///   - backend: The backend that produces tokens and tool calls.
     ///   - executor: Receives every dispatched call.
     ///   - policy: Loop bounds. Defaults to ``ToolCallLoopPolicy/init(maxSteps:perStepTimeout:loopDetectionWindow:)``.
-    ///   - compressor: Optional ``TurnHistoryCompressor`` invoked before each
-    ///     new generate round. Defaults to ``NoOpTurnHistoryCompressor`` so
-    ///     existing callers see no behaviour change.
+    ///   - compressor: ``TurnHistoryCompressor`` invoked before each new
+    ///     generate round. Defaults to ``NoOpTurnHistoryCompressor`` when
+    ///     omitted, so existing callers see no behaviour change.
     public init(
         backend: any InferenceBackend,
         executor: any ToolExecutor,
@@ -267,9 +267,9 @@ public struct ToolCallLoopOrchestrator: Sendable {
     ///   - backend: The backend that produces tokens and tool calls.
     ///   - registry: Multi-tool registry the orchestrator dispatches through.
     ///   - policy: Loop bounds. Defaults to ``ToolCallLoopPolicy/init(maxSteps:perStepTimeout:loopDetectionWindow:)``.
-    ///   - compressor: Optional ``TurnHistoryCompressor`` invoked before each
-    ///     new generate round. Defaults to ``NoOpTurnHistoryCompressor`` so
-    ///     existing callers see no behaviour change.
+    ///   - compressor: ``TurnHistoryCompressor`` invoked before each new
+    ///     generate round. Defaults to ``NoOpTurnHistoryCompressor`` when
+    ///     omitted, so existing callers see no behaviour change.
     public init(
         backend: any InferenceBackend,
         registry: ToolRegistry,
@@ -472,7 +472,7 @@ public struct ToolCallLoopOrchestrator: Sendable {
             // record list (after compression). This is a no-op for the
             // default ``NoOpTurnHistoryCompressor`` — `prompt` ends up
             // identical to the legacy `prompt + appendix` behaviour because
-            // ``Self.appendix(for:)`` produces the same `\n\nTool '<name>'
+            // the rebuilt prompt preserves the same `\n\nTool '<name>'
             // result: <content>\n` shape that callers depend on.
             records.append(TurnHistoryRecord(
                 step: step,
