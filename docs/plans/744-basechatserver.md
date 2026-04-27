@@ -135,12 +135,13 @@ Tests/
       ServerThroughputBaselines.swift              # XCTMeasure: TTFT, full-stream wall, parse+auth overhead
 ```
 
-`BaseChatServerCore` deps: `BaseChatInference`, `BaseChatTestSupport` (test only), `Hummingbird`. **No `BaseChatBackends` dep.**
-`BaseChatServer` deps: `BaseChatServerCore`, `BaseChatBackends`, `swift-argument-parser`.
+`BaseChatServerCore` deps: `BaseChatInference`, `Hummingbird`. **No `BaseChatBackends` dep.**
+`BaseChatServerCoreTests` deps: `BaseChatServerCore`, `BaseChatTestSupport` (for `MockInferenceBackend`, `MidStreamErrorBackend`, etc.), Hummingbird's `XCTHummingbird` test product.
+`BaseChatServer` (executable) deps: `BaseChatServerCore`, `BaseChatBackends`, `swift-argument-parser`.
 
 ## Wire mapping
 
-`GenerationEvent` → OpenAI SSE chunks. **Primary tool-call path is whole-call `.toolCall(_)`** — verified at `Sources/BaseChatBackends/MLXBackend.swift:62` (MLX, the only v1 backend that emits tool calls, emits whole calls; it does not set `streamsToolCallArguments`). Streamed-delta path is the (currently dead) Ollama / cloud expansion path.
+`GenerationEvent` → OpenAI SSE chunks. **Primary tool-call path is whole-call `.toolCall(_)`.** Among v1 backends, `MLXBackend` is the only one with `supportsToolCalling: true` (`LlamaBackend` and `FoundationBackend` both declare `supportsToolCalling: false`). MLX's `BackendCapabilities` literal at `Sources/BaseChatBackends/MLXBackend.swift:57` does not set `streamsToolCallArguments`, so it defaults to `false` and MLX emits whole calls. The streamed-delta path exists for Ollama / cloud (`OllamaBackend.swift:123`, `OpenAIBackend.swift:81`, `ClaudeBackend.swift:93`) and is exercised by the expansion path below — gated out of v1 by decision 7.
 
 | `GenerationEvent` case | OpenAI chunk |
 |---|---|
