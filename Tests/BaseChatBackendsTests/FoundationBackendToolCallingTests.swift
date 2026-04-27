@@ -73,6 +73,105 @@ final class FoundationBackendToolCallingTests: XCTestCase {
         XCTAssertNoThrow(try FoundationToolSchema.makeEnvelope(tools: [a, b]))
     }
 
+    /// A tool whose parameter spec uses `anyOf` cannot be honoured by
+    /// `DynamicGenerationSchema`. The mapper must throw with a clear keyword
+    /// name rather than silently degrade — silent degradation would let an
+    /// app register an `anyOf` tool and ship a model that can emit values the
+    /// host's tool executor will reject. The caller (FoundationBackend.generate)
+    /// catches this and falls back to text-only with a warning log.
+    func test_makeEnvelope_throws_onAnyOfKeyword() {
+        let badTool = ToolDefinition(
+            name: "search",
+            description: "Search.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "query": .object([
+                        "anyOf": .array([
+                            .object(["type": .string("string")]),
+                            .object(["type": .string("integer")]),
+                        ])
+                    ])
+                ]),
+            ])
+        )
+        XCTAssertThrowsError(try FoundationToolSchema.makeEnvelope(tools: [badTool])) { error in
+            guard case FoundationToolSchemaError.unsupportedKeyword(let keyword) = error else {
+                XCTFail("expected .unsupportedKeyword, got \(error)")
+                return
+            }
+            XCTAssertEqual(keyword, "anyOf")
+        }
+    }
+
+    /// `oneOf`, `$ref`, and `format` must also throw — the mapper is strict
+    /// by design about every structural alternative or reference keyword.
+    func test_makeEnvelope_throws_onEachUnsupportedKeyword() {
+        let cases: [(keyword: String, schema: JSONSchemaValue)] = [
+            ("oneOf", .object([
+                "type": .string("object"),
+                "oneOf": .array([.object(["type": .string("string")])]),
+            ])),
+            ("$ref", .object([
+                "type": .string("object"),
+                "$ref": .string("#/$defs/Other"),
+            ])),
+            ("format", .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "ts": .object([
+                        "type": .string("string"),
+                        "format": .string("date-time"),
+                    ])
+                ]),
+            ])),
+            ("const", .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "kind": .object([
+                        "type": .string("string"),
+                        "const": .string("event"),
+                    ])
+                ]),
+            ])),
+        ]
+        for (expected, schema) in cases {
+            let tool = ToolDefinition(name: "t", description: "", parameters: schema)
+            XCTAssertThrowsError(try FoundationToolSchema.makeEnvelope(tools: [tool])) { error in
+                guard case FoundationToolSchemaError.unsupportedKeyword(let keyword) = error else {
+                    XCTFail("[\(expected)] expected .unsupportedKeyword, got \(error)")
+                    return
+                }
+                XCTAssertEqual(keyword, expected)
+            }
+        }
+    }
+
+    /// A nullable type union (`type: ["string", "null"]`) must throw rather
+    /// than silently degrade to a plain string — the schema would otherwise
+    /// permit values the host's tool executor cannot decode.
+    func test_makeEnvelope_throws_onNullableTypeUnion() {
+        let tool = ToolDefinition(
+            name: "lookup",
+            description: "",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "key": .object([
+                        "type": .array([.string("string"), .string("null")])
+                    ])
+                ]),
+            ])
+        )
+        XCTAssertThrowsError(try FoundationToolSchema.makeEnvelope(tools: [tool])) { error in
+            guard case FoundationToolSchemaError.unsupportedKeyword(let keyword) = error else {
+                XCTFail("expected .unsupportedKeyword, got \(error)")
+                return
+            }
+            XCTAssertTrue(keyword.contains("type"), "expected keyword to mention 'type', got: \(keyword)")
+        }
+    }
+
     /// The instructions blurb must mention every tool by name so the model
     /// can pick a branch based on prose alone (the schema constrains shape but
     /// the system-prompt copy steers selection).

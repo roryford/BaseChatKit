@@ -112,9 +112,19 @@ enum FoundationToolSchema {
     /// Maps a ``JSONSchemaValue`` (JSON-Schema-shaped tool parameter spec) to
     /// Apple's `DynamicGenerationSchema`. Supports the subset of JSON-Schema
     /// the in-tree tools actually use: object/properties/required, primitive
-    /// types, arrays, enums, and nested objects. Anything outside that subset
-    /// throws — callers fall back to untooled generation rather than send the
-    /// model a half-broken schema.
+    /// types, arrays, enums (string), and nested objects. Anything outside
+    /// that subset throws — callers fall back to untooled generation rather
+    /// than send the model a half-broken schema.
+    ///
+    /// Strict-by-design: structural JSON-Schema constructs the on-device
+    /// `DynamicGenerationSchema` cannot honour (`anyOf`, `oneOf`, `allOf`,
+    /// `$ref`, type unions like `["string", "null"]`, `const`, `format`,
+    /// `pattern`) throw `unsupportedKeyword(_:)`. Validator-level constraints
+    /// the SDK has no way to enforce on a primitive type (`minLength`,
+    /// `maxLength`, `minimum`, `maximum`, `additionalProperties`) are
+    /// silently ignored — they don't change the *shape* of the generated
+    /// envelope, only the validation surface, and the model already produces
+    /// shape-correct output through GuidedGeneration.
     static func mapJSONSchema(
         _ value: JSONSchemaValue,
         name: String
@@ -123,6 +133,16 @@ enum FoundationToolSchema {
             // A non-object root spec is unusual in JSON-Schema-for-tools; treat
             // as an empty object so the model still has a name to bind against.
             return DynamicGenerationSchema(name: name, properties: [])
+        }
+
+        try rejectUnsupportedKeywords(dict)
+
+        // A nullable union (e.g. `type: ["string", "null"]`) cannot be honoured
+        // by `DynamicGenerationSchema(type:)` — caller must drop tool calling
+        // for this round rather than ship a schema that lets the model emit
+        // values the host's tool executor will then reject.
+        if case .array? = dict["type"] {
+            throw FoundationToolSchemaError.unsupportedKeyword("type (array union)")
         }
 
         let typeString = dict["type"].flatMap { v -> String? in
@@ -209,12 +229,41 @@ enum FoundationToolSchema {
 @available(iOS 26, macOS 26, *)
 enum FoundationToolSchemaError: Error, CustomStringConvertible {
     case unsupportedType(String)
+    /// A JSON-Schema construct (`anyOf`, `oneOf`, `allOf`, `$ref`, etc.) that
+    /// `DynamicGenerationSchema` cannot honour. Surfaces the keyword name so
+    /// the warning log explains why tool calling fell back.
+    case unsupportedKeyword(String)
 
     var description: String {
         switch self {
         case .unsupportedType(let t):
             return "FoundationToolSchema: unsupported JSON-Schema type '\(t)' — falling back to untooled generation."
+        case .unsupportedKeyword(let k):
+            return "FoundationToolSchema: unsupported JSON-Schema keyword '\(k)' — falling back to untooled generation. " +
+                   "DynamicGenerationSchema does not support structural alternatives or references; rewrite the tool's parameter schema to a closed shape."
         }
+    }
+}
+
+/// Keywords this mapper rejects up-front. Any tool spec containing one of
+/// these — at any nesting depth — falls back to untooled generation. Listed
+/// here so the rejection logic stays auditable in one place.
+@available(iOS 26, macOS 26, *)
+private let unsupportedJSONSchemaKeywords: Set<String> = [
+    "anyOf", "oneOf", "allOf", "not",  // structural alternatives
+    "$ref", "$defs", "definitions",     // schema references
+    "const",                            // fixed-value constraint
+    "format", "pattern",                // string-validator constraints
+    "if", "then", "else",               // conditional schemas
+    "dependentRequired", "dependentSchemas", "dependencies",
+    "patternProperties", "propertyNames", "unevaluatedProperties",
+    "prefixItems", "contains", "unevaluatedItems",
+]
+
+@available(iOS 26, macOS 26, *)
+private func rejectUnsupportedKeywords(_ dict: [String: JSONSchemaValue]) throws {
+    for keyword in unsupportedJSONSchemaKeywords where dict[keyword] != nil {
+        throw FoundationToolSchemaError.unsupportedKeyword(keyword)
     }
 }
 
