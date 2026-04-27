@@ -380,6 +380,11 @@ final class GenerationCoordinator {
                                 self.onMutateMessage(messageID) { msg in
                                     Self.writeThinkingPartialText(displayed, into: &msg)
                                 }
+                                if consumer.shouldStopForLoop(content: thinkingAccumulator) {
+                                    self.inferenceService.stopGeneration()
+                                    self.onSetErrorMessage("Generation stopped: the model appears to be looping in its reasoning.")
+                                    break eventLoop
+                                }
                             }
 
                         case .recordThinkingSignature(let signature):
