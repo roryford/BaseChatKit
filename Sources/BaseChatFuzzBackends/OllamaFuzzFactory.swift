@@ -28,18 +28,16 @@ public struct OllamaFuzzFactory: FuzzBackendFactory {
     }
 
     public func makeHandle() async throws -> FuzzRunner.BackendHandle {
+        // Single `/api/tags` round-trip per iteration: select from the
+        // already-fetched list rather than re-querying via
+        // `HardwareRequirements.findOllamaModel`, which would hit the endpoint
+        // again. In rotation mode this halves the per-iteration request count.
         guard let models = HardwareRequirements.listOllamaModels() else {
             throw FuzzBackendFactoryError(
                 "No Ollama server reachable at \(baseURL.absoluteString). Start with: ollama serve"
             )
         }
-        let model: String?
-        if let hint = Self.normalizedModelHint(modelHint) {
-            model = HardwareRequirements.findOllamaModel(nameContains: hint, environment: environment)
-        } else {
-            model = HardwareRequirements.findOllamaModel(environment: environment) ?? models.first
-        }
-        guard let model else {
+        guard let model = Self.selectModel(from: models, modelHint: modelHint, environment: environment) else {
             throw FuzzBackendFactoryError(
                 "No Ollama model installed. Pull one with: ollama pull qwen3.5:4b"
             )
@@ -100,6 +98,36 @@ public struct OllamaFuzzFactory: FuzzBackendFactory {
         guard !modelHint.isEmpty else { return nil }
         guard modelHint.lowercased() != "all" else { return nil }
         return modelHint
+    }
+
+    /// Selects an Ollama model from a pre-fetched name list, applying the same
+    /// precedence as the per-call helpers in `HardwareRequirements`:
+    /// 1. explicit `modelHint` (substring match, case-insensitive)
+    /// 2. `OLLAMA_TEST_MODEL` env override (substring match)
+    /// 3. first model in the list (rotation deterministically pins one model
+    ///    per child factory, so `models.first` is the desired pinned name)
+    static func selectModel(
+        from models: [String],
+        modelHint: String?,
+        environment: [String: String]
+    ) -> String? {
+        if let hint = normalizedModelHint(modelHint),
+           let match = matchModel(in: models, query: hint) {
+            return match
+        }
+        if let override = normalizedModelHint(environment["OLLAMA_TEST_MODEL"]),
+           let match = matchModel(in: models, query: override) {
+            return match
+        }
+        return models.first
+    }
+
+    private static func matchModel(in models: [String], query: String) -> String? {
+        if let exact = models.first(where: { $0.caseInsensitiveCompare(query) == .orderedSame }) {
+            return exact
+        }
+        let lowered = query.lowercased()
+        return models.first { $0.lowercased().contains(lowered) }
     }
 }
 #endif

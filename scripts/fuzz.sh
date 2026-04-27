@@ -191,7 +191,12 @@ if [[ $WITH_MLX -eq 1 ]]; then
     echo "  Running MLX XCTest fuzz suite"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    mapfile -t MLX_ENV < <(build_mlx_env "${FORWARDED_ARGS[@]+"${FORWARDED_ARGS[@]}"}")
+    # bash-3.2 compatible read loop (macOS still ships bash 3.2 by default;
+    # `mapfile` is bash 4+ only).
+    MLX_ENV=()
+    while IFS= read -r line; do
+        MLX_ENV+=("$line")
+    done < <(build_mlx_env "${FORWARDED_ARGS[@]+"${FORWARDED_ARGS[@]}"}")
     set +e
     env "${MLX_ENV[@]}" xcodebuild test \
         -scheme BaseChatKit-Package \

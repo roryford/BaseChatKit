@@ -114,6 +114,13 @@ final class MLXFuzzTests: XCTestCase {
         guard let value = Int(raw) else {
             throw ConfigurationError(message: "\(key) must be an integer (got: \(raw))")
         }
+        // Reject non-positive durations/iterations so we don't end up with a
+        // deadline that fires before the first iteration runs (FuzzRunner's
+        // `now >= deadline` check would otherwise terminate the campaign with
+        // zero runs, contradicting the "at least one run" assertion below).
+        guard value > 0 else {
+            throw ConfigurationError(message: "\(key) must be a positive integer (got: \(raw))")
+        }
         return value
     }
 
