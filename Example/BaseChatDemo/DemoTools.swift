@@ -22,7 +22,7 @@ enum DemoTools {
         "list_dir",
         "sample_repo_search",
         "write_file"
-    ]
+    ] + FailureDemoTools.names
 
     /// Registers the full reference toolset on `registry`.
     ///
@@ -45,6 +45,7 @@ enum DemoTools {
         registry.register(ListDirTool.makeExecutor(root: root))
         registry.register(SampleRepoSearchTool.makeExecutor(root: root))
         registry.register(WriteFileTool.makeExecutor(root: root))
+        FailureDemoTools.register(on: registry)
     }
 
     /// Restores `registry` to the baseline tool set.

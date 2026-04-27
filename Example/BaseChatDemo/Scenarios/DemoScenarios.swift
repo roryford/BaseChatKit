@@ -52,8 +52,52 @@ enum DemoScenarios {
         configure: nil
     )
 
+    static let invalidArgsRecover = DemoScenario(
+        id: "invalid-args-recover",
+        title: "Recover from bad args",
+        blurb: "Tempts a divide-by-zero. The tool returns invalidArguments and the model retries with corrected inputs.",
+        systemImage: "exclamationmark.arrow.triangle.2.circlepath",
+        prompt: "Use the calculator to divide 100 by 0, then try a similar division you can actually answer.",
+        expectedTools: ["calc"],
+        autoSend: true,
+        accessibilityID: "demo-card-invalid-args-recover",
+        configure: nil
+    )
+
+    static let rateLimitedRetry = DemoScenario(
+        id: "rate-limited-retry",
+        title: "Retry through a rate limit",
+        blurb: "First call returns rateLimited; the model sees the error and retries the same call within one turn.",
+        systemImage: "hourglass.tophalf.filled",
+        prompt: "Use fakeRateLimited to look up 'BaseChatKit' and report the result it returns.",
+        expectedTools: ["fakeRateLimited"],
+        autoSend: true,
+        accessibilityID: "demo-card-rate-limited-retry",
+        configure: nil
+    )
+
+    static let mcpToolFailure = DemoScenario(
+        id: "mcp-tool-failure",
+        title: "Surface an MCP failure",
+        blurb: "An MCP-style tool fails transiently. The model receives the error and tells the user what went wrong.",
+        systemImage: "bolt.horizontal.icloud",
+        prompt: "Call fakeMCPLookup for the path '/projects/scout' and tell me what happened.",
+        expectedTools: ["fakeMCPLookup"],
+        autoSend: true,
+        accessibilityID: "demo-card-mcp-tool-failure",
+        configure: nil
+    )
+
     /// Order matches card display order on the empty state.
-    static let all: [DemoScenario] = [tipCalc, worldClock, workspaceSearch, journalWrite]
+    static let all: [DemoScenario] = [
+        tipCalc,
+        worldClock,
+        workspaceSearch,
+        journalWrite,
+        invalidArgsRecover,
+        rateLimitedRetry,
+        mcpToolFailure
+    ]
 
     static func scenario(id: String) -> DemoScenario? {
         all.first { $0.id == id }

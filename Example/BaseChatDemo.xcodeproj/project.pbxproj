@@ -32,6 +32,7 @@
 		BF1008000000000000000000 /* AppIntentUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11009000000000000000000 /* AppIntentUITests.swift */; };
 		BF1009000000000000000000 /* DemoScenarioUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11010000000000000000000 /* DemoScenarioUITests.swift */; };
 		BF0014000000000000000000 /* WriteFileTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10012000000000000000000 /* WriteFileTool.swift */; };
+		BF0040000000000000000000 /* FailureDemoTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10040000000000000000000 /* FailureDemoTools.swift */; };
 		BF0015000000000000000000 /* DemoScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10013000000000000000000 /* DemoScenario.swift */; };
 		BF0016000000000000000000 /* DemoScenarios.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10014000000000000000000 /* DemoScenarios.swift */; };
 		BF0017000000000000000000 /* DemoScenarios+Scripts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10015000000000000000000 /* DemoScenarios+Scripts.swift */; };
@@ -102,6 +103,7 @@
 		F11009000000000000000000 /* AppIntentUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentUITests.swift; sourceTree = "<group>"; };
 		F11010000000000000000000 /* DemoScenarioUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoScenarioUITests.swift; sourceTree = "<group>"; };
 		F10012000000000000000000 /* WriteFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WriteFileTool.swift; sourceTree = "<group>"; };
+		F10040000000000000000000 /* FailureDemoTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailureDemoTools.swift; sourceTree = "<group>"; };
 		F10013000000000000000000 /* DemoScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenario.swift; sourceTree = "<group>"; };
 		F10014000000000000000000 /* DemoScenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios/DemoScenarios.swift; sourceTree = "<group>"; };
 		F10015000000000000000000 /* DemoScenarios+Scripts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Scenarios/DemoScenarios+Scripts.swift"; sourceTree = "<group>"; };
@@ -205,6 +207,7 @@
 				F10011000000000000000000 /* BaseChatDemo.entitlements */,
 				F10021000000000000000000 /* Info.plist */,
 				F10012000000000000000000 /* WriteFileTool.swift */,
+				F10040000000000000000000 /* FailureDemoTools.swift */,
 				F10013000000000000000000 /* DemoScenario.swift */,
 				F10014000000000000000000 /* DemoScenarios.swift */,
 				F10015000000000000000000 /* DemoScenarios+Scripts.swift */,
