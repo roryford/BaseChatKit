@@ -434,6 +434,11 @@ See the [Security Model](Sources/BaseChatCore/BaseChatCore.docc/Articles/Securit
 - Sensitive data uses `privacy: .private` in os.Logger calls
 - Error response bodies filtered before logging
 
+For regulated-deployment evaluation (healthcare, federal-adjacent, finance),
+see [docs/FIPS.md](docs/FIPS.md) — the honest answer to "are your cryptographic
+primitives FIPS 140-3 validated?", with a complete inventory of the crypto
+primitives BCK invokes and where the validation boundary actually sits.
+
 ## Binary Dependencies
 
 `BaseChatBackends` includes two pre-built binary xcframeworks:
