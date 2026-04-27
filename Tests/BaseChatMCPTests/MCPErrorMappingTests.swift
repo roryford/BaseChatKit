@@ -126,33 +126,54 @@ final class MCPErrorMappingTests: XCTestCase {
 
     /// Forces a compile error if a new MCPError case is added without updating
     /// the mapping tests. Mirrors the exhaustive switch in MCPErrorMapping.swift.
+    ///
+    /// The switch has no `default:` clause, so adding a new ``MCPError`` case
+    /// breaks compilation here until a corresponding `errorKind(for:)` call is
+    /// added — the same compile-time pressure the production mapper relies on.
     func test_exhaustiveCaseCoverage_compileTimeMarker() {
-        let allCases: [MCPError] = [
-            .transportClosed,
-            .transportFailure(""),
-            .protocolError(code: 0, message: "", data: nil),
-            .requestTimeout,
-            .unsupportedProtocolVersion(server: "", client: ""),
-            .authorizationRequired(MCPAuthorizationRequest(serverID: UUID())),
-            .authorizationFailed(""),
-            .dcrFailed(""),
-            .malformedMetadata(""),
-            .issuerMismatch(expected: URL(string: "https://a")!, actual: URL(string: "https://b")!),
-            .ssrfBlocked(URL(string: "https://c")!),
-            .tooManyTools(0),
-            .toolNotFound(""),
-            .oversizeContent(0),
-            .oversizeMessage(0),
-            .networkUnavailable,
-            .unauthorized,
-            .failed(""),
-            .backgroundedDuringDispatch,
-            .cancelled
-        ]
-        for error in allCases {
-            // Just confirm the function returns a value for every case.
-            _ = errorKind(for: error)
+        let error: MCPError = .transportClosed
+
+        switch error {
+        case .transportClosed:
+            _ = errorKind(for: .transportClosed)
+        case .transportFailure(let message):
+            _ = errorKind(for: .transportFailure(message))
+        case .protocolError(let code, let message, let data):
+            _ = errorKind(for: .protocolError(code: code, message: message, data: data))
+        case .requestTimeout:
+            _ = errorKind(for: .requestTimeout)
+        case .unsupportedProtocolVersion(let server, let client):
+            _ = errorKind(for: .unsupportedProtocolVersion(server: server, client: client))
+        case .authorizationRequired(let request):
+            _ = errorKind(for: .authorizationRequired(request))
+        case .authorizationFailed(let reason):
+            _ = errorKind(for: .authorizationFailed(reason))
+        case .dcrFailed(let reason):
+            _ = errorKind(for: .dcrFailed(reason))
+        case .malformedMetadata(let reason):
+            _ = errorKind(for: .malformedMetadata(reason))
+        case .issuerMismatch(let expected, let actual):
+            _ = errorKind(for: .issuerMismatch(expected: expected, actual: actual))
+        case .ssrfBlocked(let url):
+            _ = errorKind(for: .ssrfBlocked(url))
+        case .tooManyTools(let count):
+            _ = errorKind(for: .tooManyTools(count))
+        case .toolNotFound(let toolName):
+            _ = errorKind(for: .toolNotFound(toolName))
+        case .oversizeContent(let size):
+            _ = errorKind(for: .oversizeContent(size))
+        case .oversizeMessage(let size):
+            _ = errorKind(for: .oversizeMessage(size))
+        case .networkUnavailable:
+            _ = errorKind(for: .networkUnavailable)
+        case .unauthorized:
+            _ = errorKind(for: .unauthorized)
+        case .failed(let reason):
+            _ = errorKind(for: .failed(reason))
+        case .backgroundedDuringDispatch:
+            _ = errorKind(for: .backgroundedDuringDispatch)
+        case .cancelled:
+            _ = errorKind(for: .cancelled)
         }
-        XCTAssertEqual(allCases.count, 20)
     }
 }
