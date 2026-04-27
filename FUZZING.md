@@ -51,6 +51,7 @@ Common flags:
 | `--model <substr>` | Pin to the first installed Ollama model containing `<substr>`. Pass `all` (or omit) to rotate through every installed Ollama model, one per iteration — see [Rotation](#rotation). |
 | `--detector <ids>` | Comma-separated detector IDs to enable. |
 | `--quiet` | Suppress the per-iteration log line. |
+| `--tools` | Inject `SyntheticToolset` so tool-aware backends have something to call. Pairs with `tool-call-validity` ([#627](https://github.com/roryford/BaseChatKit/issues/627)). |
 
 ---
 
@@ -129,13 +130,14 @@ Findings are deduplicated by `<hash>` — the same bug surfaced twice in one run
 
 ## Day-One Detectors
 
-Three detectors ship with the v1 harness. All are classified `flaky` until a calibration corpus rules out false positives on known-good outputs.
+Four detectors ship with the v1 harness. Most sub-checks are classified `flaky` until a calibration corpus rules out false positives on known-good outputs; two zero-FP-by-construction transcript invariants under `tool-call-validity` (`id-reuse` and `orphan-result`) ship `confirmed`.
 
 | ID | Sub-checks | Inspiration |
 |----|-----------|-------------|
 | `thinking-classification` | 4 | df94418 — `<think>...</think>` reasoning blocks were leaking into visible MLX/Llama output. |
 | `looping` | 2 | qwen3.5:4b on Ollama — model gets stuck repeating phrases inside `<think>` blocks until max-tokens. |
 | `empty-output-after-work` | `silent-empty` | [#487](https://github.com/roryford/BaseChatKit/issues/487) — `OllamaBackend.extractToken` drops the `thinking` field for reasoning models, leaving the user with a long compute and an empty assistant bubble. The headline first-day discovery. |
+| `tool-call-validity` | 5 (`malformed-json-args`, `schema-violation`, `id-reuse`, `orphan-result`, `toolchoice-violation`) | [#627](https://github.com/roryford/BaseChatKit/issues/627) — tool-call correctness is the most fragile piece of any real integration. Activates when `--tools` is set or `RunRecord.toolCalls` is non-empty; reuses `JSONSchemaValidator`. `id-reuse` and `orphan-result` ship `confirmed` (zero-FP-by-construction transcript invariants); `malformed-json-args`, `schema-violation`, `toolchoice-violation` ship `flaky` pending corpus calibration under [#488](https://github.com/roryford/BaseChatKit/issues/488). |
 
 The remaining seven detectors and the calibration corpus are tracked as follow-up issues — see [Known Gaps](#known-gaps).
 

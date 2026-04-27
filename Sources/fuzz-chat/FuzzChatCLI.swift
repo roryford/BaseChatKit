@@ -30,6 +30,7 @@ struct FuzzChatCLI {
         var force = false
         var sessionScripts = false
         var corpusSubset: Corpus.Subset = .full
+        var tools = false
 
         var i = argv.startIndex
         while i < argv.endIndex {
@@ -85,6 +86,8 @@ struct FuzzChatCLI {
                 force = true
             case "--session-scripts":
                 sessionScripts = true
+            case "--tools":
+                tools = true
             case "--corpus-subset":
                 i = argv.index(after: i)
                 guard i < argv.endIndex else { fail("--corpus-subset requires a value (full|smoke)") }
@@ -185,7 +188,8 @@ struct FuzzChatCLI {
             calibrate: false,
             quiet: quiet,
             sessionScripts: sessionScripts,
-            corpusSubset: corpusSubset
+            corpusSubset: corpusSubset,
+            tools: tools
         )
 
         let reporter = TerminalReporter(quiet: quiet)
@@ -394,6 +398,9 @@ struct FuzzChatCLI {
             "  --session-scripts   drive bundled multi-turn SessionScripts via",
             "                      InferenceService.enqueue (opt-in for this PR;",
             "                      exercises queue, cancellation, session scoping).",
+            "  --tools             inject `SyntheticToolset` so tool-aware backends",
+            "                      have something to call. Pairs with the",
+            "                      tool-call-validity detector (#627).",
             "  --corpus-subset full|smoke  default: full.",
             "                      `smoke` loads the small deterministic seed set",
             "                      used by the PR-tier CI fuzz job.",
