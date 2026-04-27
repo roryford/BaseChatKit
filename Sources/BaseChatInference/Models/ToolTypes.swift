@@ -182,24 +182,61 @@ public struct ToolResult: Sendable, Codable, Equatable, Hashable {
     /// the failure so backends, orchestrators, and UI surfaces can decide whether
     /// to retry, surface a permission prompt, feed the error back to the model,
     /// or abort the loop. The string raw values are stable on the wire.
+    ///
+    /// ## Vocabulary freeze (1.0)
+    ///
+    /// All nine cases below are locked for the 1.0 release. Do not add, remove,
+    /// or rename cases without a BREAKING CHANGE commit footer — the raw values
+    /// are persisted and transmitted on the wire.
+    ///
+    /// ### Retryability distinctions
+    ///
+    /// - ``transient`` vs ``cancelled``: `.cancelled` means the user or system
+    ///   *explicitly stopped* the call — the model should not retry because
+    ///   cancellation was intentional. `.transient` means the tool infrastructure
+    ///   encountered a recoverable glitch (network blip, transient overload) and
+    ///   the model *may* retry the same call with the same arguments.
+    ///
+    /// - ``transient`` vs ``permanent``: `.permanent` means the failure is
+    ///   structural — retrying with the same inputs will not help (e.g., a
+    ///   configuration error, an unsupported operation). `.transient` is its
+    ///   retry-eligible counterpart for ephemeral infrastructure failures.
+    ///
+    /// ### Dispatch vs runtime distinctions
+    ///
+    /// - ``unknownTool`` vs ``notFound``: `.unknownTool` is a *dispatch-time*
+    ///   failure — no registered executor matched the call name, so the tool
+    ///   never ran. `.notFound` is a *runtime* failure — the executor ran but the
+    ///   resource it looked for (file, record, URL) did not exist.
     public enum ErrorKind: String, Sendable, Codable, Equatable, Hashable {
         /// Arguments did not parse as JSON or failed schema validation.
+        /// Indicates a model-side formatting error; feeding the error back lets
+        /// the model self-correct on the next turn.
         case invalidArguments
         /// The caller lacks permission to run the tool (user denied, missing scope).
+        /// Surface a permission prompt rather than retrying silently.
         case permissionDenied
-        /// A resource referenced by the tool (file, record, URL) does not exist.
+        /// The executor ran but a resource it needed (file, record, URL) was absent.
+        /// Distinct from ``unknownTool``, which fires before execution begins.
         case notFound
         /// The tool exceeded its time budget.
+        /// May be retried if the operation can be made faster or if the budget can be widened.
         case timeout
         /// The tool or an underlying service applied back-pressure.
+        /// Retry after a back-off delay; do not change the arguments.
         case rateLimited
-        /// The tool execution was cancelled by the caller.
+        /// The call was explicitly stopped by the user or system before it completed.
+        /// The model should not retry — cancellation was intentional, not a glitch.
         case cancelled
-        /// A transient failure — safe to retry without changing inputs.
+        /// A recoverable infrastructure failure (network blip, transient overload).
+        /// The model may retry the same call with the same arguments unchanged.
+        /// Distinct from ``cancelled`` (explicit stop) and ``permanent`` (structural failure).
         case transient
-        /// A permanent failure — retrying with the same inputs will not help.
+        /// A structural failure that retrying with the same inputs will not fix.
+        /// Report the error to the user; do not loop. Distinct from ``transient``.
         case permanent
-        /// The tool name did not match any registered executor.
+        /// No registered executor matched the call name — dispatch failed before execution.
+        /// Distinct from ``notFound``, which fires inside a running executor.
         case unknownTool
     }
 
