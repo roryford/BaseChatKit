@@ -49,9 +49,12 @@ public struct ToolCallValidityDetector: Detector {
         var findings: [Finding] = []
 
         // Index definitions by name so schema validation is O(calls) rather
-        // than O(calls × defs).
+        // than O(calls × defs). Replayed or hand-edited records can carry
+        // duplicate names; build the lookup non-trappingly and keep the first
+        // definition on collision so the detector can never crash a fuzz run.
         let definitionsByName: [String: ToolDefinition] = Dictionary(
-            uniqueKeysWithValues: r.toolDefinitions.map { ($0.name, $0) }
+            r.toolDefinitions.map { ($0.name, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
 
         var seenIds: Set<String> = []
@@ -137,6 +140,12 @@ public struct ToolCallValidityDetector: Detector {
         }
         if choice.hasPrefix("tool:") {
             let required = String(choice.dropFirst("tool:".count))
+            // Forced-tool with zero calls is a violation: a backend that
+            // ignores the forced selection would otherwise look clean to
+            // this sub-check.
+            if calls.isEmpty {
+                return "toolChoice=tool(\(required)) produced zero calls"
+            }
             let mismatched = calls.filter { $0.toolName != required }
             if !mismatched.isEmpty {
                 let names = mismatched.map(\.toolName).joined(separator: ",")

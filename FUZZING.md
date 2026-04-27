@@ -130,7 +130,7 @@ Findings are deduplicated by `<hash>` — the same bug surfaced twice in one run
 
 ## Day-One Detectors
 
-Three detectors ship with the v1 harness. All are classified `flaky` until a calibration corpus rules out false positives on known-good outputs.
+Four detectors ship with the v1 harness. Most sub-checks are classified `flaky` until a calibration corpus rules out false positives on known-good outputs; two zero-FP-by-construction transcript invariants under `tool-call-validity` (`id-reuse` and `orphan-result`) ship `confirmed`.
 
 | ID | Sub-checks | Inspiration |
 |----|-----------|-------------|

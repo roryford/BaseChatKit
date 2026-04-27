@@ -145,6 +145,29 @@ final class ToolCallValidityDetectorTests: XCTestCase {
         XCTAssertTrue(findings.contains { $0.subCheck == "toolchoice-violation" })
     }
 
+    func test_toolchoiceViolation_fires_whenForcedToolProducesZeroCalls() {
+        // A backend that silently drops a forced-tool selection must not look
+        // clean to this sub-check.
+        let r = makeRecord(toolCalls: [], toolChoice: "tool:get_weather")
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertTrue(findings.contains { $0.subCheck == "toolchoice-violation" },
+                      "expected toolchoice-violation for forced tool with zero calls")
+    }
+
+    func test_duplicateToolDefinitions_doNotTrap() {
+        // Replayed/hand-edited records can carry duplicate tool names; the
+        // detector must tolerate them rather than crashing the fuzz run.
+        let dup = SyntheticToolset.definitions + SyntheticToolset.definitions
+        let r = makeRecord(
+            toolCalls: [
+                ToolCall(id: "c1", toolName: "get_weather", arguments: #"{"city":"London","units":"metric"}"#)
+            ],
+            toolDefinitions: dup
+        )
+        let findings = ToolCallValidityDetector().inspect(r)
+        XCTAssertEqual(findings, [], "duplicate tool defs must not produce findings on a clean call")
+    }
+
     func test_toolchoiceViolation_fires_whenToolNameMismatch() {
         let r = makeRecord(
             toolCalls: [
