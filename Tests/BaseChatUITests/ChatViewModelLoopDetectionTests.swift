@@ -61,6 +61,34 @@ final class ChatViewModelLoopDetectionTests: XCTestCase {
         XCTAssertNil(vm.errorMessage, "No error should be set when loop detection is disabled")
     }
 
+    // MARK: - Thinking buffer loop detection (unit test on consumer)
+
+    /// Verifies that `shouldStopForLoop` fires on `thinkingAccumulator` content,
+    /// mirroring the guard that already exists for the visible-text accumulator.
+    /// Caught by fuzz finding 748815b0da2e (qwen3.5:4b, looping/thinking-loop).
+    func test_thinkingAccumulator_loopDetection_firesOnRepetitiveContent() {
+        var consumer = GenerationStreamConsumer(loopDetectionEnabled: true)
+
+        // Build a repetitive thinking accumulator: a 25-char phrase repeated 12 times
+        // gives 300 chars, well above the 100-char 2x-detection threshold.
+        let chunk = "This is a thinking loop. "
+        let thinkingAccumulator = String(repeating: chunk, count: 12)
+
+        // Sabotage check: with loopDetectionEnabled=false the guard must NOT fire.
+        consumer.loopDetectionEnabled = false
+        XCTAssertFalse(
+            consumer.shouldStopForLoop(content: thinkingAccumulator),
+            "shouldStopForLoop must return false when loop detection is disabled"
+        )
+
+        // Real assertion: with detection enabled the repetitive content must trip the guard.
+        consumer.loopDetectionEnabled = true
+        XCTAssertTrue(
+            consumer.shouldStopForLoop(content: thinkingAccumulator),
+            "shouldStopForLoop must return true for repetitive thinking content"
+        )
+    }
+
     // MARK: - Normal output not stopped
 
     func test_normalOutput_completesWithoutStopping() async {
