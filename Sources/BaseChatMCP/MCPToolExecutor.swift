@@ -69,7 +69,7 @@ public final class MCPToolExecutor: ToolExecutor, @unchecked Sendable {
             return ToolResult(
                 callId: "",
                 content: Self.sanitize(Self.message(for: error)),
-                errorKind: Self.errorKind(for: error)
+                errorKind: errorKind(for: error)
             )
         } catch {
             return ToolResult(callId: "", content: Self.sanitize(error.localizedDescription), errorKind: .permanent)
@@ -107,32 +107,6 @@ public final class MCPToolExecutor: ToolExecutor, @unchecked Sendable {
             if text.isEmpty == false { return text }
         }
         return jsonString(from: value)
-    }
-
-    private static func errorKind(for error: MCPError) -> ToolResult.ErrorKind {
-        switch error {
-        case .toolNotFound:
-            return .unknownTool
-        case .requestTimeout:
-            return .timeout
-        case .cancelled:
-            return .cancelled
-        case .authorizationRequired, .authorizationFailed, .unauthorized:
-            return .permissionDenied
-        case .transportClosed, .transportFailure, .networkUnavailable, .backgroundedDuringDispatch:
-            return .transient
-        case .protocolError(let code, _, _):
-            switch code {
-            case -32601:
-                return .unknownTool
-            case -32602:
-                return .invalidArguments
-            default:
-                return .permanent
-            }
-        default:
-            return .permanent
-        }
     }
 
     private static func message(for error: MCPError) -> String {
