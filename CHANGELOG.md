@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/roryford/BaseChatKit/compare/v0.13.0...v0.13.1) (2026-04-27)
+
+
+### Features
+
+* audit follow-ups — tool-spill action ([#846](https://github.com/roryford/BaseChatKit/issues/846)) + governance fixes ([#833](https://github.com/roryford/BaseChatKit/issues/833)) ([#859](https://github.com/roryford/BaseChatKit/issues/859)) ([45476a8](https://github.com/roryford/BaseChatKit/commit/45476a81fb139f0d5c397e352bdbc16f2cc9c99a))
+
 ## [0.13.0](https://github.com/roryford/BaseChatKit/compare/v0.12.5...v0.13.0) (2026-04-27)
 
 ### Highlights
