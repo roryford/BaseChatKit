@@ -82,9 +82,17 @@ jobs:
       # other two legs are build+audit only. Splitting this out keeps the
       # matrix readable and avoids running tests on `full` (already covered
       # by the per-PR ci.yml suite once MLX/Llama traits are present).
+      # `--skip-update` was previously passed here but produced
+      # `unable to read tree <sha>` failures when the SwiftPM cache was
+      # restored against a stale repository pack (upstream `mattt/llama.swift`
+      # retags between releases — `from: 2.8772.0` legitimately resolves to
+      # whatever tip of >=2.8772.0 currently exists, and the cached repo
+      # doesn't always have the new revision pack). The flag is also
+      # deprecated in current SwiftPM. Dropping it costs ~1s of `git fetch`
+      # and is the documented escape hatch.
       - name: Test [saas] — BaseChatBackends with CloudSaaS only
         if: matrix.mode == 'saas'
-        run: scripts/test.sh --filter BaseChatBackendsTests --disable-default-traits --traits CloudSaaS --skip-update
+        run: scripts/test.sh --filter BaseChatBackendsTests --disable-default-traits --traits CloudSaaS
 
       - name: Build + audit [${{ matrix.mode }}]
         env:

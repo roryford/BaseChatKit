@@ -217,8 +217,10 @@ audit_mode() {
 
         # otool -L ban list — currently empty, but the loop is wired up so
         # adding entries to OFFLINE_BANNED_DYLIBS later doesn't need code
-        # changes here.
-        for dylib in "${OFFLINE_BANNED_DYLIBS[@]}"; do
+        # changes here. The `${arr[@]+"${arr[@]}"}` form is the canonical
+        # bash-3.2-safe expansion for a possibly-empty array under `set -u`
+        # (macOS still ships bash 3.2 by default).
+        for dylib in ${OFFLINE_BANNED_DYLIBS[@]+"${OFFLINE_BANNED_DYLIBS[@]}"}; do
           if grep -Fq "$dylib" "$otool_out"; then
             echo "::error::build-modes audit [offline]: banned dylib '$dylib' linked"
             audit_failures=$((audit_failures + 1))
