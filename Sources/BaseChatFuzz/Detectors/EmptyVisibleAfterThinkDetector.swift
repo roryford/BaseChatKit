@@ -6,11 +6,10 @@ import Foundation
 /// `EmptyOutputAfterWorkDetector`: the model *did* produce raw tokens and
 /// *did* produce thinking, but the visible rendering is empty.
 ///
-/// Today's `rendered` field holds only the user-visible portion of the stream
-/// (no `<think>` blocks). It is doc-comment-deprecated in favour of a future
-/// "real UI-transform rendering" path; until that path ships, `rendered` is
-/// the only field that tracks the visible-only output, so this detector
-/// continues to read it rather than `raw` (which includes thinking tokens).
+/// `rendered` holds the user-visible portion of the stream after the real
+/// UI transform pipeline (#543). It is the right field to read for this
+/// detector — `raw` would include `<think>` markers and inline syntax that
+/// the user never actually sees as glyphs.
 ///
 /// Ships at `.flaky` severity. Promotion to `.confirmed` requires the
 /// calibration corpus + FP/TP gating planned in W2.C phase 2.

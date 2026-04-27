@@ -243,7 +243,7 @@ public actor FuzzRunner {
             ),
             events: capture.events,
             raw: capture.raw,
-            rendered: capture.raw,
+            rendered: MarkdownRendering.renderToVisibleString(capture.raw),
             thinkingRaw: capture.thinkingRaw,
             thinkingParts: capture.thinkingParts,
             thinkingCompleteCount: capture.thinkingCompleteCount,

@@ -19,24 +19,27 @@ public struct ThinkingClassificationDetector: Detector {
         // prompt that *discusses* <think> tags would otherwise produce false
         // positives here. Skip both sub-checks when no markers are declared.
         if let markers = r.templateMarkers {
-            // 1. Visible-text leak: literal markers appear in the user-visible string.
-            //    Reads `raw` directly — `rendered` is deprecated and currently
-            //    identical to `raw`. Once the harness starts running `raw` through
-            //    the real UI transform pipeline (follow-up to #499), this will
-            //    switch to the post-transform string.
-            if r.raw.contains(markers.open) || r.raw.contains(markers.close) {
+            // 1. Visible-text leak: literal markers survive into the
+            //    user-visible string. Now that #543 populates `r.rendered`
+            //    via the real UI transform, this catches cases the raw-only
+            //    check used to overlap with sub-check 2 — a marker that
+            //    appears in raw but is stripped by the transform shouldn't
+            //    be flagged here.
+            if r.rendered.contains(markers.open) || r.rendered.contains(markers.close) {
                 findings.append(.init(
                     detectorId: id,
                     subCheck: "visible-text-leak",
                     severity: .flaky,
-                    trigger: extractContext(r.raw, around: markers.open),
+                    trigger: extractContext(r.rendered, around: markers.open),
                     modelId: r.model.id
                 ))
             }
 
-            // 2. Misclassified-as-text: open marker appears in raw stream but no
-            //    structured thinking events were emitted (parser failed; reasoning
-            //    fell into `.text`).
+            // 2. Misclassified-as-text: open marker appears in the raw stream
+            //    but no structured thinking events were emitted (parser
+            //    failed; reasoning fell into `.text`). Distinct from
+            //    sub-check 1 because the marker may still be in `raw` even
+            //    after the UI transform hides it from the user.
             if r.raw.contains(markers.open) && r.thinkingRaw.isEmpty {
                 findings.append(.init(
                     detectorId: id,
