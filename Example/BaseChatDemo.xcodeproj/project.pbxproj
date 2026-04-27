@@ -417,6 +417,7 @@
 				BF0001000000000000000000 /* BaseChatDemoApp.swift in Sources */,
 				BF0002000000000000000000 /* DemoContentView.swift in Sources */,
 				BF0007000000000000000000 /* DemoTools.swift in Sources */,
+				BF0040000000000000000000 /* FailureDemoTools.swift in Sources */,
 				BF0008000000000000000000 /* ChatEmptyStateView.swift in Sources */,
 				BF0009000000000000000000 /* ToolApprovalSheet.swift in Sources */,
 				BF0010000000000000000000 /* ToolPolicyView.swift in Sources */,

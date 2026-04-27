@@ -7,10 +7,10 @@ import BaseChatInference
 /// These exist purely so the empty-state scenario picker can show the
 /// framework's error story (invalid args, transient rate limits, MCP
 /// failures) end-to-end. Production code should not use them — the
-/// fakeRateLimited tool is intentionally non-deterministic and the
-/// fakeMCPLookup tool always fails.
+/// fakeRateLimited tool is stateful (failing on the first call and
+/// succeeding thereafter) and the fakeMCPLookup tool always fails.
 ///
-/// All three are registered alongside the baseline reference tools by
+/// Both are registered alongside the baseline reference tools by
 /// ``DemoTools/register(on:root:)`` so the scripted scenarios can dispatch
 /// them without bespoke `configure` closures.
 enum FailureDemoTools {
@@ -85,6 +85,24 @@ enum FakeRateLimitedTool {
         let state: CallState
 
         func execute(arguments: JSONSchemaValue) async throws -> ToolResult {
+            // Validate arguments first so malformed input always returns the
+            // canonical `.invalidArguments` ErrorKind, regardless of which
+            // attempt this is. Otherwise the first call would mask decode
+            // failures behind `.rateLimited`, and later calls would throw
+            // (which `ToolRegistry` classifies as `.permanent`) — neither
+            // matches the "invalid args" demo story.
+            let args: Args
+            do {
+                let data = try JSONEncoder().encode(arguments)
+                args = try JSONDecoder().decode(Args.self, from: data)
+            } catch {
+                return ToolResult(
+                    callId: "",
+                    content: "invalid arguments: \(error.localizedDescription)",
+                    errorKind: .invalidArguments
+                )
+            }
+
             let attempt = await state.recordCall()
             if attempt == 1 {
                 return ToolResult(
@@ -94,8 +112,6 @@ enum FakeRateLimitedTool {
                 )
             }
 
-            let data = try JSONEncoder().encode(arguments)
-            let args = try JSONDecoder().decode(Args.self, from: data)
             let result = Result(
                 result: "Lookup for '\(args.query)' succeeded.",
                 attempt: attempt
