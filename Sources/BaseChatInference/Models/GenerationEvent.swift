@@ -3,6 +3,40 @@
 /// Replaces the raw `String` token stream to support usage reporting and
 /// future structured output without breaking the `InferenceBackend`
 /// contract again.
+///
+/// ## Vocabulary freeze (1.0)
+///
+/// The tool-call event vocabulary is locked as of the 1.0 release. Key design
+/// decisions recorded here for Wave 3 consumers:
+///
+/// ### Coordinator-emitted lifecycle events
+///
+/// ``toolDispatchStarted(callId:name:attempt:)`` and
+/// ``toolDispatchCompleted(callId:durationMs:errorKind:)`` are emitted by the
+/// **coordinator** (`GenerationCoordinator`), not by individual backends and not
+/// by ``ToolCallLoopOrchestrator`` (which silently drops these events — it has
+/// its own dispatch surface). Backends emit only ``toolCall(_:)`` (and, when
+/// streaming, ``toolCallStart(callId:name:)`` and
+/// ``toolCallArgumentsDelta(callId:textDelta:)``). Consumers driving generation
+/// through `InferenceService` / `GenerationCoordinator` that reconstruct
+/// timelines or present per-call spinners should key on these coordinator events,
+/// not on the backend streaming events.
+///
+/// ### `.toolCallNameDelta` is intentionally absent
+///
+/// There is no streaming name-delta event. Backends **must** emit the tool name
+/// up-front and complete in ``toolCallStart(callId:name:)`` and
+/// ``toolCall(_:)``. Grammar-constrained backends (Llama/Gemma-4 GBNF) are
+/// required to buffer output until the name token sequence is complete before
+/// emitting. This keeps consumers simple: the name is always final on first
+/// observation.
+///
+/// ### Source compatibility for pattern-match consumers
+///
+/// Adding new cases to this enum is source-breaking for exhaustive `switch`
+/// statements. Wave 3 test PRs that pattern-match `GenerationEvent` values
+/// **must** include a `default:` or `@unknown default:` arm, or be updated in
+/// the same PR that adds a new case.
 public enum GenerationEvent: Sendable, Equatable {
     /// Progress update while the backend is evaluating prompt tokens before the
     /// first generated content token is available.

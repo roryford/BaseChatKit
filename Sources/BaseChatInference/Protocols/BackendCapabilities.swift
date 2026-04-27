@@ -106,6 +106,15 @@ public struct BackendCapabilities: Sendable, Equatable, Codable {
     /// set `false`.
     public let streamsToolCallArguments: Bool
 
+    /// Whether the backend streams tool-call argument deltas incrementally.
+    /// Alias for ``streamsToolCallArguments`` with a clearer name.
+    ///
+    /// The original name `streamsToolCallArguments` is ambiguous — it could be
+    /// read as "streams the arguments as a whole". This alias makes the
+    /// incremental-delta semantics explicit. Both names refer to the same
+    /// capability and may be used interchangeably.
+    public var streamsToolCallArgumentDeltas: Bool { streamsToolCallArguments }
+
     /// True when the backend can emit multiple ``GenerationEvent/toolCall(_:)``
     /// events in one generation round (parallel batch). Single-call backends
     /// and small local models that only reliably emit one call at a time set
