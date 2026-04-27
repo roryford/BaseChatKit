@@ -1,8 +1,30 @@
 # Contributing to BaseChatKit
 
-Thank you for your interest in contributing. This guide covers everything you need to get started.
+Thank you for your interest in contributing.
 
-## Getting Started
+This guide is **indexed by change type** — find the section that matches the change
+you're making and follow the gates listed there. Cross-references point at
+[CLAUDE.md](CLAUDE.md), the authoritative dev reference, rather than duplicating it.
+
+## Table of contents
+
+- [Getting started](#getting-started)
+- [Pre-push checklist](#pre-push-checklist) — run **every** time, regardless of
+  change type
+- [Adding a new backend](#adding-a-new-backend)
+- [Adding a UI view](#adding-a-ui-view)
+- [Adding a dependency](#adding-a-dependency)
+- [Adding a network feature](#adding-a-network-feature)
+- [Adding a macro](#adding-a-macro)
+- [Adding a setting / configuration flag](#adding-a-setting--configuration-flag)
+- [Commit style](#commit-style)
+- [Pull request process](#pull-request-process)
+- [PR hygiene](#pr-hygiene)
+- [Reporting bugs](#reporting-bugs)
+- [Reporting security vulnerabilities](#reporting-security-vulnerabilities)
+- [License](#license)
+
+## Getting started
 
 ```bash
 git clone https://github.com/roryford/BaseChatKit.git
@@ -11,111 +33,240 @@ swift build
 swift test
 ```
 
-`swift build` will resolve package dependencies on first run. `BaseChatBackends` pulls in MLX xcframeworks, so the initial fetch may take a moment.
+`swift build` resolves package dependencies on first run. `BaseChatBackends` pulls in
+MLX and llama.cpp xcframeworks under default traits, so the initial fetch may take a
+moment.
 
-## Project Structure
+The trait set defaults to `MLX, Llama` (the offline build mode) — see
+[SECURITY.md § Supported Build Modes](SECURITY.md#supported-build-modes) for the
+four blessed configurations and what each one guarantees.
 
-| Target | Purpose |
-|--------|---------|
-| **BaseChatCore** | Models, protocols, and services. No ML dependencies. This is the integration point for all backends and custom extensions. |
-| **BaseChatBackends** | Concrete inference backend implementations: MLX, llama.cpp, Apple Foundation Models, and cloud APIs. Depends on heavy binary deps; requires Apple Silicon for MLX. |
-| **BaseChatUI** | SwiftUI views and view models. Depends only on BaseChatCore — keeps the UI layer decoupled from ML runtimes. |
-| **BaseChatTestSupport** | Shared mocks, fakes, and test helpers. Depended on by all test targets. |
+For repo-developer build-mode workflow (Xcode trait limitations, common mistakes,
+the `#warning` stub mechanism), see [CLAUDE.md](CLAUDE.md).
 
-## Running Tests
+## Pre-push checklist
 
-Test targets fall into two groups:
-
-### No special hardware required
-
-These run on any Mac (including Intel) and in CI:
+**Run before every push.** CI is macOS-only with a 10× billing multiplier; each
+failed push wastes ~25 billed minutes.
 
 ```bash
-swift test --filter BaseChatCoreTests
-swift test --filter BaseChatUITests
+swift test --filter BaseChatCoreTests --disable-default-traits \
+  && swift test --filter BaseChatInferenceTests --disable-default-traits \
+  && swift test --filter BaseChatInferenceSwiftTestingTests --disable-default-traits \
+  && swift test --filter BaseChatUITests --disable-default-traits \
+  && swift test --filter BaseChatUIModelManagementTests --disable-default-traits \
+  && swift test --filter BaseChatMCPTests --disable-default-traits \
+  && swift test --filter BaseChatBackendsTests --disable-default-traits \
+  && swift test --filter BaseChatTestSupportTests --disable-default-traits \
+  && swift test --filter BaseChatAppIntentsTests --disable-default-traits
 ```
 
-### Requires Apple Silicon / real device
+Never push based on a subset passing. After rebasing, always re-run the full suite —
+conflicts can silently break tests that compiled fine before.
 
-These targets link against MLX xcframeworks or exercise on-device models and will not build or run correctly on Intel Macs or simulators:
-
-- **BaseChatBackendsTests** — MLXBackend, LlamaBackend, FoundationBackend
-- **BaseChatE2ETests** — Full generation round-trips against real backends
-
-Run them on Apple Silicon:
+When changing the behaviour of any function or type, grep the entire `Tests/`
+directory for references — not just the obvious test file:
 
 ```bash
-swift test --filter BaseChatBackendsTests
-swift test --filter BaseChatE2ETests
+grep -r "functionOrTypeName" Tests/
 ```
 
-### Example app UI tests
+See [CLAUDE.md](CLAUDE.md) for the canonical test conventions, hardware constraints,
+and the `withKnownIssue` policy.
 
-When debugging `BaseChatDemoUITests`, prefer the fast rerun loop instead of repeating full `xcodebuild test` runs:
+## Adding a new backend
 
-```bash
-scripts/example-ui-tests.sh build-for-testing
-scripts/example-ui-tests.sh test-without-building -only-testing:BaseChatDemoUITests/ChatFlowUITests/testEmptyStateShowsWelcome
-```
+A backend is anything that conforms to `InferenceBackend` and gets registered with
+`InferenceService`.
 
-- `build-for-testing` does the expensive compile once.
-- `test-without-building` reuses that build for targeted reruns.
-- The helper auto-selects a real available simulator destination instead of hardcoding stale device names. Use `xcrun simctl list devices available` plus `--destination 'platform=iOS Simulator,id=<SIMULATOR_ID>'` if you want to pin a specific simulator.
+1. **Pick the right trait** for the file. The four trait gates are:
+   - `MLX` — Apple Silicon MLX backend.
+   - `Llama` — llama.cpp / GGUF.
+   - `Ollama` — self-hosted HTTP (in defaults today; opt-in next major).
+   - `CloudSaaS` — third-party SaaS (Claude, OpenAI). Off by default.
 
-Run the full sweep only when needed:
+   Wrap the backend file's contents in `#if <Trait>` so it does not compile in
+   modes that exclude it.
 
-```bash
-scripts/example-ui-tests.sh test
-```
+2. **Register via `DefaultBackends.register(with:)`** rather than calling backend
+   constructors from app code. The registration helper handles trait gating and
+   default-backend wiring; direct constructor calls bypass that and emit
+   deprecation warnings.
 
-To run everything at once on a capable machine:
+3. **Update `APIProvider.availableInBuild`** so the UI provider picker doesn't
+   list a backend whose code isn't linked. Match the existing `#if` gating.
 
-```bash
-swift test
-```
+4. **Add tests in `BaseChatBackendsTests`** with the matching `#if <Trait>` so
+   they don't run in trait sets that exclude the backend.
 
-### Hardware gate helpers
+5. **HTTP I/O goes through `URLSessionProvider`.** Direct `URLSession.shared` use
+   is banned by `TrafficBoundaryAuditTest` Rule 1. If your backend speaks HTTP,
+   it must use `URLSessionProvider` so the runtime kill-switch
+   (`URLSessionProvider.networkDisabled`) covers it.
 
-Tests that need specific hardware use `XCTSkipUnless` with flags from `HardwareRequirements` (in `BaseChatTestSupport`):
+6. **Hostname literals** (`https://api.example.com`) are allowlisted per file by
+   the audit's Rule 3 (`allowedHostnameFiles`). If your backend introduces a new
+   hostname, add the *file* to the allowlist with a justification comment — not
+   the hostname itself, and never inline-suppress the rule.
 
-| Flag | When `true` |
-|------|-------------|
-| `HardwareRequirements.isAppleSilicon` | Running on arm64 (Apple Silicon) |
-| `HardwareRequirements.isPhysicalDevice` | Running on a real device, not the iOS Simulator |
-| `HardwareRequirements.hasFoundationModels` | Running on macOS 26+ / iOS 26+ (does not check Apple Intelligence) |
+7. **Run before pushing:**
+   ```bash
+   swift test --filter BaseChatBackendsTests --disable-default-traits
+   swift test --filter BaseChatInferenceTests --disable-default-traits   # for the audit
+   ```
+   On Apple Silicon, also run `--traits MLX,Llama` so the actual hardware-bound
+   tests execute.
 
-Tests also check `FoundationBackend.isAvailable` for Apple Intelligence availability, which is distinct from the OS version check (the user may not have Apple Intelligence enabled).
+See [SECURITY.md § Supported Build Modes](SECURITY.md#supported-build-modes) and
+[docs/THREAT_MODEL.md § B1 Network ↔ device](docs/THREAT_MODEL.md#b1-network--device)
+for the security context.
 
-Use these at the top of `setUp()` or individual test methods:
+## Adding a UI view
 
-```swift
-override func setUp() async throws {
-    try await super.setUp()
-    try XCTSkipUnless(HardwareRequirements.isAppleSilicon, "Requires Apple Silicon")
-    try XCTSkipUnless(HardwareRequirements.isPhysicalDevice, "Metal unavailable in simulator")
-}
-```
+UI lives in `BaseChatUI` and (for model-management surfaces) `BaseChatUIModelManagement`.
 
-## Adding a New Backend
+1. **Don't `import BaseChatBackends` from UI.** This is enforced by
+   `TrafficBoundaryAuditTest` Rule 6 (import-graph layering) — the back-edge
+   would close a dependency cycle. UI consumes inference via
+   `BaseChatInference`'s service protocols.
 
-1. Implement the `InferenceBackend` protocol (defined in `Sources/BaseChatCore`).
-2. If your backend wraps a C or Objective-C library, mark the class `@unchecked Sendable`. Swift cannot verify the thread-safety invariants of C-backed state, so you are responsible for enforcing them manually (typically with a serial dispatch queue or actor isolation boundary).
-3. Register your backend with `InferenceService.registerBackendFactory(_:)` at startup.
-4. Add unit tests in `BaseChatBackendsTests` (or `BaseChatCoreTests` if the logic lives in Core). Hardware-gated tests belong in `BaseChatE2ETests`.
+2. **Cloud-config UI** (anything that talks to `APIEndpoint`, lists API providers,
+   or reads/writes Keychain entries) goes behind `#if Ollama || CloudSaaS`. In
+   the offline build mode, the cloud-config UI compiles out entirely.
 
-See existing backends in `Sources/BaseChatBackends` for reference implementations.
+3. **Pasteboard writes** must use `localOnly: true` or be added to the
+   `privacyAPIAllowlist` with an explicit justification entry. Default
+   `UIPasteboard.general` writes broadcast via Continuity — see
+   `TrafficBoundaryAuditTest` Rule 4.
 
-## Coding Conventions
+4. **Run before pushing:**
+   ```bash
+   swift test --filter BaseChatUITests --disable-default-traits
+   swift test --filter BaseChatUIModelManagementTests --disable-default-traits
+   ```
 
-- **Concurrency** — use async/await throughout. Do not introduce Combine publishers or callback-based APIs.
-- **Observable state** — mark view models and services that publish state with `@MainActor`. Use `@Observable` (the macro from Observation framework), not `ObservableObject`/`@Published`.
-- **Persistence** — use SwiftData. Do not introduce CoreData.
-- **Comments** — omit comments unless the logic is genuinely non-obvious. The code should be readable without them. When a comment is warranted, explain *why*, not *what*.
-- **Formatting** — follow the existing indentation (4-space, no tabs). There is no enforced formatter in CI yet; match the surrounding code.
+For the UI / framework / host-app trust boundary, see
+[docs/THREAT_MODEL.md § B5](docs/THREAT_MODEL.md#b5-ui--framework--host-application).
 
-## Commit Style
+## Adding a dependency
 
-This project uses [Conventional Commits](https://www.conventionalcommits.org/). Release Please reads these to determine version bumps and generate the changelog automatically.
+A new SwiftPM dependency, a new binary xcframework, or a version bump to an existing
+dependency.
+
+1. **Pick a trait gate.** If the dependency only matters for one backend or
+   feature, gate the `.product(...)` entry with `condition: .when(traits: [...])`.
+   Always-on dependencies need a justification in the PR body.
+
+2. **`Package.resolved`** updates are procurement-relevant. The PR description
+   should call out any change to `Package.resolved` so downstream consumers can
+   match it against their own pin policies.
+
+3. **Binary dependencies** (xcframeworks): note that there is no SHA-256 checksum
+   pin today, only revision pinning. Tracked under
+   [#714](https://github.com/roryford/BaseChatKit/issues/714) Phase 5 — flag the
+   PR for security review.
+
+4. **SwiftPM plugins** (`.buildToolPlugin`, `.commandPlugin`) are **banned** by
+   `TrafficBoundaryAuditTest` Rule 5. Plugins run at build time with full
+   filesystem + network access; adding one requires explicit security review and
+   an audit allowlist update.
+
+5. **`unsafeFlags` and `linkedFramework("Network")` / `linkedFramework("CFNetwork")`**
+   are banned by the same audit rule. Don't try to work around it.
+
+6. **Run before pushing:**
+   ```bash
+   swift test --filter BaseChatInferenceTests --disable-default-traits
+   ```
+
+See [docs/THREAT_MODEL.md § B3 Build time ↔ run time](docs/THREAT_MODEL.md#b3-build-time--run-time).
+
+## Adding a network feature
+
+A new HTTP client, a new endpoint, a new request shape — anything that crosses the
+network boundary.
+
+1. **`URLSession` use is allowlisted per-file** by the audit's Rule 1
+   (`networkIOAllowlist`). New network code goes in an existing allowlisted file
+   when possible. Adding a *file* to the allowlist requires reviewer sign-off —
+   the cap is intentionally low.
+
+2. **Hostname literals** (`https?://[host]…`) are allowlisted by Rule 3. UI and
+   Inference source must not contain hostname literals; cloud backend files do.
+
+3. **All HTTP traffic must route through `URLSessionProvider`** so the runtime
+   kill-switch (`URLSessionProvider.networkDisabled`) covers it.
+
+4. **SSE responses** must consume through `SSEStreamParser` with the default
+   `SSEStreamLimits` (or a justified narrower override). Don't bypass the bounds.
+
+5. **Cloud error bodies** must run through `CloudErrorSanitizer.sanitize(_:host:)`
+   before surfacing to the UI or `Log.*`.
+
+6. **Run before pushing:**
+   ```bash
+   swift test --filter BaseChatBackendsTests --disable-default-traits
+   swift test --filter BaseChatInferenceTests --disable-default-traits
+   swift test --filter BaseChatTestSupportTests --disable-default-traits
+   ```
+
+See [SECURITY.md § Supported Build Modes](SECURITY.md#supported-build-modes) for
+trait-mode behaviour and
+[docs/THREAT_MODEL.md § Network exfiltration](docs/THREAT_MODEL.md#network-exfiltration).
+
+## Adding a macro
+
+Macros live in `Sources/BaseChatMacrosPlugin/`. They run at build time with full
+shell privileges, so the rules are tighter:
+
+1. **Banned in macro source:** `Foundation.URLSession`, `Process()`, `posix_spawn`.
+   Audit Rule 2 catches these.
+
+2. **Macro output** must be covered by a snapshot test so a future change to the
+   macro doesn't silently rewrite generated source.
+
+3. The macro plugin sandbox is on the Phase 5 roadmap
+   ([#714](https://github.com/roryford/BaseChatKit/issues/714)). Until then, every
+   macro change gets a manual security review.
+
+4. **Run before pushing:**
+   ```bash
+   swift test --disable-default-traits   # exercises macro tests under all suites
+   ```
+
+See [docs/THREAT_MODEL.md § Build-time exfiltration via macros](docs/THREAT_MODEL.md#build-time-exfiltration-via-macros).
+
+## Adding a setting / configuration flag
+
+A new `BaseChatConfiguration` field, a new `@Environment` injection point, or a new
+trait.
+
+1. **Runtime configuration → `BaseChatConfiguration`.** Document the default in
+   the field's doc comment.
+
+2. **Build-time configuration → a new trait.** Add it to the `traits:` list in
+   `Package.swift` with a one-line description. The audit's Rule 7 will
+   immediately reject any `#if` typo against the new trait.
+
+3. **If the flag affects a documented guarantee** (e.g. fail-closed behaviour,
+   pinning policy, file-protection class), update
+   [SECURITY.md § Supported Build Modes](SECURITY.md#supported-build-modes) and
+   [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) in the same PR.
+
+4. **README impact:** if the flag changes how a consumer chooses a build mode,
+   update the README's build-mode decision table too.
+
+5. **Run before pushing:**
+   ```bash
+   swift test --filter BaseChatCoreTests --disable-default-traits
+   swift test --filter BaseChatInferenceTests --disable-default-traits
+   ```
+
+## Commit style
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/).
+Release Please reads commit messages to determine version bumps and to generate the
+changelog.
 
 ```
 feat: add streaming cancellation to FoundationBackend
@@ -126,46 +277,74 @@ chore: update mlx-swift-lm to 2.31.0
 docs: clarify TokenizerProvider fallback behaviour
 ```
 
-| Type | Version bump |
-|------|-------------|
-| `feat` | MINOR (`0.x.0`) |
-| `fix` | PATCH (`0.0.x`) |
-| `BREAKING CHANGE:` in footer | MAJOR (`x.0.0`) |
-| everything else | no release |
+| Type                            | Version bump      |
+|---------------------------------|-------------------|
+| `feat`                          | MINOR (`0.x.0`)   |
+| `fix`                           | PATCH (`0.0.x`)   |
+| `BREAKING CHANGE:` in footer    | MAJOR (`x.0.0`)   |
+| `chore`, `docs`, `test`, `perf` | no release        |
 
-PR titles must follow the same format — CI enforces this.
+PR titles must follow the same format — CI enforces this via `commitlint`.
 
-Add a body when the *why* needs explanation. Do not describe what the diff already shows.
+Add a body when the *why* needs explanation. Don't restate what the diff already
+shows.
 
 ```
 fix: prevent context overflow when system prompt exceeds budget
 
-The trimMessages fallback path returned an empty array when the system
-prompt alone exceeded maxTokens. Always return at least the last user
-message so generation has something to work with.
+The trimMessages fallback returned an empty array when the system prompt
+alone exceeded maxTokens. Always return at least the last user message so
+generation has something to work with.
 ```
 
-## Pull Request Process
+## Pull request process
 
-- Keep PRs focused on a single concern. Unrelated fixes belong in separate PRs.
-- Add tests for new behaviour. If you are fixing a bug, add a test that fails before your fix and passes after.
-- E2E tests that require Apple Silicon are acceptable without CI coverage — note the hardware requirement in the PR description.
-- Update the relevant section of the README if your change affects the public API or integration steps.
-- Request review from a maintainer. PRs are merged once at least one approval is received and all CI checks pass.
+1. **Branch off `main`.** Direct pushes to `main` are blocked.
+2. **Open a PR via `gh`:** `gh pr create --title "feat: ..." --body "..."`.
+3. **Don't pass `--auto` or `--merge`.** Merges require human approval.
+4. **Report the PR URL** so the maintainer can review.
+5. **Wait for CI** before flagging "ready to merge". CI runs every CI-safe test
+   suite listed in the [Pre-push checklist](#pre-push-checklist).
 
-## Reporting Bugs
+The maintainer merges PRs once at least one approval is received and CI is green.
 
-Open a GitHub Issue and select the **Bug Report** template. Include:
+## PR hygiene
 
-- A minimal reproduction case
-- The platform and OS version (e.g. macOS 15.4, Apple M3)
-- The Swift and Xcode versions (`swift --version`, `xcodebuild -version`)
-- Relevant log output
+CI is macOS-only and runs ~5 minutes per push. Each unnecessary PR or issue costs
+real money and reviewer attention.
 
-## Feature Requests
+- **One feature = one PR**, even when it touches multiple backends. A change like
+  "tool calling" or "thinking budget" should land as one PR with a backend
+  checklist in the body, not five PRs.
+- **Tests and docs ship in the feature PR.** Don't open standalone `test:` or
+  `docs:` PRs for in-flight work — they cost CI minutes and invent merge
+  conflicts. Standalone `test:` / `docs:` PRs are appropriate only for already-
+  shipped features.
+- **Single-file PRs are a smell.** Check whether there's a sibling PR you could
+  batch into.
+- **Don't open follow-up issues for "while I'm here" cleanups.** Fold them into
+  the current PR or leave a `// TODO:` in the code. The issue tracker is for
+  things that need cross-session memory **and** external visibility.
 
-Open a GitHub Issue and select the **Feature Request** template. Describe the problem you are solving, not just the solution you have in mind.
+For the full PR-hygiene rationale, see [CLAUDE.md § Issue & PR hygiene](CLAUDE.md).
+
+## Reporting bugs
+
+Open a GitHub issue using the **Bug Report** template. Include:
+
+- A minimal reproduction case.
+- Platform and OS version (e.g. macOS 15.4, Apple M3).
+- Swift and Xcode versions (`swift --version`, `xcodebuild -version`).
+- Relevant log output.
+
+Don't open public issues for security-impacting bugs — see the next section.
+
+## Reporting security vulnerabilities
+
+Use [GitHub Security Advisories](https://github.com/roryford/BaseChatKit/security/advisories/new)
+for private disclosure. Full policy in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE) that covers this project.
+By contributing, you agree that your contributions will be licensed under the
+[MIT License](LICENSE) that covers this project.
