@@ -1,5 +1,100 @@
 # Changelog
 
+## [0.12.3](https://github.com/roryford/BaseChatKit/compare/v0.12.2...v0.12.3) (2026-04-27)
+
+### Highlights
+
+#### Priority-aware prompt budget allocation
+
+`PromptAssembler` now treats slots by *role* instead of by insertion order. A new `PromptSlotRole` enum (`system`, `characterContext`, `userInstruction`, `ragRetrieved`, `archivalMemory`, `graphRetrieval`, `toolResult`) drives a `BudgetPolicy` so consumers can declare per-role caps and trim priority — RAG snippets get dropped before character context when the budget gets tight, and `.system` is never trimmed.
+
+```swift
+let policy = BudgetPolicy.default.with(
+    priority: [.system: 100, .characterContext: 80, .userInstruction: 60, .ragRetrieved: 20],
+    caps: [.ragRetrieved: 1024]
+)
+let assembled = PromptAssembler.assemble(
+    slots: [PromptSlot(id: "char", role: .characterContext, content: charCard),
+            PromptSlot(id: "rag",  role: .ragRetrieved,     content: retrievedDocs)],
+    messages: history, systemPrompt: sys,
+    contextSize: 8192, responseBuffer: 1024,
+    tokenizer: tokenizer, policy: policy
+)
+```
+
+Existing call sites default to `.userInstruction` — no source-level breaking change. The allocator is now drop-only (a slot is admitted in full or dropped wholesale), which fixes a real correctness bug where the prior implementation reduced `ResolvedSlot.tokenCount` to fit a cap without actually truncating content, so `budgetBreakdown` under-reported what the model received.
+
+See [#819](https://github.com/roryford/BaseChatKit/pull/819).
+
+#### Built-in conversation export — markdown + JSONL
+
+`BaseChatCore` now ships a `ConversationExportFormat` protocol with two built-in implementations (`MarkdownExportFormat`, `JSONLExportFormat`) and a `ConversationExporter` that produces a `ShareableFile` for `ShareLink`. `BaseChatUI` adds a drop-in `ExportButton` toolbar item — apps no longer hand-roll session serialisation.
+
+```swift
+import BaseChatCore
+import BaseChatUI
+
+ChatView()
+    .toolbar {
+        ExportButton(session: session, format: MarkdownExportFormat())
+    }
+```
+
+Filename sanitisation falls back to `chat` for empty/whitespace-only titles, replaces banned path characters with `_`, and caps the stem at 80 chars. JSONL writes one valid JSON object per `\n`-terminated line for streaming consumers; the markdown formatter skips thinking-only and tool-only turns so the output stays user-readable.
+
+See [#820](https://github.com/roryford/BaseChatKit/pull/820).
+
+#### iOS background-task scheduling with a memory-budget contract
+
+Apps running extraction pipelines, vector indexing, or other post-generation work now share a single seam — `BackgroundTaskScheduler` — instead of each wiring `BGTaskScheduler` and watchdog logic independently. `DefaultBackgroundTaskScheduler` submits a `BGProcessingTaskRequest` on iOS, runs inline on macOS, and samples `phys_footprint` against a `MemoryBudget` ceiling — when the sampled footprint exceeds the ceiling, the worker `Task` is cancelled and the closure observes `Task.isCancelled` to settle gracefully.
+
+```swift
+let scheduler: any BackgroundTaskScheduler = DefaultBackgroundTaskScheduler()
+try await scheduler.schedule(
+    identifier: "com.app.indexer",
+    budget: MemoryBudget(ceiling: 256_000_000, sampleInterval: .seconds(2))
+) {
+    try await indexer.runUntilDoneOrCancelled()
+}
+```
+
+`MockBackgroundTaskScheduler` ships in `BaseChatTestSupport` with `simulateMemoryBudgetExceeded(identifier:)` so the cancellation contract is testable deterministically. `ChatViewModel` wire-up for `PostGenerationTask` dispatch is deferred to the PR that introduces #111.
+
+See [#829](https://github.com/roryford/BaseChatKit/pull/829).
+
+### Features
+
+- **inference:** typed `PromptSlotRole` + `BudgetPolicy` for priority-aware prompt budget allocation ([#819](https://github.com/roryford/BaseChatKit/pull/819))
+- **core:** `ConversationExportFormat` protocol with `MarkdownExportFormat` + `JSONLExportFormat`, plus a `BaseChatUI` `ExportButton` ([#820](https://github.com/roryford/BaseChatKit/pull/820))
+- **core:** `BackgroundTaskScheduler` protocol + iOS `BGTaskScheduler` impl with shared memory-budget cancellation contract ([#829](https://github.com/roryford/BaseChatKit/pull/829))
+
+### Security & supply chain
+
+- **security:** `SECURITY.md` + `THREAT_MODEL.md` + indexed `CONTRIBUTING.md` ([#823](https://github.com/roryford/BaseChatKit/pull/823))
+- **security:** FIPS 140-3 posture documentation ([#821](https://github.com/roryford/BaseChatKit/pull/821))
+- **security:** `sandbox-exec` net-deny test harness — verifies offline-mode backends don't leak network calls ([#827](https://github.com/roryford/BaseChatKit/pull/827))
+- **security:** `SecureBytes` zeroing assertion via DEBUG inspection seam ([#824](https://github.com/roryford/BaseChatKit/pull/824))
+- **release:** build-provenance attestations + CycloneDX SBOM emitted on release ([#828](https://github.com/roryford/BaseChatKit/pull/828))
+- **repo:** `CODEOWNERS` for security-sensitive paths ([#822](https://github.com/roryford/BaseChatKit/pull/822))
+
+### CI & tooling
+
+- **ci:** `offline` / `ollama` / `saas` / `full` build-mode matrix + binary symbol audit ([#832](https://github.com/roryford/BaseChatKit/pull/832))
+- **fuzz:** `RunRecord.rendered` now flows through the real markdown transform pipeline ([#830](https://github.com/roryford/BaseChatKit/pull/830))
+- **fuzz:** explicit `supportsDeterministicReplay` contract pins for `FoundationFuzzFactory` and `LlamaFuzzFactory` ([#825](https://github.com/roryford/BaseChatKit/pull/825), [#831](https://github.com/roryford/BaseChatKit/pull/831))
+- **perf:** integrated streaming performance suite gated by `RUN_SLOW_TESTS=1` ([#826](https://github.com/roryford/BaseChatKit/pull/826))
+
+### Docs
+
+- **plans:** `BaseChatServer` implementation plan for #744 ([#806](https://github.com/roryford/BaseChatKit/pull/806))
+
+### Dependencies
+
+- **deps:** `github.com/mattt/llama.swift` 2.8936.0 → 2.8941.0 ([#818](https://github.com/roryford/BaseChatKit/pull/818))
+- **deps:** `dorny/paths-filter` 3 → 4 ([#817](https://github.com/roryford/BaseChatKit/pull/817))
+- **deps:** `trufflesecurity/trufflehog` 3.94.3 → 3.95.2 ([#816](https://github.com/roryford/BaseChatKit/pull/816))
+- **deps:** `googleapis/release-please-action` 4 → 5 ([#815](https://github.com/roryford/BaseChatKit/pull/815))
+
 ## [0.12.2](https://github.com/roryford/BaseChatKit/compare/v0.12.1...v0.12.2) (2026-04-26)
 
 ### Highlights
