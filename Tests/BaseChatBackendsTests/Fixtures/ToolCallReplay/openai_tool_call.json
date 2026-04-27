@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion.chunk",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_abc",
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "arguments": "{\"city\":\"Dublin\"}"
+        }
+      }]
+    },
+    "finish_reason": "tool_calls"
+  }]
+}

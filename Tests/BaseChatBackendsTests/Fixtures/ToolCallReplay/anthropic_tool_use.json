@@ -1,0 +1,12 @@
+{
+  "id": "msg_abc",
+  "type": "message",
+  "role": "assistant",
+  "content": [{
+    "type": "tool_use",
+    "id": "toolu_abc",
+    "name": "get_weather",
+    "input": { "city": "Dublin" }
+  }],
+  "stop_reason": "tool_use"
+}
