@@ -9,6 +9,8 @@ import BaseChatTools
 
 @main
 struct BaseChatDemoApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var chatViewModel: ChatViewModel
     @State private var modelManagementViewModel: ModelManagementViewModel
     @State private var sessionManager = SessionManagerViewModel()
@@ -30,6 +32,12 @@ struct BaseChatDemoApp: App {
     /// cold-launch window where the SwiftData container is still being
     /// built. ``DemoContentView`` drains it once persistence is wired.
     @State private var pendingPayloadBuffer = PendingPayloadBuffer()
+
+    /// Staged payload from the Share Extension or Action Extension, read out
+    /// of App Group storage on each foreground transition.  When the SwiftData
+    /// container is ready the payload is ingested immediately; otherwise it
+    /// waits here until the container `Task` completes.
+    @State private var stagedSharePayload: PendingSharePayload?
 
     init() {
         let testing = CommandLine.arguments.contains("--uitesting")
@@ -248,6 +256,20 @@ struct BaseChatDemoApp: App {
         #if os(macOS)
         .defaultSize(width: 900, height: 700)
         #endif
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                checkForPendingSharePayload()
+            }
+        }
+        // Drain a staged share payload as soon as the SwiftData container is
+        // ready. This covers the cold-launch race where scenePhase fires
+        // .active before the container task completes.
+        .task(id: modelContainer != nil ? 1 : 0) {
+            guard modelContainer != nil, let staged = stagedSharePayload else { return }
+            stagedSharePayload = nil
+            guard let pendingPayload = pendingPayload(from: staged) else { return }
+            await chatViewModel.ingestPendingPayload(pendingPayload, intent: .newSession(preset: nil))
+        }
     }
 
     // MARK: - Inbound payload handoff
@@ -285,6 +307,52 @@ struct BaseChatDemoApp: App {
             Task {
                 await pendingPayloadBuffer.store(payload)
             }
+        }
+    }
+
+    // MARK: - Share / Action Extension handoff
+
+    /// Reads and clears any ``PendingSharePayload`` written by the Share or
+    /// Action Extension from the App Group container.
+    ///
+    /// Called on every foreground transition (`.onChange(of: scenePhase)`).
+    /// When the SwiftData container is ready the payload is passed to
+    /// ``ChatViewModel/ingestPendingPayload(_:intent:)`` immediately;
+    /// otherwise it is stored in ``stagedSharePayload`` and picked up by the
+    /// `.task(id:)` modifier once the container completes.
+    private func checkForPendingSharePayload() {
+        guard let defaults = UserDefaults(suiteName: DemoAppGroup.identifier),
+              let data = defaults.data(forKey: DemoAppGroup.pendingShareKey),
+              let sharePayload = try? JSONDecoder().decode(PendingSharePayload.self, from: data) else {
+            return
+        }
+        // Remove before ingesting so a crash during ingest doesn't replay.
+        defaults.removeObject(forKey: DemoAppGroup.pendingShareKey)
+
+        if modelContainer != nil {
+            guard let payload = pendingPayload(from: sharePayload) else { return }
+            Task { @MainActor in
+                await chatViewModel.ingestPendingPayload(payload, intent: .newSession(preset: nil))
+            }
+        } else {
+            // Container still initialising — stage for the .task(id:) drain.
+            stagedSharePayload = sharePayload
+        }
+    }
+
+    /// Converts a ``PendingSharePayload`` (pure Foundation, extension-safe)
+    /// into a ``PendingPayload`` (BaseChatUI) for handoff to the view model.
+    private func pendingPayload(from share: PendingSharePayload) -> PendingPayload? {
+        switch share.kind {
+        case .text:
+            guard let text = share.text, !text.isEmpty else { return nil }
+            return .text(text)
+        case .url:
+            guard let urlString = share.urlString, let url = URL(string: urlString) else { return nil }
+            return .url(url)
+        case .image:
+            guard let data = share.imageData else { return nil }
+            return .image(data, mimeType: share.imageMimeType ?? "image/png")
         }
     }
 

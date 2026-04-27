@@ -43,4 +43,6 @@ struct InboundPayloadEnvelope: Codable, Sendable {
 enum DemoAppGroup {
     static let identifier = "group.com.basechatkit.demo"
     static let inboundKey = "bck.inbound"
+    /// Key written by the Share Extension and Action Extension.
+    static let pendingShareKey = "bck.pending-share"
 }

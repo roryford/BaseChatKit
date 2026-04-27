@@ -46,6 +46,13 @@
 		BF0026000000000000000000 /* SetReminderIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10022000000000000000000 /* SetReminderIntent.swift */; };
 		BF0027000000000000000000 /* AppIntentToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10023000000000000000000 /* AppIntentToolsView.swift */; };
 		BF0028000000000000000000 /* BaseChatAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = F30008000000000000000000 /* BaseChatAppIntents */; };
+		BF0030000000000000000000 /* PendingSharePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10030000000000000000000 /* PendingSharePayload.swift */; };
+		BF0031000000000000000000 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10031000000000000000000 /* ShareViewController.swift */; };
+		BF0032000000000000000000 /* PendingSharePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10030000000000000000000 /* PendingSharePayload.swift */; };
+		BF0033000000000000000000 /* ActionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10034000000000000000000 /* ActionViewController.swift */; };
+		BF0034000000000000000000 /* PendingSharePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10030000000000000000000 /* PendingSharePayload.swift */; };
+		BF0036000000000000000000 /* BaseChatDemoShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = F10037000000000000000000 /* BaseChatDemoShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BF0037000000000000000000 /* BaseChatDemoActionExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = F10038000000000000000000 /* BaseChatDemoActionExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +62,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = C10001000000000000000000;
 			remoteInfo = BaseChatDemo;
+		};
+		C22001000000000000000000 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D10001000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C12001000000000000000000;
+			remoteInfo = BaseChatDemoShareExtension;
+		};
+		C23001000000000000000000 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D10001000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C13001000000000000000000;
+			remoteInfo = BaseChatDemoActionExtension;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -93,6 +114,15 @@
 		F10021000000000000000000 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F10022000000000000000000 /* SetReminderIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents/SetReminderIntent.swift; sourceTree = "<group>"; };
 		F10023000000000000000000 /* AppIntentToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentToolsView.swift; sourceTree = "<group>"; };
+		F10030000000000000000000 /* PendingSharePayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSharePayload.swift; sourceTree = "<group>"; };
+		F10031000000000000000000 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		F10032000000000000000000 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		F10033000000000000000000 /* ShareExtensionInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = ShareExtensionInfo.plist; sourceTree = "<group>"; };
+		F10034000000000000000000 /* ActionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionViewController.swift; sourceTree = "<group>"; };
+		F10035000000000000000000 /* ActionExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ActionExtension.entitlements; sourceTree = "<group>"; };
+		F10036000000000000000000 /* ActionExtensionInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = ActionExtensionInfo.plist; sourceTree = "<group>"; };
+		F10037000000000000000000 /* BaseChatDemoShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BaseChatDemoShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F10038000000000000000000 /* BaseChatDemoActionExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BaseChatDemoActionExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -118,7 +148,36 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B12002000000000000000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B13002000000000000000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B10003000000000000000000 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				BF0036000000000000000000 /* BaseChatDemoShareExtension.appex in Embed App Extensions */,
+				BF0037000000000000000000 /* BaseChatDemoActionExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXGroup section */
 		A00001000000000000000000 = {
@@ -156,8 +215,39 @@
 				F10020000000000000000000 /* InboundPayloadEnvelope.swift */,
 				F10022000000000000000000 /* SetReminderIntent.swift */,
 				F10023000000000000000000 /* AppIntentToolsView.swift */,
+				A02001000000000000000000 /* Extensions */,
 			);
 			path = BaseChatDemo;
+			sourceTree = "<group>";
+		};
+		A02001000000000000000000 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				F10030000000000000000000 /* PendingSharePayload.swift */,
+				A02002000000000000000000 /* ShareExtension */,
+				A02003000000000000000000 /* ActionExtension */,
+			);
+			path = Extensions;
+			sourceTree = "<group>";
+		};
+		A02002000000000000000000 /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				F10031000000000000000000 /* ShareViewController.swift */,
+				F10032000000000000000000 /* ShareExtension.entitlements */,
+				F10033000000000000000000 /* ShareExtensionInfo.plist */,
+			);
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
+		A02003000000000000000000 /* ActionExtension */ = {
+			isa = PBXGroup;
+			children = (
+				F10034000000000000000000 /* ActionViewController.swift */,
+				F10035000000000000000000 /* ActionExtension.entitlements */,
+				F10036000000000000000000 /* ActionExtensionInfo.plist */,
+			);
+			path = ActionExtension;
 			sourceTree = "<group>";
 		};
 		A00003000000000000000000 /* Products */ = {
@@ -165,6 +255,8 @@
 			children = (
 				F10003000000000000000000 /* BaseChatDemo.app */,
 				F11002000000000000000000 /* BaseChatDemoUITests.xctest */,
+				F10037000000000000000000 /* BaseChatDemoShareExtension.appex */,
+				F10038000000000000000000 /* BaseChatDemoActionExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -202,10 +294,13 @@
 			buildPhases = (
 				B10001000000000000000000 /* Sources */,
 				B10002000000000000000000 /* Frameworks */,
+				B10003000000000000000000 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D22001000000000000000000 /* PBXTargetDependency */,
+				D23001000000000000000000 /* PBXTargetDependency */,
 			);
 			name = BaseChatDemo;
 			packageProductDependencies = (
@@ -220,6 +315,42 @@
 			productName = BaseChatDemo;
 			productReference = F10003000000000000000000 /* BaseChatDemo.app */;
 			productType = "com.apple.product-type.application";
+		};
+		C12001000000000000000000 /* BaseChatDemoShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E22001000000000000000000 /* Build configuration list for PBXNativeTarget "BaseChatDemoShareExtension" */;
+			buildPhases = (
+				B12001000000000000000000 /* Sources */,
+				B12002000000000000000000 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BaseChatDemoShareExtension;
+			packageProductDependencies = (
+			);
+			productName = BaseChatDemoShareExtension;
+			productReference = F10037000000000000000000 /* BaseChatDemoShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		C13001000000000000000000 /* BaseChatDemoActionExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E23001000000000000000000 /* Build configuration list for PBXNativeTarget "BaseChatDemoActionExtension" */;
+			buildPhases = (
+				B13001000000000000000000 /* Sources */,
+				B13002000000000000000000 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BaseChatDemoActionExtension;
+			packageProductDependencies = (
+			);
+			productName = BaseChatDemoActionExtension;
+			productReference = F10038000000000000000000 /* BaseChatDemoActionExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		C11001000000000000000000 /* BaseChatDemoUITests */ = {
 			isa = PBXNativeTarget;
@@ -268,6 +399,8 @@
 			projectRoot = "";
 			targets = (
 				C10001000000000000000000 /* BaseChatDemo */,
+				C12001000000000000000000 /* BaseChatDemoShareExtension */,
+				C13001000000000000000000 /* BaseChatDemoActionExtension */,
 				C11001000000000000000000 /* BaseChatDemoUITests */,
 			);
 		};
@@ -298,6 +431,7 @@
 				BF0023000000000000000000 /* InboundPayloadEnvelope.swift in Sources */,
 				BF0026000000000000000000 /* SetReminderIntent.swift in Sources */,
 				BF0027000000000000000000 /* AppIntentToolsView.swift in Sources */,
+				BF0030000000000000000000 /* PendingSharePayload.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -319,6 +453,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B12001000000000000000000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BF0032000000000000000000 /* PendingSharePayload.swift in Sources */,
+				BF0031000000000000000000 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B13001000000000000000000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BF0034000000000000000000 /* PendingSharePayload.swift in Sources */,
+				BF0033000000000000000000 /* ActionViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -326,6 +478,16 @@
 			isa = PBXTargetDependency;
 			target = C10001000000000000000000 /* BaseChatDemo */;
 			targetProxy = C21001000000000000000000 /* PBXContainerItemProxy */;
+		};
+		D22001000000000000000000 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C12001000000000000000000 /* BaseChatDemoShareExtension */;
+			targetProxy = C22001000000000000000000 /* PBXContainerItemProxy */;
+		};
+		D23001000000000000000000 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C13001000000000000000000 /* BaseChatDemoActionExtension */;
+			targetProxy = C23001000000000000000000 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -558,6 +720,112 @@
 			};
 			name = Release;
 		};
+		E12001000000000000000000 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "BaseChatDemo/Extensions/ShareExtension/ShareExtension.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "BaseChatDemo/Extensions/ShareExtension/ShareExtensionInfo.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.basechatkit.demo.share-extension;
+				PRODUCT_NAME = BaseChatDemoShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E12002000000000000000000 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "BaseChatDemo/Extensions/ShareExtension/ShareExtension.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "BaseChatDemo/Extensions/ShareExtension/ShareExtensionInfo.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.basechatkit.demo.share-extension;
+				PRODUCT_NAME = BaseChatDemoShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E13001000000000000000000 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "BaseChatDemo/Extensions/ActionExtension/ActionExtension.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "BaseChatDemo/Extensions/ActionExtension/ActionExtensionInfo.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.basechatkit.demo.action-extension;
+				PRODUCT_NAME = BaseChatDemoActionExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E13002000000000000000000 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "BaseChatDemo/Extensions/ActionExtension/ActionExtension.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "BaseChatDemo/Extensions/ActionExtension/ActionExtensionInfo.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.basechatkit.demo.action-extension;
+				PRODUCT_NAME = BaseChatDemoActionExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -584,6 +852,24 @@
 			buildConfigurations = (
 				E11001000000000000000000 /* Debug */,
 				E11002000000000000000000 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E22001000000000000000000 /* Build configuration list for PBXNativeTarget "BaseChatDemoShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E12001000000000000000000 /* Debug */,
+				E12002000000000000000000 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E23001000000000000000000 /* Build configuration list for PBXNativeTarget "BaseChatDemoActionExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E13001000000000000000000 /* Debug */,
+				E13002000000000000000000 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
