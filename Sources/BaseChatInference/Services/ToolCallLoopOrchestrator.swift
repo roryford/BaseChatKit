@@ -661,7 +661,8 @@ public struct ToolCallLoopOrchestrator: Sendable {
                     continuation.yield(.usage(prompt: p, completion: c))
                 case .prefillProgress, .thinkingToken, .thinkingComplete, .thinkingSignature,
                      .toolLoopLimitReached, .toolResult, .kvCacheReuse,
-                     .diagnosticThrottle:
+                     .diagnosticThrottle,
+                     .toolDispatchStarted, .toolDispatchCompleted:
                     // Reasoning, KV-cache hints, and diagnostic events are
                     // not part of the orchestrator's surface. The legacy
                     // `.toolLoopLimitReached` / `.toolResult` events come

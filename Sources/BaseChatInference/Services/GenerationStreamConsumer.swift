@@ -61,6 +61,14 @@ public struct GenerationStreamConsumer: Sendable {
             // authoritative arguments string lands on `.toolCall(_:)`,
             // which `dispatchToolCall` already handles.
             return .ignore
+
+        case .toolDispatchStarted, .toolDispatchCompleted:
+            // Lifecycle metadata for UI timers / spinners; consumed
+            // directly by surfaces that want to render duration / error
+            // kind. The chat-message state mapping has no work here —
+            // text and tool-result accumulation are driven by the
+            // existing `.toolCall` / `.toolResult` events.
+            return .ignore
         }
     }
 
