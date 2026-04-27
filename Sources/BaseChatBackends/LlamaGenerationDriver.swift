@@ -288,6 +288,14 @@ struct LlamaGenerationDriver {
         // Flag set when maxThinkingTokens is reached so we can break the outer loop cleanly.
         var thinkingLimitReached = false
 
+        // Tool-call parser: active when the config carries at least one tool definition.
+        // Processes `.token` events from the thinking layer (or raw decoded text) and
+        // re-routes `<|tool_call>…<|end_of_turn>` / `<tool_call>…</tool_call>` blocks
+        // into `.toolCall` events. When no tools are configured the parser is skipped
+        // entirely — zero overhead on non-tool-calling generation paths.
+        let useToolParser = !config.tools.isEmpty
+        var toolCallParser = LlamaToolCallParser()
+
         // Repetition-window state: track the last decoded token string and how
         // many times it has appeared consecutively. Exceeding `maxRepeatWindow`
         // triggers an early exit — no need to run the loop all the way to maxTokens.
@@ -348,9 +356,27 @@ struct LlamaGenerationDriver {
 
                 // Build the list of events this token emits. Two paths, matching the
                 // two thinking-marker modes documented at the top of the loop:
-                let events: [GenerationEvent] = useParser
+                let thinkingEvents: [GenerationEvent] = useParser
                     ? thinkingParser.process(text)
                     : [.token(text)]
+
+                // Route `.token` events through the tool-call parser when active.
+                // Non-token events (.thinkingToken, .thinkingComplete) pass straight
+                // through — tool calls never appear inside thinking blocks.
+                let events: [GenerationEvent]
+                if useToolParser {
+                    var routed: [GenerationEvent] = []
+                    for ev in thinkingEvents {
+                        if case .token(let t) = ev {
+                            routed += toolCallParser.process(t)
+                        } else {
+                            routed.append(ev)
+                        }
+                    }
+                    events = routed
+                } else {
+                    events = thinkingEvents
+                }
 
                 for event in events {
                     if isFirstToken {
@@ -399,6 +425,11 @@ struct LlamaGenerationDriver {
         // false avoids yielding spurious events from an untouched parser.
         if useParser {
             for event in thinkingParser.finalize() {
+                continuation.yield(event)
+            }
+        }
+        if useToolParser {
+            for event in toolCallParser.finalize() {
                 continuation.yield(event)
             }
         }

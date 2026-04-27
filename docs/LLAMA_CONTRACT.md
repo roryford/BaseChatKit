@@ -467,6 +467,45 @@ thread.
 
 ---
 
+## Security
+
+### CVE-2026-2069 — Buffer overflow in `llama_grammar_advance_stack()`
+
+| Attribute | Detail |
+|-----------|--------|
+| CVE | CVE-2026-2069 |
+| Affected symbol | `llama_sampler_init_grammar` → internal `llama_grammar_advance_stack()` |
+| Vulnerability | A buffer overflow in the grammar stack-advance logic allows a crafted GBNF grammar string (or a JSON Schema with certain constructs) to overflow an internal stack buffer, enabling potential arbitrary code execution. |
+| Fixed in | llama.cpp build **b8774** |
+| Vendored build | **b8772** (via `mattt/llama.swift` 2.8772.0) — **not fixed** |
+| Status | ⚠️ **Unmitigated in the vendored binary.** The fix has not been picked up yet. |
+
+#### Mitigation until the pin is bumped
+
+`GBNFSchemaPreValidator` (introduced in this codebase alongside issue #609) runs
+before every `llama_sampler_init_grammar` call that is driven by a tool-call
+`ToolDefinition.parameters` schema. It rejects the schema constructs confirmed in
+the CVE proof-of-concept to trigger the overflow:
+
+- `anyOf`, `oneOf`, `allOf`, `not` — schema combiners
+- Nullable union types: `"type": ["string", "null"]`
+- `exclusiveMinimum` / `exclusiveMaximum` (Draft 2020-12 integer form)
+
+**Callers that pass a GBNF string directly via `GenerationConfig.grammar` (not via tool definitions) are not covered by this pre-validator.** Those strings are already validated syntactically by `llama_sampler_init_grammar`'s own GBNF parser, but crafted inputs from untrusted sources could still trigger the overflow. Treat `GenerationConfig.grammar` as a trusted-input field until the pin is bumped.
+
+#### Upgrade procedure for the CVE fix
+
+1. Bump `mattt/llama.swift` to a version wrapping build ≥ b8774.
+2. Confirm the xcframework version in `docs/vendor/llama.h` and update this section.
+3. In `GBNFSchemaPreValidator.swift`, flip `CVEAuditRecord.isFixed` to `true` and
+   update `vendoredBuild` to match.
+4. Re-audit the rejection rules in `GBNFSchemaPreValidator.validate(_:path:)` —
+   rules that were solely motivated by the overflow (rather than GBNF expressiveness
+   limits) may be relaxed or removed.
+5. Run `swift test --filter BaseChatBackendsTests --traits Llama` on Apple Silicon.
+
+---
+
 ## Binary vs. Vendored Source
 
 ### Decision
