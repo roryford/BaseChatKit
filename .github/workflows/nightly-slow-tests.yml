@@ -3,6 +3,7 @@ name: Nightly slow tests
 # Runs the expensive tests excluded from per-PR CI:
 #  - LargeSessionListPerformanceTests — XCTMeasure perf baselines (~65s)
 #  - TrafficBoundaryAuditTest — source-tree boundary audit (~50s)
+#  - IntegratedStreamingPerformanceTests — full pipeline streaming baselines (#243)
 # These are gated by RUN_SLOW_TESTS=1 in their setUp; the main `ci.yml`
 # job leaves that unset so they skip there. Local `swift test` runs them
 # unconditionally (CI is also unset locally).
@@ -53,6 +54,9 @@ jobs:
 
       - name: Test — TrafficBoundaryAuditTest
         run: scripts/test.sh --filter "BaseChatInferenceTests.TrafficBoundaryAuditTest" --disable-default-traits --skip-update
+
+      - name: Test — IntegratedStreamingPerformanceTests
+        run: scripts/test.sh --filter "BaseChatUITests.IntegratedStreamingPerformanceTests" --disable-default-traits --skip-update
 
       - name: Stage test diagnostics
         # Mirrors ci.yml: scripts/test.sh writes captured stdout/stderr to
