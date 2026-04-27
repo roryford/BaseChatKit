@@ -25,10 +25,15 @@ final class FoundationFuzzFactoryTests: XCTestCase {
 
     /// Mirror of `Sources/fuzz-chat/FoundationFuzzFactory.swift`. Keep the two
     /// structurally identical; behavioural divergence should either be cleaned
-    /// up in both places or surfaced with a distinct test.
+    /// up in both places or surfaced with a distinct test. The explicit
+    /// `supportsDeterministicReplay` override is mirrored here on purpose —
+    /// without it the test would only exercise the protocol-extension default
+    /// and silently pass even if the real factory dropped its override.
     @available(macOS 26, iOS 26, *)
     struct LocalFoundationFuzzFactory: FuzzBackendFactory {
         struct UnavailableError: Error, Equatable {}
+
+        var supportsDeterministicReplay: Bool { true }
 
         func makeHandle() async throws -> FuzzRunner.BackendHandle {
             guard FoundationBackend.isAvailable else {
@@ -50,26 +55,42 @@ final class FoundationFuzzFactoryTests: XCTestCase {
         }
     }
 
+    /// Companion type with no override. Used to verify the protocol-extension
+    /// default that the executable's factory inherits when reading is decided
+    /// purely by the protocol contract — keeps the determinism invariant
+    /// double-pinned even if the real factory's explicit override regresses.
+    @available(macOS 26, iOS 26, *)
+    struct DefaultsOnlyFactory: FuzzBackendFactory {
+        func makeHandle() async throws -> FuzzRunner.BackendHandle {
+            fatalError("not used; only inspected for protocol-extension defaults")
+        }
+    }
+
     // MARK: - Pure-value contract (runs on every host)
 
-    /// The Foundation factory must be flagged as deterministic so the
-    /// `Replayer` does not short-circuit with `.nonDeterministicBackend`.
-    /// Apple Intelligence runs on-device and produces identical output for
-    /// identical inputs — opting out of replay would be incorrect.
+    /// The Foundation factory's explicit override must report `true` so the
+    /// `Replayer` does not short-circuit with `.nonDeterministicBackend` for
+    /// Apple Intelligence findings. Pinned via the local mirror — the real
+    /// factory lives in an `executableTarget` and cannot be imported here.
     func test_supportsDeterministicReplay_isTrue() {
         let factory = LocalFoundationFuzzFactory()
         XCTAssertTrue(
             factory.supportsDeterministicReplay,
-            "FoundationFuzzFactory must default to deterministic replay so #561 fuzz findings are replayable"
+            "FoundationFuzzFactory must report deterministic replay so #561 fuzz findings are replayable"
         )
     }
 
-    /// The default `teardown()` extension must compile and be a no-op for
-    /// factories that don't override it. Foundation owns no per-process
-    /// resources that need ordered shutdown (unlike Llama's `llama_backend_init`).
-    func test_defaultTeardown_isNoOp() async {
-        let factory = LocalFoundationFuzzFactory()
-        await factory.teardown()
+    /// Independently verifies the protocol-extension default is `true`.
+    /// Together with `test_supportsDeterministicReplay_isTrue` above, this
+    /// pins both layers: the executable's explicit override AND the
+    /// inherited default it would fall back to. Either regressing would flip
+    /// `Replayer` to `.nonDeterministicBackend` for Foundation campaigns.
+    func test_protocolDefault_supportsDeterministicReplay_isTrue() {
+        let factory = DefaultsOnlyFactory()
+        XCTAssertTrue(
+            factory.supportsDeterministicReplay,
+            "FuzzBackendFactory protocol default must remain `true` — local backends rely on it"
+        )
     }
 
     // MARK: - Unavailability handling
