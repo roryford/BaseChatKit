@@ -279,11 +279,11 @@ Run the gate locally:
 swift test --filter BaseChatFuzzTests.CalibrationTests --disable-default-traits
 ```
 
-All ten single-turn detectors pass both gates as of [#488](https://github.com/roryford/BaseChatKit/issues/488). Session detectors (`turn-boundary-kv-state`, `cancellation-race`, `session-context-leak`) consume `[SessionCapture]` objects and are not covered by this corpus — they require a separate session-level fixture set.
+All ten single-turn detectors pass both gates as of [#488](https://github.com/roryford/BaseChatKit/issues/488). `tool-call-validity` (which landed in [#813](https://github.com/roryford/BaseChatKit/pull/813) after the corpus was authored) ships two `.confirmed` zero-FP-by-construction sub-checks (`id-reuse`, `orphan-result`) and three `.flaky` sub-checks pending follow-up corpus work — it is intentionally exempt from the coverage check via `CalibrationTests.coverageExempt`. Session detectors (`turn-boundary-kv-state`, `cancellation-race`, `session-context-leak`) consume `[SessionCapture]` objects and are not covered by this corpus — they require a separate session-level fixture set.
 
 ### Adding records
 
-1. Append entries to `good.json` (plain `RunRecord`) or `bad.json` (`{detectorId, note, record}`) following the existing `runId` patterns (`g-<group>-NNN` / `b-<detectorId>-NNN`).
+1. Append entries to `good.json` (plain `RunRecord`) or `bad.json` (`{detectorId, note, record}`). Good records use `g-<group>-NNN` (group letter from the corpus-group table). Bad records use a short detector slug + bug-class group, e.g. `b-tc-vl-001` for `thinking-classification` visible-leak — follow the existing pattern in `bad.json` for the relevant detector to keep IDs consistent.
 2. Re-run `CalibrationTests` — mislabeled records are caught immediately.
 3. A new detector added to `DetectorRegistry.all` will fail `test_badCorpusCoverage_allDetectorsCovered` until at least one bad record is added for it.
 
@@ -293,11 +293,11 @@ See `Sources/BaseChatTestSupport/FuzzCalibrationCorpus/README.md` for the full s
 
 ## Known Gaps
 
-These are wired but not yet implemented. Day-one issues will be filed for each.
+Items below are tracked as follow-up issues — some are detectors that ship without corpus coverage, others are infrastructure not yet built.
 
-### Detectors not yet implemented
+### Session detectors without corpus coverage
 
-All ten single-turn detectors are now implemented and covered by the calibration corpus. The following session-level detectors ship but are not yet covered by a session-corpus fixture:
+All ten single-turn detectors are implemented and covered by the calibration corpus. The following session-level detectors ship and run, but consume `[SessionCapture]` rather than `RunRecord`, so they are not gated by the single-turn corpus and need a separate session-level fixture set:
 
 | ID | Looks for |
 |----|-----------|

@@ -23,7 +23,7 @@ A detector that passes both gates is eligible for promotion from `.flaky` to `.c
 **`good.json`** — plain array of `RunRecord` objects:
 ```json
 [
-  { "runId": "g-a-001", "schemaVersion": 1, ... }
+  { "runId": "g-a-001", ... }
 ]
 ```
 
@@ -33,14 +33,16 @@ A detector that passes both gates is eligible for promotion from `.flaky` to `.c
   {
     "detectorId": "looping",
     "note": "raw-looping — 3x 65-char unit repeated at tail",
-    "record": { "runId": "b-loop-001", "schemaVersion": 1, ... }
+    "record": { "runId": "b-loop-001", ... }
   }
 ]
 ```
 
+`schemaVersion` is optional in stored records — `RunRecord` decodes a missing field as `1`. Omit it from new records unless you explicitly need to pin a future version.
+
 ## Adding records
 
-1. Add entries to the appropriate file keeping the `runId` pattern (`g-<group>-NNN` / `b-<detectorId>-NNN`).
+1. Add entries to the appropriate file. Good records use `g-<group>-NNN` (group letter from the corpus-group table below). Bad records use a short detector slug + bug-class group, e.g. `b-tc-vl-001` for `thinking-classification` visible-leak, `b-loop-001` for `looping`. Follow the existing pattern in `bad.json` for that detector.
 2. Run `swift test --filter BaseChatFuzzTests.CalibrationTests --disable-default-traits` — the FP/TP gate will catch mislabeled records immediately.
 3. If a new detector is added to `DetectorRegistry.all`, the `test_badCorpusCoverage_allDetectorsCovered` test will fail until at least one bad record is added for that detector.
 

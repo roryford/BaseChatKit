@@ -8,7 +8,7 @@ import Foundation
 /// and asserts per-detector accuracy gates:
 ///
 /// - **FP < 2%**: each detector must fire on fewer than 2 % of the known-good records.
-/// - **TP > 80%**: each detector must fire on more than 80 % of the known-bad records
+/// - **TP ≥ 80%**: each detector must fire on at least 80 % of the known-bad records
 ///   labeled with its ID.
 ///
 /// A detector that passes both gates is eligible for promotion from `.flaky` to
@@ -38,31 +38,47 @@ final class CalibrationTests: XCTestCase {
 
     // MARK: - Path helpers
 
-    /// Navigate from this source file up three levels to the repo root, then into
-    /// Sources/BaseChatTestSupport/FuzzCalibrationCorpus/.
-    private static func corpusRoot() -> URL {
-        URL(fileURLWithPath: "\(#filePath)")
-            .deletingLastPathComponent() // .../Tests/BaseChatFuzzTests/
-            .deletingLastPathComponent() // .../Tests/
-            .deletingLastPathComponent() // repo root
-            .appendingPathComponent("Sources/BaseChatTestSupport/FuzzCalibrationCorpus",
-                                    isDirectory: true)
+    /// Walk upward from this source file until a `Sources` directory is found, then
+    /// descend into `Sources/BaseChatTestSupport/FuzzCalibrationCorpus/`. This mirrors
+    /// the pattern used by `SilentCatchAuditTest.locateSourcesDirectory` so the test
+    /// is robust to the package being embedded or the test file moving.
+    private static func corpusRoot(filePath: StaticString = #filePath) throws -> URL {
+        var dir = URL(fileURLWithPath: "\(filePath)").deletingLastPathComponent()
+        while dir.path != "/" {
+            let candidate = dir.appendingPathComponent("Sources")
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDir),
+               isDir.boolValue {
+                return candidate
+                    .appendingPathComponent("BaseChatTestSupport", isDirectory: true)
+                    .appendingPathComponent("FuzzCalibrationCorpus", isDirectory: true)
+            }
+            dir.deleteLastPathComponent()
+        }
+        throw NSError(domain: "CalibrationTests", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "Could not locate Sources/ from #filePath"
+        ])
     }
 
+    /// The corpus is in-tree and load-bearing for the FP/TP gates. A missing file
+    /// indicates a packaging/checkout regression — fail loudly rather than skipping
+    /// silently (which would mask an accidental omission in CI).
     private func loadGoodRecords() throws -> [RunRecord] {
-        let url = Self.corpusRoot().appendingPathComponent("good.json")
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw XCTSkip("Calibration corpus not found at \(url.path)")
-        }
+        let url = try Self.corpusRoot().appendingPathComponent("good.json")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: url.path),
+            "Calibration corpus missing at \(url.path) — corpus is required, not optional"
+        )
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode([RunRecord].self, from: data)
     }
 
     private func loadBadRecords() throws -> [LabeledBadRecord] {
-        let url = Self.corpusRoot().appendingPathComponent("bad.json")
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw XCTSkip("Calibration corpus not found at \(url.path)")
-        }
+        let url = try Self.corpusRoot().appendingPathComponent("bad.json")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: url.path),
+            "Calibration corpus missing at \(url.path) — corpus is required, not optional"
+        )
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode([LabeledBadRecord].self, from: data)
     }
@@ -103,7 +119,7 @@ final class CalibrationTests: XCTestCase {
 
     // MARK: - TP gate
 
-    func test_truePositiveRate_allDetectors_aboveEightyPercent() throws {
+    func test_truePositiveRate_allDetectors_atLeastEightyPercent() throws {
         let badRecords = try loadBadRecords()
         XCTAssertGreaterThanOrEqual(
             badRecords.count, 50,
@@ -135,18 +151,33 @@ final class CalibrationTests: XCTestCase {
 
     // MARK: - Coverage check
 
-    /// Every detector in DetectorRegistry.all must have at least one bad-corpus
-    /// entry so the TP gate is meaningful for that detector.
+    /// Detectors known to ship without single-turn corpus coverage. New entries
+    /// here MUST be paired with a tracking issue — never silence a detector by
+    /// adding it to this set without one.
+    ///
+    /// - `tool-call-validity` (#627): two sub-checks ship `.confirmed` (zero-FP-by-
+    ///   construction transcript invariants — `id-reuse`, `orphan-result`); three
+    ///   ship `.flaky` and need bad-corpus records authored before they can graduate.
+    ///   Tracked under #488 as a follow-up to keep this PR scoped to the existing
+    ///   ten single-turn detectors.
+    private static let coverageExempt: Set<String> = [
+        "tool-call-validity",
+    ]
+
+    /// Every detector in DetectorRegistry.all (minus `coverageExempt`) must have
+    /// at least one bad-corpus entry so the TP gate is meaningful for that
+    /// detector.
     func test_badCorpusCoverage_allDetectorsCovered() throws {
         let badRecords = try loadBadRecords()
         let coveredIds = Set(badRecords.map(\.detectorId))
         let uncovered = DetectorRegistry.all
             .map(\.id)
-            .filter { !coveredIds.contains($0) }
+            .filter { !coveredIds.contains($0) && !Self.coverageExempt.contains($0) }
 
         XCTAssertTrue(
             uncovered.isEmpty,
-            "Detectors with no bad-corpus coverage (add records to bad.json): "
+            "Detectors with no bad-corpus coverage (add records to bad.json or "
+                + "to coverageExempt with a tracking-issue rationale): "
                 + uncovered.joined(separator: ", ")
         )
     }
