@@ -44,7 +44,7 @@ public struct ToolCallLoopPolicy: Sendable {
     /// Number of trailing `(toolName, arguments)` pairs that must be identical
     /// for the loop-detection heuristic to fire.
     ///
-    /// On a hit the orchestrator emits ``ToolLoopEvent/loopDetected(toolName:)``
+    /// On a hit the orchestrator emits ``ToolLoopEvent/loopDetected(_:)``
     /// and finishes. Defaults to `3`. Values `<= 1` disable the heuristic
     /// entirely (a single tool call by itself is never a cycle).
     public var loopDetectionWindow: Int
@@ -55,7 +55,7 @@ public struct ToolCallLoopPolicy: Sendable {
     ///   - maxSteps: Step budget. Clamped to `1...`. Defaults to `8`.
     ///   - perStepTimeout: Optional wall-clock cap per generate round. Defaults to `nil`.
     ///   - loopDetectionWindow: N identical consecutive `(name, args)` pairs that
-    ///     trigger ``ToolLoopEvent/loopDetected(toolName:)``. Values `<= 1` disable
+    ///     trigger ``ToolLoopEvent/loopDetected(_:)``. Values `<= 1` disable
     ///     the heuristic. Defaults to `3`.
     public init(
         maxSteps: Int = 8,
@@ -68,6 +68,51 @@ public struct ToolCallLoopPolicy: Sendable {
     }
 }
 
+// MARK: - ToolLoopFinding
+
+/// Structured payload emitted with ``ToolLoopEvent/loopDetected(_:)`` when the
+/// orchestrator's cycle heuristic fires.
+///
+/// Ports the ``finding_id`` + ``reason`` shape from Goose AI's
+/// ``RepetitionInspector``: consumers (fuzz harnesses, host UIs, telemetry
+/// pipelines) can switch on a stable ``findingID`` instead of string-matching
+/// the human-readable ``reason``.
+///
+/// The current orchestrator emits a single finding kind: identical-arguments
+/// repetition with `findingID == "REP-001"`. New finding kinds can be added
+/// later without breaking pattern matches that already key on the ID.
+public struct ToolLoopFinding: Sendable, Equatable {
+
+    /// Stable identifier for the finding kind. `"REP-001"` for the
+    /// identical-arguments repetition heuristic.
+    public let findingID: String
+
+    /// Name of the tool whose repeated invocation triggered the finding.
+    public let toolName: String
+
+    /// Human-readable explanation of what fired and why. Suitable for logs
+    /// and developer-facing UI; do not parse it — switch on ``findingID``
+    /// instead.
+    public let reason: String
+
+    /// Number of identical-signature calls observed in the trailing window
+    /// at the moment the finding fired. Equals
+    /// ``ToolCallLoopPolicy/loopDetectionWindow`` for `REP-001`.
+    public let repetitionCount: Int
+
+    public init(
+        findingID: String,
+        toolName: String,
+        reason: String,
+        repetitionCount: Int
+    ) {
+        self.findingID = findingID
+        self.toolName = toolName
+        self.reason = reason
+        self.repetitionCount = repetitionCount
+    }
+}
+
 // MARK: - ToolLoopEvent
 
 /// Events emitted by ``ToolCallLoopOrchestrator/run(initialPrompt:systemPrompt:config:)``.
@@ -75,7 +120,7 @@ public struct ToolCallLoopPolicy: Sendable {
 /// Mirrors a subset of ``GenerationEvent`` plus three orchestrator-only
 /// terminal events. Callers consume the stream until it finishes; the last
 /// event is always one of ``finished``, ``stepLimitReached(steps:)`` or
-/// ``loopDetected(toolName:)`` unless the stream throws.
+/// ``loopDetected(_:)`` unless the stream throws.
 public enum ToolLoopEvent: Sendable, Equatable {
 
     /// A fragment of visible text emitted by the model (forwarded verbatim
@@ -115,7 +160,11 @@ public enum ToolLoopEvent: Sendable, Equatable {
     /// The cycle heuristic fired: the last
     /// ``ToolCallLoopPolicy/loopDetectionWindow`` `(toolName, arguments)`
     /// pairs were identical. Terminal — no further events follow.
-    case loopDetected(toolName: String)
+    ///
+    /// The associated ``ToolLoopFinding`` carries a stable ``findingID``
+    /// (`"REP-001"` for this heuristic), the offending ``toolName``, a
+    /// human-readable ``reason``, and the observed ``repetitionCount``.
+    case loopDetected(ToolLoopFinding)
 
     /// The model produced a turn without emitting any tool call.
     /// Terminal — no further events follow.
@@ -160,7 +209,7 @@ public enum ToolLoopError: Error, Sendable, Equatable {
 /// 6. If ``ToolCallLoopPolicy/maxSteps`` is exceeded, it emits
 ///    ``ToolLoopEvent/stepLimitReached(steps:)``.
 /// 7. If the last ``ToolCallLoopPolicy/loopDetectionWindow`` `(name, args)`
-///    pairs are identical, it emits ``ToolLoopEvent/loopDetected(toolName:)``.
+///    pairs are identical, it emits ``ToolLoopEvent/loopDetected(_:)``.
 ///
 /// ## Cancellation
 ///
@@ -289,7 +338,7 @@ public struct ToolCallLoopOrchestrator: Sendable {
     /// The returned stream produces ``ToolLoopEvent`` values until the loop
     /// terminates with ``ToolLoopEvent/finished``,
     /// ``ToolLoopEvent/stepLimitReached(steps:)``, or
-    /// ``ToolLoopEvent/loopDetected(toolName:)``. Errors thrown by the backend
+    /// ``ToolLoopEvent/loopDetected(_:)``. Errors thrown by the backend
     /// or by the per-step timeout are forwarded into the stream.
     ///
     /// Cancellation: when the consumer cancels its iteration, the orchestrator
@@ -407,7 +456,14 @@ public struct ToolCallLoopOrchestrator: Sendable {
                    recentCalls.count == policy.loopDetectionWindow,
                    let first = recentCalls.first,
                    recentCalls.allSatisfy({ $0 == first }) {
-                    continuation.yield(.loopDetected(toolName: first.name))
+                    let count = recentCalls.count
+                    let finding = ToolLoopFinding(
+                        findingID: "REP-001",
+                        toolName: first.name,
+                        reason: "Tool '\(first.name)' invoked \(count) times with identical arguments within a window of \(policy.loopDetectionWindow) — denying further calls",
+                        repetitionCount: count
+                    )
+                    continuation.yield(.loopDetected(finding))
                     continuation.finish()
                     return
                 }
