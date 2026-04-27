@@ -275,6 +275,12 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     ///    and shrink prompt-only state safely for text-only models.
     /// 3. Future `mlx-swift-lm` bumps must rerun the MLX KV-cache integration and
     ///    performance suite before this contract is trusted unchanged.
+    ///
+    /// Marked `@MainActor` because every MLX call here (`copy()`, `eval`,
+    /// `state` slicing, `trim`) shares the same single-threaded GPU scheduler
+    /// as `ModelContainer.generate()`; running off-main risks racy crashes /
+    /// cache corruption.
+    @MainActor
     private static func capturePromptCacheSnapshot(
         from cache: MLXPromptCache,
         promptTokens: [Int]
@@ -282,10 +288,16 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         guard !promptTokens.isEmpty, isSupportedPromptCache(cache.value) else {
             return nil
         }
+        // Early-exit if the surrounding generation task was cancelled — `copy()`
+        // and `eval` materialise full prompt-prefix tensors per layer, which is
+        // expensive enough to be worth skipping when a reset/unload already
+        // invalidated the snapshot we'd be writing.
+        if Task.isCancelled { return nil }
 
         var layers: [CachedLayerState] = []
         layers.reserveCapacity(cache.value.count)
         for original in cache.value {
+            if Task.isCancelled { return nil }
             guard original.offset >= promptTokens.count else {
                 return nil
             }
@@ -345,6 +357,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             if layer.state.isEmpty {
                 guard let target = target as? KVCacheSimple else { return false }
                 target.offset = layer.offset
+                target.metaState = layer.metaState
             } else {
                 target.state = layer.state.map { $0[.ellipsis] }
                 target.metaState = layer.metaState
@@ -799,7 +812,12 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                     self.withStateLock {
                         self._promptCacheWriteToken &+= 1
                         let snapshotWriteToken = self._promptCacheWriteToken
-                        let snapshotTask = Task<Void, Never> { [weak self] in
+                        // The snapshot must capture on `@MainActor`: every MLX
+                        // call inside `capturePromptCacheSnapshot` (copy/eval/
+                        // slicing/trim) shares the single-threaded GPU scheduler
+                        // with `ModelContainer.generate`. Running it on a free
+                        // executor would race the next generation's compute.
+                        let snapshotTask = Task<Void, Never> { @MainActor [weak self] in
                             let snapshot = Self.capturePromptCacheSnapshot(
                                 from: cache,
                                 promptTokens: promptTokenIds
