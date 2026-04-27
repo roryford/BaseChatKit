@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.12.5](https://github.com/roryford/BaseChatKit/compare/v0.12.4...v0.12.5) (2026-04-27)
+
+### Highlights
+
+#### Llama tool calling — Gemma 4 native format + GBNF schema pre-validator
+
+Gemma 4 GGUF models loaded via llama.cpp now do tool calling. Pass `ToolDefinition` values in `GenerationConfig.tools`, select the `.gemma4` prompt template, and the framework injects `<|tool>` declaration blocks into the system turn and parses `<|tool_call>…<|end_of_turn>` tokens off the stream into `GenerationEvent.toolCall` events. The wire shape (`ToolCall(id:toolName:arguments:)`) matches `FoundationBackend` (#812), MLX, Ollama, Claude, and OpenAI — orchestrator and detectors don't care which backend produced the call.
+
+```swift
+let backend = LlamaBackend()
+try await backend.loadModel(from: ggufURL, plan: plan)
+
+var config = GenerationConfig()
+config.tools = [getWeatherTool]   // ToolDefinition with JSON-Schema parameters
+config.promptTemplate = .gemma4
+
+let stream = try backend.generate(
+    prompt: "What's the weather in Paris?",
+    systemPrompt: "You are a helpful assistant.",
+    config: config
+)
+for try await event in stream.events {
+    if case .toolCall(let call) = event { /* dispatch */ }
+}
+```
+
+A separate `GBNFSchemaPreValidator` guards GBNF grammar compilation against CVE-2026-2069 (buffer overflow in `llama_grammar_advance_stack()`; the vendored llama.cpp build b8772 is pre-fix). The validator rejects schema combiners and nullable union types before they reach `llama_sampler_init_grammar`, with index-qualified failure paths so tool authors get an actionable error. See `LLAMA_CONTRACT.md` § Security for the upgrade procedure once the xcframework pin moves past b8773. See [#836](https://github.com/roryford/BaseChatKit/pull/836), [#414](https://github.com/roryford/BaseChatKit/issues/414), [#609](https://github.com/roryford/BaseChatKit/issues/609).
+
+#### Fuzz detectors — calibration corpus + FP/TP gate
+
+`ToolCallValidityDetector` (shipped in v0.12.4 with three sub-checks at `.flaky` severity) now has a 265-record labeled corpus and a `CalibrationTests` harness that gates each single-turn detector at FP rate < 2% and TP rate > 80%. This is the prerequisite for promoting detectors from `.flaky` to `.confirmed` — sub-checks that pass calibration get routed into the high-signal tier, the noisy ones stay quarantined.
+
+```swift
+swift test --filter CalibrationTests --disable-default-traits --traits Fuzz
+// Each detector is run against ~210 good + ~55 bad records;
+// gate fails if FP ≥ 2% or TP ≤ 80% per sub-check.
+```
+
+The corpus runs locally and on the nightly job, not per-PR — the gate is load-bearing for severity decisions, not a CI tripwire on every push. New detectors register a coverage exemption via `coverageExempt` with a tracking-issue link until their corpus records are authored. See [#837](https://github.com/roryford/BaseChatKit/pull/837), [#488](https://github.com/roryford/BaseChatKit/issues/488).
+
+#### Share + Action extension recipes
+
+`BaseChatDemo` ships two iOS app extensions — Share and Action — that show how to pipe content from the system Share sheet or action row into a new BaseChatKit chat session. The extensions are intentionally thin: they write a `PendingSharePayload` to an App Group `UserDefaults` key and complete immediately. The host app drains the payload on the next foreground transition and hands it to `ChatViewModel.ingestPendingPayload(_:intent:)` — no inference happens inside the extension sandbox.
+
+```swift
+// In your App body:
+.onChange(of: scenePhase) { _, newPhase in
+    if newPhase == .active { checkForPendingSharePayload() }
+}
+.task(id: payloadID) { await viewModel.ingestPendingPayload(payload, intent: .summarise) }
+```
+
+The companion `.task(id:)` modifier handles the cold-launch race where `scenePhase` fires `.active` before the SwiftData container finishes initialising. See `docs/share-action-extension-recipe.md` for the full integration guide. See [#840](https://github.com/roryford/BaseChatKit/pull/840).
+
+### Features
+
+- **llama:** Gemma 4 tool calling via `<|tool_call>` parser + `GBNFSchemaPreValidator` guarding against CVE-2026-2069 ([#836](https://github.com/roryford/BaseChatKit/pull/836))
+- **fuzz:** 265-record calibration corpus + `CalibrationTests` FP/TP gate (FP < 2% / TP > 80% per sub-check) for detector severity promotion ([#837](https://github.com/roryford/BaseChatKit/pull/837))
+- **example:** Share + Action extension targets in `BaseChatDemo` with App Group `UserDefaults` handoff and `ChatViewModel.ingestPendingPayload(_:intent:)` ([#840](https://github.com/roryford/BaseChatKit/pull/840))
+
+### Internal
+
+- **inference:** injectable `Sleeper` and `JitterProvider` closures on `RetryStrategy` / `withRetry` / `SSECloudBackend` for deterministic retry tests, with NaN-safe jitter clamping and ms-rounded delay logging ([#839](https://github.com/roryford/BaseChatKit/pull/839))
+
 ## [0.12.4](https://github.com/roryford/BaseChatKit/compare/v0.12.3...v0.12.4) (2026-04-27)
 
 ### Highlights
