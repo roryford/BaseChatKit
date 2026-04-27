@@ -312,7 +312,11 @@ final class GenerationCoordinator {
 
         if backend.capabilities.requiresPromptTemplate {
             let template = provider?.selectedPromptTemplate ?? .chatML
-            assembledPrompt = template.format(messages: flattened, systemPrompt: systemPrompt)
+            if backend.capabilities.supportsToolCalling && !config.tools.isEmpty {
+                assembledPrompt = template.format(messages: flattened, systemPrompt: systemPrompt, tools: config.tools)
+            } else {
+                assembledPrompt = template.format(messages: flattened, systemPrompt: systemPrompt)
+            }
             effectiveSystemPrompt = nil
         } else {
             assembledPrompt = flattened.last(where: { $0.role == "user" })?.content ?? ""

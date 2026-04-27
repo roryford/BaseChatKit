@@ -31,7 +31,7 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         case .gemma:
             return ["<start_of_turn>", "<end_of_turn>"]
         case .gemma4:
-            return ["<|turn>", "<|end_of_turn>"]
+            return ["<|turn>", "<|end_of_turn>", "<|tool>", "<|tool_call>", "<|tool_response>"]
         case .phi:
             return ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>"]
         }
@@ -65,6 +65,28 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         messages: [(role: String, content: String)],
         systemPrompt: String?
     ) -> String {
+        format(messages: messages, systemPrompt: systemPrompt, tools: [])
+    }
+
+    /// Formats an array of messages into a single prompt string, injecting
+    /// native tool-declaration blocks for templates that support them.
+    ///
+    /// Currently only `.gemma4` uses `tools` natively (via `<|tool>` blocks in
+    /// the system turn). All other templates ignore the `tools` parameter and
+    /// produce the same output as `format(messages:systemPrompt:)`. Tool
+    /// descriptions for those templates must be injected via
+    /// `ToolSystemPromptBuilder` into `systemPrompt` before calling this method.
+    ///
+    /// - Parameters:
+    ///   - messages: Ordered (role, content) pairs.
+    ///   - systemPrompt: An optional system-level instruction.
+    ///   - tools: Tool definitions to inject natively when the template supports it.
+    /// - Returns: A formatted prompt string ready for the model.
+    public func format(
+        messages: [(role: String, content: String)],
+        systemPrompt: String?,
+        tools: [ToolDefinition]
+    ) -> String {
         switch self {
         case .chatML:
             return formatChatML(messages: messages, systemPrompt: systemPrompt)
@@ -77,7 +99,7 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         case .gemma:
             return formatGemma(messages: messages, systemPrompt: systemPrompt)
         case .gemma4:
-            return formatGemma4(messages: messages, systemPrompt: systemPrompt)
+            return formatGemma4(messages: messages, systemPrompt: systemPrompt, tools: tools)
         case .phi:
             return formatPhi(messages: messages, systemPrompt: systemPrompt)
         }
@@ -252,7 +274,9 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
 
     /// ```
     /// <|turn>system
-    /// {system}<|end_of_turn>       ← emitted only when systemPrompt is non-empty
+    /// {system}
+    /// <|tool>{"name":"…","description":"…","parameters":{…}}   ← one per tool
+    /// <|end_of_turn>
     /// <|turn>user
     /// {content}<|end_of_turn>
     /// <|turn>model
@@ -262,14 +286,40 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
     ///
     /// Unlike Gemma 1/2/3 (which prepend the system prompt to the first user turn),
     /// Gemma 4 uses an explicit `<|turn>system` turn.
+    ///
+    /// When `tools` is non-empty, each `ToolDefinition` is serialised as a
+    /// `<|tool>{JSON}` block appended to the system turn, in the order they appear
+    /// in the array. The declaration JSON has the shape
+    /// `{"name":"…","description":"…","parameters":{…}}`.
     private func formatGemma4(
         messages: [(role: String, content: String)],
-        systemPrompt: String?
+        systemPrompt: String?,
+        tools: [ToolDefinition] = []
     ) -> String {
         var result = ""
 
-        if let systemPrompt, !systemPrompt.isEmpty {
-            result += "<|turn>system\n\(sanitize(systemPrompt))<|end_of_turn>\n"
+        let hasSystemContent = systemPrompt != nil && !(systemPrompt!.isEmpty)
+        var systemParts: [String] = []
+        if hasSystemContent {
+            systemParts.append(sanitize(systemPrompt!))
+        }
+        for tool in tools {
+            if let block = toolDeclarationBlock(for: tool) {
+                systemParts.append("<|tool>\(block)")
+            } else {
+                // Silent skip would mask a tool author's mistake during prompt
+                // assembly. Surface it in the prompt log so the failure is
+                // discoverable without crashing generation.
+                Log.prompt.error("Failed to serialize tool declaration for Gemma 4 template: \(tool.name)")
+            }
+        }
+        // Only emit the system turn when at least one part survived
+        // serialisation — otherwise we'd ship an empty `<|turn>system\n<|end_of_turn>`
+        // marker that confuses the model and burns context.
+        if !systemParts.isEmpty {
+            result += "<|turn>system\n"
+            result += systemParts.joined(separator: "\n")
+            result += "<|end_of_turn>\n"
         }
 
         for message in messages {
@@ -286,6 +336,24 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         result += "<|turn>model\n"
         Log.prompt.debug("Formatted \(messages.count) messages with Gemma 4 template")
         return result
+    }
+
+    /// Serialises a `ToolDefinition` to the JSON string placed after `<|tool>`.
+    /// Returns `nil` when serialisation fails (the tool is silently skipped).
+    private func toolDeclarationBlock(for tool: ToolDefinition) -> String? {
+        guard let paramsData   = try? JSONEncoder().encode(tool.parameters),
+              let paramsObject = try? JSONSerialization.jsonObject(with: paramsData)
+        else { return nil }
+
+        let dict: [String: Any] = [
+            "name":        tool.name,
+            "description": tool.description,
+            "parameters":  paramsObject
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: .sortedKeys),
+              let str  = String(data: data, encoding: .utf8)
+        else { return nil }
+        return str
     }
 
     // MARK: - Phi

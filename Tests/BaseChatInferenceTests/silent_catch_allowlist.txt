@@ -306,3 +306,31 @@ BaseChatMCP/MCPOAuth.swift:(try? container.decodeIfPresent(Bool.self, forKey: .a
 # HTTP layer); falling back to an empty dictionary is correct because all
 # the downstream field reads return nil for missing keys.
 BaseChatMCP/MCPOAuth.swift:let rawJSON = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+
+# PromptTemplate.toolDeclarationBlock — JSON serialisation of ToolDefinition
+# for Gemma 4 <|tool> blocks. These are best-effort conversions: if a tool's
+# parameter schema or the resulting dict cannot be serialised, the tool block
+# is silently skipped (caller handles nil return). No observable side effect.
+BaseChatInference/Services/PromptTemplate.swift:guard let paramsData   = try? JSONEncoder().encode(tool.parameters),
+BaseChatInference/Services/PromptTemplate.swift:let paramsObject = try? JSONSerialization.jsonObject(with: paramsData)
+BaseChatInference/Services/PromptTemplate.swift:guard let data = try? JSONSerialization.data(withJSONObject: dict, options: .sortedKeys),
+
+# LlamaToolCallParser — JSON parsing of streamed Gemma 4 / JSON-fallback
+# tool-call bodies. These are optional conversions: a parse failure means the
+# tool-call block is discarded or falls back to empty args, which is the
+# correct behaviour for a malformed model output.
+BaseChatBackends/LlamaToolCallParser.swift:let obj  = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+BaseChatBackends/LlamaToolCallParser.swift:let serialized = try? JSONSerialization.data(withJSONObject: argsDict),
+
+# Gemma 4 native-format string-value escape decoder: wraps the scanned raw
+# value in `"…"` and reuses JSONSerialization (with `.fragmentsAllowed`) to
+# unescape standard JSON escapes like `\n`, `\"`, `\\`. On failure we keep
+# the raw bytes — a malformed escape is preferable to dropping the call.
+BaseChatBackends/LlamaToolCallParser.swift:let decoded = try? JSONSerialization.jsonObject(
+
+# Gemma 4 native-format argument re-serialisation: round-trips the parsed
+# `[String: Any]` back into a canonical JSON string for ToolCall.arguments.
+# Failure here means a value type slipped through the tokenizer that
+# JSONSerialization rejects — caller falls back to "{}", same shape as
+# the JSON-fallback path's empty-arg fallback.
+BaseChatBackends/LlamaToolCallParser.swift:guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),

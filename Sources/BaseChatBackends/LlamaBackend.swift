@@ -50,7 +50,7 @@ public final class LlamaBackend: InferenceBackend, @unchecked Sendable {
             maxContextTokens: ctxSize,
             requiresPromptTemplate: true,
             supportsSystemPrompt: true,
-            supportsToolCalling: false,
+            supportsToolCalling: true,
             supportsStructuredOutput: false,
             supportsNativeJSONMode: false,
             cancellationStyle: .explicit,
