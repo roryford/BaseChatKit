@@ -1,10 +1,9 @@
 import UIKit
 import UniformTypeIdentifiers
 
-// App Group constants — mirror DemoAppGroup (host app). Duplicated because
-// the extension cannot import InboundPayloadEnvelope (BaseChatInference dep).
-private let kAppGroupID = "group.com.basechatkit.demo"
-private let kPendingKey = "bck.pending-share"
+// App Group constants come from `DemoSharedAppGroup` in
+// `PendingSharePayload.swift`, which is compiled into both the host app
+// and this extension — single source of truth, no string drift.
 
 /// Action Extension principal class — "Summarise selection" recipe.
 ///
@@ -39,9 +38,13 @@ class ActionViewController: UIViewController {
         let payload = await extractPayload(from: items)
 
         if let payload,
-           let defaults = UserDefaults(suiteName: kAppGroupID),
+           let defaults = UserDefaults(suiteName: DemoSharedAppGroup.identifier),
            let data = try? JSONEncoder().encode(payload) {
-            defaults.set(data, forKey: kPendingKey)
+            defaults.set(data, forKey: DemoSharedAppGroup.pendingShareKey)
+            // Force a flush before the extension is suspended. The host app
+            // can wake within milliseconds of `completeRequest`, so we want
+            // the write committed before we hand control back.
+            defaults.synchronize()
         }
 
         extensionContext?.completeRequest(returningItems: nil)

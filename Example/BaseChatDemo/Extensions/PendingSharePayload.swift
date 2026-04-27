@@ -10,8 +10,8 @@ import Foundation
 /// ## Wire format
 ///
 /// Extensions write a JSON-encoded `PendingSharePayload` to:
-/// - App Group: `group.com.basechatkit.demo`
-/// - Key: `bck.pending-share`
+/// - App Group: ``DemoSharedAppGroup/identifier``
+/// - Key: ``DemoSharedAppGroup/pendingShareKey``
 ///
 /// The host app reads it in ``BaseChatDemoApp/checkForPendingSharePayload()``
 /// and converts it to a ``PendingPayload`` before calling
@@ -19,9 +19,11 @@ import Foundation
 ///
 /// ## Payload priority
 ///
-/// If the extension finds multiple item types, it picks the best one in this
-/// order: URL > plain text > image.  Only one payload is queued per extension
-/// invocation.
+/// If an extension finds multiple item types it queues only one payload per
+/// invocation. The exact priority is determined by the producing extension:
+/// the Share Extension prefers `URL > text > image`, while the Action
+/// Extension prefers `text > URL` (its typical use case is "summarise
+/// selection", which is prose-first).
 struct PendingSharePayload: Codable, Sendable {
 
     /// The flavour of content the extension captured.
@@ -35,21 +37,35 @@ struct PendingSharePayload: Codable, Sendable {
     var kind: Kind
 
     /// Plain-text body — populated when `kind == .text`.
-    var text: String?
+    var text: String? = nil
 
     /// Absolute string of the shared URL — populated when `kind == .url`.
-    var urlString: String?
+    var urlString: String? = nil
 
     /// Raw image bytes — populated when `kind == .image`.
-    var imageData: Data?
+    var imageData: Data? = nil
 
     /// MIME type for `imageData`; defaults to `"image/png"` at the read site
     /// when absent.
-    var imageMimeType: String?
+    var imageMimeType: String? = nil
 
     /// Entry point that produced this payload.
     ///
     /// - `"shareExtension"`: iOS/macOS Share sheet
     /// - `"actionExtension"`: iOS Action sheet ("Summarise selection")
     var source: String
+}
+
+/// App Group constants shared between the host app and the Share/Action
+/// extensions. The host app's `DemoAppGroup` enum re-exports the same
+/// identifiers — keep the two in sync (the constants live here so the
+/// extension targets, which can't import host-app types, still see them).
+enum DemoSharedAppGroup {
+    /// App Group identifier — must match the entitlement in
+    /// `BaseChatDemo.entitlements`, `ShareExtension.entitlements`, and
+    /// `ActionExtension.entitlements`.
+    static let identifier = "group.com.basechatkit.demo"
+
+    /// `UserDefaults` key the extensions write to and the host app drains.
+    static let pendingShareKey = "bck.pending-share"
 }

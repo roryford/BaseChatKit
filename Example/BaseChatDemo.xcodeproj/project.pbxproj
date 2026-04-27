@@ -51,8 +51,8 @@
 		BF0032000000000000000000 /* PendingSharePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10030000000000000000000 /* PendingSharePayload.swift */; };
 		BF0033000000000000000000 /* ActionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10034000000000000000000 /* ActionViewController.swift */; };
 		BF0034000000000000000000 /* PendingSharePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10030000000000000000000 /* PendingSharePayload.swift */; };
-		BF0036000000000000000000 /* BaseChatDemoShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = F10037000000000000000000 /* BaseChatDemoShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		BF0037000000000000000000 /* BaseChatDemoActionExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = F10038000000000000000000 /* BaseChatDemoActionExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BF0036000000000000000000 /* BaseChatDemoShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = F10037000000000000000000 /* BaseChatDemoShareExtension.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BF0037000000000000000000 /* BaseChatDemoActionExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = F10038000000000000000000 /* BaseChatDemoActionExtension.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -481,11 +481,13 @@
 		};
 		D22001000000000000000000 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = C12001000000000000000000 /* BaseChatDemoShareExtension */;
 			targetProxy = C22001000000000000000000 /* PBXContainerItemProxy */;
 		};
 		D23001000000000000000000 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = C13001000000000000000000 /* BaseChatDemoActionExtension */;
 			targetProxy = C23001000000000000000000 /* PBXContainerItemProxy */;
 		};

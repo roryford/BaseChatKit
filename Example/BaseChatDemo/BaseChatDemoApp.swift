@@ -252,6 +252,17 @@ struct BaseChatDemoApp: App {
             .onOpenURL { url in
                 handleOpenURL(url)
             }
+            // Drain a staged share payload as soon as the SwiftData container
+            // is ready. This covers the cold-launch race where scenePhase
+            // fires .active before the container task completes. The `.task`
+            // modifier lives on the inner View (not on `WindowGroup`, which
+            // is a `Scene`).
+            .task(id: modelContainer != nil ? 1 : 0) {
+                guard modelContainer != nil, let staged = stagedSharePayload else { return }
+                stagedSharePayload = nil
+                guard let pendingPayload = pendingPayload(from: staged) else { return }
+                await chatViewModel.ingestPendingPayload(pendingPayload, intent: .newSession(preset: nil))
+            }
         }
         #if os(macOS)
         .defaultSize(width: 900, height: 700)
@@ -260,15 +271,6 @@ struct BaseChatDemoApp: App {
             if newPhase == .active {
                 checkForPendingSharePayload()
             }
-        }
-        // Drain a staged share payload as soon as the SwiftData container is
-        // ready. This covers the cold-launch race where scenePhase fires
-        // .active before the container task completes.
-        .task(id: modelContainer != nil ? 1 : 0) {
-            guard modelContainer != nil, let staged = stagedSharePayload else { return }
-            stagedSharePayload = nil
-            guard let pendingPayload = pendingPayload(from: staged) else { return }
-            await chatViewModel.ingestPendingPayload(pendingPayload, intent: .newSession(preset: nil))
         }
     }
 
