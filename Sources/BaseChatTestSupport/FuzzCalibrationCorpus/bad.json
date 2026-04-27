@@ -1,0 +1,3334 @@
+[
+  {
+    "detectorId": "thinking-classification",
+    "note": "visible-text-leak \u2014 marker in rendered (case 1)",
+    "record": {
+      "runId": "b-tc-vl-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this math problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>Let me analyze this. Case 1.</think>The answer is 1.",
+      "rendered": "<think>Let me analyze this. Case 1.</think>The answer is 1.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": {
+        "open": "<think>",
+        "close": "</think>"
+      },
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "visible-text-leak \u2014 marker in rendered (case 2)",
+    "record": {
+      "runId": "b-tc-vl-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this math problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>Let me analyze this. Case 2.</think>The answer is 2.",
+      "rendered": "<think>Let me analyze this. Case 2.</think>The answer is 2.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": {
+        "open": "<think>",
+        "close": "</think>"
+      },
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "visible-text-leak \u2014 marker in rendered (case 3)",
+    "record": {
+      "runId": "b-tc-vl-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this math problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>Let me analyze this. Case 3.</think>The answer is 3.",
+      "rendered": "<think>Let me analyze this. Case 3.</think>The answer is 3.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": {
+        "open": "<think>",
+        "close": "</think>"
+      },
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "visible-text-leak \u2014 marker in rendered (case 4)",
+    "record": {
+      "runId": "b-tc-vl-004",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this math problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>Let me analyze this. Case 4.</think>The answer is 4.",
+      "rendered": "<think>Let me analyze this. Case 4.</think>The answer is 4.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": {
+        "open": "<think>",
+        "close": "</think>"
+      },
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "misclassified-as-text \u2014 open marker in raw, thinkingRaw empty (case 1)",
+    "record": {
+      "runId": "b-tc-mt-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain your reasoning."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>The reasoning fell into raw text. Case 1.</think>",
+      "rendered": "<think>The reasoning fell into raw text. Case 1.</think>",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": {
+        "open": "<think>",
+        "close": "</think>"
+      },
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "misclassified-as-text \u2014 open marker in raw, thinkingRaw empty (case 2)",
+    "record": {
+      "runId": "b-tc-mt-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain your reasoning."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>The reasoning fell into raw text. Case 2.</think>",
+      "rendered": "<think>The reasoning fell into raw text. Case 2.</think>",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": {
+        "open": "<think>",
+        "close": "</think>"
+      },
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "misclassified-as-text \u2014 open marker in raw, thinkingRaw empty (case 3)",
+    "record": {
+      "runId": "b-tc-mt-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain your reasoning."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>The reasoning fell into raw text. Case 3.</think>",
+      "rendered": "<think>The reasoning fell into raw text. Case 3.</think>",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": {
+        "open": "<think>",
+        "close": "</think>"
+      },
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "misclassified-as-text \u2014 open marker in raw, thinkingRaw empty (case 4)",
+    "record": {
+      "runId": "b-tc-mt-004",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain your reasoning."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>The reasoning fell into raw text. Case 4.</think>",
+      "rendered": "<think>The reasoning fell into raw text. Case 4.</think>",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": {
+        "open": "<think>",
+        "close": "</think>"
+      },
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "orphan-thinking-complete \u2014 thinkingCompleteCount=1 but thinkingRaw empty (case 1)",
+    "record": {
+      "runId": "b-tc-oc-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "What is your answer?"
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Here is my answer to case 1.",
+      "rendered": "Here is my answer to case 1.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "orphan-thinking-complete \u2014 thinkingCompleteCount=1 but thinkingRaw empty (case 2)",
+    "record": {
+      "runId": "b-tc-oc-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "What is your answer?"
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Here is my answer to case 2.",
+      "rendered": "Here is my answer to case 2.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "orphan-thinking-complete \u2014 thinkingCompleteCount=1 but thinkingRaw empty (case 3)",
+    "record": {
+      "runId": "b-tc-oc-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "What is your answer?"
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Here is my answer to case 3.",
+      "rendered": "Here is my answer to case 3.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "unbalanced-thinking-events \u2014 thinkingRaw non-empty, thinkingCompleteCount=0, phase=done (case 1)",
+    "record": {
+      "runId": "b-tc-ub-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "The answer is 10.",
+      "rendered": "The answer is 10.",
+      "thinkingRaw": "I started thinking about case 1 but the close event never arrived...",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "unbalanced-thinking-events \u2014 thinkingRaw non-empty, thinkingCompleteCount=0, phase=done (case 2)",
+    "record": {
+      "runId": "b-tc-ub-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "The answer is 11.",
+      "rendered": "The answer is 11.",
+      "thinkingRaw": "I started thinking about case 2 but the close event never arrived...",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "thinking-classification",
+    "note": "unbalanced-thinking-events \u2014 thinkingRaw non-empty, thinkingCompleteCount=0, phase=done (case 3)",
+    "record": {
+      "runId": "b-tc-ub-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "The answer is 12.",
+      "rendered": "The answer is 12.",
+      "thinkingRaw": "I started thinking about case 3 but the close event never arrived...",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "looping",
+    "note": "raw-looping \u2014 3x repetition of 81-char unit (case 1)",
+    "record": {
+      "runId": "b-loop-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me something interesting."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "The model encountered an unexpected error and cannot (1) continue this task now. The model encountered an unexpected error and cannot (1) continue this task now. The model encountered an unexpected error and cannot (1) continue this task now. ",
+      "rendered": "The model encountered an unexpected error and cannot (1) continue this task now. The model encountered an unexpected error and cannot (1) continue this task now. The model encountered an unexpected error and cannot (1) continue this task now. ",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "looping",
+    "note": "raw-looping \u2014 3x repetition of 81-char unit (case 2)",
+    "record": {
+      "runId": "b-loop-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me something interesting."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "The model encountered an unexpected error and cannot (2) continue this task now. The model encountered an unexpected error and cannot (2) continue this task now. The model encountered an unexpected error and cannot (2) continue this task now. ",
+      "rendered": "The model encountered an unexpected error and cannot (2) continue this task now. The model encountered an unexpected error and cannot (2) continue this task now. The model encountered an unexpected error and cannot (2) continue this task now. ",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "looping",
+    "note": "raw-looping \u2014 3x repetition of 81-char unit (case 3)",
+    "record": {
+      "runId": "b-loop-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me something interesting."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "The model encountered an unexpected error and cannot (3) continue this task now. The model encountered an unexpected error and cannot (3) continue this task now. The model encountered an unexpected error and cannot (3) continue this task now. ",
+      "rendered": "The model encountered an unexpected error and cannot (3) continue this task now. The model encountered an unexpected error and cannot (3) continue this task now. The model encountered an unexpected error and cannot (3) continue this task now. ",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "looping",
+    "note": "raw-looping \u2014 3x repetition of 81-char unit (case 4)",
+    "record": {
+      "runId": "b-loop-004",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me something interesting."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "The model encountered an unexpected error and cannot (4) continue this task now. The model encountered an unexpected error and cannot (4) continue this task now. The model encountered an unexpected error and cannot (4) continue this task now. ",
+      "rendered": "The model encountered an unexpected error and cannot (4) continue this task now. The model encountered an unexpected error and cannot (4) continue this task now. The model encountered an unexpected error and cannot (4) continue this task now. ",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "looping",
+    "note": "raw-looping \u2014 3x repetition of 81-char unit (case 5)",
+    "record": {
+      "runId": "b-loop-005",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me something interesting."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "The model encountered an unexpected error and cannot (5) continue this task now. The model encountered an unexpected error and cannot (5) continue this task now. The model encountered an unexpected error and cannot (5) continue this task now. ",
+      "rendered": "The model encountered an unexpected error and cannot (5) continue this task now. The model encountered an unexpected error and cannot (5) continue this task now. The model encountered an unexpected error and cannot (5) continue this task now. ",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "looping",
+    "note": "thinking-looping \u2014 3x repetition of 77-char unit (case 1)",
+    "record": {
+      "runId": "b-loop-006",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this complex problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "I need to reconsider my approach and start over completely (1) from scratch. I need to reconsider my approach and start over completely (1) from scratch. I need to reconsider my approach and start over completely (1) from scratch. ",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "looping",
+    "note": "thinking-looping \u2014 3x repetition of 77-char unit (case 2)",
+    "record": {
+      "runId": "b-loop-007",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this complex problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "I need to reconsider my approach and start over completely (2) from scratch. I need to reconsider my approach and start over completely (2) from scratch. I need to reconsider my approach and start over completely (2) from scratch. ",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "looping",
+    "note": "thinking-looping \u2014 3x repetition of 77-char unit (case 3)",
+    "record": {
+      "runId": "b-loop-008",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Solve this complex problem."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "I need to reconsider my approach and start over completely (3) from scratch. I need to reconsider my approach and start over completely (3) from scratch. I need to reconsider my approach and start over completely (3) from scratch. ",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "empty-output-after-work",
+    "note": "empty output after 35000ms of work (case 1)",
+    "record": {
+      "runId": "b-eoaw-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the complete history of computing in detail. Case 1."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 35000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "empty-output-after-work",
+    "note": "empty output after 40000ms of work (case 2)",
+    "record": {
+      "runId": "b-eoaw-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the complete history of computing in detail. Case 2."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 40000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "empty-output-after-work",
+    "note": "empty output after 45000ms of work (case 3)",
+    "record": {
+      "runId": "b-eoaw-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the complete history of computing in detail. Case 3."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 45000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "empty-output-after-work",
+    "note": "empty output after 50000ms of work (case 4)",
+    "record": {
+      "runId": "b-eoaw-004",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the complete history of computing in detail. Case 4."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 50000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "empty-output-after-work",
+    "note": "empty output after 55000ms of work (case 5)",
+    "record": {
+      "runId": "b-eoaw-005",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the complete history of computing in detail. Case 5."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 55000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "template-token-leak",
+    "note": "template token '<|im_start|>' leaked into raw output without fence (case 1)",
+    "record": {
+      "runId": "b-ttl-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me about tokenizers."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Tokenizers convert text to tokens. <|im_start|>The vocabulary includes many special tokens.",
+      "rendered": "Tokenizers convert text to tokens. <|im_start|>The vocabulary includes many special tokens.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "template-token-leak",
+    "note": "template token '[INST]' leaked into raw output without fence (case 2)",
+    "record": {
+      "runId": "b-ttl-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me about tokenizers."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Tokenizers convert text to tokens. [INST]The vocabulary includes many special tokens.",
+      "rendered": "Tokenizers convert text to tokens. [INST]The vocabulary includes many special tokens.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "template-token-leak",
+    "note": "template token <|end_of_text|> leaked into raw output without fence (case 3)",
+    "record": {
+      "runId": "b-ttl-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me about tokenizers."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Tokenizers convert text to tokens. <|end_of_text|>The vocabulary includes many special tokens.",
+      "rendered": "Tokenizers convert text to tokens. <|end_of_text|>The vocabulary includes many special tokens.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "template-token-leak",
+    "note": "template token '<|begin_of_text|>' leaked into raw output without fence (case 4)",
+    "record": {
+      "runId": "b-ttl-004",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me about tokenizers."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Tokenizers convert text to tokens. <|begin_of_text|>The vocabulary includes many special tokens.",
+      "rendered": "Tokenizers convert text to tokens. <|begin_of_text|>The vocabulary includes many special tokens.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "template-token-leak",
+    "note": "template token <end_of_turn> leaked into raw output without fence (case 5)",
+    "record": {
+      "runId": "b-ttl-005",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Tell me about tokenizers."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Tokenizers convert text to tokens. <end_of_turn>The vocabulary includes many special tokens.",
+      "rendered": "Tokenizers convert text to tokens. <end_of_turn>The vocabulary includes many special tokens.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "memory-growth",
+    "note": "memory error triggering memory-growth detector (case 1)",
+    "record": {
+      "runId": "b-mem-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Run a large computation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "jetsam killed process due to memory pressure",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "memory-growth",
+    "note": "memory error triggering memory-growth detector (case 2)",
+    "record": {
+      "runId": "b-mem-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Run a large computation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "OOM: out of memory \u2014 allocation failed",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "memory-growth",
+    "note": "memory error triggering memory-growth detector (case 3)",
+    "record": {
+      "runId": "b-mem-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Run a large computation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "mach_vm_allocate failed: malloc error in region",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "kv-collision",
+    "note": "decode failed during generation \u2014 KV-cache collision (case 1)",
+    "record": {
+      "runId": "b-kvc-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Continue the conversation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "Decode failed during generation: invalid KV-cache state after stop 1",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "kv-collision",
+    "note": "decode failed during generation \u2014 KV-cache collision (case 2)",
+    "record": {
+      "runId": "b-kvc-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Continue the conversation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "Decode failed during generation: invalid KV-cache state after stop 2",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "kv-collision",
+    "note": "decode failed during generation \u2014 KV-cache collision (case 3)",
+    "record": {
+      "runId": "b-kvc-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Continue the conversation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "Decode failed during generation: invalid KV-cache state after stop 3",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "empty-visible-after-think",
+    "note": "thinking present but rendered is empty (case 1)",
+    "record": {
+      "runId": "b-evat-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the solution."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>After careful analysis, the answer involves several steps.</think>",
+      "rendered": "",
+      "thinkingRaw": "After careful analysis, the answer involves several steps. Case 1.",
+      "thinkingParts": [
+        "After careful analysis, the answer involves several steps. Case 1."
+      ],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "empty-visible-after-think",
+    "note": "thinking present but rendered is empty (case 2)",
+    "record": {
+      "runId": "b-evat-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the solution."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>After careful analysis, the answer involves several steps.</think>",
+      "rendered": "",
+      "thinkingRaw": "After careful analysis, the answer involves several steps. Case 2.",
+      "thinkingParts": [
+        "After careful analysis, the answer involves several steps. Case 2."
+      ],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "empty-visible-after-think",
+    "note": "thinking present but rendered is empty (case 3)",
+    "record": {
+      "runId": "b-evat-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the solution."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>After careful analysis, the answer involves several steps.</think>",
+      "rendered": "",
+      "thinkingRaw": "After careful analysis, the answer involves several steps. Case 3.",
+      "thinkingParts": [
+        "After careful analysis, the answer involves several steps. Case 3."
+      ],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "empty-visible-after-think",
+    "note": "thinking present but rendered is empty (case 4)",
+    "record": {
+      "runId": "b-evat-004",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Explain the solution."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "<think>After careful analysis, the answer involves several steps.</think>",
+      "rendered": "",
+      "thinkingRaw": "After careful analysis, the answer involves several steps. Case 4.",
+      "thinkingParts": [
+        "After careful analysis, the answer involves several steps. Case 4."
+      ],
+      "thinkingCompleteCount": 1,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "race-stall",
+    "note": "phase=stalled indicating generation stall (case 1)",
+    "record": {
+      "runId": "b-rs-ps-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Run a computation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 65000.0,
+        "tokensPerSec": null
+      },
+      "phase": "stalled",
+      "error": null,
+      "stopReason": null
+    }
+  },
+  {
+    "detectorId": "race-stall",
+    "note": "phase=stalled indicating generation stall (case 2)",
+    "record": {
+      "runId": "b-rs-ps-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Run a computation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 70000.0,
+        "tokensPerSec": null
+      },
+      "phase": "stalled",
+      "error": null,
+      "stopReason": null
+    }
+  },
+  {
+    "detectorId": "race-stall",
+    "note": "phase=stalled indicating generation stall (case 3)",
+    "record": {
+      "runId": "b-rs-ps-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Run a computation."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 75000.0,
+        "tokensPerSec": null
+      },
+      "phase": "stalled",
+      "error": null,
+      "stopReason": null
+    }
+  },
+  {
+    "detectorId": "race-stall",
+    "note": "firstTokenMs=90000ms exceeds 60s threshold (case 1)",
+    "record": {
+      "runId": "b-rs-ftt-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Generate text."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Eventually some output appeared.",
+      "rendered": "Eventually some output appeared.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": 90000,
+        "totalMs": 95000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "race-stall",
+    "note": "firstTokenMs=95000ms exceeds 60s threshold (case 2)",
+    "record": {
+      "runId": "b-rs-ftt-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Generate text."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Eventually some output appeared.",
+      "rendered": "Eventually some output appeared.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": 95000,
+        "totalMs": 100000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "race-stall",
+    "note": "firstTokenMs=100000ms exceeds 60s threshold (case 3)",
+    "record": {
+      "runId": "b-rs-ftt-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Generate text."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Eventually some output appeared.",
+      "rendered": "Eventually some output appeared.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": 100000,
+        "totalMs": 105000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "context-exhaustion-silent",
+    "note": "exceeds context window error (case 1)",
+    "record": {
+      "runId": "b-ces-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Summarize this very long document."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "The prompt exceeds context window limit (context exhaustion case 1)",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "context-exhaustion-silent",
+    "note": "exceeds context window error (case 2)",
+    "record": {
+      "runId": "b-ces-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Summarize this very long document."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "The prompt exceeds context window limit (context exhaustion case 2)",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "context-exhaustion-silent",
+    "note": "exceeds context window error (case 3)",
+    "record": {
+      "runId": "b-ces-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Summarize this very long document."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 1200.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": "The prompt exceeds context window limit (context exhaustion case 3)",
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "timeout",
+    "note": "totalMs=70000ms exceeds 60s timeout threshold (case 1)",
+    "record": {
+      "runId": "b-to-001",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Generate a very long story."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Eventually completed.",
+      "rendered": "Eventually completed.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 70000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "timeout",
+    "note": "totalMs=85000ms exceeds 60s timeout threshold (case 2)",
+    "record": {
+      "runId": "b-to-002",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Generate a very long story."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "Eventually completed.",
+      "rendered": "Eventually completed.",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 85000.0,
+        "tokensPerSec": null
+      },
+      "phase": "done",
+      "error": null,
+      "stopReason": "natural"
+    }
+  },
+  {
+    "detectorId": "timeout",
+    "note": "totalMs=120000ms exceeds 60s timeout threshold (case 3)",
+    "record": {
+      "runId": "b-to-003",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Generate a very long story."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 120000.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": null,
+      "stopReason": "error"
+    }
+  },
+  {
+    "detectorId": "timeout",
+    "note": "totalMs=65001ms exceeds 60s timeout threshold (case 4)",
+    "record": {
+      "runId": "b-to-004",
+      "ts": "2026-01-15T12:00:00Z",
+      "harness": {
+        "fuzzVersion": "1.0.0",
+        "packageGitRev": "calibration",
+        "packageGitDirty": false,
+        "swiftVersion": "6.1",
+        "osBuild": "24A335",
+        "thermalState": "nominal"
+      },
+      "model": {
+        "backend": "mock",
+        "id": "calibration-model",
+        "url": "mem://calibration",
+        "fileSHA256": null,
+        "tokenizerHash": null
+      },
+      "config": {
+        "seed": 42,
+        "temperature": 0.8,
+        "topP": 0.95,
+        "maxTokens": null,
+        "systemPrompt": null
+      },
+      "prompt": {
+        "corpusId": "calibration",
+        "mutators": [],
+        "messages": [
+          {
+            "role": "user",
+            "text": "Generate a very long story."
+          }
+        ]
+      },
+      "events": [],
+      "raw": "",
+      "rendered": "",
+      "thinkingRaw": "",
+      "thinkingParts": [],
+      "thinkingCompleteCount": 0,
+      "templateMarkers": null,
+      "memory": {
+        "beforeBytes": 150000000,
+        "peakBytes": 155000000,
+        "afterBytes": 152000000
+      },
+      "timing": {
+        "firstTokenMs": null,
+        "totalMs": 65001.0,
+        "tokensPerSec": null
+      },
+      "phase": "stopped",
+      "error": null,
+      "stopReason": "error"
+    }
+  }
+]

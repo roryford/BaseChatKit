@@ -1,6 +1,6 @@
 # Fuzzing Guide
 
-BaseChatFuzz is a long-running, randomised exercise harness for the inference stack. It drives real backends with semi-random prompts, sampler settings, and stop conditions, and runs detectors over the output stream looking for whole classes of bugs that unit tests don't think to ask about — visible reasoning leaks, runaway loops, template-token escapes, KV cache collisions, and so on. It is **not** a regression-test replacement: detector hits are leads to investigate, and severity stays at `flaky` until the calibration corpus lands.
+BaseChatFuzz is a long-running, randomised exercise harness for the inference stack. It drives real backends with semi-random prompts, sampler settings, and stop conditions, and runs detectors over the output stream looking for whole classes of bugs that unit tests don't think to ask about — visible reasoning leaks, runaway loops, template-token escapes, KV cache collisions, and so on. It is **not** a regression-test replacement: detector hits are leads to investigate, and severity stays at `flaky` until the calibration corpus clears both accuracy gates (FP < 2 %, TP ≥ 80 %).
 
 On its first real-model smoke run against `qwen3.5:4b` via Ollama, the harness landed three findings in three iterations — every one a 41–99-second compute that produced an empty assistant message. Root cause was filed as [#487](https://github.com/roryford/BaseChatKit/issues/487): `OllamaBackend.extractToken` only reads `message.content` and silently drops the separate `thinking` field that reasoning models emit. That is the kind of bug this harness exists to find — a real production-path drop that no unit test was asking about, surfaced in minutes against an off-the-shelf model.
 
@@ -16,6 +16,7 @@ On its first real-model smoke run against `qwen3.5:4b` via Ollama, the harness l
 - [Reproducing a Finding](#reproducing-a-finding)
 - [Adding a New Detector](#adding-a-new-detector)
 - [Real-Bug Rediscovery Recipes](#real-bug-rediscovery-recipes)
+- [Calibration Corpus](#calibration-corpus)
 - [Known Gaps](#known-gaps)
 - [CI tiers](#ci-tiers)
 
@@ -130,7 +131,7 @@ Findings are deduplicated by `<hash>` — the same bug surfaced twice in one run
 
 ## Day-One Detectors
 
-Four detectors ship with the v1 harness. Most sub-checks are classified `flaky` until a calibration corpus rules out false positives on known-good outputs; two zero-FP-by-construction transcript invariants under `tool-call-validity` (`id-reuse` and `orphan-result`) ship `confirmed`.
+Four detectors ship with the v1 harness. Most sub-checks are classified `flaky` until the calibration corpus clears both accuracy gates on known-good outputs — see [Calibration Corpus](#calibration-corpus); two zero-FP-by-construction transcript invariants under `tool-call-validity` (`id-reuse` and `orphan-result`) ship `confirmed`.
 
 | ID | Sub-checks | Inspiration |
 |----|-----------|-------------|
@@ -139,7 +140,7 @@ Four detectors ship with the v1 harness. Most sub-checks are classified `flaky` 
 | `empty-output-after-work` | `silent-empty` | [#487](https://github.com/roryford/BaseChatKit/issues/487) — `OllamaBackend.extractToken` drops the `thinking` field for reasoning models, leaving the user with a long compute and an empty assistant bubble. The headline first-day discovery. |
 | `tool-call-validity` | 5 (`malformed-json-args`, `schema-violation`, `id-reuse`, `orphan-result`, `toolchoice-violation`) | [#627](https://github.com/roryford/BaseChatKit/issues/627) — tool-call correctness is the most fragile piece of any real integration. Activates when `--tools` is set or `RunRecord.toolCalls` is non-empty; reuses `JSONSchemaValidator`. `id-reuse` and `orphan-result` ship `confirmed` (zero-FP-by-construction transcript invariants); `malformed-json-args`, `schema-violation`, `toolchoice-violation` ship `flaky` pending corpus calibration under [#488](https://github.com/roryford/BaseChatKit/issues/488). |
 
-The remaining seven detectors and the calibration corpus are tracked as follow-up issues — see [Known Gaps](#known-gaps).
+The remaining seven detectors are documented below. All ten single-turn detectors are now covered by the calibration corpus — see [Calibration Corpus](#calibration-corpus).
 
 ---
 
@@ -254,31 +255,62 @@ Until [#487](https://github.com/roryford/BaseChatKit/issues/487) is fixed, this 
 
 ---
 
+## Calibration Corpus
+
+`Sources/BaseChatTestSupport/FuzzCalibrationCorpus/` holds a labeled fixture corpus that gates the `flaky` → `confirmed` severity promotion for each single-turn detector.
+
+| File | Size | Purpose |
+|------|------|---------|
+| `good.json` | ~210 records | Known-good `RunRecord` captures — no detector should fire |
+| `bad.json`  | ~55 records  | Known-bad captures labeled `{detectorId, note, record}` |
+
+### Accuracy gates
+
+`CalibrationTests` in `Tests/BaseChatFuzzTests/` asserts:
+
+| Gate | Threshold |
+|------|-----------|
+| False-positive rate (FP) | **< 2 %** per detector on the good corpus |
+| True-positive rate  (TP) | **≥ 80 %** per detector on its labeled bad records |
+
+Run the gate locally:
+
+```bash
+swift test --filter BaseChatFuzzTests.CalibrationTests --disable-default-traits
+```
+
+All ten single-turn detectors pass both gates as of [#488](https://github.com/roryford/BaseChatKit/issues/488). `tool-call-validity` (which landed in [#813](https://github.com/roryford/BaseChatKit/pull/813) after the corpus was authored) ships two `.confirmed` zero-FP-by-construction sub-checks (`id-reuse`, `orphan-result`) and three `.flaky` sub-checks pending follow-up corpus work — it is intentionally exempt from the coverage check via `CalibrationTests.coverageExempt`. Session detectors (`turn-boundary-kv-state`, `cancellation-race`, `session-context-leak`) consume `[SessionCapture]` objects and are not covered by this corpus — they require a separate session-level fixture set.
+
+### Adding records
+
+1. Append entries to `good.json` (plain `RunRecord`) or `bad.json` (`{detectorId, note, record}`). Good records use `g-<group>-NNN` (group letter from the corpus-group table). Bad records use a short detector slug + bug-class group, e.g. `b-tc-vl-001` for `thinking-classification` visible-leak — follow the existing pattern in `bad.json` for the relevant detector to keep IDs consistent.
+2. Re-run `CalibrationTests` — mislabeled records are caught immediately.
+3. A new detector added to `DetectorRegistry.all` will fail `test_badCorpusCoverage_allDetectorsCovered` until at least one bad record is added for it.
+
+See `Sources/BaseChatTestSupport/FuzzCalibrationCorpus/README.md` for the full schema reference and corpus-group descriptions.
+
+---
+
 ## Known Gaps
 
-These are wired but not yet implemented. Day-one issues will be filed for each.
+Items below are tracked as follow-up issues — some are detectors that ship without corpus coverage, others are infrastructure not yet built.
 
-### Detectors not yet implemented (7)
+### Session detectors without corpus coverage
+
+All ten single-turn detectors are implemented and covered by the calibration corpus. The following session-level detectors ship and run, but consume `[SessionCapture]` rather than `RunRecord`, so they are not gated by the single-turn corpus and need a separate session-level fixture set:
 
 | ID | Looks for |
 |----|-----------|
-| `template-token-leak` | Raw chat-template tokens (`<|im_start|>`, `<|eot_id|>`, etc.) appearing in visible output. |
-| `memory-growth` | RSS increase across iterations beyond a baseline ceiling. |
-| `kv-collision` | Output that looks like context bleed from a prior session. |
-| `empty-visible-after-think` | `<think>` block followed by no visible content. |
-| `race-stall` | First-token latency spike after rapid session switches. |
-| `context-exhaustion-silent` | Truncation past the context window without a user-visible signal. |
-| `timeout` | Generations that exceed the configured per-iteration deadline. |
+| `turn-boundary-kv-state` | KV-cache residue bleeding across turn boundaries in multi-turn sessions. |
+| `cancellation-race` | Output emitted after a cancellation request is acknowledged. |
+| `session-context-leak` | Context from one session appearing in a different session's output. |
 
 ### Infrastructure
 
-- **Calibration corpus** — known-good outputs to score detectors against; gates the `flaky` → `confirmed` severity promotion.
 - **`--shrink`** — minimise a failing prompt to the smallest input that still fires the detector.
 - **Multi-turn** — opt-in via `--session-scripts`. The harness drives bundled `SessionScript` JSONs through `InferenceService.enqueue`, exercising the queue, cancellation, and latest-wins load paths that single-turn fuzzing can't reach. Three multi-turn detectors ship alongside: `turn-boundary-kv-state`, `cancellation-race`, and `session-context-leak`. Single-turn remains the default ([#492](https://github.com/roryford/BaseChatKit/issues/492)).
 - **Slash command** — `/fuzz` shortcut to run `scripts/fuzz.sh` from inside Claude Code.
 - **Multi-backend factory fleet** — `FuzzRunner` now accepts a `FuzzBackendFactory` protocol (landed via [#496](https://github.com/roryford/BaseChatKit/issues/496)). Ship `LlamaFuzzFactory`, `FoundationFuzzFactory`, and `MLXFuzzFactory` to feed `--backend all` ([#501](https://github.com/roryford/BaseChatKit/issues/501)).
-
-The fuzzer now runs on three tiers — see [CI tiers](#ci-tiers).
 
 ---
 
