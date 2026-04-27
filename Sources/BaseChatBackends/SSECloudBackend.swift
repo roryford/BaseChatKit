@@ -107,6 +107,11 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
     /// custom strategy for tests.
     public var retryStrategy: any RetryStrategy = ExponentialBackoffStrategy()
 
+    /// Called to perform each retry delay. Defaults to `nil`, which uses `Task.sleep`
+    /// (real wall clock). Inject a ``RecordingRetrySleeper`` in tests to assert delay
+    /// bounds without real-time blocking.
+    public var retrySleeper: (@Sendable (Duration) async throws -> Void)?
+
     /// Idle timeout for the generation stream. If no SSE event arrives within
     /// this duration, the stream throws ``CloudBackendError/timeout(_:)``.
     /// `nil` disables idle detection (default).
@@ -330,6 +335,7 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
         withStateLock { _activeEventIDTracker = eventIDTracker }
 
         let capturedStrategy = retryStrategy
+        let capturedSleeper = retrySleeper
         let session = self.urlSession
         let capturedTimeout = streamIdleTimeout
         let capturedBaseURL = baseURL
@@ -369,7 +375,10 @@ open class SSECloudBackend: InferenceBackend, ConversationHistoryReceiver, @unch
                     // Retry wraps only the HTTP connection phase — not SSE parsing.
                     // Mid-stream failures propagate immediately, preserving
                     // already-yielded tokens.
-                    let (bytes, _) = try await withRetry(strategy: capturedStrategy) {
+                    let (bytes, _) = try await withRetry(
+                        strategy: capturedStrategy,
+                        sleeper: capturedSleeper ?? { try await Task.sleep(for: $0) }
+                    ) {
                         let attempt = retryCounter.incrementAndGet()
                         if attempt > 1 {
                             await MainActor.run { streamBox.value?.setPhase(.retrying(attempt: attempt - 1, of: maxRetries)) }
