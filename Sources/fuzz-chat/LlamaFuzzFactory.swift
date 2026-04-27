@@ -22,6 +22,13 @@ public final class LlamaFuzzFactory: FuzzBackendFactory, @unchecked Sendable {
 
     public init() {}
 
+    /// Llama is bit-deterministic given seed + temperature=0, so findings are
+    /// replayable. Stated explicitly per the #560 spec rather than relying on
+    /// the protocol-extension default, to make intent obvious to readers
+    /// comparing factories side-by-side (mirrors `FoundationFuzzFactory` /
+    /// PR #825).
+    public var supportsDeterministicReplay: Bool { true }
+
     public func makeHandle() async throws -> FuzzRunner.BackendHandle {
         guard let modelURL = HardwareRequirements.findGGUFModel() else {
             throw CLIError(

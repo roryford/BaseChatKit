@@ -43,7 +43,7 @@ Common flags:
 
 | Flag | Purpose |
 |------|---------|
-| `--backend <name>` | `ollama` (default), `llama`, `foundation`, `mlx`, `all`. Only `ollama` is wired in v1. |
+| `--backend <name>` | `ollama` (default), `llama`, `foundation`, `mlx`, `mock`, `chaos`, `all`. `mlx` runs via the xcodebuild path (see below); `all` is not yet implemented. |
 | `--minutes N` | Wall-clock budget. Default 5. |
 | `--iterations N` | Iteration cap; runs until either budget is hit. |
 | `--single` | One iteration then exit — useful with `--seed`. |
@@ -87,7 +87,7 @@ Bug shapes diverge per model. The #487 `thinking`-drop only showed up on reasoni
 
 **Determinism.** The discovered model list is sorted by UTF-8 byte order before rotation, so two invocations on the same machine — regardless of the order Ollama reports its models — produce the same iteration-to-model mapping. This is the contract that keeps `--seed N --replay` (#490) meaningful: given a fixed seed and a fixed installed-model list, the rotation sequence is reproducible.
 
-**Llama opt-out.** `LlamaBackend` calls `llama_backend_init` as a process-global one-shot — only one instance per process is supported. Rotation never applies to Llama. The CLI's Llama path is still unwired today and throws; when it lands, it will stay single-model even under `--model all`.
+**Llama opt-out.** `LlamaBackend` calls `llama_backend_init` as a process-global one-shot — only one instance per process is supported. Rotation never applies to Llama. The CLI's Llama path is wired (`--backend llama` discovers the first GGUF in `~/Documents/Models/` via `HardwareRequirements.findGGUFModel`) and stays single-model even under `--model all`.
 
 **Mechanism.** The rotating factory is a `FuzzBackendFactory` conformance that wraps an ordered array of child factories and advances an internal index per `makeHandle()` call. The runner's `init(config:factory:)` contract (#537) is unchanged — rotation is hidden behind the factory boundary. See `RotatingFuzzFactory` in `Sources/BaseChatFuzz/`.
 
