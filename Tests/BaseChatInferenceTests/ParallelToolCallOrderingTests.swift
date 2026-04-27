@@ -10,6 +10,14 @@ import BaseChatTestSupport
 /// ``GenerationEvent/toolCall(_:)`` events when a backend reports
 /// ``BackendCapabilities/supportsParallelToolCalls``.
 ///
+/// **Scope split:** tests 1–3 assert on the backend-level stream
+/// directly (`MockInferenceBackend.generate(...)`) so any future
+/// reordering or buffering introduced *inside the backend* is caught
+/// without coordinator-side noise. Test 4 routes through
+/// `GenerationCoordinator` to lock in the higher-level callId↔result
+/// association contract. The two layers exercise different invariants
+/// and intentionally use different harnesses.
+///
 /// All tests use deterministic mock sequences — no wall-clock races,
 /// no `sleep`, no timing-based assertions.
 @MainActor
@@ -116,12 +124,13 @@ final class ParallelToolCallOrderingTests: XCTestCase {
     // MARK: - 3. Sequential backend delivers all calls (no drops)
 
     /// A backend that serialises tool calls (`supportsParallelToolCalls: false`)
-    /// must still deliver every scripted call — sequential serialisation must
-    /// not cause the second call to be silently dropped.
+    /// must still deliver every scripted call in receipt order — sequential
+    /// serialisation must not cause the second call to be silently dropped or
+    /// reordered.
     ///
     /// Sabotage: truncate `scriptedToolCalls` to a single entry and the
     /// count assertion `received.count == 2` catches the drop.
-    func test_sequentialBackend_emitsOneCallAtATime() async throws {
+    func test_sequentialBackend_deliversAllCallsWithoutDrops() async throws {
         let backend = makeBackend(parallel: false)
         XCTAssertFalse(
             backend.capabilities.supportsParallelToolCalls,
@@ -149,12 +158,17 @@ final class ParallelToolCallOrderingTests: XCTestCase {
     /// results, each `.toolResult` event must carry the `callId` that
     /// corresponds to its originating `.toolCall` event.
     ///
+    /// This test asserts on callId/result *association*, not on the
+    /// emission order of `.toolResult` events. The coordinator is free
+    /// to dispatch parallel executors concurrently, so result order is
+    /// not part of the locked-in contract — only the callId binding is.
+    ///
     /// Uses `scriptedToolCallsPerTurn` so the coordinator loop routes
     /// both calls through the tool registry and surfaces `.toolResult` events.
     ///
     /// Sabotage: swap the `callId` values in `call1`/`call2` definitions and
     /// the result-association assertion detects the mismatch.
-    func test_parallelCalls_resultsDispatchedInOrder() async throws {
+    func test_parallelCalls_resultsAssociatedWithCorrectCallIds() async throws {
         let backend = makeBackend(parallel: true)
 
         let call1 = ToolCall(id: "p-1", toolName: "get_weather", arguments: #"{"city":"London"}"#)
