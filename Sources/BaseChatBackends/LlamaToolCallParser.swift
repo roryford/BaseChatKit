@@ -194,10 +194,16 @@ struct LlamaToolCallParser: Sendable {
         return parseJSONCall(trimmed)
     }
 
-    /// Parses Gemma 4 native format: `call:name{param1:<|"|>val<|"|>}`.
+    /// Parses Gemma 4 native format: `call:name{param1:<|"|>val<|"|>,param2:42}`.
     ///
-    /// `<|"|>` is Gemma 4's string-quoting special token and is substituted
-    /// with `"` before the brace-delimited body is parsed as JSON.
+    /// The brace body uses **unquoted JSON-like keys** with values that are
+    /// either Gemma 4's `<|"|>...<|"|>` quoted-string token, or a bare
+    /// numeric / boolean / null literal. JSON itself requires quoted keys,
+    /// so the body cannot be handed to `JSONSerialization` directly — earlier
+    /// versions did, with the result that *every* native tool call fell back
+    /// to `arguments == "{}"`. The dedicated tokenizer below quotes keys and
+    /// (when needed) values, then round-trips through `JSONSerialization` for
+    /// canonicalisation.
     private func parseGemma4NativeCall(_ raw: String) -> GenerationEvent? {
         let body = String(raw.dropFirst("call:".count))
         let substituted = body.replacingOccurrences(of: Self.gemma4QuoteToken, with: "\"")
@@ -206,10 +212,114 @@ struct LlamaToolCallParser: Sendable {
         let name = String(substituted[..<braceIndex]).trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return nil }
 
-        let jsonBody = String(substituted[braceIndex...])
-        let argsString = canonicalizedArguments(from: jsonBody) ?? "{}"
+        let braceBody = String(substituted[braceIndex...])
+        let argsString = parseGemma4Arguments(braceBody) ?? "{}"
         let id = "llama-\(name)-\(UUID().uuidString.prefix(8))"
         return .toolCall(ToolCall(id: id, toolName: name, arguments: argsString))
+    }
+
+    /// Tokenises Gemma 4's `{key:value,key:value}` brace body into a JSON object.
+    ///
+    /// Returns the canonical JSON string on success, or `nil` on parse failure
+    /// so the caller can fall back to `"{}"` (the same behaviour the JSON
+    /// fallback path uses for malformed call bodies).
+    private func parseGemma4Arguments(_ braceBody: String) -> String? {
+        var trimmed = braceBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}") else { return nil }
+        trimmed.removeFirst()
+        trimmed.removeLast()
+        let inner = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if inner.isEmpty {
+            return "{}"
+        }
+
+        var dict: [String: Any] = [:]
+        var idx = inner.startIndex
+        let end = inner.endIndex
+
+        while idx < end {
+            // Skip whitespace and stray commas between pairs.
+            while idx < end, inner[idx].isWhitespace || inner[idx] == "," {
+                idx = inner.index(after: idx)
+            }
+            if idx >= end { break }
+
+            // Read unquoted key up to the next `:`.
+            guard let colon = inner[idx...].firstIndex(of: ":") else { return nil }
+            let key = inner[idx..<colon].trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { return nil }
+            idx = inner.index(after: colon)
+
+            // Skip whitespace before the value.
+            while idx < end, inner[idx].isWhitespace {
+                idx = inner.index(after: idx)
+            }
+            if idx >= end { return nil }
+
+            // Read value: either a quoted string, or a bare literal up to the next comma.
+            let value: Any
+            if inner[idx] == "\"" {
+                // Quoted string: scan for the closing quote, honouring `\"` escapes.
+                var cursor = inner.index(after: idx)
+                var raw = ""
+                var escaped = false
+                while cursor < end {
+                    let ch = inner[cursor]
+                    if escaped {
+                        raw.append(ch)
+                        escaped = false
+                    } else if ch == "\\" {
+                        raw.append(ch)
+                        escaped = true
+                    } else if ch == "\"" {
+                        break
+                    } else {
+                        raw.append(ch)
+                    }
+                    cursor = inner.index(after: cursor)
+                }
+                guard cursor < end else { return nil } // unterminated string
+                idx = inner.index(after: cursor)
+                // Decode JSON escapes via JSONSerialization on a wrapped string.
+                if let data = "\"\(raw)\"".data(using: .utf8),
+                   let decoded = try? JSONSerialization.jsonObject(
+                       with: data, options: [.fragmentsAllowed]) as? String {
+                    value = decoded
+                } else {
+                    value = raw
+                }
+            } else {
+                // Bare literal — number, true, false, or null. Read up to next comma.
+                var cursor = idx
+                while cursor < end, inner[cursor] != "," {
+                    cursor = inner.index(after: cursor)
+                }
+                let literal = inner[idx..<cursor].trimmingCharacters(in: .whitespaces)
+                idx = cursor
+                guard !literal.isEmpty else { return nil }
+                if literal == "true" {
+                    value = true
+                } else if literal == "false" {
+                    value = false
+                } else if literal == "null" {
+                    value = NSNull()
+                } else if let intVal = Int(literal) {
+                    value = intVal
+                } else if let dblVal = Double(literal) {
+                    value = dblVal
+                } else {
+                    // Treat as a bare string when the model omits Gemma's quote token.
+                    value = literal
+                }
+            }
+
+            dict[key] = value
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
+              let str  = String(data: data, encoding: .utf8)
+        else { return nil }
+        return str
     }
 
     /// Parses JSON fallback format: `{"name":"...","arguments":{...}}`.
@@ -234,15 +344,5 @@ struct LlamaToolCallParser: Sendable {
         return .toolCall(ToolCall(id: id, toolName: name, arguments: argsString))
     }
 
-    /// Round-trips `jsonBody` through `JSONSerialization` to canonicalize it.
-    /// Returns `nil` on parse failure; callers fall back to `"{}"`.
-    private func canonicalizedArguments(from jsonBody: String) -> String? {
-        guard let data = jsonBody.data(using: .utf8),
-              let obj  = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let serialized = try? JSONSerialization.data(withJSONObject: obj),
-              let str = String(data: serialized, encoding: .utf8)
-        else { return nil }
-        return str
-    }
 }
 #endif

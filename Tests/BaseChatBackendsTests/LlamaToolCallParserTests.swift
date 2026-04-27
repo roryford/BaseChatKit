@@ -12,7 +12,7 @@ final class LlamaToolCallParserTests: XCTestCase {
 
     // MARK: - Gemma 4 native format
 
-    func test_gemma4NativeCall_singleCall_emitsToolCallEvent() {
+    func test_gemma4NativeCall_singleCall_emitsToolCallEvent() throws {
         var parser = LlamaToolCallParser()
         let input = "<|tool_call>\ncall:get_weather{city:<|\"|>London<|\"|>,units:<|\"|>celsius<|\"|>}\n<|end_of_turn>"
         let events = parser.process(input)
@@ -29,6 +29,32 @@ final class LlamaToolCallParserTests: XCTestCase {
         let decoded = try XCTUnwrap(try? JSONSerialization.jsonObject(with: args) as? [String: Any])
         XCTAssertEqual(decoded["city"] as? String, "London")
         XCTAssertEqual(decoded["units"] as? String, "celsius")
+    }
+
+    func test_gemma4NativeCall_mixedScalarArgs_areTypedNotStrings() throws {
+        // Gemma 4's brace body has unquoted JSON-like keys, with values that
+        // are either `<|"|>...<|"|>`-quoted strings or bare numeric / boolean
+        // literals. Earlier versions handed the body to JSONSerialization
+        // directly, which always failed (unquoted keys aren't JSON), so every
+        // native call fell back to `arguments == "{}"`. This test exists so
+        // that regression cannot reappear silently.
+        var parser = LlamaToolCallParser()
+        let input = "<|tool_call>\ncall:rate{score:5,active:true,note:<|\"|>ok<|\"|>}\n<|end_of_turn>"
+        let events = parser.process(input)
+        let toolCalls = events.compactMap { event -> ToolCall? in
+            if case .toolCall(let tc) = event { return tc }
+            return nil
+        }
+        XCTAssertEqual(toolCalls.count, 1)
+        let tc = try XCTUnwrap(toolCalls.first)
+        XCTAssertEqual(tc.toolName, "rate")
+        XCTAssertNotEqual(tc.arguments, "{}", "Native call body must not silently fall back to empty args")
+
+        let args = try XCTUnwrap(tc.arguments.data(using: .utf8))
+        let decoded = try XCTUnwrap(try? JSONSerialization.jsonObject(with: args) as? [String: Any])
+        XCTAssertEqual(decoded["score"] as? Int, 5)
+        XCTAssertEqual(decoded["active"] as? Bool, true)
+        XCTAssertEqual(decoded["note"] as? String, "ok")
     }
 
     func test_gemma4NativeCall_noArgs_emitsToolCallWithEmptyArgs() {
@@ -169,15 +195,31 @@ final class LlamaToolCallParserTests: XCTestCase {
 
     // MARK: - finalize
 
-    func test_finalize_emitsRemainingPlainText() {
+    func test_finalize_emitsBufferedPartialTagPrefix() {
+        // When the stream ends with bytes that *could* be the start of an
+        // open tag (here: "<|tool_") the parser holds them back during
+        // `process()` so a later chunk can complete or cancel the tag.
+        // `finalize()` must flush that held-back text once we know no more
+        // chunks are coming.
         var parser = LlamaToolCallParser()
-        _ = parser.process("Hello ")
-        let events = parser.finalize()
-        let tokens = events.compactMap { event -> String? in
+        let processEvents = parser.process("Hello <|tool_")
+        let processTokens = processEvents.compactMap { event -> String? in
             if case .token(let t) = event { return t }
             return nil
         }
-        XCTAssertFalse(tokens.joined().isEmpty, "finalize should emit any buffered plain text")
+        // The visible "Hello " portion may be emitted during process;
+        // the partial tag suffix "<|tool_" must NOT be — verify by reuniting
+        // the joined token stream and checking it never leaks the partial tag.
+        XCTAssertFalse(processTokens.joined().contains("<|tool_"),
+                       "Partial open-tag bytes must not leak as visible tokens")
+
+        let finalEvents = parser.finalize()
+        let finalTokens = finalEvents.compactMap { event -> String? in
+            if case .token(let t) = event { return t }
+            return nil
+        }
+        XCTAssertFalse(finalTokens.joined().isEmpty,
+                       "finalize must flush bytes held back as a candidate open-tag prefix")
     }
 
     func test_finalize_discardsPartialToolCallBlock() {

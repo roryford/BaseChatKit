@@ -164,6 +164,38 @@ final class GBNFSchemaPreValidatorTests: XCTestCase {
         XCTAssertEqual(failure?.path, ["items", "type"])
     }
 
+    func test_anyOf_inTupleItemsArray_isRejected() {
+        // `items` may be an array of schemas (tuple validation). Without the
+        // array branch, an unsafe combiner inside one of the tuple entries
+        // would bypass the pre-validator and reach the GBNF compiler.
+        let schema = JSONSchemaValue.object([
+            "type": .string("array"),
+            "items": .array([
+                .object(["type": .string("string")]),
+                .object([
+                    "anyOf": .array([
+                        .object(["type": .string("integer")]),
+                        .object(["type": .string("string")])
+                    ])
+                ])
+            ])
+        ])
+        let failure = validator.validate(schema)
+        XCTAssertNotNil(failure)
+        XCTAssertEqual(failure?.path, ["items", "1", "anyOf"])
+    }
+
+    func test_safeTupleItemsArray_passes() {
+        let schema = JSONSchemaValue.object([
+            "type": .string("array"),
+            "items": .array([
+                .object(["type": .string("string")]),
+                .object(["type": .string("integer")])
+            ])
+        ])
+        XCTAssertNil(validator.validate(schema))
+    }
+
     // MARK: - CVE audit record sanity
 
     func test_cveAuditRecord_isUnfixed() {

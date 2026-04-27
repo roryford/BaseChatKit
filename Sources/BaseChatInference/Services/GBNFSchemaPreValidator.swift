@@ -164,10 +164,25 @@ public struct GBNFSchemaPreValidator: Sendable {
             }
         }
 
-        // Recurse into `items` (array schema).
+        // Recurse into `items`. JSON Schema permits two shapes:
+        //   - a single sub-schema object (list validation), or
+        //   - an array of sub-schemas (tuple validation, draft-04 / 2019-09).
+        // Without the array branch, unsafe constructs nested inside a tuple-form
+        // `items` would bypass the pre-validator and reach the GBNF compiler.
         if let itemsValue = dict["items"] {
-            if let failure = validate(itemsValue, path: path + ["items"]) {
-                return failure
+            switch itemsValue {
+            case .object:
+                if let failure = validate(itemsValue, path: path + ["items"]) {
+                    return failure
+                }
+            case .array(let itemSchemas):
+                for (index, itemSchema) in itemSchemas.enumerated() {
+                    if let failure = validate(itemSchema, path: path + ["items", String(index)]) {
+                        return failure
+                    }
+                }
+            default:
+                break
             }
         }
 

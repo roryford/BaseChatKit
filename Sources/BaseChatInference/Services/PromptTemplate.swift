@@ -299,17 +299,25 @@ public enum PromptTemplate: String, CaseIterable, Sendable, Identifiable {
         var result = ""
 
         let hasSystemContent = systemPrompt != nil && !(systemPrompt!.isEmpty)
-        if hasSystemContent || !tools.isEmpty {
+        var systemParts: [String] = []
+        if hasSystemContent {
+            systemParts.append(sanitize(systemPrompt!))
+        }
+        for tool in tools {
+            if let block = toolDeclarationBlock(for: tool) {
+                systemParts.append("<|tool>\(block)")
+            } else {
+                // Silent skip would mask a tool author's mistake during prompt
+                // assembly. Surface it in the prompt log so the failure is
+                // discoverable without crashing generation.
+                Log.prompt.error("Failed to serialize tool declaration for Gemma 4 template: \(tool.name)")
+            }
+        }
+        // Only emit the system turn when at least one part survived
+        // serialisation — otherwise we'd ship an empty `<|turn>system\n<|end_of_turn>`
+        // marker that confuses the model and burns context.
+        if !systemParts.isEmpty {
             result += "<|turn>system\n"
-            var systemParts: [String] = []
-            if hasSystemContent {
-                systemParts.append(sanitize(systemPrompt!))
-            }
-            for tool in tools {
-                if let block = toolDeclarationBlock(for: tool) {
-                    systemParts.append("<|tool>\(block)")
-                }
-            }
             result += systemParts.joined(separator: "\n")
             result += "<|end_of_turn>\n"
         }
