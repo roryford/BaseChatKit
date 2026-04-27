@@ -32,7 +32,7 @@ in #490) call it before acting on a decoded record.
 | `prompt` | `PromptSnapshot` | Corpus id, applied mutator list, message turns (role + text). |
 | `events` | `[EventSnapshot]` | Ordered stream of `{t, kind, v?}` observations. `t` is seconds since run start. |
 | `raw` | `String` | Raw backend output with think/tool markers intact. |
-| `rendered` | `String` | User-visible rendering of `raw` (stripped of reasoning). May be deprecated in a future version — see #499. |
+| `rendered` | `String` | User-visible string produced by running `raw` through the same markdown / code-fence transform that `BaseChatUI`'s `AssistantMarkdownView` applies (see `MarkdownRendering.renderToVisibleString`). Diverges from `raw` in realistic ways: closing fences disappear, emphasis markers collapse, link targets are hidden. Records written before #543 had `rendered == raw`. |
 | `thinkingRaw` | `String` | Concatenation of all thinking-channel text. |
 | `thinkingParts` | `[String]` | Thinking deltas as a list, in stream order. |
 | `thinkingCompleteCount` | `Int` | Number of `thinkingComplete` events observed. |

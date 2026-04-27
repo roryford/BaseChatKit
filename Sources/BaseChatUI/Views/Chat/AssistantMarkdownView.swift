@@ -1,5 +1,6 @@
 import SwiftUI
 import BaseChatCore
+import BaseChatInference
 
 struct AssistantMarkdownBlock: Identifiable, Equatable {
     enum Kind: Equatable {
@@ -61,93 +62,23 @@ final class MarkdownAttributedStringCache: @unchecked Sendable {
 // MARK: - Parser
 
 enum AssistantMarkdownParser {
+    /// Splits an assistant message into prose / fenced-code blocks.
+    ///
+    /// Delegates to ``MarkdownRendering/parseBlocks(from:)`` in
+    /// `BaseChatInference` so the live UI pipeline and the headless fuzz
+    /// renderer (`RunRecord.rendered`) agree on fence handling — see
+    /// issue #543. The only thing this wrapper adds is the SwiftUI-side
+    /// `id` numbering used by `ForEach`.
     static func parseBlocks(from source: String) -> [AssistantMarkdownBlock] {
-        guard !source.isEmpty else { return [] }
-        var blocks: [AssistantMarkdownBlock] = []
-        var nextID = 0
-        var markdownBuffer = ""
-        var codeBuffer = ""
-        var isInCodeBlock = false
-        var codeLanguage: String?
-        var openingFenceLength = 0
-        // Intentionally support markdown-in-markdown examples from LLM output.
-        var nestedFenceDepth = 0
-
-        let lines = source.components(separatedBy: "\n")
-        for (lineIndex, line) in lines.enumerated() {
-            let hadTrailingNewline = lineIndex < lines.count - 1
-
-            if !isInCodeBlock {
-                if let fence = parseFenceLine(line) {
-                    if !markdownBuffer.isEmpty {
-                        blocks.append(.init(id: nextID, kind: .markdown, text: markdownBuffer))
-                        nextID += 1
-                        markdownBuffer = ""
-                    }
-                    isInCodeBlock = true
-                    openingFenceLength = fence.ticks
-                    codeLanguage = fence.rest.isEmpty ? nil : fence.rest
-                    nestedFenceDepth = 0
-                } else {
-                    append(line: line, hadTrailingNewline: hadTrailingNewline, to: &markdownBuffer)
-                }
-                continue
+        let parsed = MarkdownRendering.parseBlocks(from: source)
+        guard !parsed.isEmpty else { return [] }
+        return parsed.enumerated().map { index, block in
+            switch block {
+            case .markdown(let text):
+                return AssistantMarkdownBlock(id: index, kind: .markdown, text: text)
+            case .code(let language, let code):
+                return AssistantMarkdownBlock(id: index, kind: .code(language: language), text: code)
             }
-
-            if let fence = parseFenceLine(line), fence.ticks >= openingFenceLength {
-                if fence.rest.isEmpty {
-                    if nestedFenceDepth == 0 {
-                        let code = codeBuffer.trimmingCharacters(in: .newlines)
-                        blocks.append(.init(id: nextID, kind: .code(language: codeLanguage), text: code))
-                        nextID += 1
-                        codeBuffer = ""
-                        isInCodeBlock = false
-                        openingFenceLength = 0
-                        codeLanguage = nil
-                        continue
-                    }
-                    nestedFenceDepth -= 1
-                } else {
-                    nestedFenceDepth += 1
-                }
-            }
-
-            append(line: line, hadTrailingNewline: hadTrailingNewline, to: &codeBuffer)
-        }
-
-        // Streaming can end mid-fence; keep partially parsed content as plain markdown.
-        if isInCodeBlock {
-            return [AssistantMarkdownBlock(id: 0, kind: .markdown, text: source)]
-        }
-
-        if !markdownBuffer.isEmpty {
-            blocks.append(.init(id: nextID, kind: .markdown, text: markdownBuffer))
-        }
-
-        return blocks.isEmpty ? [AssistantMarkdownBlock(id: 0, kind: .markdown, text: source)] : blocks
-    }
-
-    private static func parseFenceLine(_ line: String) -> (ticks: Int, rest: String)? {
-        // Accept arbitrary indentation to be lenient with streamed/model-formatted fences.
-        let trimmedLeading = line.trimmingCharacters(in: .whitespaces)
-        guard trimmedLeading.first == "`" else { return nil }
-
-        var tickCount = 0
-        var index = trimmedLeading.startIndex
-        while index < trimmedLeading.endIndex, trimmedLeading[index] == "`" {
-            tickCount += 1
-            index = trimmedLeading.index(after: index)
-        }
-        guard tickCount >= 3 else { return nil }
-
-        let rest = String(trimmedLeading[index...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (ticks: tickCount, rest: rest)
-    }
-
-    private static func append(line: String, hadTrailingNewline: Bool, to target: inout String) {
-        target += line
-        if hadTrailingNewline {
-            target += "\n"
         }
     }
 

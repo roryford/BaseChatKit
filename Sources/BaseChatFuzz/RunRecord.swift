@@ -17,13 +17,20 @@ public struct RunRecord: Codable, Sendable, Equatable {
     public var prompt: PromptSnapshot
     public var events: [EventSnapshot]
     public var raw: String
-    /// Historical duplicate of `raw` — retained for one release cycle so external
-    /// record consumers can migrate off it without a hard break. `FuzzRunner` and
-    /// `Replayer` still populate it from `capture.raw`; detectors now read `raw`
-    /// directly. Tracked for removal once the "real UI-transform rendering" path
-    /// is wired up (see follow-up issue).
+    /// User-visible string produced by running `raw` through the same
+    /// markdown / code-fence transform that `BaseChatUI`'s
+    /// `AssistantMarkdownView` applies (see
+    /// ``BaseChatInference/MarkdownRendering/renderToVisibleString(_:)``).
     ///
-    /// - Deprecated: use `raw` instead; `rendered` will be removed in a later release.
+    /// Diverges from `raw` in realistic ways: closing fences disappear,
+    /// emphasis markers collapse, link targets are hidden, partial fences
+    /// fall back to plain markdown the way the streaming UI does. Detectors
+    /// that read `rendered` therefore catch UI-layer rendering bugs (mid-stream
+    /// cancellation breakage, partial-fence mis-termination, grapheme-cluster
+    /// edge cases) that detectors reading `raw` cannot.
+    ///
+    /// Wired through #543 (follow-up to #499). Replay records written before
+    /// that change had `rendered == raw`; `init(from:)` decodes them as-is.
     public var rendered: String
     public var thinkingRaw: String
     public var thinkingParts: [String]

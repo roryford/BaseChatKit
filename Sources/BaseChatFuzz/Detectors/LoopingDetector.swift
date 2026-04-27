@@ -16,11 +16,31 @@ public struct LoopingDetector: Detector {
         var findings: [Finding] = []
 
         // Sub-check id stays `rendered-loop` for dedup stability across the
-        // existing on-disk sink — the name predates `rendered`'s deprecation.
-        if r.raw.count >= 100, RepetitionDetector.looksLikeLooping(r.raw) {
+        // existing on-disk sink. Now that #543 populates `r.rendered` via
+        // the real UI transform, this checks the user-visible string —
+        // which is what loop reports should reflect (closing fences, link
+        // chrome and emphasis markers stripped). When the transform is a
+        // no-op (empty/short string) `r.rendered` matches `r.raw` byte-for-byte.
+        if r.rendered.count >= 100, RepetitionDetector.looksLikeLooping(r.rendered) {
             findings.append(.init(
                 detectorId: id,
                 subCheck: "rendered-loop",
+                severity: .flaky,
+                trigger: String(r.rendered.suffix(120)),
+                modelId: r.model.id
+            ))
+        }
+
+        // Distinct sub-check on the raw stream when the visible string didn't
+        // already trip `rendered-loop`. Catches loops that the UI transform
+        // happened to mask (e.g. a runaway code block whose fence stripping
+        // changed the substring frequencies enough to dodge the detector).
+        if r.rendered != r.raw,
+           r.raw.count >= 100,
+           RepetitionDetector.looksLikeLooping(r.raw) {
+            findings.append(.init(
+                detectorId: id,
+                subCheck: "raw-loop",
                 severity: .flaky,
                 trigger: String(r.raw.suffix(120)),
                 modelId: r.model.id
