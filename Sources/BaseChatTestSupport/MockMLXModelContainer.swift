@@ -17,6 +17,14 @@ public struct SendableLMInput: @unchecked Sendable {
     }
 }
 
+public struct SendableKVCacheList: @unchecked Sendable {
+    public let value: [any KVCache]
+
+    public init(_ value: [any KVCache]) {
+        self.value = value
+    }
+}
+
 // MARK: - MockMLXModelContainer
 
 /// Fake model container for unit-testing `MLXBackend` generation without hardware.
@@ -50,39 +58,85 @@ public final class MockMLXModelContainer: @unchecked Sendable {
     /// are exercising and assert the backend hands compatible messages along.
     public var simulatedChatTemplate: String?
 
+    /// Prepared prompt-token batches returned by successive `prepare` calls.
+    ///
+    /// When empty, the mock synthesizes a small token sequence from the message count.
+    public var preparedTokenBatches: [[Int]] = []
+
+    /// Factory used to create the explicit cache passed to generation.
+    public var cacheFactory: @Sendable () -> [any KVCache] = { [KVCacheSimple()] }
+
+    /// Extra tail tokens the mock appends to the cache during generation to model
+    /// completion tokens extending beyond the prompt.
+    public var simulatedCacheCompletionTokenCount = 0
+
     // MARK: - Observation
 
-    /// Number of times `generate(messages:parameters:)` was called.
+    /// Number of times prepared generation was called.
     public private(set) var generateCallCount = 0
 
-    /// Last messages passed to `generate`.
+    /// Number of times `prepare(messages:)` was called.
+    public private(set) var prepareCallCount = 0
+
+    /// Number of times `makeCache(parameters:)` was called.
+    public private(set) var makeCacheCallCount = 0
+
+    /// Last messages passed to `prepare`.
     public private(set) var lastMessages: [[String: String]]?
 
-    /// Last `GenerateParameters` value passed to `generate`. Useful for asserting
+    /// Last `GenerateParameters` value passed to generation. Useful for asserting
     /// that `MLXBackend` forwards `temperature` / `topP` / `topK` / `minP` /
     /// `repetitionPenalty` from the caller's `GenerationConfig`.
     public private(set) var lastParameters: GenerateParameters?
 
+    /// Last prepared prompt-token batch returned by `prepare`.
+    public private(set) var lastPreparedTokenIds: [Int]?
+
+    /// Cache offsets observed at the start of generation.
+    public private(set) var lastInitialCacheOffsets: [Int]?
+
     public init() {}
 
-    // MARK: - Protocol-shaped method (consumed by BaseChatBackendsTests conformance)
+    // MARK: - Public helpers consumed by BaseChatBackendsTests conformance
 
-    public func generate(
-        messages: [[String: String]],
+    public func prepareForGeneration(
+        messages: [[String: String]]
+    ) async throws -> [Int] {
+        prepareCallCount += 1
+        lastMessages = messages
+
+        let promptTokens: [Int]
+        if !preparedTokenBatches.isEmpty {
+            promptTokens = preparedTokenBatches.removeFirst()
+        } else {
+            promptTokens = Array(1 ... max(messages.count, 1))
+        }
+        lastPreparedTokenIds = promptTokens
+        return promptTokens
+    }
+
+    public func makeCacheForGeneration(parameters: GenerateParameters) -> [any KVCache] {
+        makeCacheCallCount += 1
+        return cacheFactory()
+    }
+
+    public func generatePreparedInput(
+        promptTokenIds: [Int],
+        cache: SendableKVCacheList?,
         parameters: GenerateParameters
     ) async throws -> AsyncStream<Generation> {
         generateCallCount += 1
-        lastMessages = messages
         lastParameters = parameters
-        // Tokenizer-apply failures throw before any token is yielded — that is
-        // the failure mode `MLXBackend` sees when a template is missing or the
-        // message set is rejected by the chat template.
+        lastInitialCacheOffsets = cache?.value.map(\.offset)
         if let error = simulatedTokenizerApplyFailure { throw error }
         if let error = generateError { throw error }
 
         let tokens = tokensToYield
+        let cache = cache
+        let promptTokenCount = promptTokenIds.count
+        let completionTokenCount = simulatedCacheCompletionTokenCount
         return AsyncStream { continuation in
-            let producerTask = Task {
+            let producerTask = Task { [tokens, cache, promptTokenCount, completionTokenCount] in
                 for token in tokens {
                     if Task.isCancelled {
                         continuation.finish()
@@ -91,12 +145,23 @@ public final class MockMLXModelContainer: @unchecked Sendable {
                     continuation.yield(.chunk(token))
                     await Task.yield()
                 }
+                if let cache {
+                    let totalTokenCount = promptTokenCount + completionTokenCount
+                    for layer in cache.value {
+                        Self.setCacheOffset(layer, tokenCount: totalTokenCount)
+                    }
+                }
                 continuation.finish()
             }
             continuation.onTermination = { _ in
                 producerTask.cancel()
             }
         }
+    }
+
+    private static func setCacheOffset(_ cache: any KVCache, tokenCount: Int) {
+        guard let cache = cache as? KVCacheSimple else { return }
+        cache.offset = max(tokenCount, 0)
     }
 }
 #endif

@@ -41,6 +41,11 @@ final class MLXBackendTests: XCTestCase {
         XCTAssertEqual(MLXBackend().capabilities.maxContextTokens, 8192)
     }
 
+    func test_capabilities_supportsKVCachePersistence_onlyWhenEnabled() {
+        XCTAssertFalse(MLXBackend().capabilities.supportsKVCachePersistence)
+        XCTAssertTrue(MLXBackend(enableKVCacheReuse: true).capabilities.supportsKVCachePersistence)
+    }
+
     // MARK: - Lifecycle (no hardware gate)
 
     func test_generate_beforeLoad_throws() {
@@ -55,6 +60,13 @@ final class MLXBackendTests: XCTestCase {
 
     func test_stopGeneration_beforeLoad_doesNotCrash() {
         MLXBackend().stopGeneration()
+    }
+
+    func test_unloadModel_afterMockInjection_doesNotCrash() {
+        let backend = MLXBackend(enableKVCacheReuse: true)
+        backend._inject(MockMLXModelContainer())
+        backend.unloadModel()
+        XCTAssertFalse(backend.isModelLoaded)
     }
 
     // MARK: - Hardware-gated

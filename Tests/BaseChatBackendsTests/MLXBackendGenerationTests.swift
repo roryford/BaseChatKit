@@ -8,7 +8,28 @@ import BaseChatTestSupport
 
 // Conform MockMLXModelContainer to the internal protocol in this test target,
 // where both the internal protocol and the public mock type are visible.
-extension MockMLXModelContainer: MLXModelContainerProtocol {}
+extension MockMLXModelContainer: MLXModelContainerProtocol {
+    public func prepare(messages: [[String : String]]) async throws -> MLXPreparedInput {
+        let promptTokenIds = try await prepareForGeneration(messages: messages)
+        return MLXPreparedInput(promptTokenIds: promptTokenIds)
+    }
+
+    public func makeCache(parameters: GenerateParameters) async throws -> MLXPromptCache {
+        MLXPromptCache(makeCacheForGeneration(parameters: parameters))
+    }
+
+    public func generate(
+        input: MLXPreparedInput,
+        cache: MLXPromptCache?,
+        parameters: GenerateParameters
+    ) async throws -> AsyncStream<Generation> {
+        try await generatePreparedInput(
+            promptTokenIds: input.promptTokenIds,
+            cache: cache.map { SendableKVCacheList($0.value) },
+            parameters: parameters
+        )
+    }
+}
 
 /// Unit tests for `MLXBackend.generate()` using `MockMLXModelContainer`.
 ///
@@ -88,6 +109,233 @@ final class MLXBackendGenerationTests: XCTestCase {
 
         // Sabotage check: setting maxOutputTokens = 100 yields all 10 tokens,
         // causing the count assertion to fail.
+    }
+
+    func test_generate_reusesPromptCachePrefixOnMatchingTurn() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["ok"]
+        mock.preparedTokenBatches = [
+            [11, 12, 13, 14],
+            [11, 12, 13, 14, 15],
+        ]
+
+        let backend = MLXBackend(enableKVCacheReuse: true)
+        backend._inject(mock)
+
+        _ = try await collectAllEvents(from: try backend.generate(
+            prompt: "first",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+
+        let secondStream = try backend.generate(
+            prompt: "second",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        )
+        let secondEvents = try await collectAllEvents(from: secondStream)
+        let reuseCounts = secondEvents.compactMap { event -> Int? in
+            if case .kvCacheReuse(let count) = event { return count }
+            return nil
+        }
+
+        XCTAssertEqual(reuseCounts, [4],
+            "Second turn should emit kvCacheReuse for the shared 4-token prompt prefix")
+        XCTAssertEqual(mock.lastInitialCacheOffsets, [4],
+            "Generation should resume from the restored prefix length, not from a cold cache")
+
+        // Sabotage check: disabling enableKVCacheReuse or clearing _promptCacheSnapshot
+        // before the second turn makes reuseCounts empty and the cache offset 0.
+    }
+
+    func test_generate_withReuseDisabled_doesNotPersistPromptSnapshot() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["ok"]
+        mock.preparedTokenBatches = [[16, 17, 18, 19]]
+
+        let backend = MLXBackend(enableKVCacheReuse: false)
+        backend._inject(mock)
+
+        XCTAssertFalse(backend._hasPromptCacheSnapshotForTesting())
+        _ = try await collectAllEvents(from: try backend.generate(
+            prompt: "first",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+
+        XCTAssertFalse(
+            backend._hasPromptCacheSnapshotForTesting(),
+            "Default-off reuse must not retain prompt-cache state between turns"
+        )
+
+        // Sabotage check: capturing snapshots unconditionally leaves a retained
+        // prompt snapshot here and fails the final assertion.
+    }
+
+    func test_generate_reusesOnlySharedPrefixAfterPromptDivergence() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["ok"]
+        mock.preparedTokenBatches = [
+            [21, 22, 23, 24],
+            [21, 22, 99, 100],
+        ]
+
+        let backend = MLXBackend(enableKVCacheReuse: true)
+        backend._inject(mock)
+
+        _ = try await collectAllEvents(from: try backend.generate(
+            prompt: "first",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+
+        let secondEvents = try await collectAllEvents(from: try backend.generate(
+            prompt: "second",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+        let reuseCounts = secondEvents.compactMap { event -> Int? in
+            if case .kvCacheReuse(let count) = event { return count }
+            return nil
+        }
+
+        XCTAssertEqual(reuseCounts, [2],
+            "Only the shared head of the prompt should be reused after divergence")
+        XCTAssertEqual(mock.lastInitialCacheOffsets, [2],
+            "Restored cache should be trimmed to the shared-prefix length before generation")
+
+        // Sabotage check: changing the second prepared token batch to start with
+        // [21, 99, ...] drops reuse to 1 and fails the assertions.
+    }
+
+    func test_generate_unsupportedCacheShapeBypassesReuseAndClearsSnapshot() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["ok"]
+        mock.preparedTokenBatches = [
+            [31, 32, 33, 34],
+            [31, 32, 33, 34, 35],
+            [31, 32, 33, 34, 35, 36],
+        ]
+
+        let backend = MLXBackend(enableKVCacheReuse: true)
+        backend._inject(mock)
+
+        _ = try await collectAllEvents(from: try backend.generate(
+            prompt: "first",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+
+        mock.cacheFactory = { [RotatingKVCache(maxSize: 32)] }
+        let secondEvents = try await collectAllEvents(from: try backend.generate(
+            prompt: "second",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+        let secondReuseCounts = secondEvents.compactMap { event -> Int? in
+            if case .kvCacheReuse(let count) = event { return count }
+            return nil
+        }
+
+        XCTAssertTrue(secondReuseCounts.isEmpty,
+            "Unsupported cache families must bypass prompt-cache restore")
+        XCTAssertEqual(mock.lastInitialCacheOffsets, [0],
+            "Unsupported cache families should start from a cold cache")
+
+        mock.cacheFactory = { [KVCacheSimple()] }
+        let thirdEvents = try await collectAllEvents(from: try backend.generate(
+            prompt: "third",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+        let thirdReuseCounts = thirdEvents.compactMap { event -> Int? in
+            if case .kvCacheReuse(let count) = event { return count }
+            return nil
+        }
+
+        XCTAssertTrue(thirdReuseCounts.isEmpty,
+            "A turn that bypasses reuse must clear the prior snapshot rather than keeping stale state")
+        XCTAssertEqual(mock.lastInitialCacheOffsets, [0],
+            "After an unsupported turn the next request should still begin cold")
+
+        // Sabotage check: if unsupported caches leave the old snapshot intact, the
+        // third turn reuses 4+ tokens and both assertions fail.
+    }
+
+    func test_resetConversation_invalidatesPromptCache() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["ok"]
+        mock.preparedTokenBatches = [
+            [41, 42, 43, 44],
+            [41, 42, 43, 44, 45],
+        ]
+
+        let backend = MLXBackend(enableKVCacheReuse: true)
+        backend._inject(mock)
+
+        _ = try await collectAllEvents(from: try backend.generate(
+            prompt: "first",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+
+        backend.resetConversation()
+
+        let secondEvents = try await collectAllEvents(from: try backend.generate(
+            prompt: "second",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+        let reuseCounts = secondEvents.compactMap { event -> Int? in
+            if case .kvCacheReuse(let count) = event { return count }
+            return nil
+        }
+
+        XCTAssertTrue(reuseCounts.isEmpty,
+            "resetConversation must invalidate any cached prompt prefix")
+        XCTAssertEqual(mock.lastInitialCacheOffsets, [0],
+            "After resetConversation the next turn should start from a cold cache")
+
+        // Sabotage check: removing the resetConversation() call restores a 4-token hit.
+    }
+
+    func test_generate_offsetOnlyMockRestoresPromptLengthAfterPriorCompletionTail() async throws {
+        let mock = MockMLXModelContainer()
+        mock.tokensToYield = ["ok"]
+        mock.simulatedCacheCompletionTokenCount = 3
+        mock.preparedTokenBatches = [
+            [51, 52, 53, 54],
+            [51, 52, 53, 54, 55],
+        ]
+
+        let backend = MLXBackend(enableKVCacheReuse: true)
+        backend._inject(mock)
+
+        _ = try await collectAllEvents(from: try backend.generate(
+            prompt: "first",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+
+        let secondEvents = try await collectAllEvents(from: try backend.generate(
+            prompt: "second",
+            systemPrompt: nil,
+            config: GenerationConfig()
+        ))
+        let reuseCounts = secondEvents.compactMap { event -> Int? in
+            if case .kvCacheReuse(let count) = event { return count }
+            return nil
+        }
+
+        XCTAssertEqual(reuseCounts, [4],
+            "Only prompt tokens, not the simulated completion tail, should be restorable on the next turn")
+        XCTAssertEqual(mock.lastInitialCacheOffsets, [4],
+            "Even on the offset-only mock path, restore should clamp back to the prompt length before reuse")
+
+        // Sabotage check: if the restore path keeps the simulated 3-token completion
+        // tail, lastInitialCacheOffsets becomes 7 and fails this assertion. The
+        // real tensor-state trim/copy path is covered by the Xcode-only MLX
+        // integration suite, not this CI-safe mock.
     }
 
     // MARK: - test_generate_cancellation

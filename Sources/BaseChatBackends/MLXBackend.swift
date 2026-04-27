@@ -19,6 +19,18 @@ import BaseChatInference
 /// Requires real Apple Silicon hardware — does not work in iOS Simulator.
 public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
+    private struct CachedLayerState {
+        let cacheTypeName: String
+        let offset: Int
+        let state: [MLXArray]
+        let metaState: [String]
+    }
+
+    private struct PromptCacheSnapshot {
+        let promptTokens: [Int]
+        let layers: [CachedLayerState]
+    }
+
     // MARK: - Logging
 
     private static let logger = Logger(
@@ -54,22 +66,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Capabilities
 
-    public let capabilities = BackendCapabilities(
-        supportedParameters: [.temperature, .topP, .repeatPenalty],
-        maxContextTokens: 8192,
-        requiresPromptTemplate: false,
-        supportsSystemPrompt: true,
-        supportsToolCalling: true,
-        supportsStructuredOutput: false,
-        supportsNativeJSONMode: false,
-        cancellationStyle: .cooperative,
-        supportsTokenCounting: true,
-        memoryStrategy: .resident,
-        maxOutputTokens: 4096,
-        supportsStreaming: true,
-        isRemote: false,
-        supportsThinking: true
-    )
+    public let capabilities: BackendCapabilities
 
     // MARK: - Private
 
@@ -94,6 +91,21 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     /// overrides this — see the generate path below.
     /// Access only under `stateLock`.
     private var _autoDetectedThinkingMarkers: ThinkingMarkers?
+    /// Cached prompt KV state for longest-common-prefix reuse on the next turn.
+    /// Access only under `stateLock`.
+    private var _promptCacheSnapshot: PromptCacheSnapshot?
+    /// Snapshot capture still materializing after the previous turn finished.
+    /// Access only under `stateLock`.
+    private var _pendingPromptCacheSnapshotTask: Task<Void, Never>?
+    /// Monotonic token used to invalidate stale post-finish snapshot writes.
+    /// Access only under `stateLock`.
+    private var _promptCacheWriteToken: UInt64 = 0
+    /// Whether the currently loaded model/config is eligible for prompt-cache reuse.
+    /// Access only under `stateLock`.
+    private var _kvCacheReuseEligible = false
+    /// Tracks whether a real MLX model load initialized the runtime in this process.
+    /// Access only under `stateLock`.
+    private var _hasInitializedRuntime = false
 
     // MARK: - Load Progress
 
@@ -110,6 +122,8 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
     /// Policy controlling MLX's GPU buffer cache size. See `MLXCachePolicy`.
     /// Defaults to `.auto`, which picks a sensible value based on device RAM.
     public let cachePolicy: MLXCachePolicy
+    /// Safe-first rollout flag for prompt KV-cache reuse.
+    public let enableKVCacheReuse: Bool
 
     // MARK: - Test seams
 
@@ -122,8 +136,29 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     // MARK: - Init
 
-    public init(cachePolicy: MLXCachePolicy = .auto) {
+    public init(
+        cachePolicy: MLXCachePolicy = .auto,
+        enableKVCacheReuse: Bool = false
+    ) {
         self.cachePolicy = cachePolicy
+        self.enableKVCacheReuse = enableKVCacheReuse
+        self.capabilities = BackendCapabilities(
+            supportedParameters: [.temperature, .topP, .repeatPenalty],
+            maxContextTokens: 8192,
+            requiresPromptTemplate: false,
+            supportsSystemPrompt: true,
+            supportsToolCalling: true,
+            supportsStructuredOutput: false,
+            supportsNativeJSONMode: false,
+            cancellationStyle: .cooperative,
+            supportsTokenCounting: true,
+            memoryStrategy: .resident,
+            maxOutputTokens: 4096,
+            supportsStreaming: true,
+            isRemote: false,
+            supportsKVCachePersistence: enableKVCacheReuse,
+            supportsThinking: true
+        )
     }
 
     // MARK: - Architecture Allowlist
@@ -213,6 +248,119 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             return true
         }
         return false
+    }
+
+    private static func longestCommonPrefixLength(_ lhs: [Int], _ rhs: [Int]) -> Int {
+        zip(lhs, rhs).prefix(while: { $0 == $1 }).count
+    }
+
+    private func invalidatePromptCacheLocked() {
+        _pendingPromptCacheSnapshotTask?.cancel()
+        _pendingPromptCacheSnapshotTask = nil
+        _promptCacheSnapshot = nil
+        _promptCacheWriteToken &+= 1
+    }
+
+    private static func isSupportedPromptCache(_ caches: [any KVCache]) -> Bool {
+        !caches.isEmpty && caches.allSatisfy { $0 is KVCacheSimple }
+    }
+
+    /// Captures prompt-only KV state for the next turn.
+    ///
+    /// Contract assumptions taken from the currently pinned `mlx-swift-lm`:
+    /// 1. `LanguageModel.prepare(_:cache:windowSize:)` consumes any cached prefix
+    ///    from the front of the prepared prompt and only evaluates the remaining
+    ///    suffix, so restored caches must be paired with the uncached prompt tail.
+    /// 2. `KVCacheSimple.copy()/state/metaState/trim(_:)` are sufficient to clone
+    ///    and shrink prompt-only state safely for text-only models.
+    /// 3. Future `mlx-swift-lm` bumps must rerun the MLX KV-cache integration and
+    ///    performance suite before this contract is trusted unchanged.
+    private static func capturePromptCacheSnapshot(
+        from cache: MLXPromptCache,
+        promptTokens: [Int]
+    ) -> PromptCacheSnapshot? {
+        guard !promptTokens.isEmpty, isSupportedPromptCache(cache.value) else {
+            return nil
+        }
+
+        var layers: [CachedLayerState] = []
+        layers.reserveCapacity(cache.value.count)
+        for original in cache.value {
+            guard original.offset >= promptTokens.count else {
+                return nil
+            }
+
+            if original.state.isEmpty {
+                layers.append(
+                    CachedLayerState(
+                        cacheTypeName: String(describing: type(of: original)),
+                        offset: promptTokens.count,
+                        state: [],
+                        metaState: original.metaState
+                    )
+                )
+                continue
+            }
+
+            let copy = original.copy()
+            eval([copy])
+
+            let excess = copy.offset - promptTokens.count
+            if excess > 0 {
+                guard copy.isTrimmable, copy.trim(excess) == excess else {
+                    return nil
+                }
+            }
+
+            let state = copy.state.map { $0[.ellipsis] }
+            eval(state)
+            layers.append(
+                CachedLayerState(
+                    cacheTypeName: String(describing: type(of: copy)),
+                    offset: copy.offset,
+                    state: state,
+                    metaState: copy.metaState
+                )
+            )
+        }
+        return PromptCacheSnapshot(promptTokens: promptTokens, layers: layers)
+    }
+
+    private static func restorePromptCache(
+        _ snapshot: PromptCacheSnapshot,
+        into cache: MLXPromptCache,
+        reusedPromptTokenCount: Int
+    ) -> Bool {
+        guard reusedPromptTokenCount > 0,
+              cache.value.count == snapshot.layers.count,
+              isSupportedPromptCache(cache.value) else {
+            return false
+        }
+
+        for (index, layer) in snapshot.layers.enumerated() {
+            var target = cache.value[index]
+            guard String(describing: type(of: target)) == layer.cacheTypeName else {
+                return false
+            }
+            if layer.state.isEmpty {
+                guard let target = target as? KVCacheSimple else { return false }
+                target.offset = layer.offset
+            } else {
+                target.state = layer.state.map { $0[.ellipsis] }
+                target.metaState = layer.metaState
+            }
+
+            guard target.offset >= reusedPromptTokenCount else { return false }
+            let excess = target.offset - reusedPromptTokenCount
+            if excess > 0 {
+                guard target.isTrimmable, target.trim(excess) == excess else {
+                    return false
+                }
+            }
+        }
+
+        eval(cache.value)
+        return true
     }
 
     // MARK: - Thinking-Marker Auto-Discovery
@@ -318,10 +466,14 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             }
             let detectedDialect = MLXToolDialect.detect(at: url)
             let detectedThinkingMarkers = Self.detectThinkingMarkers(at: url)
+            let kvCacheReuseEligible = enableKVCacheReuse && !Self.requiresVLMFactory(at: url)
             withStateLock {
                 _modelContainer = container
                 _dialect = detectedDialect
                 _autoDetectedThinkingMarkers = detectedThinkingMarkers
+                invalidatePromptCacheLocked()
+                _kvCacheReuseEligible = kvCacheReuseEligible
+                _hasInitializedRuntime = true
             }
             // Apply the cache policy after loadModelContainer succeeds. Doing
             // this *after* the load (rather than before) keeps it inside the
@@ -360,7 +512,15 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         systemPrompt: String?,
         config: GenerationConfig
     ) throws -> GenerationStream {
-        let modelContainer: any MLXModelContainerProtocol = try withStateLock {
+        let (
+            modelContainer,
+            pendingSnapshotTask,
+            kvCacheReuseEligible
+        ): (
+            any MLXModelContainerProtocol,
+            Task<Void, Never>?,
+            Bool
+        ) = try withStateLock {
             guard _isModelLoaded, let container = _modelContainer else {
                 throw InferenceError.inferenceFailure("No model loaded")
             }
@@ -368,7 +528,7 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 throw InferenceError.alreadyGenerating
             }
             _isGenerating = true
-            return container
+            return (container, _pendingPromptCacheSnapshotTask, _kvCacheReuseEligible)
         }
         Self.logger.debug("MLX generate started")
 
@@ -430,10 +590,10 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             return base + toolBlock
         }()
 
-        // All messages are encoded as plain [String: String] dictionaries because
-        // MLXModelContainerProtocol.generate(messages:) requires [[String: String]].
-        // For Qwen 2.5 tool history, tool calls are text-encoded into content fields
-        // using the same <tool_call>…</tool_call> format the model emits.
+        // All messages are encoded as plain [String: String] dictionaries before the
+        // container applies the tokenizer's chat template. For Qwen 2.5 tool history,
+        // tool calls are text-encoded into content fields using the same
+        // <tool_call>…</tool_call> format the model emits.
         let messages: [[String: String]] = {
             var msgs: [[String: String]] = []
             if let sp = effectiveSystemPrompt, !sp.isEmpty {
@@ -459,7 +619,6 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
         let task = Task { @MainActor [weak self, generationStream] in
             defer {
-                self?.withStateLock { self?._isGenerating = false }
                 Self.logger.debug("MLX generate finished")
             }
 
@@ -502,8 +661,48 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 var thinkingTokenCount = 0
                 var thinkingLimitReached = false
 
+                let preparedInput = try await modelContainer.prepare(messages: messages)
+                let cache = try await modelContainer.makeCache(parameters: generateConfig)
+                var generationInput = preparedInput
+                let promptTokenIds: [Int]? = if kvCacheReuseEligible {
+                    preparedInput.promptTokenIds
+                } else {
+                    nil
+                }
+                if kvCacheReuseEligible, let pendingSnapshotTask {
+                    await pendingSnapshotTask.value
+                }
+                let resolvedSnapshot: PromptCacheSnapshot? =
+                    if kvCacheReuseEligible, let self {
+                        self.withStateLock { self._promptCacheSnapshot }
+                    } else {
+                        nil
+                    }
+
+                if kvCacheReuseEligible,
+                   let snapshot = resolvedSnapshot,
+                   let promptTokenIds,
+                   Self.isSupportedPromptCache(cache.value),
+                   promptTokenIds.count > 1 {
+                    let commonPrefixLen = Self.longestCommonPrefixLength(
+                        promptTokenIds,
+                        snapshot.promptTokens
+                    )
+                    let reuseLen = min(commonPrefixLen, promptTokenIds.count - 1)
+                    if reuseLen > 0,
+                       Self.restorePromptCache(
+                        snapshot,
+                        into: cache,
+                        reusedPromptTokenCount: reuseLen
+                       ) {
+                        generationInput = preparedInput.suffix(from: reuseLen)
+                        continuation.yield(.kvCacheReuse(promptTokensReused: reuseLen))
+                    }
+                }
+
                 let mlxStream = try await modelContainer.generate(
-                    messages: messages,
+                    input: generationInput,
+                    cache: cache,
                     parameters: generateConfig
                 )
                 // Inserts a brief cooperative yield every N tokens so sustained MLX
@@ -585,8 +784,41 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                 for event in thinkingParser.finalize() {
                     continuation.yield(event)
                 }
+                let snapshotInputs: (MLXPromptCache, [Int])? =
+                    if kvCacheReuseEligible, !Task.isCancelled, let promptTokenIds {
+                        (cache, promptTokenIds)
+                    } else {
+                        nil
+                    }
+
+                if let self {
+                    self.withStateLock { self._isGenerating = false }
+                }
                 await MainActor.run { generationStream.setPhase(.done) }
+                if let self, let (cache, promptTokenIds) = snapshotInputs {
+                    self.withStateLock {
+                        self._promptCacheWriteToken &+= 1
+                        let snapshotWriteToken = self._promptCacheWriteToken
+                        let snapshotTask = Task<Void, Never> { [weak self] in
+                            let snapshot = Self.capturePromptCacheSnapshot(
+                                from: cache,
+                                promptTokens: promptTokenIds
+                            )
+                            guard let self else { return }
+                            self.withStateLock {
+                                guard self._promptCacheWriteToken == snapshotWriteToken else { return }
+                                self._promptCacheSnapshot = snapshot
+                                self._pendingPromptCacheSnapshotTask = nil
+                            }
+                        }
+                        self._pendingPromptCacheSnapshotTask = snapshotTask
+                    }
+                }
+                continuation.finish()
             } catch {
+                if let self {
+                    self.withStateLock { self._isGenerating = false }
+                }
                 if !Task.isCancelled {
                     Self.logger.error("MLX generation error: \(error)")
                     await MainActor.run { generationStream.setPhase(.failed(error.localizedDescription)) }
@@ -594,14 +826,16 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
                     return
                 }
                 await MainActor.run { generationStream.setPhase(.done) }
+                continuation.finish()
             }
-            continuation.finish()
         }
 
         withStateLock { self._generationTask = task }
 
-        continuation.onTermination = { @Sendable _ in
-            task.cancel()
+        continuation.onTermination = { @Sendable termination in
+            if case .cancelled = termination {
+                task.cancel()
+            }
         }
 
         return generationStream
@@ -617,7 +851,18 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
         withStateLock {
             _modelContainer = container
             _isModelLoaded = true
+            invalidatePromptCacheLocked()
+            _kvCacheReuseEligible = enableKVCacheReuse
+            _hasInitializedRuntime = false
         }
+    }
+
+    func _hasPromptCacheSnapshotForTesting() -> Bool {
+        withStateLock { _promptCacheSnapshot != nil || _pendingPromptCacheSnapshotTask != nil }
+    }
+
+    func _isPromptCacheSnapshotReadyForTesting() -> Bool {
+        withStateLock { _promptCacheSnapshot != nil && _pendingPromptCacheSnapshotTask == nil }
     }
 
     /// Test-only seam: forces the auto-detected thinking markers to a specific
@@ -640,17 +885,12 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
 
     public func unloadModel() {
         stopGeneration()
-        // Capture whether we actually had a loaded container *before* clearing
-        // state. We use this to decide whether to call Memory.clearCache()
-        // below — touching MLX's Memory namespace requires the metallib to be
-        // resident in the process, which is only true after a successful
-        // model load. Calling clearCache() on a never-loaded backend (e.g.
-        // from BackendContractChecks.assertAllInvariants) trips a "Failed to
-        // load default metallib" error under `swift test`, because the
-        // metallib is only compiled by Xcode and isn't present in the SwiftPM
-        // build output.
-        let hadContainer: Bool = withStateLock {
-            let had = _modelContainer != nil
+        // Only touch MLX's Memory namespace after a real model load has
+        // initialized the runtime in this process. Injected test doubles do not
+        // compile the metallib, so clearing the cache after `_inject(...)`
+        // would trip the same failure this guard exists to avoid.
+        let hadInitializedRuntime: Bool = withStateLock {
+            let had = _hasInitializedRuntime
             _modelContainer = nil
             _isModelLoaded = false
             _isGenerating = false
@@ -658,9 +898,12 @@ public final class MLXBackend: InferenceBackend, @unchecked Sendable {
             _toolAwareHistory = nil
             _dialect = .unknown
             _autoDetectedThinkingMarkers = nil
+            invalidatePromptCacheLocked()
+            _kvCacheReuseEligible = false
+            _hasInitializedRuntime = false
             return had
         }
-        if hadContainer {
+        if hadInitializedRuntime {
             Memory.clearCache()
         }
         Self.logger.info("MLX backend unloaded")
@@ -676,6 +919,16 @@ extension MLXBackend: ConversationHistoryReceiver {
             // Clear any previously stored tool-aware history so the simpler path takes
             // effect when the orchestrator calls the non-tool-aware setter.
             _toolAwareHistory = nil
+        }
+    }
+}
+
+extension MLXBackend {
+    public func resetConversation() {
+        withStateLock {
+            _conversationHistory = []
+            _toolAwareHistory = nil
+            invalidatePromptCacheLocked()
         }
     }
 }
@@ -698,7 +951,7 @@ extension MLXBackend: ToolCallingHistoryReceiver {
 
 extension MLXBackend {
     /// Encodes a ``ToolAwareHistoryEntry`` into a plain `[String: String]` message
-    /// compatible with `MLXModelContainerProtocol.generate(messages:)`.
+    /// compatible with MLX chat-template preparation.
     ///
     /// For the Qwen 2.5 dialect:
     /// - Assistant entries with `toolCalls` have the calls serialised as

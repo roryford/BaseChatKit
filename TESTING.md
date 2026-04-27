@@ -167,6 +167,33 @@ Place your MLX snapshot in either location. The harness scans all immediate subd
 
 The suite calls `XCTSkip` and is marked skipped — CI sees a green pass, not a failure. You only need a local fixture when you're actively working on `BaseChatMLXIntegrationTests` or `MLXBackend`.
 
+### MLX KV-cache reuse regression checks
+
+Issue #749's prompt-cache reuse path has an extra validation bar beyond "still generates text":
+
+1. **Correctness** — warm second-turn output must match the cold path under deterministic settings.
+2. **Real cache hit** — the warm path must emit `GenerationEvent.kvCacheReuse(...)`.
+3. **Measured improvement** — warm second-turn TTFT must materially beat the cold path for a long shared prefix.
+
+The Xcode-only suite lives in `BaseChatMLXIntegrationTests/MLXKVPersistenceIntegrationTests.swift`. Run it with:
+
+```bash
+xcodebuild test -scheme BaseChatKit-Package \
+  -only-testing:BaseChatMLXIntegrationTests/MLXKVPersistenceIntegrationTests \
+  -destination 'platform=macOS'
+```
+
+When bumping `mlx-swift-lm` or `mlx-swift`, rerun both MLX integration targets before trusting the update:
+
+```bash
+xcodebuild test -scheme BaseChatKit-Package \
+  -only-testing:BaseChatMLXIntegrationTests/MLXModelE2ETests \
+  -only-testing:BaseChatMLXIntegrationTests/MLXKVPersistenceIntegrationTests \
+  -destination 'platform=macOS'
+```
+
+If the fixture model is VLM/MoE-only, the KV-cache suite skips by design — v1 reuse is intentionally scoped to text-only MLX models.
+
 ---
 
 ## Feature Coverage Matrix
