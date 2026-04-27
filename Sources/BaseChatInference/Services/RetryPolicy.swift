@@ -24,19 +24,28 @@ public protocol RetryStrategy: Sendable {
 /// Retries errors that conform to ``BackendError`` where `isRetryable` is true.
 /// Uses `Retry-After` from ``CloudBackendError/rateLimited(retryAfter:)`` when
 /// available, otherwise falls back to exponential backoff with 25% jitter.
+///
+/// The `jitterProvider` closure receives the maximum allowed jitter (25% of the
+/// exponential delay) and returns the actual jitter to apply. The default draws
+/// from a live `SystemRandomNumberGenerator`. In tests, pass `{ _ in 0.0 }` for
+/// deterministic delay bounds or `{ $0 }` to lock jitter at its maximum.
 public struct ExponentialBackoffStrategy: RetryStrategy, Sendable {
     public let maxRetries: Int
     public let baseDelay: TimeInterval
     public let maxTotalDelay: TimeInterval
+    /// Returns the jitter to add, given the maximum jitter ceiling for this attempt.
+    public let jitterProvider: @Sendable (Double) -> Double
 
     public init(
         maxRetries: Int = 3,
         baseDelay: TimeInterval = 1.0,
-        maxTotalDelay: TimeInterval = 60.0
+        maxTotalDelay: TimeInterval = 60.0,
+        jitterProvider: @escaping @Sendable (Double) -> Double = { Double.random(in: 0...$0) }
     ) {
         self.maxRetries = maxRetries
         self.baseDelay = baseDelay
         self.maxTotalDelay = maxTotalDelay
+        self.jitterProvider = jitterProvider
     }
 
     public func delay(for error: any Error, attempt: Int, totalDelayed: TimeInterval) -> TimeInterval? {
@@ -59,7 +68,7 @@ public struct ExponentialBackoffStrategy: RetryStrategy, Sendable {
         }
 
         let exponentialDelay = baseDelay * pow(2.0, Double(attempt))
-        let jitter = Double.random(in: 0...(exponentialDelay * 0.25))
+        let jitter = jitterProvider(exponentialDelay * 0.25)
         let delay = retryAfter ?? (exponentialDelay + jitter)
 
         guard totalDelayed + delay <= maxTotalDelay else { return nil }
@@ -91,6 +100,9 @@ public struct RetryExhaustedError: Error, LocalizedError {
 ///
 /// - Parameters:
 ///   - strategy: The retry strategy that determines backoff timing and stop conditions.
+///   - sleeper: Called to perform each retry delay. Defaults to `Task.sleep`, which blocks
+///     the real wall clock. Inject a ``RecordingRetrySleeper`` in tests to assert delay
+///     bounds without real-time blocking.
 ///   - operation: The async throwing operation to execute.
 /// - Returns: The result of the operation.
 /// - Throws: The last error if all retries are exhausted (wrapped in ``RetryExhaustedError``),
@@ -98,6 +110,7 @@ public struct RetryExhaustedError: Error, LocalizedError {
 ///   or any non-retryable error immediately.
 public func withRetry<T>(
     strategy: some RetryStrategy,
+    sleeper: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
     operation: () async throws -> T
 ) async throws -> T {
     var totalDelayed: TimeInterval = 0
@@ -123,7 +136,7 @@ public func withRetry<T>(
 
             Log.network.info("Retryable error (attempt \(attempt + 1), \(error)). Retrying in \(String(format: "%.1f", delay))s")
 
-            try await Task.sleep(for: .milliseconds(Int(delay * 1000)))
+            try await sleeper(.milliseconds(Int(delay * 1000)))
             totalDelayed += delay
 
             if Task.isCancelled {
@@ -140,7 +153,7 @@ public func withRetry<T>(
 
 /// Executes an async operation with exponential backoff on retryable errors.
 ///
-/// Convenience wrapper around ``withRetry(strategy:operation:)`` using
+/// Convenience wrapper around ``withRetry(strategy:sleeper:operation:)`` using
 /// ``ExponentialBackoffStrategy``.
 func withExponentialBackoff<T>(
     maxRetries: Int = 3,
