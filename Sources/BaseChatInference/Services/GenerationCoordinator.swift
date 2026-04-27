@@ -832,7 +832,10 @@ final class GenerationCoordinator {
                     // log. `attempt` is reserved for future retry semantics
                     // and pinned to 1 today (no per-call retry path exists).
                     let dispatchAttempt = 1
-                    let dispatchStart = Date()
+                    // Monotonic clock so `durationMs` reflects actual elapsed
+                    // time even when wall-clock jumps (NTP / user time-zone
+                    // change) happen mid-dispatch.
+                    let dispatchStart = DispatchTime.now()
                     self.continuations[request.token]?.yield(
                         .toolDispatchStarted(callId: call.id, name: call.toolName, attempt: dispatchAttempt)
                     )
@@ -925,7 +928,8 @@ final class GenerationCoordinator {
                     // pair see exactly one `.toolDispatchStarted` →
                     // `.toolDispatchCompleted` per call. `errorKind` mirrors
                     // the result's classification (nil on success).
-                    let dispatchDurationMs = max(0, Int(Date().timeIntervalSince(dispatchStart) * 1000))
+                    let dispatchDurationNs = DispatchTime.now().uptimeNanoseconds &- dispatchStart.uptimeNanoseconds
+                    let dispatchDurationMs = Int(dispatchDurationNs / 1_000_000)
                     self.continuations[request.token]?.yield(
                         .toolDispatchCompleted(
                             callId: call.id,

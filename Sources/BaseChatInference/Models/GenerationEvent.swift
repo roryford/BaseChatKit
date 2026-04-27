@@ -96,25 +96,35 @@ public enum GenerationEvent: Sendable, Equatable {
     /// `reason` is a short, human-readable string the UI may display verbatim.
     case diagnosticThrottle(reason: String)
 
-    /// Emitted by the orchestrator immediately before a model-emitted
-    /// ``ToolCall`` is dispatched through the registered ``ToolRegistry``.
+    /// Emitted by the orchestrator immediately before it begins handling a
+    /// model-emitted ``ToolCall``.
     ///
     /// Fires after the corresponding ``toolCall(_:)`` event and before the
     /// matching ``toolResult(_:)``, giving UI surfaces a precise "running"
     /// boundary they can pin a spinner / start timer to without scraping
-    /// logs. `callId` matches ``ToolCall/id``; `name` is the tool name;
-    /// `attempt` is the 1-based dispatch attempt for this call (always `1`
-    /// today — reserved for future retry semantics).
+    /// logs. This lifecycle covers the coordinator's full handling path for
+    /// the call, not only successful routing through the registered
+    /// ``ToolRegistry``: approval gating, registry execution, and synthesized
+    /// non-dispatch outcomes (for example approval denial, identical-call
+    /// short-circuiting, or byte-budget exhaustion) are all included.
+    /// `callId` matches ``ToolCall/id``; `name` is the tool name; `attempt`
+    /// is the 1-based handling attempt for this call (always `1` today —
+    /// reserved for future retry semantics).
     case toolDispatchStarted(callId: String, name: String, attempt: Int)
 
-    /// Emitted by the orchestrator after a tool dispatch settles, regardless
-    /// of outcome.
+    /// Emitted by the orchestrator after tool-call handling settles,
+    /// regardless of outcome.
     ///
     /// Fires after the matching ``toolResult(_:)`` event. `durationMs` is the
-    /// wall-clock dispatch latency in milliseconds (>= 0). `errorKind`
-    /// carries the failure classification when the dispatch produced an
-    /// error result and `nil` on success — its value matches the
-    /// ``ToolResult/errorKind`` of the `.toolResult` event with the same
-    /// `callId`.
+    /// monotonic handling latency in milliseconds (>= 0), measured from
+    /// ``toolDispatchStarted(callId:name:attempt:)`` to this event with a
+    /// monotonic clock so wall-clock adjustments (NTP, user time changes) do
+    /// not skew the value. It covers the full orchestrator-managed lifecycle
+    /// for the call, including any approval-gate wait time and paths that do
+    /// not invoke the registered ``ToolRegistry`` because the coordinator
+    /// synthesized the result. `errorKind` carries the failure classification
+    /// when handling produced an error result and `nil` on success — its
+    /// value matches the ``ToolResult/errorKind`` of the `.toolResult` event
+    /// with the same `callId`.
     case toolDispatchCompleted(callId: String, durationMs: Int, errorKind: ToolResult.ErrorKind?)
 }
