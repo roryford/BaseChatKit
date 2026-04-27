@@ -158,7 +158,7 @@ extension PromptSlotRole: Codable {
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type, in: c,
-                debugDescription: "Unknown PromptSlotRole type"
+                debugDescription: "Unknown PromptSlotRole type \"\(t)\""
             )
         }
     }
@@ -265,7 +265,7 @@ public struct BudgetPolicy: Sendable {
 /// effective position retain their input-array order. The slot's ``role``
 /// determines its priority in budget allocation — see ``BudgetPolicy``.
 ///
-/// Use ``PromptAssembler/assemble(slots:messages:systemPrompt:contextSize:responseBuffer:tokenizer:)``
+/// Use ``PromptAssembler/assemble(slots:messages:systemPrompt:contextSize:responseBuffer:tokenizer:policy:)``
 /// to resolve slots and history into a final ``AssembledPrompt``.
 public struct PromptSlot: Identifiable, Sendable {
     /// Unique identifier for this slot (e.g. "system", "charDef", "lorebook", "authorsNote").
@@ -342,7 +342,7 @@ public struct ResolvedSlot: Identifiable, Sendable {
     }
 }
 
-/// The output of ``PromptAssembler/assemble(slots:messages:systemPrompt:contextSize:responseBuffer:tokenizer:)``.
+/// The output of ``PromptAssembler/assemble(slots:messages:systemPrompt:contextSize:responseBuffer:tokenizer:policy:)``.
 public struct AssembledPrompt: Sendable {
     /// All resolved slots in their final order (position-sorted).
     public let orderedSlots: [ResolvedSlot]

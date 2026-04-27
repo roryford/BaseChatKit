@@ -2,7 +2,8 @@ import Testing
 import Foundation
 @testable import BaseChatInference
 
-/// Deterministic tokenizer: 1 token per character.
+/// Deterministic tokenizer: at least 1 token, otherwise 1 token per character
+/// (`max(1, text.count)` so empty strings still cost a token).
 private struct CharTokenizer: TokenizerProvider {
     func tokenCount(_ text: String) -> Int { max(1, text.count) }
 }
@@ -71,11 +72,11 @@ struct PromptSlotRoleTests {
 
     // MARK: - Per-role caps
 
-    @Test func test_assembler_roleCap_clampsCombinedRoleTokens() {
-        // Two retrieval slots totalling 30 tokens, capped at 20.
-        // Cap is applied in input-array order: first slot gets up to 20,
-        // remaining (10 → 0) for the second slot. Slots that drop to 0 are
-        // pruned from the assembled output.
+    @Test func test_assembler_roleCap_dropsSlotsThatDoNotFitWithinCap() {
+        // Two retrieval slots totalling 30 tokens, capped at 20. The allocator
+        // is drop-only (it cannot truncate content at a token boundary), so the
+        // first slot is admitted in full (15) and the second is dropped because
+        // its 15-token cost exceeds the 5-token remaining cap.
         let slots = [
             PromptSlot(id: "r1", content: "aaaaaaaaaaaaaaa", role: .retrieval, label: "R1"), // 15
             PromptSlot(id: "r2", content: "bbbbbbbbbbbbbbb", role: .retrieval, label: "R2"), // 15
@@ -88,8 +89,27 @@ struct PromptSlotRoleTests {
             tokenizer: CharTokenizer(), policy: policy
         )
         #expect(result.budgetBreakdown["r1"] == 15)
-        // Second slot's remaining cap is 5 → kept at 5 tokens.
-        #expect(result.budgetBreakdown["r2"] == 5)
+        #expect(result.budgetBreakdown["r2"] == nil) // dropped — exceeds remaining cap
+        // The dropped slot must also be absent from the assembled prompt content
+        // so token accounting matches what the model receives.
+        #expect(result.orderedSlots.contains(where: { $0.id == "r1" }))
+        #expect(!result.orderedSlots.contains(where: { $0.id == "r2" }))
+    }
+
+    @Test func test_assembler_roleCap_admitsSlotThatFitsExactly() {
+        // A single retrieval slot whose token cost equals the cap is admitted.
+        let slots = [
+            PromptSlot(id: "r", content: String(repeating: "a", count: 20),
+                       role: .retrieval, label: "R"), // 20
+        ]
+        var policy = BudgetPolicy.default
+        policy.caps[.retrieval] = 20
+        let result = PromptAssembler.assemble(
+            slots: slots, messages: [], systemPrompt: nil,
+            contextSize: 10000, responseBuffer: 0,
+            tokenizer: CharTokenizer(), policy: policy
+        )
+        #expect(result.budgetBreakdown["r"] == 20)
     }
 
     @Test func test_assembler_systemRole_ignoresCapAndPriorityTrim() {
@@ -115,7 +135,7 @@ struct PromptSlotRoleTests {
 
     @Test func test_assembler_priorityTrim_dropsLowestRoleFirst() {
         // slotBudget = 30. Total content = 60.
-        // Default priority: characterContext (kept) > retrieval > userInstruction > custom (trimmed first).
+        // Default priority: characterContext (kept) > retrieval > userInstruction > custom (dropped first).
         let slots = [
             PromptSlot(id: "char", content: String(repeating: "c", count: 20),
                        role: .characterContext, label: "Char"),
@@ -129,12 +149,34 @@ struct PromptSlotRoleTests {
             contextSize: 30, responseBuffer: 0,
             tokenizer: CharTokenizer(), policy: .default
         )
-        // Custom (lowest priority) is fully removed first (-20 → 40 left).
-        // Retrieval (next lowest) is trimmed to absorb the remaining 10 (40-30).
-        // Character context survives untouched.
+        // Drop-only semantics: `cust` (lowest) goes first (60 → 40), still over by 10.
+        // The allocator cannot truncate `ret` mid-content, so it drops `ret`
+        // wholesale (40 → 20). Character context survives intact.
         #expect(result.budgetBreakdown["char"] == 20)
-        #expect(result.budgetBreakdown["ret"] == 10)
-        #expect(result.budgetBreakdown["cust"] == nil) // dropped
+        #expect(result.budgetBreakdown["ret"] == nil) // dropped — over-budget after cust drop
+        #expect(result.budgetBreakdown["cust"] == nil) // dropped — lowest priority
+        // The dropped slots must also be absent from the assembled prompt content.
+        #expect(result.orderedSlots.map(\.id) == ["char"])
+    }
+
+    @Test func test_assembler_priorityTrim_zeroBudget_dropsAllNonSystemSlots() {
+        // contextSize == responseBuffer means slotBudget = 0. Every non-system
+        // slot is dropped, but the system slot is preserved by policy.
+        let slots = [
+            PromptSlot(id: "ret", content: String(repeating: "r", count: 20),
+                       role: .retrieval, label: "Ret"),
+            PromptSlot(id: "char", content: String(repeating: "c", count: 20),
+                       role: .characterContext, label: "Char"),
+        ]
+        let result = PromptAssembler.assemble(
+            slots: slots, messages: [], systemPrompt: "sys",
+            contextSize: 100, responseBuffer: 100, // slotBudget = 0
+            tokenizer: CharTokenizer(), policy: .default
+        )
+        #expect(result.budgetBreakdown["system"] == 3) // "sys" survives
+        #expect(result.budgetBreakdown["ret"] == nil)
+        #expect(result.budgetBreakdown["char"] == nil)
+        #expect(result.orderedSlots.map(\.id) == ["system"])
     }
 
     @Test func test_assembler_priorityTrim_systemAlwaysSurvives() {

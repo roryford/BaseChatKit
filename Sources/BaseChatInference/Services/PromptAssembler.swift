@@ -136,34 +136,40 @@ public enum PromptAssembler {
 
     // MARK: - Role-aware budget helpers
 
-    /// Clamps the combined token usage of slots in each role to the policy's
-    /// `cap(for:)` value, in input-array order. Slots without a role cap are
-    /// returned unchanged. The system role ignores caps — `.system` content
-    /// is never trimmed by policy.
+    // The role-aware allocator is *drop-only*: it cannot truncate content at
+    // an arbitrary token boundary (`TokenizerProvider` exposes counting, not
+    // tokenization with byte offsets), so any slot whose token cost would
+    // exceed its allowance is dropped wholesale. This keeps `tokenCount`,
+    // `budgetBreakdown`, and the actual prompt content consistent — accounting
+    // never undercounts what the model receives. Per-slot truncation lives at
+    // the caller's level via ``PromptSlot/tokenBudget``, which is applied
+    // before role-aware trimming kicks in.
+
+    /// Drops slots whose role-cap allowance is insufficient. Slots are admitted
+    /// in input-array order; once a role's remaining cap can no longer cover a
+    /// slot's full token cost, that slot is dropped entirely. Slots without a
+    /// role cap are returned unchanged. The system role ignores caps — `.system`
+    /// content is never dropped by policy.
     private static func applyRoleCaps(
         to slots: [ResolvedSlot],
         policy: BudgetPolicy
     ) -> [ResolvedSlot] {
         var remaining: [PromptSlotRole: Int] = [:]
-        return slots.map { slot in
+        return slots.compactMap { slot in
             if case .system = slot.role { return slot }
             guard let cap = policy.cap(for: slot.role) else { return slot }
             let left = remaining[slot.role] ?? cap
-            let allowed = min(slot.tokenCount, max(0, left))
-            remaining[slot.role] = max(0, left - allowed)
-            guard allowed != slot.tokenCount else { return slot }
-            return ResolvedSlot(
-                id: slot.id, label: slot.label, content: slot.content,
-                tokenCount: allowed, position: slot.position, role: slot.role
-            )
+            guard slot.tokenCount <= left else { return nil }
+            remaining[slot.role] = left - slot.tokenCount
+            return slot
         }
     }
 
-    /// Trims slots in priority order so the combined token cost fits within
-    /// `slotBudget`. Lowest-priority roles are trimmed first; within a role,
-    /// later slots in the input array are trimmed before earlier ones (so a
-    /// single slot at the head of a role keeps as much content as possible).
-    /// `.system` slots are never trimmed.
+    /// Drops slots in priority order so the combined token cost fits within
+    /// `slotBudget`. Lowest-priority roles are dropped first; within a role,
+    /// later slots in the input array are dropped before earlier ones (so the
+    /// first slot in a role keeps its content if any slot in the role survives).
+    /// `.system` slots are never dropped.
     private static func applyRolePriorityTrimming(
         to slots: [ResolvedSlot],
         slotBudget: Int,
@@ -172,10 +178,10 @@ public enum PromptAssembler {
         var current = slots.reduce(0) { $0 + $1.tokenCount }
         guard current > slotBudget else { return slots }
 
-        // Indices ordered for trimming: lowest priority first; within the same
+        // Indices ordered for dropping: lowest priority first; within the same
         // priority, later input order first. .system is excluded entirely so
-        // it can never be trimmed even when the budget is impossible.
-        let trimOrder: [Int] = slots.indices
+        // it can never be dropped even when the budget is impossible.
+        let dropOrder: [Int] = slots.indices
             .filter { idx in
                 if case .system = slots[idx].role { return false }
                 return true
@@ -186,20 +192,13 @@ public enum PromptAssembler {
                 return lp == rp ? lhs > rhs : lp > rp
             }
 
-        var mutated = slots
-        for idx in trimOrder {
+        var dropped: Set<Int> = []
+        for idx in dropOrder {
             if current <= slotBudget { break }
-            let slot = mutated[idx]
-            let overflow = current - slotBudget
-            let removeFromSlot = min(slot.tokenCount, overflow)
-            let newCount = slot.tokenCount - removeFromSlot
-            mutated[idx] = ResolvedSlot(
-                id: slot.id, label: slot.label, content: slot.content,
-                tokenCount: newCount, position: slot.position, role: slot.role
-            )
-            current -= removeFromSlot
+            dropped.insert(idx)
+            current -= slots[idx].tokenCount
         }
-        return mutated
+        return slots.enumerated().compactMap { dropped.contains($0.offset) ? nil : $0.element }
     }
 
     // MARK: - Private Helpers
