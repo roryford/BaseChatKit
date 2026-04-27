@@ -130,9 +130,12 @@ enum FoundationToolSchema {
         name: String
     ) throws -> DynamicGenerationSchema {
         guard case .object(let dict) = value else {
-            // A non-object root spec is unusual in JSON-Schema-for-tools; treat
-            // as an empty object so the model still has a name to bind against.
-            return DynamicGenerationSchema(name: name, properties: [])
+            // `ToolDefinition.parameters` is documented as a JSON-Schema object
+            // describing named arguments. Failing closed here lets the caller
+            // drop tool calling for this round rather than ship a schema that
+            // decodes as `{}` while the executor expects some other root shape
+            // (the half-broken schema this PR is specifically trying to avoid).
+            throw FoundationToolSchemaError.unsupportedType("non-object root")
         }
 
         try rejectUnsupportedKeywords(dict)

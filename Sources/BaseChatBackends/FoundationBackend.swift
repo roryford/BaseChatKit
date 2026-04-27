@@ -256,7 +256,11 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                 toolEnvelope = try FoundationToolSchema.makeEnvelope(tools: config.tools)
                 toolsForRound = config.tools
             } catch {
-                Self.logger.warning("FoundationBackend tool schema build failed; falling back to text-only: \(error.localizedDescription, privacy: .public)")
+                // Most `Error`s do not carry a meaningful `localizedDescription`
+                // unless they conform to `LocalizedError`. `String(describing:)`
+                // preserves the keyword/type detail the schema builder embeds
+                // in `FoundationToolSchemaError.description`.
+                Self.logger.warning("FoundationBackend tool schema build failed; falling back to text-only: \(String(describing: error), privacy: .public)")
                 toolEnvelope = nil
                 toolsForRound = []
             }
@@ -514,10 +518,12 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
         guard let envelope = FoundationEnvelope.decode(finalRaw) else {
             // Best-effort fallback: surface the raw JSON as text rather than
             // dropping the round on the floor. The orchestrator will treat
-            // this as a finished text reply.
+            // this as a finished text reply. Phase must transition before the
+            // first event is yielded so observers don't briefly see tokens
+            // arriving while still in `.connecting`.
             if !streamedAsText {
-                continuation.yield(.token(finalRaw.jsonString))
                 await MainActor.run { generationStream.setPhase(.streaming) }
+                continuation.yield(.token(finalRaw.jsonString))
             }
             Self.logger.warning("FoundationBackend: envelope decode failed; surfaced raw JSON as text")
             return streamExhausted
@@ -534,6 +540,15 @@ public final class FoundationBackend: InferenceBackend, @unchecked Sendable {
                 continuation.yield(.token(final))
             }
         case .toolCall(let name, let argumentsJSON):
+            // The tool branch can produce zero `.token` events when the model
+            // commits to a tool call straight away. Transition to `.streaming`
+            // before the `.toolCall` event so observers don't stay stuck in
+            // `.connecting` until `.done` — mirrors MLXBackend, which treats
+            // `.toolCall` as a streaming event.
+            if isFirstToken {
+                await MainActor.run { generationStream.setPhase(.streaming) }
+                isFirstToken = false
+            }
             let call = ToolCall(
                 id: "fm-\(UUID().uuidString)",
                 toolName: name,

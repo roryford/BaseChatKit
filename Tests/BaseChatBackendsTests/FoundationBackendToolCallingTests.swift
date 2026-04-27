@@ -172,6 +172,29 @@ final class FoundationBackendToolCallingTests: XCTestCase {
         }
     }
 
+    /// A non-object root parameter spec (e.g. a bare `{"type": "string"}` at
+    /// the top of `parameters`) must throw rather than silently degrade to an
+    /// empty `{}` schema. Returning `{}` would let the model emit
+    /// shape-correct envelopes the executor still rejects — the fail-closed
+    /// keeps the round on the untooled path with a warning instead.
+    func test_makeEnvelope_throws_onNonObjectRoot() {
+        let tool = ToolDefinition(
+            name: "echo",
+            description: "",
+            parameters: .string("string")  // not a JSON-Schema object
+        )
+        XCTAssertThrowsError(try FoundationToolSchema.makeEnvelope(tools: [tool])) { error in
+            guard case FoundationToolSchemaError.unsupportedType(let detail) = error else {
+                XCTFail("expected .unsupportedType, got \(error)")
+                return
+            }
+            XCTAssertTrue(
+                detail.contains("non-object root"),
+                "detail must explain the failure mode, got: \(detail)"
+            )
+        }
+    }
+
     /// The instructions blurb must mention every tool by name so the model
     /// can pick a branch based on prose alone (the schema constrains shape but
     /// the system-prompt copy steers selection).
