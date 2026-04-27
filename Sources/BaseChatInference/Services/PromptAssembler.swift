@@ -22,7 +22,8 @@ public enum PromptAssembler {
         systemPrompt: String?,
         capabilities: BackendCapabilities,
         responseBuffer: Int = 512,
-        tokenizer: TokenizerProvider? = nil
+        tokenizer: TokenizerProvider? = nil,
+        policy: BudgetPolicy = .default
     ) -> AssembledPrompt {
         assemble(
             slots: slots,
@@ -30,7 +31,8 @@ public enum PromptAssembler {
             systemPrompt: systemPrompt,
             contextSize: capabilities.contextWindowSize,
             responseBuffer: responseBuffer,
-            tokenizer: tokenizer
+            tokenizer: tokenizer,
+            policy: policy
         )
     }
 
@@ -43,6 +45,8 @@ public enum PromptAssembler {
     ///   - contextSize: Total context window size in tokens.
     ///   - responseBuffer: Tokens reserved for the model's response.
     ///   - tokenizer: Optional tokenizer. Falls back to ``HeuristicTokenizer`` when nil.
+    ///   - policy: Per-role budget policy. Defaults to ``BudgetPolicy/default`` —
+    ///     the priority order from #110 with no role-level caps.
     /// - Returns: An ``AssembledPrompt`` containing resolved slots, trimmed messages, and budget info.
     public static func assemble(
         slots: [PromptSlot],
@@ -50,7 +54,8 @@ public enum PromptAssembler {
         systemPrompt: String?,
         contextSize: Int,
         responseBuffer: Int = 512,
-        tokenizer: TokenizerProvider? = nil
+        tokenizer: TokenizerProvider? = nil,
+        policy: BudgetPolicy = .default
     ) -> AssembledPrompt {
         let tok = tokenizer ?? HeuristicTokenizer()
 
@@ -61,26 +66,43 @@ public enum PromptAssembler {
                 id: "system",
                 content: systemPrompt,
                 position: .systemPreamble,
+                role: .system,
                 label: "System Prompt"
             )
             allSlots.insert(systemSlot, at: 0)
         }
 
-        // 2. Resolve each slot's token cost
-        var resolvedSlots: [ResolvedSlot] = []
-        var budgetBreakdown: [String: Int] = [:]
-
-        for slot in allSlots {
+        // 2. Resolve each slot's token cost (per-slot tokenBudget cap first).
+        var resolvedSlots: [ResolvedSlot] = allSlots.map { slot in
             let rawCount = tok.tokenCount(slot.content)
             let tokenCount = slot.tokenBudget.map { min(rawCount, $0) } ?? rawCount
-            resolvedSlots.append(ResolvedSlot(
+            return ResolvedSlot(
                 id: slot.id, label: slot.label, content: slot.content,
-                tokenCount: tokenCount, position: slot.position
-            ))
-            budgetBreakdown[slot.id] = tokenCount
+                tokenCount: tokenCount, position: slot.position, role: slot.role
+            )
         }
 
-        // 3. Calculate total slot tokens and remaining budget for messages
+        // 3. Apply per-role caps (combined token usage across slots in the role).
+        // Slots in the same role are clamped in input-array order — earlier
+        // slots get the budget first; later ones drop to whatever remains.
+        resolvedSlots = applyRoleCaps(to: resolvedSlots, policy: policy)
+
+        // 4. Apply role-priority trimming so slot+responseBuffer fits in contextSize.
+        // Lowest-priority roles are trimmed first; .system is never trimmed.
+        let slotBudget = max(0, contextSize - responseBuffer)
+        resolvedSlots = applyRolePriorityTrimming(
+            to: resolvedSlots, slotBudget: slotBudget, policy: policy
+        )
+
+        // Drop slots whose final token count is zero — they no longer contribute
+        // content, and keeping them would still inject empty system messages.
+        resolvedSlots.removeAll { $0.tokenCount == 0 }
+
+        // 5. Build the per-slot breakdown after all clamping.
+        var budgetBreakdown: [String: Int] = [:]
+        for slot in resolvedSlots { budgetBreakdown[slot.id] = slot.tokenCount }
+
+        // 6. Calculate total slot tokens and remaining budget for messages.
         let totalSlotTokens = resolvedSlots.reduce(0) { $0 + $1.tokenCount }
         let availableForMessages = max(0, contextSize - totalSlotTokens - responseBuffer)
 
@@ -110,6 +132,74 @@ public enum PromptAssembler {
             totalTokens: totalSlotTokens + messageTokens,
             budgetBreakdown: budgetBreakdown
         )
+    }
+
+    // MARK: - Role-aware budget helpers
+
+    /// Clamps the combined token usage of slots in each role to the policy's
+    /// `cap(for:)` value, in input-array order. Slots without a role cap are
+    /// returned unchanged. The system role ignores caps — `.system` content
+    /// is never trimmed by policy.
+    private static func applyRoleCaps(
+        to slots: [ResolvedSlot],
+        policy: BudgetPolicy
+    ) -> [ResolvedSlot] {
+        var remaining: [PromptSlotRole: Int] = [:]
+        return slots.map { slot in
+            if case .system = slot.role { return slot }
+            guard let cap = policy.cap(for: slot.role) else { return slot }
+            let left = remaining[slot.role] ?? cap
+            let allowed = min(slot.tokenCount, max(0, left))
+            remaining[slot.role] = max(0, left - allowed)
+            guard allowed != slot.tokenCount else { return slot }
+            return ResolvedSlot(
+                id: slot.id, label: slot.label, content: slot.content,
+                tokenCount: allowed, position: slot.position, role: slot.role
+            )
+        }
+    }
+
+    /// Trims slots in priority order so the combined token cost fits within
+    /// `slotBudget`. Lowest-priority roles are trimmed first; within a role,
+    /// later slots in the input array are trimmed before earlier ones (so a
+    /// single slot at the head of a role keeps as much content as possible).
+    /// `.system` slots are never trimmed.
+    private static func applyRolePriorityTrimming(
+        to slots: [ResolvedSlot],
+        slotBudget: Int,
+        policy: BudgetPolicy
+    ) -> [ResolvedSlot] {
+        var current = slots.reduce(0) { $0 + $1.tokenCount }
+        guard current > slotBudget else { return slots }
+
+        // Indices ordered for trimming: lowest priority first; within the same
+        // priority, later input order first. .system is excluded entirely so
+        // it can never be trimmed even when the budget is impossible.
+        let trimOrder: [Int] = slots.indices
+            .filter { idx in
+                if case .system = slots[idx].role { return false }
+                return true
+            }
+            .sorted { lhs, rhs in
+                let lp = policy.priority(for: slots[lhs].role)
+                let rp = policy.priority(for: slots[rhs].role)
+                return lp == rp ? lhs > rhs : lp > rp
+            }
+
+        var mutated = slots
+        for idx in trimOrder {
+            if current <= slotBudget { break }
+            let slot = mutated[idx]
+            let overflow = current - slotBudget
+            let removeFromSlot = min(slot.tokenCount, overflow)
+            let newCount = slot.tokenCount - removeFromSlot
+            mutated[idx] = ResolvedSlot(
+                id: slot.id, label: slot.label, content: slot.content,
+                tokenCount: newCount, position: slot.position, role: slot.role
+            )
+            current -= removeFromSlot
+        }
+        return mutated
     }
 
     // MARK: - Private Helpers

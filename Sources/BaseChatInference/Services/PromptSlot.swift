@@ -114,11 +114,156 @@ extension PromptSlotPosition {
     }
 }
 
+/// The semantic source of a ``PromptSlot``.
+///
+/// Roles let the assembler apply per-source priority and caps when the budget
+/// is tight: e.g. trim retrieval before character context, and trim custom
+/// slots before either. See ``BudgetPolicy`` for the trimming order.
+public enum PromptSlotRole: Hashable, Sendable {
+    /// Core system prompt content. Highest priority — never trimmed by the
+    /// role-aware allocator.
+    case system
+    /// Persona / character definition.
+    case characterContext
+    /// Keyword or semantic retrieval results (e.g. RAG, graph retrieval).
+    case retrieval
+    /// Long-term archival memory retrievals.
+    case archival
+    /// Lorebook / world info / instructions injected by user configuration.
+    case userInstruction
+    /// Conversation history slot (rare — history is normally handled separately).
+    case conversationHistory
+    /// App-defined role with a string discriminator. Treated as the lowest
+    /// priority by default (``BudgetPolicy/customPriority``), unless callers
+    /// override the policy.
+    case custom(String)
+}
+
+extension PromptSlotRole: Codable {
+    private enum CodingKeys: String, CodingKey { case type, name }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let t = try c.decode(String.self, forKey: .type)
+        switch t {
+        case "system":              self = .system
+        case "characterContext":    self = .characterContext
+        case "retrieval":           self = .retrieval
+        case "archival":            self = .archival
+        case "userInstruction":     self = .userInstruction
+        case "conversationHistory": self = .conversationHistory
+        case "custom":
+            let name = try c.decode(String.self, forKey: .name)
+            self = .custom(name)
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type, in: c,
+                debugDescription: "Unknown PromptSlotRole type"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .system:              try c.encode("system", forKey: .type)
+        case .characterContext:    try c.encode("characterContext", forKey: .type)
+        case .retrieval:           try c.encode("retrieval", forKey: .type)
+        case .archival:            try c.encode("archival", forKey: .type)
+        case .userInstruction:     try c.encode("userInstruction", forKey: .type)
+        case .conversationHistory: try c.encode("conversationHistory", forKey: .type)
+        case .custom(let name):
+            try c.encode("custom", forKey: .type)
+            try c.encode(name, forKey: .name)
+        }
+    }
+}
+
+extension PromptSlotRole {
+    /// Short human-readable label suitable for prompt inspector UI.
+    public var displayName: String {
+        switch self {
+        case .system:              return "system"
+        case .characterContext:    return "character context"
+        case .retrieval:           return "retrieval"
+        case .archival:            return "archival"
+        case .userInstruction:     return "user instruction"
+        case .conversationHistory: return "conversation history"
+        case .custom(let name):    return "custom (\(name))"
+        }
+    }
+}
+
+/// Policy describing how the assembler allocates the per-slot budget across
+/// ``PromptSlotRole``s when the total content exceeds the context window.
+///
+/// Slots whose role has a higher priority (lower number) are kept first; slots
+/// in lower-priority roles are trimmed (or dropped) first. Per-role caps apply
+/// before priority trimming — a role-specific cap clamps the combined token
+/// usage of all slots in that role.
+///
+/// The default policy uses the order specified in #110:
+/// `.system` > `.characterContext` > `.retrieval` > `.archival` >
+/// `.userInstruction` > `.conversationHistory`.
+public struct BudgetPolicy: Sendable {
+    /// Priority for each known role. Lower number = higher priority (kept first).
+    /// Roles missing from the dictionary use ``customPriority``.
+    public var priorities: [PromptSlotRole: Int]
+
+    /// Optional per-role cap on the combined token cost of all slots in that
+    /// role. `nil` (or missing key) means no role-level cap; the slot's own
+    /// `tokenBudget` is still honored.
+    public var caps: [PromptSlotRole: Int]
+
+    /// Priority assigned to ``PromptSlotRole/custom(_:)`` and any role missing
+    /// from ``priorities``. Defaults to a value lower than every built-in role,
+    /// so custom slots are trimmed first.
+    public var customPriority: Int
+
+    public init(
+        priorities: [PromptSlotRole: Int] = BudgetPolicy.defaultPriorities,
+        caps: [PromptSlotRole: Int] = [:],
+        customPriority: Int = 1000
+    ) {
+        self.priorities = priorities
+        self.caps = caps
+        self.customPriority = customPriority
+    }
+
+    /// Default priority order from issue #110:
+    /// `.system` > `.characterContext` > `.retrieval` > `.archival` >
+    /// `.userInstruction` > `.conversationHistory`.
+    public static let defaultPriorities: [PromptSlotRole: Int] = [
+        .system:              0,
+        .characterContext:    1,
+        .retrieval:           2,
+        .archival:            3,
+        .userInstruction:     4,
+        .conversationHistory: 5,
+    ]
+
+    /// The default policy: priorities from #110, no role caps, custom slots
+    /// trimmed first.
+    public static let `default` = BudgetPolicy()
+
+    /// Resolves the priority for a role, falling back to ``customPriority`` for
+    /// ``PromptSlotRole/custom(_:)`` and any role missing from ``priorities``.
+    public func priority(for role: PromptSlotRole) -> Int {
+        priorities[role] ?? customPriority
+    }
+
+    /// Resolves the optional per-role cap. `nil` means no cap.
+    public func cap(for role: PromptSlotRole) -> Int? {
+        caps[role]
+    }
+}
+
 /// A named slot in the prompt assembly pipeline.
 ///
 /// Each slot carries content that occupies part of the context window budget.
 /// Slots are placed according to their ``position``; slots with the same
-/// effective position retain their input-array order.
+/// effective position retain their input-array order. The slot's ``role``
+/// determines its priority in budget allocation — see ``BudgetPolicy``.
 ///
 /// Use ``PromptAssembler/assemble(slots:messages:systemPrompt:contextSize:responseBuffer:tokenizer:)``
 /// to resolve slots and history into a final ``AssembledPrompt``.
@@ -131,6 +276,13 @@ public struct PromptSlot: Identifiable, Sendable {
 
     /// Where this slot appears in the assembled prompt.
     public var position: PromptSlotPosition
+
+    /// The semantic source of this slot. Drives per-role priority and caps in
+    /// the budget allocator. Defaults to ``PromptSlotRole/userInstruction`` so
+    /// that pre-#110 callers (no explicit role) preserve existing behavior:
+    /// no role-cap clamping, and trimmed before history but after retrieval
+    /// and character context.
+    public var role: PromptSlotRole
 
     /// Maximum token budget for this slot. `nil` means the slot uses as many
     /// tokens as its content requires (no cap).
@@ -146,6 +298,7 @@ public struct PromptSlot: Identifiable, Sendable {
         id: String,
         content: String,
         position: PromptSlotPosition = .contextSetup,
+        role: PromptSlotRole = .userInstruction,
         tokenBudget: Int? = nil,
         isEnabled: Bool = true,
         label: String
@@ -156,6 +309,7 @@ public struct PromptSlot: Identifiable, Sendable {
         self.id = id
         self.content = content
         self.position = position
+        self.role = role
         self.tokenBudget = tokenBudget
         self.isEnabled = isEnabled
         self.label = label
@@ -169,13 +323,22 @@ public struct ResolvedSlot: Identifiable, Sendable {
     public let content: String
     public let tokenCount: Int
     public let position: PromptSlotPosition
+    public let role: PromptSlotRole
 
-    public init(id: String, label: String, content: String, tokenCount: Int, position: PromptSlotPosition) {
+    public init(
+        id: String,
+        label: String,
+        content: String,
+        tokenCount: Int,
+        position: PromptSlotPosition,
+        role: PromptSlotRole = .userInstruction
+    ) {
         self.id = id
         self.label = label
         self.content = content
         self.tokenCount = tokenCount
         self.position = position
+        self.role = role
     }
 }
 
