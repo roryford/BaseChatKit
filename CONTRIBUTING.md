@@ -284,7 +284,7 @@ docs: clarify TokenizerProvider fallback behaviour
 | `BREAKING CHANGE:` in footer    | MAJOR (`x.0.0`)   |
 | `chore`, `docs`, `test`, `perf` | no release        |
 
-PR titles must follow the same format — CI enforces this via `commitlint`.
+**PR titles are the enforced surface.** All PRs squash-merge, and Release Please reads the squashed PR title rather than the individual commit messages on the branch, so CI lints the *PR title* via [`amannn/action-semantic-pull-request`](https://github.com/amannn/action-semantic-pull-request). Individual commit messages on a feature branch should follow the same convention as a matter of habit, but they are not linted and can be reworded freely during review.
 
 Add a body when the *why* needs explanation. Don't restate what the diff already
 shows.

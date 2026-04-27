@@ -29,14 +29,19 @@ See [docs/SCOPE_DECISION.md](docs/SCOPE_DECISION.md) for the scoping rationale b
 - **SwiftData persistence** — Chat sessions, messages, and API endpoint configuration
 - **Context window management** — Automatic message trimming with token estimation
 - **Memory pressure monitoring** — Auto-unloads models when the system is under pressure
-- **Secure API key storage** — Keychain-backed with just-in-time retrieval (keys never held in memory)
+- **Secure API key storage** — Keychain-backed with just-in-time retrieval; keys are read at request time and not stored as long-lived properties (they do exist in process memory as `String` for the duration of an HTTP request — see [docs/FIPS.md](docs/FIPS.md) §non-mitigations)
 - **Certificate pinning** — Configurable SPKI hash pinning for cloud API connections
 
 ## Requirements
 
 - Swift 5.9+
-- iOS 17+ / macOS 14+
+- iOS 18+ / macOS 15+
 - Apple Foundation Models require iOS 26+ / macOS 26+
+
+BaseChatKit follows an **n-1 platform policy**: the current Apple OS release
+and the one immediately before it. When Apple ships a new major OS each
+September, both minimums are bumped by one. See
+[CLAUDE.md → Platform policy](CLAUDE.md#platform-policy) for the rationale.
 
 ## How BCK compares to AnyLanguageModel
 
@@ -427,7 +432,7 @@ Templates auto-detect from GGUF metadata when available. User content is sanitis
 See the [Security Model](Sources/BaseChatCore/BaseChatCore.docc/Articles/SecurityModel.md) DocC article for the full threat model, what BCK protects against, what remains your responsibility, and how to tune for stricter environments. A quick summary:
 
 - API keys stored in Keychain with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
-- Keys read just-in-time from Keychain, never held as stored properties
+- Keys read just-in-time from Keychain rather than cached as long-lived properties; during an in-flight `URLSession` request the key bytes do exist in process memory as a Swift `String` and are not zeroized after use (see [docs/FIPS.md](docs/FIPS.md) §non-mitigations)
 - Certificate pinning support via `PinnedSessionDelegate` — configure `pinnedHosts` with SPKI SHA-256 hashes; `api.openai.com` and `api.anthropic.com` fail closed if pin sets are missing/empty; custom hosts use platform trust by default or can be set to fail-closed via `BaseChatConfiguration.shared.customHostTrustPolicy = .requireExplicitPins`
 - HTTPS enforced for non-localhost endpoints
 - User content sanitised in prompt templates to prevent injection

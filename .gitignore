@@ -5,5 +5,12 @@ DerivedData/
 *.xcodeproj/xcuserdata/
 xcuserdata/
 .DS_Store
-.claude/
+# Claude Code agent state — per-developer, gitignored by default.
+# Track only the policy files that document repo-wide conventions:
+# `.claude/README.md` (rationale) and `.claude/settings.json` (shared policy
+# allowlist, if/when one exists). Per-developer overrides go in
+# `settings.local.json` and stay local.
+.claude/*
+!.claude/README.md
+!.claude/settings.json
 tmp/

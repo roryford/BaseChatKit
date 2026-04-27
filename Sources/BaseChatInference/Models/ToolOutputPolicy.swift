@@ -46,6 +46,12 @@ import Foundation
 ///   Already-errored results whose content overflows are still trimmed
 ///   (the registry never re-classifies an existing error). Debug only —
 ///   disables the safety net for happy-path responses.
+/// - ``OversizeAction/spillToFile(threshold:message:)``: write the
+///   oversize content to a file in the caches directory and replace
+///   the in-conversation payload with a short pointer message. The
+///   host registers a file-reading tool that can fetch the spill back
+///   on demand. See the case docs for the open-question decisions
+///   (reaper, gating, sandbox volatility).
 ///
 /// ## Example
 ///
@@ -95,7 +101,7 @@ public struct ToolOutputPolicy: Sendable, Equatable {
 
 /// How ``ToolRegistry`` should react when a tool result's UTF-8 byte
 /// length exceeds ``ToolOutputPolicy/maxBytes``.
-public enum OversizeAction: Sendable, Equatable {
+public enum OversizeAction: Sendable {
 
     /// Replace the result with a
     /// ``ToolResult/ErrorKind/invalidArguments`` failure whose content
@@ -120,4 +126,73 @@ public enum OversizeAction: Sendable, Equatable {
     /// Intended for debug builds and tests; production hosts should
     /// keep the default ``rejectWithError`` policy.
     case allow
+
+    /// Spill oversize content to a file in the caches directory and
+    /// replace the in-conversation result with a short pointer message
+    /// produced by `message`.
+    ///
+    /// `threshold` is the byte ceiling above which the spill triggers.
+    /// In practice it should equal (or be slightly below)
+    /// ``ToolOutputPolicy/maxBytes`` — the registry uses `maxBytes` for
+    /// its overflow check and only consults `threshold` to decide
+    /// whether the result is large enough to warrant the file-system
+    /// round-trip rather than truncating in place. Results whose UTF-8
+    /// size is `>= threshold` are spilled; smaller (but still oversize)
+    /// results fall through to truncation with a generic suffix so we
+    /// never silently lose data.
+    ///
+    /// `message` receives the original UTF-8 byte size and the URL of
+    /// the spilled file and returns the short pointer string the model
+    /// will see (e.g. `"Result spilled to /var/.../tool-spill-… — 1.4 MB.
+    /// Use the read_file tool to inspect."`).
+    ///
+    /// Files are written to
+    /// `<caches>/BaseChatKit/tool-spills/tool-spill-<ISO8601>-<UUID>.txt`.
+    /// On iOS, the file is created with
+    /// `NSFileProtectionCompleteUntilFirstUserAuthentication` so it is
+    /// readable while the device is unlocked at least once after boot.
+    ///
+    /// ## Open-question decisions
+    ///
+    /// - **Reaper**: spilled files accumulate. Pair this case with
+    ///   ``ToolSpillReaper/cleanOldSpills(maxAge:directory:)`` (the
+    ///   default ``InferenceService`` initializers schedule a 7-day
+    ///   sweep at startup as a fire-and-forget detached `Task`).
+    /// - **File-reading-tool gating**: the host is responsible for
+    ///   registering a tool that can read the spill URL back. The
+    ///   registry does not gate on this — emitting a pointer to a file
+    ///   the model can't access is a host configuration mistake, not a
+    ///   library invariant.
+    /// - **iOS sandbox volatility**: caches-directory contents may be
+    ///   evicted by the OS under disk pressure. Worst case the model
+    ///   re-invokes the tool when it can't read the file back. That is
+    ///   acceptable: spills are a budget-relief mechanism, not durable
+    ///   storage.
+    ///
+    /// On write failure the registry falls back to ``truncate(suffix:)``
+    /// semantics with a generic suffix and logs a warning — a spill
+    /// cannot be allowed to crash the chat loop.
+    case spillToFile(threshold: Int, message: @Sendable (Int, URL) -> String)
+}
+
+// Hand-rolled because the `spillToFile` closure can't be auto-synthesised
+// into the Equatable conformance. Two `spillToFile` actions compare equal
+// when their thresholds match — closure identity is intentionally ignored,
+// matching the convention closure-bearing values use elsewhere in the
+// framework.
+extension OversizeAction: Equatable {
+    public static func == (lhs: OversizeAction, rhs: OversizeAction) -> Bool {
+        switch (lhs, rhs) {
+        case (.rejectWithError, .rejectWithError):
+            return true
+        case (.allow, .allow):
+            return true
+        case (.truncate(let a), .truncate(let b)):
+            return a == b
+        case (.spillToFile(let a, _), .spillToFile(let b, _)):
+            return a == b
+        default:
+            return false
+        }
+    }
 }
